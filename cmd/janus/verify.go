@@ -87,6 +87,11 @@ type verifiedReport struct {
 	Role string `json:"role,omitempty"`
 	// MatchedMain is, for a witness, the main theorem of the proof module that it instantiates.
 	MatchedMain string `json:"matchedMain,omitempty"`
+	// MatchedMains is every main theorem of the proof module the witness is an instance of (MatchedMain is the
+	// first): one witness may serve several main theorems that share a precondition.
+	MatchedMains []string `json:"matchedMains,omitempty"`
+	// MatchedModules[i] is the module that declares MatchedMains[i].
+	MatchedModules []string `json:"matchedModules,omitempty"`
 	// ContractHyps are the runtime contracts the STATEMENT applies, computed from the statement
 	// itself (round 14): "NewobjectContract@runtime.newobject". Empty: the statement assumes
 	// nothing about the runtime, whatever the extraction left out (Contracts).
@@ -105,6 +110,14 @@ type verifiedReport struct {
 	// Notes flag operations of the statement (and of the disclosed definitions) whose standard
 	// Lean meaning often reads unexpectedly (round 7 K1). They are not errors.
 	Notes []string `json:"notes,omitempty"`
+	// NonVacuity (policy): "shown" (a kernel-checked non-vacuity witness, NonVacuityWitness, verified in the
+	// same run, supports THIS theorem), "not-shown" (none; only possible for a theorem without runtime-contract
+	// hypotheses, or when opted out), "opted-out" (--allow-no-witness: a contract-assuming theorem accepted
+	// without a witness) or "witness" (this report is itself a witness). Set after the run, never cached.
+	NonVacuity        string `json:"nonVacuity,omitempty"`
+	NonVacuityWitness string `json:"nonVacuityWitness,omitempty"`
+	// NonVacuityReturns names a verified Witness.returns for this theorem, when there is one (informational).
+	NonVacuityReturns string `json:"nonVacuityReturns,omitempty"`
 	// Cached: this report is the recorded result of an earlier verification with exactly the
 	// same inputs (resultcache.go), made at CachedFrom.
 	Cached     bool   `json:"cached,omitempty"`
@@ -125,6 +138,8 @@ type auditResult struct {
 	Notes             []string   `json:"notes"`               // surprising standard operations (round 7 K1)
 	Role              string     `json:"role"`                // round 14: main, witness-nonvacuous, witness-returns
 	MatchedMain       string     `json:"matchedMain"`         // round 14: for a witness, the main theorem it supports
+	MatchedMains      []string   `json:"matchedMains"`        // every main theorem of the module the witness supports
+	MatchedModules    []string   `json:"matchedModules"`      // the module declaring each of them
 	ContractHyps      []string   `json:"contractHyps"`        // round 14: the contracts the STATEMENT applies ("Contract@runtime.fn")
 	Imports           [][]string `json:"imports"`             // [module, direct imports…] for every non-core module
 }
@@ -259,7 +274,7 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "no-result-cache")
+	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "no-result-cache", "allow-no-witness")
 	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root", "results")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -297,6 +312,9 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	}
 	r, err := verifyAndReport(outdir, opts, stderr)
 	if err != nil {
+		return jsonFailure(stdout, flags["json"], err)
+	}
+	if err := nonVacuitySingle(outdir, r, flags["allow-no-witness"]); err != nil {
 		return jsonFailure(stdout, flags["json"], err)
 	}
 	if flags["json"] {
@@ -416,6 +434,7 @@ func printVerifiedAt(stdout io.Writer, outdir, reportPath string, r *verifiedRep
 	for _, l := range roleLines(r) {
 		fmt.Fprintln(stdout, l)
 	}
+	fmt.Fprintln(stdout, nonVacuityLine(r))
 	if len(r.Kernel) > 0 {
 		fmt.Fprintf(stdout, "  Kernel interface: %s (.syscall stubs: their effect is the kernel contract of Janus.Kernel, under ReturnsK/EnsuresK only)\n",
 			termSafe(strings.Join(r.Kernel, ", ")))
@@ -1192,6 +1211,8 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			Contracts:         cr.Identity.contractList(),
 			Role:              ar.Role,
 			MatchedMain:       ar.MatchedMain,
+			MatchedMains:      ar.MatchedMains,
+			MatchedModules:    ar.MatchedModules,
 			ContractHyps:      ar.ContractHyps,
 			Notes:             ar.Notes,
 		}
@@ -1367,6 +1388,7 @@ func cmdVerifyMany(outdir string, opts map[string]string, flags map[string]bool,
 		return jsonFailure(stdout, flags["json"], err)
 	}
 	checkWitnessSupport(outdir, outs)
+	applyNonVacuity(outdir, outs, flags["allow-no-witness"])
 	failed := 0
 	var aslErr error
 	mj := multiJSON{Schema: 1}
@@ -1574,6 +1596,19 @@ func roleLines(r *verifiedReport) []string {
 // THEM. The audit matches a witness against the module's main theorem (`matchedMain`); if that theorem
 // is not among the main theorems verified in this same call, the witness would sit beside a
 // correctness claim it says nothing about, so it fails and its report is withdrawn.
+// witnessSupportsAny: the witness supports at least one of the verified main theorems.
+func witnessSupportsAny(w *verifiedReport, mains map[string]bool) bool {
+	if mains[w.MatchedMain] {
+		return true
+	}
+	for _, m := range w.MatchedMains {
+		if mains[m] {
+			return true
+		}
+	}
+	return false
+}
+
 func checkWitnessSupport(outdir string, outs []thmOutcome) {
 	mains := map[string]bool{}
 	for _, o := range outs {
@@ -1591,7 +1626,7 @@ func checkWitnessSupport(outdir string, outs []thmOutcome) {
 	sort.Strings(names)
 	for i := range outs {
 		o := &outs[i]
-		if o.Err != nil || o.Report == nil || !strings.HasPrefix(o.Report.Role, "witness-") || mains[o.Report.MatchedMain] {
+		if o.Err != nil || o.Report == nil || !strings.HasPrefix(o.Report.Role, "witness-") || witnessSupportsAny(o.Report, mains) {
 			continue
 		}
 		o.Err = &diag{Invalid: true, Stage: "theorem audit",

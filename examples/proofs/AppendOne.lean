@@ -124,4 +124,97 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
         janus_simp
       · exact zero_after_store hz h1 h2
 
+/-! ## Non-vacuity witness
+
+`janus_growslice_witness` (`Janus/Contracts/AllocWitness.lean`) builds a concrete `runtime.growslice`
+at the contract address (for `append` to an empty `[]uint64`: it returns the 64 KiB heap with
+capacity 1), the runtime-owned ranges `rt` (the heap), the readiness predicate `H`, and proves the
+contract `hgrow` for them. Below, a concrete call state of `AppendOne(nil, 0, 0, 5)` satisfies the
+whole precondition, `H` included, and the call returns the grown slice the theorem describes. -/
+
+namespace Witness
+
+janus_growslice_witness
+
+open GrowW (impl rt H linked hgrow)
+open Janus.Contracts.AllocWitness (heap)
+
+def ret : Nat := 0x1000
+def sp0 : Nat := 0x100000
+def g0 : Nat := 0x200000
+def dat : DataSegment := Extracted.data.head!
+def dlen : Nat := janus_eval% dat.bytes.length
+def dbase : Nat := janus_eval% dat.base
+
+def bytes (a : Nat) : Byte :=
+  if dbase ≤ a ∧ a < dbase + dlen then BitVec.ofNat 8 (dat.bytes.getD (a - dbase) 0) else 0
+
+def s0 : State :=
+  { regs := fun i => if i = 3 then 5 else if i = 28 then BitVec.ofNat 64 g0
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩,
+    mem := ⟨bytes, [⟨sp0 - 4192, 4232, true⟩, ⟨g0, 0x100, false⟩, ⟨dbase, dlen, false⟩,
+      ⟨heap, 0x10000, true⟩]⟩ }
+
+theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (linked.withExit ret) Extracted.entry [0, 0, 0, 5] s0 :=
+  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+
+set_option maxRecDepth 100000 in
+theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
+  unfold Program.DataLoaded
+  decide
+
+set_option maxRecDepth 100000 in
+theorem hH : H [(0 : BitVec 64).toNat, (0 : BitVec 64).toNat + 1, (0 : BitVec 64).toNat, 1, u64Type]
+    (s0.regs 28).toNat (s0.sp.toNat - 96) (rtView rt s0.mem) := by
+  refine ⟨⟨by decide, Janus.Contracts.AllocWitness.heapZero_of_bytes _ _ fun i hi => ?_⟩, 0, u64Type, rfl⟩
+  have h1 : ¬(dbase ≤ heap + i ∧ heap + i < dbase + dlen) := by
+    simp only [dbase, heap, dlen]; omega
+  show bytes (heap + i) = 0
+  simp only [bytes]; rw [if_neg h1]
+
+set_option maxRecDepth 100000 in
+theorem pre : Pre rt H 0 0 0 s0 :=
+  ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩, dataLoaded,
+    by simp only [rt, GrowW.rt, Janus.Contracts.AllocWitness.allocRt, outside_cons, outside_nil, List.map]; decide,
+    by decide, by decide, by decide, by simp [Disjoint], fun h => absurd h (by decide),
+    fun h => absurd h (by decide), fun _ => hH⟩
+
+/-- The hypotheses are satisfiable: a `growslice` meeting the contract (`hgrow`), runtime ranges, a
+readiness predicate, and a call state of `AppendOne(nil, 0, 0, 5)` that satisfies the precondition. -/
+theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
+    (s : State),
+    GrowsliceContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.growslice") rt 4096 H ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 5] s ∧
+    Pre rt H 0 0 0 s :=
+  ⟨impl, rt, H, ret, s0, hgrow, hret, setup, pre⟩
+
+/-- The theorem fires: `AppendOne(nil, 0, 0, 5)` returns a slice of length 1 and capacity
+`growCap8 1 0` in `rt`, holding `5` first. -/
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    (s'.regs 1).toNat = (0 : BitVec 64).toNat + 1 ∧
+        ((0 : BitVec 64).toNat < (0 : BitVec 64).toNat → s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 2 = (0 : BitVec 64) ∧
+          s'.mem.readLE ((0 : BitVec 64).toNat + 8 * (0 : BitVec 64).toNat) 8 = (5 : BitVec 64).toNat ∧
+          MemFrame s0.mem s'.mem [((0 : BitVec 64).toNat + 8 * (0 : BitVec 64).toNat, (0 : BitVec 64).toNat + 8 * (0 : BitVec 64).toNat + 8),
+            (s0.sp.toNat - 4192, s0.sp.toNat + 40)]) ∧
+        ((0 : BitVec 64).toNat ≤ (0 : BitVec 64).toNat →
+          (s'.regs 2).toNat = growCap8 ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat ∧
+          InRanges (s'.regs 0).toNat (8 * growCap8 ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat) rt ∧
+          (s'.regs 0).toNat % 8 = 0 ∧
+          s'.mem.accessible (s'.regs 0).toNat (8 * growCap8 ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat) true = true ∧
+          (∀ i, i < (0 : BitVec 64).toNat →
+            s'.mem.readLE ((s'.regs 0).toNat + 8 * i) 8 = s0.mem.readLE ((0 : BitVec 64).toNat + 8 * i) 8) ∧
+          s'.mem.readLE ((s'.regs 0).toNat + 8 * (0 : BitVec 64).toNat) 8 = (5 : BitVec 64).toNat ∧
+          (∀ i, (0 : BitVec 64).toNat < i → i < growCap8 ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat →
+            s'.mem.readLE ((s'.regs 0).toNat + 8 * i) 8 = 0) ∧
+          MemFrame s0.mem s'.mem (rt ++ [(s0.sp.toNat - 4192, s0.sp.toNat + 40)])) :=
+  correctness impl rt H 0 0 0 5 hgrow ret hret s0 setup pre
+
+end Witness
+
 end Proof

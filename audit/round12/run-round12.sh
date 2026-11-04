@@ -47,7 +47,7 @@ attack() {
   local out v
   out="$("$J" extract "$ev" "$sym" "$W/$isa-$name.x" 2>&1)"; local rc=$?
   if [ $rc = 0 ]; then
-    out="$out$("$J" verify --fresh --janus-root "$root" --proof "$proof" "$W/$isa-$name.x" ${thm:+--theorem "$thm"} 2>&1)"
+    out="$out$("$J" verify --allow-no-witness --fresh --janus-root "$root" --proof "$proof" "$W/$isa-$name.x" ${thm:+--theorem "$thm"} 2>&1)"
     case $out in *Verified*) check "${name}_${isa}_blocked" 1 "FALSE VERIFY: extraction accepted the crafted binary and verify printed Verified"; return ;; esac
     check "${name}_${isa}_blocked" 1 "extraction accepted the crafted binary"; return
   fi
@@ -69,9 +69,9 @@ for isa in arm64 amd64; do
   echo "== C ($isa): control"
   bin=artifacts/examples-$isa
   if [ $isa = arm64 ]; then
-    out="$("$J" extract "$bin" example.com/basic.Add "$W/$isa-ctl" 2>&1 && "$J" verify --fresh --janus-root "$root" --proof examples/proofs/Add.lean "$W/$isa-ctl" 2>&1)"
+    out="$("$J" extract "$bin" example.com/basic.Add "$W/$isa-ctl" 2>&1 && "$J" verify --allow-no-witness --fresh --janus-root "$root" --proof examples/proofs/Add.lean "$W/$isa-ctl" 2>&1)"
   else
-    out="$("$J" extract "$bin" example.com/basic.Add "$W/$isa-ctl" 2>&1 && "$J" verify --fresh --janus-root "$root" --proof examples/proofs-amd64/Add/Proof.lean "$W/$isa-ctl" --theorem Proof.correctness 2>&1)"
+    out="$("$J" extract "$bin" example.com/basic.Add "$W/$isa-ctl" 2>&1 && "$J" verify --allow-no-witness --fresh --janus-root "$root" --proof examples/proofs-amd64/Add/Proof.lean "$W/$isa-ctl" --theorem Proof.correctness 2>&1)"
   fi
   grep -q '^Verified' <<<"$out"; check "C1_${isa}_unmodified_verifies" $? "$(grep -m1 -E '^(Verified|Invalid|Error)' <<<"$out" | cut -c1-90)"
 done

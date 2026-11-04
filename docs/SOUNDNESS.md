@@ -2400,3 +2400,47 @@ start state. When a witness is verified in the same call as main theorems, `janu
 that the main theorem it supports is among them. Residual: a witness is matched against a theorem of the
 proof module, not against the theorem the reader happens to verify alone; the report names the matched
 main theorem (`matchedMain`) so the reader can see it.
+
+## Non-vacuity is required for contract-assuming main theorems
+
+A main theorem whose statement applies runtime-contract hypotheses (`contractHyps` non-empty, the report
+line "Runtime contracts assumed: …") is only as meaningful as the joint satisfiability of its
+precondition, those contracts and the program. Each pinned contract is proved satisfiable on its own
+(`_satisfiable`), but nothing about the pieces together made a vacuous main theorem fail. `janus verify`
+now rejects such a theorem (stage `non-vacuity`, no report written) unless a **kernel-checked witness
+for exactly that theorem** is verified in the same run:
+
+* **Accepted form.** A theorem of the proof's `Witness` namespace, verified in the same call (single
+  `--theorem` runs cannot carry a witness: list both, or use `--allow-no-witness`), whose audited role is
+  `witness-nonvacuous` and whose `matchedMain` (same proof module) is the main theorem. The role comes from the
+  STATEMENT: `…Witness.nonvacuous` by convention, but any named theorem under a `Witness` component whose
+  statement is an `∃ …` is checked as a non-vacuity witness. The auditor's W2 matcher (round 14) then
+  demands a conjunct for every hypothesis of the main theorem, contract hypotheses included, every premise of
+  its unfolded conclusion (return address, call state, entry, arguments, precondition conjuncts), and a
+  type that has an element for every binder; a witness with a weaker precondition, for another theorem, or
+  from another module does not match and the main theorem fails.
+* **Which theorems need one.** A main theorem whose statement ASSUMES a runtime contract: one applied in a
+  premise or in the non-contract part of the conclusion (`contractHyps`). A theorem whose conclusion IS a
+  contract (it proves `Access1 Extracted.program …` for the program's own code) assumes nothing by stating it.
+  Every such theorem of a proof module needs its own: a witness supports the main theorems of its module it
+  is an instance of (`matchedMains` in the audit record; `matchedMain` is the first), so one witness serves
+  `correctness` and a `full_write` that share a precondition, and a main theorem with an extra hypothesis the
+  witness does not exhibit is rejected.
+* **Matching.** Conjuncts of the witness are matched after beta-reduction (an applied lambda
+  `(fun s => P s ∧ Q s) s` copied from the main theorem's precondition reads as the conjunction),
+  and `let`-instantiation; definitions are not unfolded (a premise `CallPre n s` stays one conjunct). A lambda body that leaves a conjunct out is a weaker witness and does not match.
+* **Not accepted.** `Witness.returns` alone: a concrete run shows that the program fires, but its
+  statement does not say that the contract hypotheses hold of the runtime it uses, so it does not show
+  the hypotheses jointly satisfiable. It is reported (`nonVacuityReturns`) when verified. An anonymous
+  `example := correctness …` cannot be referenced by the auditor (it has no name and leaves nothing in
+  the environment); state it as a named `theorem` under `Witness`.
+* **Report.** Every report (text and `verified.json`) carries `nonVacuity`: `shown` (+ `nonVacuityWitness`),
+  `not-shown` (a theorem with no contract hypothesis and no witness in the run: still verified),
+  `opted-out`, or `witness` (the report is itself a witness). Text line: "Non-vacuity: shown by W" /
+  "NOT SHOWN".
+* **Opt-out.** `--allow-no-witness` (`verify`, `verify-batch`) verifies the theorem anyway and marks it
+  "non-vacuity NOT shown (opted out)" in text and JSON. The status is computed after the run from the
+  verified reports of that run and is never stored in the result cache, so a cache hit gets the same
+  policy and the same marking as a fresh run; the opt-out does not make cache hits count differently.
+  `verify-batch`: the witness must be a request of the same batch and extraction.
+* Residual: a witness shows satisfiability by a concrete (toy) runtime, not by the real one (V3).

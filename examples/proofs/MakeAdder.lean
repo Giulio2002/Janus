@@ -69,4 +69,93 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
     rfl
   · janus_frame
 
+/-! ## Non-vacuity witness
+
+`janus_alloc_witness` (`Janus/Contracts/AllocWitness.lean`) builds a concrete allocator at
+`runtime.newobject`'s address, the runtime-owned ranges `rt` (the heap and the closure's type
+descriptor) and the readiness predicate `H`, and proves the contract `hnew` for them. Below, a
+concrete call state of `MakeAdder(7)` satisfies the whole precondition, `H` included, and the call
+returns the closure the theorem describes. -/
+
+namespace Witness
+
+janus_alloc_witness types := [fvType]
+
+open AllocW (impl rt H linked hnew)
+open Janus.Contracts.AllocWitness (heap)
+
+def tyA : Nat := janus_eval% fvType
+def ret : Nat := 0x1000
+def sp0 : Nat := 0x100000
+def g0 : Nat := 0x200000
+def dat : DataSegment := Extracted.data.head!
+def dlen : Nat := janus_eval% dat.bytes.length
+def dbase : Nat := janus_eval% dat.base
+
+def bytes (a : Nat) : Byte :=
+  if dbase ≤ a ∧ a < dbase + dlen then BitVec.ofNat 8 (dat.bytes.getD (a - dbase) 0) else 0
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then 7 else if i = 28 then BitVec.ofNat 64 g0
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩,
+    mem := ⟨bytes, [⟨sp0 - 4144, 4168, true⟩, ⟨g0, 0x100, false⟩, ⟨dbase, dlen, false⟩,
+      ⟨heap, 0x10000, true⟩]⟩ }
+
+theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (linked.withExit ret) Extracted.entry [7] s0 :=
+  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+
+set_option maxRecDepth 100000 in
+theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
+  unfold Program.DataLoaded
+  decide
+
+set_option maxRecDepth 100000 in
+theorem hH : H [fvType] (s0.regs 28).toNat (s0.sp.toNat - 48) (rtView rt s0.mem) := by
+  have hpt : fvType = tyA := by unfold tyA; decide
+  rw [hpt]
+  refine Janus.Contracts.AllocWitness.allocH_intro
+    (Janus.Contracts.AllocWitness.inRanges_ty (tys := AllocW.tys) (a := tyA) (by decide)) ?_ ?_ ?_
+  · decide
+  · decide
+  · refine Janus.Contracts.AllocWitness.heapZero_of_bytes _ _ fun i hi => ?_
+    have h1 : ¬(dbase ≤ heap + i ∧ heap + i < dbase + dlen) := by
+      simp only [dbase, heap, dlen]; omega
+    show bytes (heap + i) = 0
+    simp only [bytes]; rw [if_neg h1]
+
+theorem pre : GuardOK s0 0 ∧ StackOK s0 4144 24 ∧ Extracted.program.DataLoaded s0.mem ∧
+    Outside (s0.sp.toNat - 4144) 4168 rt ∧
+    H [fvType] (s0.regs 28).toNat (s0.sp.toNat - 48) (rtView rt s0.mem) :=
+  ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩, dataLoaded,
+    by simp only [rt, AllocW.rt, Janus.Contracts.AllocWitness.allocRt, AllocW.tys, outside_cons, outside_nil, List.map]; decide, hH⟩
+
+/-- The hypotheses are satisfiable: an allocator meeting the contract (`hnew`), runtime ranges,
+a readiness predicate, and a call state of `MakeAdder(7)` that satisfies the precondition. -/
+theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
+    (s : State),
+    NewobjectContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [7] s ∧
+    (GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
+      Outside (s.sp.toNat - 4144) 4168 rt ∧
+      H [fvType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) :=
+  ⟨impl, rt, H, ret, s0, hnew, hret, setup, pre⟩
+
+/-- The theorem fires: for this call and this allocator, `MakeAdder(7)` returns a fresh closure
+in `rt`. -/
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    InRanges (s'.regs 0).toNat 16 rt ∧ (s'.regs 0).toNat % 16 = 0 ∧
+    s'.mem.accessible (s'.regs 0).toNat 16 true = true ∧
+    FuncvalIs s'.mem (s'.regs 0) (segAddr Extracted.program "example.com/basic.MakeAdder.func1") ∧
+    ClosureCtx s'.mem (s'.regs 0) [(7 : BitVec 64)] ∧
+    MemFrame s0.mem s'.mem (rt ++ [(s0.sp.toNat - 4144, s0.sp.toNat + 24)]) :=
+  correctness impl rt H 7 hnew ret hret s0 setup pre
+
+end Witness
+
 end Proof

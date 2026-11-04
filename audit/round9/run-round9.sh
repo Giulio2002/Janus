@@ -49,7 +49,7 @@ check() {
   if [ "$2" = 0 ]; then printf '  %-40s ok       %s\n' "$1" "$3"
   else printf '  %-40s FAILED   %s   <-- BROKEN\n' "$1" "$3"; broken+=("$1"); fi
 }
-v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
+v() { out="$("$J" verify --allow-no-witness --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
 
 echo "== C1: allocation contracts must be satisfiable (kernel-checked)"
 type tmark >/dev/null 2>&1 && tmark "== C1: allocation contracts must be satisfiable (k"
@@ -148,7 +148,7 @@ done
 echo "== MG: memory-guard settings change limits only, never a verdict"
 type tmark >/dev/null 2>&1 && tmark "== MG: memory-guard settings change limits only, n"
 for mg in prlimit systemd-user none bogus; do
-  out="$(JANUS_MEMGUARD=$mg JANUS_MEM_MAX=300M "$J" verify --fresh --janus-root "$root" --proof audit/round7/attacks/H1a_binder_lookalike_vacuous.lean "$W/Add" 2>&1)"
+  out="$(JANUS_MEMGUARD=$mg JANUS_MEM_MAX=300M "$J" verify --allow-no-witness --fresh --janus-root "$root" --proof audit/round7/attacks/H1a_binder_lookalike_vacuous.lean "$W/Add" 2>&1)"
   row "MG_attack_JANUS_MEMGUARD=$mg" blocked
 done
 out="$(JANUS_MEMGUARD=prlimit "$J" verify --fresh --fresh-framework --janus-root "$root" --proof examples/proofs/Add.lean "$W/Add" 2>&1)"

@@ -53,4 +53,81 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
     simp only [setRegF, keepABI_apply, reduceIte, Nat.reduceEqDiff] at hnz hrep henv' ⊢
     exact ⟨hnz, hrep, henv'⟩
 
+/-! ## Non-vacuity witness
+
+The stub of `Janus/Contracts/LiveStubMapAmd64.lean` sits at `runtime.makemap_small`'s address in this program;
+`janus64_map_makesmall` proves `MakeSmall` for it (the model `MC`: one map of at most one entry) by running the stub code. Below, a
+concrete call state of `NewMap()` satisfies the whole precondition and the call returns what the
+theorem describes. -/
+
+namespace Witness
+
+open Janus.Contracts.MapModel0 Janus.Contracts.MapSatAmd64 Janus.Contracts.LiveStubMapAmd64
+open Janus.Contracts.IfaceModel (wsp wg wret)
+
+/-- The contract address, as a numeral (the executor needs concrete addresses). -/
+local macro "cA" : term => `(janus_eval% (Extracted.program.contractAddr "runtime.makemap_small"))
+theorem addr : Extracted.program.contractAddr "runtime.makemap_small" = cA := by decide
+def implAt : List Janus.Amd64.Segment := [makeSmallSeg cA]
+def linked : Janus.Amd64.Program := Extracted.program.link implAt
+
+theorem h0 : MakeSmall linked cA (MC ck64) HMake := by janus64_map_makesmall
+
+theorem hcon : MakeSmall (Extracted.program.link implAt)
+    (Extracted.program.contractAddr "runtime.makemap_small") (MC ck64) HMake := by
+  rw [addr]; exact h0
+
+def mem0 : Janus.Arm64.Memory := mmem64Dead
+
+def emp : AMap (BitVec 64) (BitVec 64) := AMap.empty
+
+def ret : Nat := wret
+
+def s0 : Janus.Amd64.State :=
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := mem0 }
+
+theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (linked.withExit ret) Extracted.entry [] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h, rfl⟩
+
+set_option maxRecDepth 100000 in
+theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
+  unfold Janus.Amd64.Program.DataLoaded
+  decide
+
+set_option maxRecDepth 100000 in
+theorem callerOK : CallerOK (MC ck64) s0 16 8 := by
+  refine ⟨⟨by decide, by decide⟩,
+    ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩,
+    by decide, by decide, by decide, by decide, ?_, ?_, ?_⟩
+  · simp only [MC_priv, MC_depth, priv0, outside_cons, outside_nil, and_true]; decide
+  · simp only [Janus.Spec.Disjoint, MC_depth]; decide
+  · simp only [MC_priv, priv0, outside_cons, outside_nil, and_true]; decide
+
+set_option maxRecDepth 100000 in
+theorem pre : CallerOK (MC ck64) s0 16 8 ∧ HMake [] (s0.regs 14).toNat ((s0.regs 4).toNat - 16) (Contracts.rtView (MC ck64).priv s0.mem)  ∧
+    IsMap (MC ck64) s0.mem 0 emp :=
+  ⟨callerOK, by unfold HMake; decide, by simp [IsMap, emp]⟩
+
+/-- The hypotheses are satisfiable: a model, an implementation of `runtime.makemap_small`
+meeting `MakeSmall` for it, and a call state of `NewMap()` that satisfies the precondition. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec 64)) (H : Contracts.RtReady) (ret : Nat)
+    (s : Janus.Amd64.State), M.Laws ∧
+    MakeSmall (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.makemap_small") M H ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
+    (CallerOK M s 16 8 ∧ H [] (s.regs 14).toNat ((s.regs 4).toNat - 16) (Contracts.rtView M.priv s.mem) ∧ IsMap M s.mem 0 emp) :=
+  ⟨implAt, (MC ck64), HMake, ret, s0, (MC_laws _), hcon, hret, setup, pre⟩
+
+/-- The theorem fires: `NewMap()` returns what the theorem says. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    ((s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty ∧ (MC ck64).Env s'.mem (s0.regs 14)) :=
+  correctness implAt (MC ck64) (MC_laws _) HMake hcon ret hret s0 setup ⟨pre.1, pre.2.1⟩
+
+end Witness
+
 end Proof
