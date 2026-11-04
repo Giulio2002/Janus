@@ -79,6 +79,8 @@ theorem hcon : MakeSmall (Extracted.program.link implAt)
 
 def mem0 : Janus.Arm64.Memory := mmem64Dead
 
+def emp : AMap (BitVec 64) (BitVec 64) := AMap.empty
+
 def ret : Nat := wret
 
 def s0 : Janus.Amd64.State :=
@@ -106,8 +108,9 @@ theorem callerOK : CallerOK (MC ck64) s0 16 8 := by
   · simp only [MC_priv, priv0, outside_cons, outside_nil, and_true]; decide
 
 set_option maxRecDepth 100000 in
-theorem pre : CallerOK (MC ck64) s0 16 8 ∧ HMake [] (s0.regs 14).toNat ((s0.regs 4).toNat - 16) (Contracts.rtView (MC ck64).priv s0.mem) :=
-  ⟨callerOK, by unfold HMake; decide⟩
+theorem pre : CallerOK (MC ck64) s0 16 8 ∧ HMake [] (s0.regs 14).toNat ((s0.regs 4).toNat - 16) (Contracts.rtView (MC ck64).priv s0.mem)  ∧
+    IsMap (MC ck64) s0.mem 0 emp :=
+  ⟨callerOK, by unfold HMake; decide, by simp [IsMap, emp]⟩
 
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.makemap_small`
 meeting `MakeSmall` for it, and a call state of `NewMap()` that satisfies the precondition. -/
@@ -117,7 +120,7 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec
       (Extracted.program.contractAddr "runtime.makemap_small") M H ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
-    (CallerOK M s 16 8 ∧ H [] (s.regs 14).toNat ((s.regs 4).toNat - 16) (Contracts.rtView M.priv s.mem)) :=
+    (CallerOK M s 16 8 ∧ H [] (s.regs 14).toNat ((s.regs 4).toNat - 16) (Contracts.rtView M.priv s.mem) ∧ IsMap M s.mem 0 emp) :=
   ⟨implAt, (MC ck64), HMake, ret, s0, (MC_laws _), hcon, hret, setup, pre⟩
 
 /-- The theorem fires: `NewMap()` returns what the theorem says. -/

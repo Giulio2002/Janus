@@ -76,6 +76,8 @@ theorem hcon : Contracts.Map.Clear (Extracted.program.link implAt)
     (Extracted.program.contractAddr "runtime.mapclear") (ME (BitVec 64)) := by
   rw [addr]; exact h0
 
+def emp : AMap (BitVec 64) (BitVec 64) := AMap.empty
+
 def dat : DataSegment := Extracted.data.head!
 def mem0 : Memory := withData mmem dat
 
@@ -106,7 +108,7 @@ theorem callerOK : CallerOK (ME (BitVec 64)) s0 32 0 := by
   · simp only [ME_priv, priv0, outside_cons, outside_nil, and_true]; decide
 
 set_option maxRecDepth 100000 in
-theorem pre : CallerOK (ME (BitVec 64)) s0 32 0 ∧ (ME (BitVec 64)).Typ mapType ∧ IsMap (ME (BitVec 64)) s0.mem (BitVec.ofNat 64 MP).toNat AMap.empty :=
+theorem pre : CallerOK (ME (BitVec 64)) s0 32 0 ∧ (ME (BitVec 64)).Typ mapType ∧ IsMap (ME (BitVec 64)) s0.mem (BitVec.ofNat 64 MP).toNat emp :=
   ⟨callerOK, trivial, (isMap_of_ne (by decide)).2 ⟨rfl, rfl, by decide, by decide⟩⟩
 
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapclear`
@@ -117,13 +119,13 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
       (Extracted.program.contractAddr "runtime.mapclear") M ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP] s ∧
-    (CallerOK M s 32 0 ∧ M.Typ mapType ∧ IsMap M s.mem (BitVec.ofNat 64 MP).toNat AMap.empty) :=
+    (CallerOK M s 32 0 ∧ M.Typ mapType ∧ IsMap M s.mem (BitVec.ofNat 64 MP).toNat emp) :=
   ⟨implAt, (ME (BitVec 64)), ret, s0, (ME_laws _), hcon, hret, setup, pre⟩
 
 /-- The theorem fires: `ClearMap(map)` returns what the theorem says. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (IsMap (ME (BitVec 64)) s'.mem (BitVec.ofNat 64 MP).toNat AMap.empty ∧ (ME (BitVec 64)).Env s'.mem (s0.regs 28)) :=
-  correctness implAt (ME (BitVec 64)) (ME_laws _) hcon (BitVec.ofNat 64 MP) AMap.empty ret hret s0 setup pre
+    (IsMap (ME (BitVec 64)) s'.mem (BitVec.ofNat 64 MP).toNat emp ∧ (ME (BitVec 64)).Env s'.mem (s0.regs 28)) :=
+  correctness implAt (ME (BitVec 64)) (ME_laws _) hcon (BitVec.ofNat 64 MP) emp ret hret s0 setup pre
 
 end Witness
 

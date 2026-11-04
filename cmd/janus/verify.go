@@ -90,6 +90,8 @@ type verifiedReport struct {
 	// MatchedMains is every main theorem of the proof module the witness is an instance of (MatchedMain is the
 	// first): one witness may serve several main theorems that share a precondition.
 	MatchedMains []string `json:"matchedMains,omitempty"`
+	// MatchedModules[i] is the module that declares MatchedMains[i].
+	MatchedModules []string `json:"matchedModules,omitempty"`
 	// ContractHyps are the runtime contracts the STATEMENT applies, computed from the statement
 	// itself (round 14): "NewobjectContract@runtime.newobject". Empty: the statement assumes
 	// nothing about the runtime, whatever the extraction left out (Contracts).
@@ -137,6 +139,7 @@ type auditResult struct {
 	Role              string     `json:"role"`                // round 14: main, witness-nonvacuous, witness-returns
 	MatchedMain       string     `json:"matchedMain"`         // round 14: for a witness, the main theorem it supports
 	MatchedMains      []string   `json:"matchedMains"`        // every main theorem of the module the witness supports
+	MatchedModules    []string   `json:"matchedModules"`      // the module declaring each of them
 	ContractHyps      []string   `json:"contractHyps"`        // round 14: the contracts the STATEMENT applies ("Contract@runtime.fn")
 	Imports           [][]string `json:"imports"`             // [module, direct imports…] for every non-core module
 }
@@ -1209,6 +1212,7 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			Role:              ar.Role,
 			MatchedMain:       ar.MatchedMain,
 			MatchedMains:      ar.MatchedMains,
+			MatchedModules:    ar.MatchedModules,
 			ContractHyps:      ar.ContractHyps,
 			Notes:             ar.Notes,
 		}

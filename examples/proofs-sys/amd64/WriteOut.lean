@@ -173,6 +173,10 @@ def s0 : Amd64.State :=
     mem := ⟨bytes, [⟨sp0 - 1232, 1232 + 16, true⟩, ⟨g0, 0x100, false⟩, ⟨errA, 48, false⟩]⟩ }
 
 def k0 : Kern := {}
+
+/-- Fixes the types of the witness's kernel environment and kernel state in the printed statement (they
+occur nowhere else in the precondition). -/
+def pin (_E : KEnv) (_k : Kern) : Prop := True
 def E0 : KEnv := ⟨[], 1024⟩
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
@@ -202,6 +206,7 @@ theorem pre : StackGuardOK s0 48 ∧ StackWritable s0 1232 16 ∧ (s0.regs 4).to
 `WriteOut(p, 0, 0)` that satisfies the precondition. -/
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E : KEnv) (ret : Nat)
     (s : Amd64.State) (k : Kern),
+    pin E k ∧
     Amd64.Kernel.SchedContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.entersyscall") rt 1024 ∧
     Amd64.Kernel.SchedContract (Extracted.program.link impl)
@@ -219,7 +224,7 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E
       ((s.regs 14).toNat + 24 ≤ (s.regs 4).toNat - 1232 ∨ (s.regs 4).toNat + 16 ≤ (s.regs 14).toNat + 16) ∧
       s.mem.accessible errVars 48 false = true ∧
       (errVars + 48 ≤ (s.regs 4).toNat - 1232 ∨ (s.regs 4).toNat + 16 ≤ errVars)) :=
-  ⟨implAt, [], E0, ret, s0, k0, hent, hexit, hconv, hret, setup, pre⟩
+  ⟨implAt, [], E0, ret, s0, k0, trivial, hent, hexit, hconv, hret, setup, pre⟩
 
 /-- The theorem fires: `WriteOut(p, 0, 0)` returns with a successful empty write or with `-1`. -/
 theorem returns : Amd64.Kernel.ReturnsK ((Extracted.program.link implAt).withExit ret) E0

@@ -30,7 +30,7 @@ func nonVacuityVerdict(r *verifiedReport, peers []*verifiedReport, allow bool) (
 		return nvWitness, "", "", nil
 	}
 	for _, p := range peers {
-		if p == nil || p == r || p.Module != r.Module || !supports(p, r.Theorem) {
+		if p == nil || p == r || !supports(p, r) {
 			continue
 		}
 		switch p.Role {
@@ -63,15 +63,27 @@ func nonVacuityVerdict(r *verifiedReport, peers []*verifiedReport, allow bool) (
 			witnessHint(r.Theorem) + "). The auditor matches witnesses by their statement, not their name, but an anonymous `example` cannot be referenced and is not accepted: state it as a named theorem. Or pass --allow-no-witness to accept the verdict WITHOUT non-vacuity (it is then marked 'non-vacuity NOT shown (opted out)')."}
 }
 
-// supports: the witness report p is an instance of the main theorem thm (MatchedMains, else the first match).
-func supports(p *verifiedReport, thm string) bool {
-	if p.MatchedMain == thm {
-		return true
+// supports: the witness report p is an instance of the main theorem r. The witness may sit in a module of its
+// own (rtmisc's Witness.lean imports the main module), so the match is by the theorem's name AND the module
+// that declares it (MatchedModules); reports without the module list fall back to the module of the witness.
+func supports(p, r *verifiedReport) bool {
+	if p.Theorem == r.Theorem {
+		return false
 	}
-	for _, m := range p.MatchedMains {
-		if m == thm {
+	for i, m := range p.MatchedMains {
+		if m != r.Theorem {
+			continue
+		}
+		if i < len(p.MatchedModules) {
+			if p.MatchedModules[i] == r.Module {
+				return true
+			}
+		} else if p.Module == r.Module {
 			return true
 		}
+	}
+	if len(p.MatchedMains) == 0 && p.MatchedMain == r.Theorem && p.Module == r.Module {
+		return true
 	}
 	return false
 }

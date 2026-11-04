@@ -1643,6 +1643,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			Role:                  r.audit.Role,
 			MatchedMain:           r.audit.MatchedMain,
 			MatchedMains:          r.audit.MatchedMains,
+			MatchedModules:        r.audit.MatchedModules,
 			ContractHyps:          r.audit.ContractHyps,
 			Consumer: &consumerInfo{
 				Root: pkg.Root, Lakefile: pkg.Lakefile, Module: r.module, SnapshotSha256: pkg.Sha256,

@@ -184,6 +184,10 @@ def s0 : State :=
     mem := ⟨fun _ => 0, [⟨sp0 - 1232, 1248, true⟩, ⟨g0, 0x100, false⟩, ⟨errA, 48, false⟩]⟩ }
 
 def k0 : Kern := {}
+
+/-- Fixes the types of the witness's kernel environment and kernel state in the printed statement (they
+occur nowhere else in the precondition). -/
+def pin (_E : KEnv) (_k : Kern) : Prop := True
 def E0 : KEnv := ⟨[], 1024⟩
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
@@ -210,6 +214,7 @@ theorem pre : GuardOK s0 48 ∧ StackOK s0 1232 16 ∧ Outside (s0.sp.toNat - 12
 `WriteOut(p, 0, 0)` that satisfies the precondition. -/
 theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv) (ret : Nat) (s : State)
     (k : Kern),
+    pin E k ∧
     SchedContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.entersyscall") rt 1024 ∧
     SchedContract (Extracted.program.link impl)
@@ -226,7 +231,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (E : KEn
       ((s.regs 28).toNat + 24 ≤ s.sp.toNat - 1232 ∨ s.sp.toNat + 16 ≤ (s.regs 28).toNat + 16) ∧
       s.mem.accessible errVars 48 false = true ∧
       (errVars + 48 ≤ s.sp.toNat - 1232 ∨ s.sp.toNat + 16 ≤ errVars)) :=
-  ⟨implAt, [], E0, ret, s0, k0, hent, hexit, hconv, hret, setup, pre⟩
+  ⟨implAt, [], E0, ret, s0, k0, trivial, hent, hexit, hconv, hret, setup, pre⟩
 
 /-- The theorem fires: `WriteOut(p, 0, 0)` returns with a successful empty write or with `-1`. -/
 theorem returns : ReturnsK ((Extracted.program.link implAt).withExit ret) E0

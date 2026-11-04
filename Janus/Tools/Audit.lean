@@ -90,6 +90,9 @@ structure Record where
   /-- Every main theorem of the proof module the witness is an instance of (`matchedMain` is the first):
   a witness for a precondition several theorems share supports all of them. -/
   matchedMains : Array String := #[]
+  /-- The module declaring each of `matchedMains` (a witness may sit in a module of its own, importing the main
+  theorem's: `Three/Witness.lean`). -/
+  matchedModules : Array String := #[]
   /-- Round 14: the runtime contracts the STATEMENT applies (`NewobjectContract@runtime.newobject`),
   computed from the statement, not from the extraction. A main theorem has them as hypotheses; a
   witness claims them. Empty: the statement assumes nothing about the runtime. -/
@@ -2570,11 +2573,15 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     -- checked structurally against a main theorem of the module; every other theorem is a main
     -- theorem, whose runtime is quantified (`checkContractHyps … main`).
     let role := roleOfTy thmN ci.type
-    let (matchedMain, matchedMains) ← match role with
-      | .main => pure ("", #[])
+    let (matchedMain, matchedMains, matchedModules) ← match role with
+      | .main => pure ("", #[], #[])
       | _ => do
         match ← runCore envA (Meta.MetaM.run' (checkWitness envA proofModN thmN role ci.type)) with
-        | .ok (c, cs) => pure (c.toString, cs.map (·.toString))
+        | .ok (c, cs) =>
+          let modOf := fun (n : Name) => match envA.getModuleIdxFor? n with
+            | some i => modNames[i.toNat]!.toString
+            | none => ""
+          pure (c.toString, cs.map (·.toString), cs.map modOf)
         | .error m => fail s!"{thm} {m} (round 14, W2)"
     -- close over the consumer defs reachable from the statement; check the dependency
     -- constants on the way
@@ -2598,7 +2605,7 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
              statement, statementExplicit, definitions := defs,
              modules := modNames.map (·.toString),
              external := externalNames.filterMap external.get?, externalDefinitions := extOut,
-             notes, role := role.label, matchedMain, matchedMains, contractHyps, imports := importGraph envA }
+             notes, role := role.label, matchedMain, matchedMains, matchedModules, contractHyps, imports := importGraph envA }
   ).run
   match result with
   | .ok rec => IO.println (marker ++ (toJson rec).compress)
