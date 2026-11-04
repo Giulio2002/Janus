@@ -150,21 +150,45 @@ func TestLakefileCacheable(t *testing.T) {
 	if !ok(base + "srcDir = \"src/lean\"\n") {
 		t.Error("a relative srcDir inside the package must be cacheable")
 	}
+	if !ok(base + "roots = [\"A\", # c\n  'B',\n]\nprecompileModules = true\n\n[leanOptions]\npp.unicode.fun = true\nautoImplicit = false\n") {
+		t.Error("arrays, comments, booleans and leanOptions must be cacheable")
+	}
 	for name, extra := range map[string]string{
-		"absolute srcDir":  "srcDir = \"/tmp/ext\"\n",
-		"escaping srcDir":  "srcDir = \"../ext\"\n",
-		"nested escape":    "srcDir = \"a/../../ext\"\n",
-		"home srcDir":      "srcDir = \"~/x\"\n",
-		"escaped srcDir":   "srcDir = \"a\\\\x2e\\\\x2e\"\n",
-		"plugin args":      "moreLeanArgs = [\"--load-dynlib=/tmp/p.so\"]\n",
-		"weak args":        "weakLeanArgs = [\"-DfooBar\"]\n",
-		"link args":        "moreLinkArgs = [\"-L/x\"]\n",
-		"unknown table":    "\n[[input_file]]\nname = \"x\"\n",
-		"inline srcDir":    "srcDir=\"/abs\"\n",
-		"srcDir with tail": "srcDir = \"/abs\" # c\n",
+		"absolute srcDir":        "srcDir = \"/tmp/ext\"\n",
+		"escaping srcDir":        "srcDir = \"../ext\"\n",
+		"nested escape":          "srcDir = \"a/../../ext\"\n",
+		"home srcDir":            "srcDir = \"~/x\"\n",
+		"escaped srcDir":         "srcDir = \"a\\\\x2e\\\\x2e\"\n",
+		"plugin args":            "moreLeanArgs = [\"--load-dynlib=/tmp/p.so\"]\n",
+		"weak args":              "weakLeanArgs = [\"-DfooBar\"]\n",
+		"link args":              "moreLinkArgs = [\"-L/x\"]\n",
+		"unknown table":          "\n[[input_file]]\nname = \"x\"\n",
+		"inline srcDir":          "srcDir=\"/abs\"\n",
+		"srcDir with tail":       "srcDir = \"/abs\" # c\n",
+		"quoted key":             "\"srcDir\" = \"/abs/ext\"\n",
+		"literal key":            "'srcDir' = '/abs/ext'\n",
+		"quoted link args":       "\"moreLinkArgs\" = [\"-L/x\"]\n",
+		"literal string":         "srcDir = '/abs/ext'\n",
+		"dotted key":             "a.b = 1\n",
+		"inline table":           "x = { srcDir = \"/abs\" }\n",
+		"multiline string":       "description = \"\"\"\nx\n\"\"\"\n",
+		"CR line endings":        "srcDir = \"/abs/ext\"\r\n",
+		"CR only":                "name = \"x\"\rsrcDir = \"/abs\"\n",
+		"array then quoted key":  "roots = [\n  \"A\",\n]\n\"srcDir\" = \"/abs\"\n",
+		"srcDir array":           "srcDir = [\"a\"]\n",
+		"srcDir dot dot":         "srcDir = \"a/..\"\n",
+		"unterminated":           "srcDir = \"a\n",
+		"header trailing":        "[[lean_lib]] x\n",
+		"single bracket require": "[require]\nname = \"x\"\n",
 	} {
 		if ok(base + extra) {
 			t.Errorf("%s was cacheable", name)
+		}
+	}
+	for _, f := range []string{"examples/consumer/lakefile.toml"} {
+		// the consumer example's plain lakefile is cacheable
+		if b, err := os.ReadFile(filepath.Join(repoRoot, f)); err == nil && !lakefileCacheable(map[string][]byte{"lakefile.toml": b}, "lakefile.toml") {
+			t.Errorf("%s is not cacheable", f)
 		}
 	}
 	if lakefileCacheable(map[string][]byte{"lakefile.lean": []byte("import Lake\n")}, "lakefile.lean") {
