@@ -289,8 +289,8 @@ def isGeneratedEqnLemma (env : Environment) (n : Name) : Bool :=
 independently elaborated trusted copy, exactly like `program` and `entry`: a statement may mention
 them, and a planted or shadowed definition of one differs from the trusted copy and is rejected. -/
 def checkDataSymIdentities (env : Environment) : AuditM Unit := do
-  let names := env.const2ModIdx.fold (init := #[]) fun acc n _ =>
-    if n.getPrefix.getPrefix == `Extracted &&
+  let names := env.const2ModIdx.fold (init := #[]) fun acc n idx =>
+    if env.header.moduleNames[idx.toNat]? == some `Extracted && n.getPrefix.getPrefix == `Extracted &&
         (n.getPrefix == `Extracted.dataAddr || n.getPrefix == `Extracted.dataSize) then acc.push n else acc
   for n in names.qsort Name.lt do
     checkIdentity env (n.replacePrefix `Extracted .anonymous)

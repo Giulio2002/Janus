@@ -1,6 +1,9 @@
 package basic
 
-import "math/bits"
+import (
+	"errors"
+	"math/bits"
+)
 
 //go:noinline
 func Add(x, y uint64) uint64 { return x + y }
@@ -94,6 +97,16 @@ var symPows = [8]uint64{1, 10, 100, 1000, 10000, 100000, 1000000, 10000000}
 //
 //go:noinline
 func SymPows(i uint64) uint64 { return symPows[i&7] }
+
+// errSym is an interface-typed package variable the linker initialises statically (a sentinel
+// error): its link-time image holds the *errors.errorString type word and the address of a
+// static errorString. The extraction names both words (`errSym→type`, `errSym→data`).
+var errSym = errors.New("sym error")
+
+// SymErr returns the sentinel (it loads both words of errSym).
+//
+//go:noinline
+func SymErr() error { return errSym }
 
 var counter uint64
 

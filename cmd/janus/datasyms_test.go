@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"debug/elf"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,12 +66,11 @@ func TestDataSymConstants(t *testing.T) {
 	}
 }
 
-// TestDataSymNone: a function that references no named data symbol (Add) and one whose constant
-// is an anonymous read-only static (Table) get no constants, so those extractions are
-// byte-identical to the earlier format.
+// TestDataSymNone: a function that references no data (Add) gets no constants, so such
+// extractions are byte-identical to the earlier format.
 func TestDataSymNone(t *testing.T) {
 	for arch, bin := range map[string]string{"arm64": exampleBin, "amd64": exampleAmd64(t)} {
-		for _, fn := range []string{"Add", "Table"} {
+		for _, fn := range []string{"Add"} {
 			dir := filepath.Join(t.TempDir(), arch+fn)
 			if code, _, stderr := runJanus(t, "extract", bin, "example.com/basic."+fn, dir); code != 0 {
 				t.Fatalf("%s %s: %s", arch, fn, stderr)
@@ -180,5 +180,74 @@ func TestDataSymNaming(t *testing.T) {
 	out := sb.String()
 	if strings.Count(out, "def dataAddr.") != 6 || strings.Count(out, "def dataSize.") != 6 || strings.Contains(out, "»name") {
 		t.Errorf("unexpected rendering:\n%s", out)
+	}
+}
+
+// TestDataSymAnonymous: anonymous read-only data the code references (HexDigit's string
+// literal) is named by the hash of its content, which is the same on both ISAs (the layouts
+// differ), and the address is the one the code computes (a copied data object covers it).
+func TestDataSymAnonymous(t *testing.T) {
+	re := regexp.MustCompile(`(?m)^def dataAddr\.«(\.rodata#[0-9a-f]{8})» : Nat := 0x([0-9a-f]+)$`)
+	names := map[string]string{}
+	for arch, bin := range map[string]string{"arm64": exampleBin, "amd64": exampleAmd64(t)} {
+		dir := filepath.Join(t.TempDir(), arch)
+		if code, _, stderr := runJanus(t, "extract", bin, "example.com/basic.HexDigit", dir); code != 0 {
+			t.Fatalf("%s: %s", arch, stderr)
+		}
+		lean, _ := os.ReadFile(filepath.Join(dir, "Extracted.lean"))
+		m := re.FindStringSubmatch(string(lean))
+		if m == nil {
+			t.Fatalf("%s: no anonymous constant:\n%s", arch, lean)
+		}
+		if strings.Contains(string(lean), "dataSize.«"+m[1]) {
+			t.Errorf("%s: anonymous data must not get a size", arch)
+		}
+		names[arch] = m[1]
+		f, err := elf.Open(bin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		var addr uint64
+		fmt.Sscanf(m[2], "%x", &addr)
+		sec := f.Section(".rodata")
+		data, _ := sec.Data()
+		if !bytes.HasPrefix(data[addr-sec.Addr:], []byte("0123456789abcdef")) {
+			t.Errorf("%s: 0x%x does not hold the hex digit string", arch, addr)
+		}
+	}
+	if names["arm64"] != names["amd64"] {
+		t.Errorf("content names differ across ISAs: %v", names)
+	}
+}
+
+// TestDataSymInterfaceVar: a referenced 16-byte interface variable linked statically (a sentinel
+// error) gets its two link-time words as constants, equal to the words of the ELF image.
+func TestDataSymInterfaceVar(t *testing.T) {
+	for arch, bin := range map[string]string{"arm64": exampleBin, "amd64": exampleAmd64(t)} {
+		dir := filepath.Join(t.TempDir(), arch)
+		if code, _, stderr := runJanus(t, "extract", bin, "example.com/basic.SymErr", dir); code != 0 {
+			t.Fatalf("%s: %s", arch, stderr)
+		}
+		lean, _ := os.ReadFile(filepath.Join(dir, "Extracted.lean"))
+		s := elfSymbol(t, bin, "example.com/basic.errSym")
+		f, _ := elf.Open(bin)
+		sec := f.Sections[s.Section]
+		data, _ := sec.Data()
+		off := s.Value - sec.Addr
+		w0, w1 := binary.LittleEndian.Uint64(data[off:]), binary.LittleEndian.Uint64(data[off+8:])
+		f.Close()
+		for _, w := range []string{
+			fmt.Sprintf("def dataAddr.«example.com/basic.errSym→type» : Nat := 0x%x\n", w0),
+			fmt.Sprintf("def dataAddr.«example.com/basic.errSym→data» : Nat := 0x%x\n", w1),
+			fmt.Sprintf("def dataAddr.«example.com/basic.errSym» : Nat := 0x%x\n", s.Value),
+		} {
+			if !strings.Contains(string(lean), w) {
+				t.Errorf("%s: Extracted.lean lacks %q:\n%s", arch, w, lean)
+			}
+		}
+		if code, _, stderr := runJanus(t, "check", dir); code != 0 {
+			t.Fatalf("%s: check: %s", arch, stderr)
+		}
 	}
 }

@@ -26,6 +26,7 @@ var Keep = []any{
 	basic.SetOne256,
 	basic.GlobalTable,
 	basic.SymPows,
+	basic.SymErr,
 	basic.Bump,
 	basic.AddLimbs,
 	basic.CopyWords,

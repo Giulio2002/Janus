@@ -387,7 +387,26 @@ def dataSize.«example.com/basic.symPows» : Nat := 64
   stub pins identify them (`dataAddr.«type:basic.Pair#118403d1»`). The descriptor's size is not
   recorded (it depends on the type's kind), so there is **no `dataSize` for a type**. The name is
   only a label: the address is the one the code computes.
-* Anonymous static data (`.rodata+0x…`, string literals) has no symbol and no constant.
+* **Anonymous data.** A reference to data that no sized symbol covers (a string literal such as a
+  hex-digit table, a compiler-made static array, a static temporary) is named by its **content**:
+  `dataAddr.«.rodata#1a2b3c4d»`, section name and the first 8 hex digits of the SHA-256 of the 16
+  bytes at the referenced address (fewer at the end of the section), in which every aligned 8-byte
+  word that is itself an address in an allocated section is replaced by the 16 bytes it points to
+  (a pointer is layout, its target's content is not). The name therefore survives a rebuild that
+  moves the data, and is the same on arm64 and amd64 for the same constant. It is a label for the
+  exact address the code computes; there is **no `dataSize`** (the object's extent is not in the
+  binary). Equal hashes at different addresses get `#1`, `#2`, … by ascending address (stable
+  only while the binary is). The hash covers only file-backed, non-executable sections other than
+  `.gopclntab`.
+* **Interface variables.** For a referenced 16-byte symbol that is a statically initialised
+  interface value (word 0 a type descriptor or a static `go:itab.*`, word 1 an address in an
+  allocated section; e.g. a sentinel `var ErrX = errors.New("…")` the compiler built at link time),
+  the two words of its link-time image are named `dataAddr.«SYM→type»` and `dataAddr.«SYM→data»`
+  (the pointed-to `errorString`, say). The values are read from the binary's file image like the
+  data bytes. A proof that states the variable's contents uses them:
+  `m.readLE Extracted.dataAddr.«SYM» 8 = Extracted.dataAddr.«SYM→type»` and
+  `m.readLE (Extracted.dataAddr.«SYM» + 8) 8 = Extracted.dataAddr.«SYM→data»`. Only the image is
+  named; whether the variable still holds it at run time is the theorem's precondition.
 * Extractions that reference no symbol keep exactly their earlier bytes.
 * **Trust.** The constants are part of `Extracted.lean`, so `janus check` / `janus verify`
   regenerate them from the binary and compare byte for byte (an edited address or size is

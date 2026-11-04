@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -17,7 +20,11 @@ type DataSym struct {
 	// Type: a type descriptor. The linker gives descriptors no ELF symbol, so Name is
 	// "type:<type string>#<hash>" read from the descriptor itself (regionIdentity) and Size is
 	// unknown (0, no dataSize constant is generated).
-	Type  bool
+	Type bool
+	// Kind: "sym" (a sized ELF symbol), "type" (a type descriptor), "anon" (anonymous data the
+	// code references, named by the hash of its content: anonName), "link" (a pointer stored in
+	// the link-time image of a referenced interface variable: linkWords).
+	Kind  string
 	Ident string // the Lean identifier component: «Name», or sym@0xADDR when that is unusable
 }
 
@@ -46,6 +53,7 @@ func collectDataSyms(x *Extraction) []DataSym {
 	}
 	seen := map[key]bool{}
 	var out []DataSym
+	refsOnly := false
 	add := func(addr uint64) {
 		s, ok, _ := x.Bin.dataSymbolAt(addr)
 		if !ok {
@@ -55,11 +63,21 @@ func collectDataSyms(x *Extraction) []DataSym {
 					return
 				}
 				seen[k] = true
-				d := DataSym{Name: t, Addr: addr, Type: true}
+				d := DataSym{Name: t, Addr: addr, Type: true, Kind: "type"}
 				if sec, ok := x.Bin.sectionOf(addr); ok {
 					d.Section = sec.Name
 				}
 				out = append(out, d)
+			} else if !refsOnly {
+				// an address inside a copied window, not a reference of the code
+			} else if n, ok := x.Bin.anonName(addr); ok {
+				k := key{n, addr}
+				if seen[k] {
+					return
+				}
+				seen[k] = true
+				sec, _ := x.Bin.sectionOf(addr)
+				out = append(out, DataSym{Name: n, Addr: addr, Section: sec.Name, Type: true, Kind: "anon"})
 			}
 			return
 		}
@@ -68,20 +86,36 @@ func collectDataSyms(x *Extraction) []DataSym {
 			return
 		}
 		seen[k] = true
-		d := DataSym{Name: s.Name, Addr: s.Addr, Size: s.Size}
+		d := DataSym{Name: s.Name, Addr: s.Addr, Size: s.Size, Kind: "sym"}
 		if sec, ok := x.Bin.sectionOf(s.Addr); ok {
 			d.Section = sec.Name
 		}
 		out = append(out, d)
 	}
+	refsOnly = true
 	for _, r := range x.DataRefs {
 		add(r.Target)
 	}
 	for _, s := range x.Skipped {
 		add(s.Target)
 	}
+	refsOnly = false
 	for _, d := range x.Data {
 		add(d.Base)
+	}
+	// The words of a referenced interface variable's link-time image (an `error` sentinel): its
+	// type/itab word and its data pointer.
+	for _, d := range append([]DataSym(nil), out...) {
+		if d.Kind != "sym" {
+			continue
+		}
+		for _, l := range x.Bin.linkWords(d) {
+			k := key{l.Name, l.Addr}
+			if !seen[k] {
+				seen[k] = true
+				out = append(out, l)
+			}
+		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Addr != out[j].Addr {
@@ -89,6 +123,20 @@ func collectDataSyms(x *Extraction) []DataSym {
 		}
 		return out[i].Name < out[j].Name
 	})
+	// anonymous objects whose content hashes agree: ordinal by address
+	ord := map[string]int{}
+	acount := map[string]int{}
+	for _, d := range out {
+		if d.Kind == "anon" {
+			acount[d.Name]++
+		}
+	}
+	for i := range out {
+		if d := &out[i]; d.Kind == "anon" && acount[d.Name] > 1 {
+			ord[d.Name]++
+			d.Name = fmt.Sprintf("%s#%d", d.Name, ord[d.Name])
+		}
+	}
 	count := map[string]int{}
 	for _, d := range out {
 		count[d.Name]++
@@ -122,7 +170,11 @@ func writeDataSyms(sb *strings.Builder, syms []DataSym) {
 		if sec == "" {
 			sec = "?"
 		}
-		if d.Type && leanIdentOK(d.Name) {
+		if d.Kind == "anon" {
+			fmt.Fprintf(sb, "/-- anonymous data at 0x%x (%s), named by the hash of its first bytes -/\n", d.Addr, sec)
+		} else if d.Kind == "link" {
+			fmt.Fprintf(sb, "/-- a pointer word of the link-time image of an interface variable (%s) -/\n", d.Name)
+		} else if d.Type && leanIdentOK(d.Name) {
 			fmt.Fprintf(sb, "/-- type descriptor `%s` (%s) -/\n", d.Name, sec)
 		} else if leanIdentOK(d.Name) {
 			fmt.Fprintf(sb, "/-- `%s` (%s, %d bytes) -/\n", d.Name, sec, d.Size)
@@ -130,7 +182,7 @@ func writeDataSyms(sb *strings.Builder, syms []DataSym) {
 			fmt.Fprintf(sb, "/-- data symbol at 0x%x (%s, %d bytes) -/\n", d.Addr, sec, d.Size)
 		}
 		fmt.Fprintf(sb, "def dataAddr.«%s» : Nat := 0x%x\n", d.Ident, d.Addr)
-		if !d.Type {
+		if d.Kind == "sym" {
 			fmt.Fprintf(sb, "def dataSize.«%s» : Nat := %d\n", d.Ident, d.Size)
 		}
 	}
@@ -164,4 +216,91 @@ func (b *Binary) typeDescriptorAt(addr uint64) (string, bool) {
 		return id, true
 	}
 	return "", false
+}
+
+// anonName names anonymous data (no sized symbol, not a type descriptor) that the code
+// references by the content at addr, so the name survives a rebuild that moves it:
+// "<section>#<8 hex digits of SHA-256>". The hashed content is the 16 bytes at addr (fewer at the
+// end of the section), in which every aligned 8-byte word that is itself an address in an
+// allocated section is replaced by the 16 bytes it points to (a pointer is layout, its target's
+// content is not). Only file-backed, non-executable sections qualify. The name is a label: the
+// address is the one the code computes.
+func (b *Binary) anonName(addr uint64) (string, bool) {
+	sec, ok := b.sectionOf(addr)
+	if !ok || sec.Exec || sec.NoBits || sec.Name == ".gopclntab" {
+		return "", false
+	}
+	c, ok := b.contentAt(addr, 16)
+	if !ok {
+		return "", false
+	}
+	h := sha256.New()
+	h.Write([]byte("janus-anon-v1\x00"))
+	h.Write([]byte(sec.Name))
+	h.Write([]byte{0})
+	for off := 0; off < len(c); off += 8 {
+		if off+8 <= len(c) {
+			w := binary.LittleEndian.Uint64(c[off:])
+			if w >= 0x1000 {
+				if t, ok := b.sectionOf(w); ok && !t.NoBits && !t.Exec {
+					if tc, ok := b.contentAt(w, 16); ok {
+						h.Write([]byte{'P'})
+						h.Write(tc)
+						continue
+					}
+				}
+			}
+		}
+		end := min(off+8, len(c))
+		h.Write([]byte{'B'})
+		h.Write(c[off:end])
+	}
+	return fmt.Sprintf("%s#%s", sec.Name, hex.EncodeToString(h.Sum(nil))[:8]), true
+}
+
+// contentAt returns up to n bytes at addr from a file-backed section (fewer at its end).
+func (b *Binary) contentAt(addr uint64, n int) ([]byte, bool) {
+	sec, ok := b.sectionOf(addr)
+	if !ok || sec.NoBits || addr-sec.Addr >= uint64(len(sec.data)) {
+		return nil, false
+	}
+	d := sec.data[addr-sec.Addr:]
+	if len(d) > n {
+		d = d[:n]
+	}
+	return d, true
+}
+
+// linkWords: when d is a 16-byte referenced data symbol whose link-time image is an interface
+// value (word 0 a type descriptor or a static itab, word 1 a pointer into an allocated section),
+// its two words as constants named "<symbol>→type" and "<symbol>→data". These are the values the
+// binary stores in the variable's initial image (an `error` sentinel: the `errors.New` result
+// built at link time); a proof that states the variable's contents needs them. Nothing for a
+// symbol that is not such a value.
+func (b *Binary) linkWords(d DataSym) []DataSym {
+	if d.Size != 16 || !leanIdentOK(d.Name) {
+		return nil
+	}
+	c, ok := b.contentAt(d.Addr, 16)
+	if !ok || len(c) != 16 {
+		return nil
+	}
+	if sec, ok := b.sectionOf(d.Addr); !ok || sec.Exec {
+		return nil
+	}
+	w0, w1 := binary.LittleEndian.Uint64(c), binary.LittleEndian.Uint64(c[8:])
+	isItab := false
+	if s, ok, _ := b.dataSymbolAt(w0); ok && s.Addr == w0 && strings.HasPrefix(s.Name, itabPrefix) {
+		isItab = true
+	}
+	if _, ok := b.typeDescriptorAt(w0); !ok && !isItab {
+		return nil
+	}
+	if t, ok := b.sectionOf(w1); !ok || t.Exec || w1 < 0x1000 {
+		return nil
+	}
+	return []DataSym{
+		{Name: d.Name + "→type", Addr: w0, Section: d.Section, Kind: "link", Type: true},
+		{Name: d.Name + "→data", Addr: w1, Section: d.Section, Kind: "link", Type: true},
+	}
 }
