@@ -34,6 +34,33 @@ def withData (m : Janus.Arm64.Memory) (d : Janus.DataSegment) : Janus.Arm64.Memo
   ⟨fun a => if d.base ≤ a ∧ a < d.base + d.bytes.length then BitVec.ofNat 8 (d.bytes.getD (a - d.base) 0)
       else m.bytes a, m.regions ++ [⟨d.base, d.bytes.length, false⟩]⟩
 
+/-- `runtime.mapaccess1_fast64` in the one-entry model `MC`: the value slot `MP + 32` when `m = MP`, the cell is
+used and its key is `k`; else the zero slot. -/
+def access1McCode : List Nat :=
+  [0xd2810004, 0xf2a00024, 0xeb04003f, 0x54000101, 0xf9400085, 0xb40000c5, 0xf9400486, 0xeb0200df,
+   0x54000061, 0x91008080, 0xd65f03c0, 0xd2812000, 0xf2a00020, 0xd65f03c0]
+def access1McSeg (addr : Nat) : Janus.Segment := ⟨"live-stub.mapaccess1mc", addr, access1McCode⟩
+
+open Janus Janus.Spec.Map Janus.Contracts.MapModel0 in
+theorem readLE8_lt (m : Janus.Arm64.Memory) (a : Nat) : m.readLE a 8 < 2 ^ 64 := by
+  simpa using Janus.Arm64.Memory.readLE_lt m a 8
+
+open Janus Janus.Spec.Map Janus.Contracts.MapModel0 in
+theorem key_ne (m : Janus.Arm64.Memory) (x : BitVec 64) (h : ¬ m.readLE (MP + 8) 8 = x.toNat) :
+    ¬ x = ck64.get m := by
+  intro hx
+  apply h
+  have := congrArg BitVec.toNat hx
+  simp only [ck64, BitVec.toNat_ofNat] at this
+  rw [this, Nat.mod_eq_of_lt (readLE8_lt m _)]
+
+open Janus Janus.Spec.Map Janus.Contracts.MapModel0 in
+theorem key_eq (m : Janus.Arm64.Memory) (x : BitVec 64) (h : m.readLE (MP + 8) 8 = x.toNat) :
+    x = ck64.get m := by
+  apply BitVec.eq_of_toNat_eq
+  simp only [ck64, BitVec.toNat_ofNat]
+  rw [h, Nat.mod_eq_of_lt x.isLt]
+
 end Janus.Contracts.LiveStubMap
 
 /-- The proof of `MapSat.access1_impl` against the stub at the real address. -/
@@ -232,4 +259,64 @@ macro_rules
       janus_run
       exact mapReturn_of (ME _) 2 [] _ s _ _ rfl rfl rfl rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) hze
         (fun _ _ _ h => h) hmap
+      )))
+
+/-- `Access1` for the one-entry model `MC ck64` against `LiveStubMap.access1McSeg`: the proof by cases on
+`m = 0`, the `used` word and the key (the stub branches on them; each branch is run by the executor). -/
+syntax "janus_map_access1mc" : tactic
+set_option hygiene false in
+macro_rules
+  | `(tactic| janus_map_access1mc) => `(tactic| (
+      open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.Spec.Type
+        Janus.Contracts Janus.Contracts.Map Janus.Contracts.MapVar Janus.Contracts.MapModel0
+        Janus.Contracts.IfaceSat Janus.Contracts.MapSat in
+      open Janus.Contracts.IfaceModel (wsp wg wret acc_read_of_write) in
+      (
+      intro f s hpc hpre
+      obtain ⟨⟨hze, hg, hc, hout⟩, -, hmap⟩ := hpre
+      obtain ⟨hl1, hl2, -⟩ := hc
+      change Janus.Tactic.ReachesRet _ _ s _
+      by_cases h0 : (s.regs 1).toNat = 0
+      · have hf : f = AMap.empty := by simpa [IsMap, h0] using hmap
+        have hx : s.regs 1 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using h0)
+        janus_run [hx]
+        refine mapReturn_of (MC ck64) 3 [] _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg])
+          (by simp [setReg]) rfl rfl rfl rfl (MemFrame.refl _ _) hze (fun _ _ _ h => h)
+          ⟨by simpa [hx] using hmap, ?_⟩
+        simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat]
+        exact ⟨hze.1, inPriv0 (by decide) (by decide), by simpa [hf, AMap.empty, ZS] using hze.2⟩
+      · have hrep : (MC ck64).Rep s.mem (s.regs 1).toNat f := by simpa [IsMap, h0] using hmap
+        obtain ⟨hmp, hacc, hal, hu⟩ := hrep
+        have hx : s.regs 1 = 67584#64 := BitVec.eq_of_toNat_eq (by rw [hmp]; decide)
+        have hmap' : IsMap (MC ck64) s.mem 67584 f := by rw [hx] at hmap; simpa using hmap
+        have hacc' : s.mem.accessible 67584 56 true = true := hacc
+        rcases hu with ⟨hu0, hf⟩ | ⟨hu1, hf⟩
+        · have hu0' : s.mem.readLE 67584 8 = 0 := hu0
+          janus_run [hx]
+          refine mapReturn_of (MC ck64) 3 [] _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg])
+            (by simp [setReg]) rfl rfl rfl rfl (MemFrame.refl _ _) hze (fun _ _ _ h => h) ⟨hmap', ?_⟩
+          simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat]
+          exact ⟨hze.1, inPriv0 (by decide) (by decide), by simpa [hf, AMap.empty, ZS] using hze.2⟩
+        · have hu1' : s.mem.readLE 67584 8 = 1 := hu1
+          by_cases hk : s.mem.readLE 67592 8 = (s.regs 2).toNat
+          · janus_run [hx]
+            refine mapReturn_of (MC ck64) 3 [] _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg])
+              (by simp [setReg]) rfl rfl rfl rfl (MemFrame.refl _ _) hze (fun _ _ _ h => h) ⟨hmap', ?_⟩
+            have hkey : s.regs 2 = ck64.get s.mem := Janus.Contracts.LiveStubMap.key_eq s.mem _ hk
+            have hv : (cellMap ck64 s.mem (s.regs 2)).getD 0#64 = BitVec.ofNat 64 (s.mem.readLE (MP + 32) 8) := by
+              simp [cellMap, ← hkey]
+            have hacr : s.mem.accessible 67584 56 false = true := Janus.Contracts.IfaceModel.acc_read_of_write hacc'
+            have hslot : s.mem.accessible 67616 8 false = true := Memory.accessible_mono _ hacr (by decide) (by decide)
+            simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, Nat.reduceMod, hf, hv]
+            refine ⟨by simpa using hslot, inPriv0 (by decide) (by decide), ?_⟩
+            first
+              | exact (Nat.mod_eq_of_lt (Janus.Contracts.LiveStubMap.readLE8_lt _ 67616)).symm
+              | exact (Nat.mod_eq_of_lt (Janus.Contracts.LiveStubMap.readLE8_lt _ (MP + 32))).symm
+          · janus_run [hx]
+            refine mapReturn_of (MC ck64) 3 [] _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg])
+              (by simp [setReg]) rfl rfl rfl rfl (MemFrame.refl _ _) hze (fun _ _ _ h => h) ⟨hmap', ?_⟩
+            have hn : (cellMap ck64 s.mem (s.regs 2)) = none := by
+              simp [cellMap, Janus.Contracts.LiveStubMap.key_ne s.mem _ hk]
+            simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, hf, hn]
+            exact ⟨hze.1, inPriv0 (by decide) (by decide), by simpa [ZS] using hze.2⟩
       )))
