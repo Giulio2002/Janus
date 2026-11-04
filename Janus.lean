@@ -52,6 +52,10 @@ import Janus.Contracts.CmpstringSat
 import Janus.Contracts.CmpstringAmd64
 import Janus.Contracts.CmpstringSatAmd64
 import Janus.Amd64
+import Janus.Tactic.Bridge
+import Janus.Contracts.LiveStub
+import Janus.Contracts.LiveStubAmd64
+import Janus.Amd64.Bridge
 import Janus.Amd64.FFISat
 import Janus.Contracts.MapAmd64
 import Janus.Contracts.MapSat
