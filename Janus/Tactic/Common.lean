@@ -1135,6 +1135,43 @@ where
   mkFunOfEq (rhs : Expr) : MetaM Expr := do
     return .lam `x (mkConst ``Bool) (mkApp3 (mkConst ``Eq [1]) (mkConst ``Bool) (.bvar 0) rhs) .default
 
+/-- The `MemFrame` hypotheses that relate the memory of the accessibility goal `g` (stores stripped) to
+another memory, in either direction: `(d, up, m')` with `up = true` when the goal's memory is the BASE of
+`d : MemFrame base m' rs` (the goal moves to the later memory `m'`) and `up = false` when it is `m'`'s
+successor (`d : MemFrame m' mem rs`: the goal moves to the earlier memory `m'`). `MemFrame.accessible` states
+that the accessibility of every range is the same in both. -/
+def accessibleFrameLinks (g : MVarId) : MetaM (Array (LocalDecl × Bool × Expr)) := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  let some (_, lhs, _) := t.eq? | return #[]
+  unless lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do return #[]
+  let m0 := stripWrites (lhs.getArg! 0)
+  let mut out := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ty.isAppOfArity ``Janus.MemFrame 3 do continue
+    if ← withReducible (isDefEq (ty.getArg! 1) m0) then out := out.push (d, false, ty.getArg! 0)
+    if ← withReducible (isDefEq (ty.getArg! 0) m0) then out := out.push (d, true, ty.getArg! 1)
+  return out
+
+/-- Move the accessibility goal `g` (stores already stripped) across the `MemFrame` hypothesis `d`, in the
+direction `up` (see `accessibleFrameLinks`); the proof is `MemFrame.accessible`. Returns the new goal. -/
+def moveAccessible (g : MVarId) (d : LocalDecl) (up : Bool) : MetaM MVarId := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  let some (_, lhs, rhs) := t.eq? | throwError "moveAccessible: not an accessibility goal"
+  let ty ← instantiateMVars d.type
+  let m' := if up then ty.getArg! 1 else ty.getArg! 0
+  let t' ← mkEq (mkAppN (mkConst ``Janus.Arm64.Memory.accessible)
+    #[m', lhs.getArg! 1, lhs.getArg! 2, lhs.getArg! 3]) rhs
+  let g' ← mkFreshExprSyntheticOpaqueMVar t'
+  let eqv ← mkAppM ``Janus.MemFrame.accessible #[d.toExpr, lhs.getArg! 1, lhs.getArg! 2, lhs.getArg! 3]
+  -- `eqv : M.accessible … = base.accessible …`
+  let eqv ← if up then mkEqSymm eqv else pure eqv
+  let fn : Expr := .lam `x (mkConst ``Bool) (mkApp3 (mkConst ``Eq [1]) (mkConst ``Bool) (.bvar 0) rhs) .default
+  let eqT ← mkCongrArg fn eqv
+  g.assign (← mkEqMPR eqT g')
+  return g'.mvarId!
+
 /-! ## Sparse omega
 
 `omega` case-splits on every disjunctive hypothesis of the context (the aliasing preconditions

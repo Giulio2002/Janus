@@ -1870,8 +1870,9 @@ theorem accessible_sub {m : Memory} {a n b k : Nat} {w w' : Bool}
     (h2 : a + n ≤ b + k) : m.accessible a n w = true :=
   Janus.Arm64.Memory.accessible_sub m h hw h1 h2
 
-def dischargeAccessible (g : MVarId) : TacticM Bool := g.withContext do
-  let g ← Common.reduceAccessible g
+/-- `m.accessible a n w = true` from a hypothesis about the same memory term (stores stripped; no `MemFrame`
+step). -/
+def accessibleFromHyps (g : MVarId) : TacticM Bool := g.withContext do
   let gs ← Common.simpNoRfl g (← `(tactic| simp only [Janus.Arm64.Memory.accessible_writeLE, State.mem]))
   let some g := gs.head? | return true
   let t ← instantiateMVars (← g.getType)
@@ -1900,6 +1901,27 @@ def dischargeAccessible (g : MVarId) : TacticM Bool := g.withContext do
     if ok then return true
     saved.restore
   return false
+
+/-- Prove `m.accessible a n w = true` from the context: against the hypotheses about the goal's own memory
+first, then one `MemFrame` step at a time against those about each earlier memory (see the arm64 twin). -/
+partial def accessibleSearch (cur : MVarId) (visited : Array Expr) (fuel : Nat) : TacticM Bool := cur.withContext do
+    if fuel == 0 then return false
+    let cur ← Common.stripWritesProof cur
+    let saved ← saveState
+    if ← accessibleFromHyps cur then return true
+    saved.restore
+    let some (_, lhs, _) := (← instantiateMVars (← cur.getType)).eq? | return false
+    let visited := visited.push (lhs.getArg! 0)
+    for (d, up, m') in ← Common.accessibleFrameLinks cur do
+      if visited.contains (Common.stripWrites m') then continue
+      let saved ← saveState
+      let g' ← Common.moveAccessible cur d up
+      if ← accessibleSearch g' visited (fuel - 1) then return true
+      saved.restore
+    return false
+
+def dischargeAccessible (g : MVarId) : TacticM Bool := g.withContext do
+  accessibleSearch g #[] 16
 
 elab_rules : tactic | `(tactic| janus64_disch) => do
   let g ← getMainGoal

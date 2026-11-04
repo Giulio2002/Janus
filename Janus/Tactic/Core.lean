@@ -839,10 +839,9 @@ theorem accessible_sub {m : Memory} {a n b k : Nat} {w w' : Bool}
     (h2 : a + n ≤ b + k) : m.accessible a n w = true :=
   Memory.accessible_sub m h hw h1 h2
 
-/-- Prove `m.accessible a n w = true` from a hypothesis about the same memory. -/
-def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withContext do
-  -- through stores and callee frames (`MemFrame`)
-  let g ← Common.reduceAccessible g
+/-- Prove `m.accessible a n w = true` from a hypothesis about the SAME memory term (stores stripped by
+`accessible_writeLE`; no `MemFrame` step). -/
+def accessibleFromHyps (g : MVarId) : TacticM Bool := withoutRecover <| g.withContext do
   -- strip writes: `accessible_writeLE`
   let gs ← withoutRecover (Common.simpNoRfl g (← `(tactic| simp only [janus_acc, State.mem])))
   let some g := gs.head? | return true
@@ -869,6 +868,31 @@ def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withC
     if ok then return true
     saved.restore
   return false
+
+/-- Prove `m.accessible a n w = true` from the accessibility hypotheses of the context. The goal is
+tried against the hypotheses about its own memory first, and then, one `MemFrame` step at a time (a
+callee frame, `MemFrame`), in both directions, against the hypotheses about each related memory: a fact
+stated about the memory after a call (`S.mem`) and one stated about the memory before it (`s.mem`)
+both discharge a store after the call. (The memory was rewritten to the earliest one at once, and the
+facts about the later memories were never looked at.) -/
+partial def accessibleSearch (cur : MVarId) (visited : Array Expr) (fuel : Nat) : TacticM Bool := withoutRecover <| cur.withContext do
+    if fuel == 0 then return false
+    let cur ← Common.stripWritesProof cur
+    let saved ← saveState
+    if ← accessibleFromHyps cur then return true
+    saved.restore
+    let some (_, lhs, _) := (← instantiateMVars (← cur.getType)).eq? | return false
+    let visited := visited.push (lhs.getArg! 0)
+    for (d, up, m') in ← Common.accessibleFrameLinks cur do
+      if visited.contains (Common.stripWrites m') then continue
+      let saved ← saveState
+      let g' ← Common.moveAccessible cur d up
+      if ← accessibleSearch g' visited (fuel - 1) then return true
+      saved.restore
+    return false
+
+def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withContext do
+  accessibleSearch g #[] 16
 
 elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
   let g ← getMainGoal
