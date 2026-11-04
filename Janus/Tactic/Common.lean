@@ -2278,6 +2278,31 @@ def accessibleOrder (lhs : Expr) : MetaM (Array LocalDecl) := do
     if fv.toList.any addrFVars.contains then first := first.push d else rest := rest.push d
   return first ++ rest
 
+/-- Cheap necessary condition for `ty` to be the goal `tgt`: two equations need defeq carriers (the carriers are
+small terms), any other pair the same head constant. Only a refutation: it never makes anything provable. -/
+def sameShape (ty tgt : Expr) : MetaM Bool := do
+  if let some (α, _, _) := ty.eq? then
+    if let some (β, _, _) := tgt.eq? then
+      return ← isDefEq α β
+  return ty.getAppFn.constName? == tgt.getAppFn.constName? || ty.getAppFn.isFVar || tgt.getAppFn.isFVar
+
+/-- `janus_exact h`: `exact h`, but it fails at once when the type of `h` cannot be the goal. A failing `exact`
+elaborates `h` against the goal, and for a goal that mentions a long chain of stores (the memory of a straight-line
+run) the failed unification and coercion search costs minutes (FV-B DivMod: `exact h_x15` on `readLE …` goals,
+73-131 s each; a 400-store chain: 14 s and a `whnf` timeout). Here both types are first compared as equations
+(`Eq α a b`): when the carriers `α` differ, nothing else is unified. The proof is the elaborated `h`, checked by the
+kernel as with `exact`. -/
+elab "janus_exact " h:term : tactic => do
+  let g ← getMainGoal
+  g.withContext do
+    let e ← elabTerm h none
+    let ty ← instantiateMVars (← inferType e)
+    let tgt ← instantiateMVars (← g.getType)
+    unless ← sameShape ty tgt do throwError "janus_exact: the shapes of the hypothesis and the goal differ"
+    unless ← isDefEq ty tgt do throwError "janus_exact: type mismatch"
+    g.assign e
+    replaceMainGoal []
+
 /-- `janus_close`: the recommended closer for the side goals of a proof script. It tries, cheapest
 first: `with_reducible rfl`, `with_reducible assumption`, `omega` with the disjunctions of the
 context cleared and then with one or two of them split (`janus_omega_sparse`), and finally the

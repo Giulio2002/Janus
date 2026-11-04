@@ -28,3 +28,4 @@ import JanusTests.AVX512
 import JanusTests.KernelSafeMemory
 import JanusTests.OmegaCap
 import JanusTests.AddrSub
+import JanusTests.JanusExact
