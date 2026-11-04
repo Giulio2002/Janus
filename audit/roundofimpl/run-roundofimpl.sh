@@ -6,6 +6,7 @@
 # link/ofImpl, a constraining premise, another program, another predicate, a combined premise, `ofImpl` as the
 # statement's program, the predicate in the conclusion) is rejected. arm64 (`OfImplAttacks.lean`) and amd64
 # (`OfImplAttacksAmd64.lean`).
+# Rows run with --allow-no-witness (the witness policy is exercised by the Witness side below and by audit/round15).
 # Exits 1 if an attack verifies or a control stops verifying. Uses --fresh and a private temporary cache.
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -50,7 +51,7 @@ row() { # NAME expect(blocked|Verified) pattern...
 run() { # file dir thms...
   local f=$1 d=$2; shift 2
   local targs=(); for t in "$@"; do targs+=(--theorem "$P.$t"); done
-  all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/$f "$W/$d" "${targs[@]}" 2>&1)"
+  all="$("$J" verify --fresh --allow-no-witness --janus-root "$root" --proof $R/attacks/$f "$W/$d" "${targs[@]}" 2>&1)"
 }
 echo "== arm64: controls (a contract over ofImpl; with ImplApart; mixed link/ofImpl)"
 run OfImplAttacks.lean NewPair ctl1 ctl2 ctl3 ctl4 ctl5 ctl8 ctl9 ctl10 Shadow.ctl7 ctl11 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 Shadow2.r12 r13 r16 r17 r18 r20 r21 r22 r23
@@ -63,7 +64,9 @@ row ctl8 Verified 'Role: main theorem'
 row ctl9 Verified 'Role: main theorem'
 row ctl10 Verified 'Role: main theorem'
 row Shadow.ctl7 Verified 'Role: main theorem'
-row ctl11 Verified 'Role: main theorem'
+# round 15c: ctl11 states the growslice spec at the address of runtime.newobject (the only contract NewPair has): the spec of another
+# function, so it is no control any more; the growslice live contract is a verified control in audit/roundspecbind (g2)
+row ctl11 blocked 'with the spec `growsliceSpec`' 'which describes runtime.growslice'
 echo "== arm64: attacks"
 row r1 blocked 'ofImpl impl'
 row r2 blocked 'other than as'
