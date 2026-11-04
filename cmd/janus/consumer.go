@@ -398,6 +398,9 @@ func snapshotDir(root string, excluded []string) (map[string][]byte, error) {
 		}
 		return nil, pkgDiag("consumer package", "Cannot read the consumer package: "+err.Error(), "")
 	}
+	if err := checkFileNames(files, displayPath(root)); err != nil {
+		return nil, err
+	}
 	return files, nil
 }
 
@@ -408,10 +411,28 @@ func treeSha(files map[string][]byte) string {
 	}
 	sort.Strings(paths)
 	h := sha256.New()
+	// Unambiguous: a fixed-width hash, then the path quoted (%q escapes quotes, backslashes and
+	// every control character, a newline included), then the line end. A path cannot imitate a
+	// further "hash  path" line, so two different file sets never share an encoding.
 	for _, p := range paths {
-		fmt.Fprintf(h, "%s  %s\n", sha256Hex(files[p]), p)
+		fmt.Fprintf(h, "%s  %q\n", sha256Hex(files[p]), p)
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// checkFileNames rejects file names with control characters (newline, NUL, escape, DEL…): no
+// legitimate Lean package has them, and they are the raw material of path-confusion attacks on
+// every listing that is hashed or printed.
+func checkFileNames(files map[string][]byte, what string) error {
+	for p := range files {
+		for _, r := range p {
+			if r < 0x20 || r == 0x7f {
+				return pkgDiag("consumer package", fmt.Sprintf("%s has a file name with a control character: %q.", what, p),
+					"Rename the file.")
+			}
+		}
+	}
+	return nil
 }
 
 func (pkg *consumerPkg) fileHashes() []fileHash {

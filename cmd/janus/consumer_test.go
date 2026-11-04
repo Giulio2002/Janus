@@ -949,3 +949,48 @@ func TestConsumerResultCache(t *testing.T) {
 		t.Errorf("a tampered entry was used:\n%s", out)
 	}
 }
+
+// TestConsumerResultCacheExternalSrc: a lakefile whose lean_lib has an ABSOLUTE srcDir makes Lake
+// read sources outside the package snapshot, which the cache key does not cover: such a package is
+// never answered from the cache, so breaking the external file is seen by the next verification
+// (red team PoC TestZZrcAbsSrcDir).
+func TestConsumerResultCacheExternalSrc(t *testing.T) {
+	defer parallel(t)()
+	needLeanSlow(t)
+	useTestCache(t)
+	if _, err := detectSandbox(false); err != nil {
+		t.Skipf("no sandbox available: %v", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	ext, err := os.MkdirTemp(home, ".janus-test-ext-")
+	if err != nil {
+		t.Skipf("cannot create the external directory: %v", err)
+	}
+	defer os.RemoveAll(ext)
+	pkg := consumerCopy(t, "toml")
+	lf := filepath.Join(pkg, "lakefile.toml")
+	lfb, _ := os.ReadFile(lf)
+	writeFile(t, lf, string(lfb)+fmt.Sprintf("\n[[lean_lib]]\nname = \"ExtDep\"\nsrcDir = %q\nroots = [\"ExtDep\"]\n", ext))
+	addf := filepath.Join(pkg, "ConsumerExample", "Add.lean")
+	ab, _ := os.ReadFile(addf)
+	writeFile(t, addf, strings.Replace(string(ab), "import Extracted\n", "import Extracted\nimport ExtDep\n", 1)+fmt.Sprintf("\n-- ext run %d\n", time.Now().UnixNano()))
+	writeFile(t, filepath.Join(ext, "ExtDep.lean"), "def extX : Nat := 1\n")
+	add := mustExtract(t, "example.com/basic.Add")
+	verify := func() (int, string) {
+		code, out, stderr := runJanus(t, "verify", add, "--proof", addf, "--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness")
+		return code, out + stderr
+	}
+	if code, out := verify(); code != 0 {
+		t.Skipf("the external srcDir is not usable in this sandbox: %d\n%.600s", code, out)
+	}
+	if code, out := verify(); code != 0 || strings.Contains(out, "Cached: ") {
+		t.Fatalf("second run: %d cached=%v", code, strings.Contains(out, "Cached: "))
+	}
+	writeFile(t, filepath.Join(ext, "ExtDep.lean"), "def extX : Nat := this is broken\n")
+	if code, out := verify(); code == 0 || strings.Contains(out, "Cached: ") {
+		t.Fatalf("a broken external source was not noticed: %d\n%.600s", code, out)
+	}
+}

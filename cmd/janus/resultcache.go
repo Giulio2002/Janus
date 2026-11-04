@@ -35,6 +35,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -298,8 +299,16 @@ func (in *consumerResultInputs) key() string {
 		return ""
 	}
 	r := in.req
+	if !lakefileCacheable(in.pkg.Files, in.pkg.Lakefile) {
+		return ""
+	}
+	for _, d := range in.pkg.Deps {
+		if !lakefileCacheable(d.Files, d.Config) {
+			return ""
+		}
+	}
 	h := sha256.New()
-	fmt.Fprintf(h, "janus-consumer-result-v1 schema %d\nverifier %s\n", resultCacheSchema, vid)
+	fmt.Fprintf(h, "janus-consumer-result-v2 schema %d\nverifier %s\n", resultCacheSchema, vid)
 	fmt.Fprintf(h, "framework %s %s\npins %s\nauditor %s\n", in.fw.Source, in.fw.Sha256, pinsDigest(in.fwPins.want), in.auditExeSha)
 	fmt.Fprintf(h, "toolchain %q %s %s\nlake %s\nsandbox %s %s\n", in.tc.cacheID(), in.tc.lean, in.tc.leanchecker, in.lakeSha, in.sb.mode, in.sb.bwrap)
 	fmt.Fprintf(h, "theorem %s\nreplay-fresh %q\nallow-path-deps %q\n", in.thm, in.opts["replay-fresh"], in.opts["allow-path-deps"])
@@ -311,4 +320,110 @@ func (in *consumerResultInputs) key() string {
 	idBytes, _ := os.ReadFile(filepath.Join(r.Outdir, "identity.json"))
 	fmt.Fprintf(h, "extracted %s\nidentity %s\nproof-src %s\n", sha256Hex(r.cr.Lean), sha256Hex(idBytes), sha256Hex(r.proofSrc))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// lakefileTomlKeys are the lakefile.toml keys the consumer result cache accepts: none of them
+// reads a file outside the package snapshot or the keyed dependencies, or changes what Lean loads
+// (plugins, shared libraries, link arguments). `srcDir` is accepted only when it stays inside the
+// package (see srcDirInside); `path` is a path dependency, which loadConsumer admits only with
+// --allow-path-deps and the key covers by its tree hash.
+var lakefileTomlKeys = map[string]bool{
+	"name": true, "defaultTargets": true, "version": true, "versionTags": true, "description": true,
+	"keywords": true, "homepage": true, "license": true, "licenseFiles": true, "readmeFile": true,
+	"reservoir": true, "leanOptions": true, "roots": true, "globs": true, "libName": true,
+	"srcDir": true, "root": true, "exeName": true, "supportInterpreter": true, "buildType": true,
+	"precompileModules": true, "platformIndependent": true, "scope": true, "git": true, "rev": true,
+	"subDir": true, "path": true, "inputRev": true, "type": true, "dir": true,
+}
+
+var lakefileTomlTables = map[string]bool{
+	"[[require]]": true, "[[lean_lib]]": true, "[[lean_exe]]": true, "[leanOptions]": true,
+}
+
+// srcDirInside: v is a TOML basic string naming a relative directory that stays inside the
+// package (no absolute path, no `..` component, no escapes that could hide one).
+func srcDirInside(v string) bool {
+	v = strings.TrimSpace(v)
+	if i := strings.Index(v, "#"); i >= 0 && strings.HasPrefix(strings.TrimSpace(v[i:]), "#") && strings.Count(v[:i], `"`)%2 == 0 {
+		v = strings.TrimSpace(v[:i])
+	}
+	if len(v) < 2 || v[0] != '"' || v[len(v)-1] != '"' {
+		return false
+	}
+	d := v[1 : len(v)-1]
+	if strings.ContainsAny(d, "\\\"\x00") || strings.HasPrefix(d, "/") || strings.HasPrefix(d, "~") {
+		return false
+	}
+	for _, c := range strings.Split(d, "/") {
+		if c == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// lakefileCacheable: whether the verification-result cache may answer for a package (or
+// dependency) with this Lake configuration. The key covers the package snapshot and the pinned
+// dependencies; a configuration that makes Lake or Lean read anything else (an absolute or
+// escaping srcDir, plugin or link arguments, or any lakefile.lean, which is arbitrary code that
+// cannot be checked statically) is not cached, and its verifications always run.
+func lakefileCacheable(files map[string][]byte, config string) bool {
+	if config != "lakefile.toml" {
+		return false
+	}
+	src, ok := files[config]
+	if !ok {
+		return false
+	}
+	for _, line := range strings.Split(string(src), "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if strings.HasPrefix(t, "[") && !strings.HasPrefix(t, "[[\"") {
+			// a table header, or the continuation line of a multi-line array of tables/arrays
+			h := t
+			if i := strings.Index(h, "#"); i >= 0 {
+				h = strings.TrimSpace(h[:i])
+			}
+			if lakefileTomlTables[h] {
+				continue
+			}
+			return false
+		}
+		if t[0] == '"' || t[0] == ']' || t[0] == '\'' || (t[0] >= '0' && t[0] <= '9') || t[0] == '}' {
+			continue // an element of a multi-line array
+		}
+		eq := strings.Index(t, "=")
+		if eq < 0 {
+			return false
+		}
+		key := strings.TrimSpace(t[:eq])
+		if !lakefileTomlKeys[key] {
+			// keys inside [leanOptions] are option names; accept dotted option names only under that table
+			if !leanOptionLine(src, line) {
+				return false
+			}
+			continue
+		}
+		if key == "srcDir" && !srcDirInside(t[eq+1:]) {
+			return false
+		}
+	}
+	return true
+}
+
+// leanOptionLine: the line sits in a [leanOptions] table (option names are free-form there).
+func leanOptionLine(src []byte, line string) bool {
+	in := false
+	for _, l := range strings.Split(string(src), "\n") {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "[") {
+			in = strings.HasPrefix(t, "[leanOptions]")
+		}
+		if l == line {
+			return in
+		}
+	}
+	return false
 }
