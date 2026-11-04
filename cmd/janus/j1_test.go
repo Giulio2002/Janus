@@ -537,3 +537,37 @@ func TestJ1DigestFraming(t *testing.T) {
 		t.Fatal("ambiguous marker MAC")
 	}
 }
+
+// The consumer path plans its kernel replay from the hashes of this run's pins (not from re-reading
+// the files): a module-data file that changes between the pinning and the end of the replay is
+// still caught by the pin check that follows the replay, and the plan's key stays that of the
+// bytes that were pinned.
+func TestConsumerReplayPlanUsesPinsTamperCaught(t *testing.T) {
+	privateCache(t)
+	lib := t.TempDir()
+	writeBytes(t, filepath.Join(lib, "A.olean"), []byte("a"))
+	pl, err := newPinnedLib("the Janus framework build", lib, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := pinSet{pl}
+	resolved := map[string]string{"A": filepath.Join(lib, "A.olean")}
+	graph := map[string][]string{"A": {"Init"}}
+	before, err := planReplayPinned(resolved, graph, "v1", false, ps.absHashes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the file is replaced after it was pinned
+	writeBytes(t, filepath.Join(lib, "A.olean"), []byte("forged"))
+	after, err := planReplayPinned(resolved, graph, "v1", false, ps.absHashes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.keys["A"] != before.keys["A"] {
+		t.Error("the plan key must follow the pinned hash, not the (modified) file")
+	}
+	err = ps.check("the kernel replay")
+	if err == nil || !strings.Contains(err.Error(), "A.olean") || !strings.Contains(err.Error(), "after the kernel replay") {
+		t.Fatalf("a framework module modified after pinning was not caught: %v", err)
+	}
+}
