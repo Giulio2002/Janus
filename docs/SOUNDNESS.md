@@ -2435,3 +2435,10 @@ The auditor (`checkContractHyps`, Janus/Tools/Audit.lean) changes in four places
    predicate in the conclusion is rejected.
 
 Regression rows: `audit/roundofimpl/run-roundofimpl.sh` (arm64 and amd64; controls verify, the attacks are rejected).
+
+Round 15 addendum (live specs): `RtLiveContract`'s second description argument (`LiveSpec`: cost, fresh and kept objects) is
+checked like the `RtSpec`: only the named framework constants (`growsliceLive`, `growsliceNoAliasLive`, `growsliceBufLive`,
+`growsliceBufNoAliasLive`) are accepted. Rows `ctl11` (accepted), `r22` (modified cost) and `r23` (empty spec) in
+`audit/roundofimpl`. Consumer-defined `ImplApart` look-alikes: one that states nothing, a wrapper that unfolds to the trusted
+predicate, and a predicate about an unrelated variable are accepted (they constrain nothing the statement is about; controls
+`Shadow.ctl7`, `ctl8`, `ctl9`, `ctl10`); a look-alike that constrains `impl` is rejected (`Shadow2.r12`).

@@ -407,6 +407,14 @@ one of the runtime's `tys` (`toyR tys ok`: the descriptor is a runtime-owned ran
 (always for size 1 and powers of two), the stub copies the `(n - num) · size` old bytes (at most 11 chunks arm64, 7 amd64);
 `A`, the bump advance, is a multiple of 16 in `[K, 64 K]`, all side conditions are closed numerals proved by `decide`.
 
+Examples with a Witness on both ISAs (`examples/rtmisc/proofs/{arm64,amd64}`, `examples/rtmisc/stubdemo`): `Cons`
+(`newobject` + `gcWriteBarrier1`), `Zero` (`clear(s)`: `MemclrNoHeapPointersLive`), `CopyBytes` (`copy`: `MemmoveLive`),
+`Push` (`append(s, b)` for bytes: `RtLiveContract … growsliceSpec growsliceLive`, element size 1). A main theorem may assume
+`RtLiveContract` only with the framework's own spec and live data (`growsliceSpec growsliceLive` and the `NoAlias`/`Buf`
+variants are on the auditor's named list, `Janus.Tools.Audit.frameworkSpecs`; a built or modified `LiveSpec` is rejected). The
+toy runtime's `TysOK` lets a descriptor lie below the bump cell or between the barrier buffer and the heap (an amd64 binary's
+read-only data is above `0x400000`).
+
 **The non-live allocation contracts** (`StubAlloc`, `StubAllocAmd64`): `NewobjectContract p addr rt stack H`,
 `MallocgcContract`, `MakesliceContract` over a consumer-chosen `rt` (which may include its own type descriptors) and
 the readiness predicates `StubAlloc.NewReadyAt rt heap` / `MallocReadyAt heap` / `MakeReadyAt rt heap` (the heap
