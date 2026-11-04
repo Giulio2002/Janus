@@ -11,7 +11,8 @@ R=audit/round15a; J="${JANUS_AUDIT_BIN:-$root/$R/janus}"
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 W=$R/work; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-round15a.XXXXXX")" || exit 1; trap 'rm -rf "$T"' EXIT
-mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"
+# JANUS_AUDIT_KEEP_CACHE=1: use the caller's (pre-seeded) JANUS_CACHE_DIR instead of an empty private one
+if [ "${JANUS_AUDIT_KEEP_CACHE:-}" != 1 ]; then mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"; fi
 . scripts/example-contracts.sh
 mapfile -t tg < <(scripts/example-targets.sh NewPair)
 "$J" extract artifacts/examples-arm64 "$(example_symbol NewPair)" "$W/NewPair" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1

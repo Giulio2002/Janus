@@ -112,3 +112,75 @@ func TestRound15aResolvableSubsetOfSnapshot(t *testing.T) {
 		t.Fatal("no configuration accepted: the test checks nothing")
 	}
 }
+
+// A cached consumer-package pass must MISS when the janus binary, the framework (sources or build)
+// or the Lean toolchain changes (round 15a, follow-up 3). The key is the whole cache lookup (an
+// entry is found only under an identical key), so this exercises it through consumerResultInputs.key
+// with a stored entry: the entry is a hit under the recorded inputs and a miss under each change.
+func TestRound15aConsumerCacheMissOnVerifierFrameworkToolchain(t *testing.T) {
+	resetVerifierCache()
+	defer resetVerifierCache()
+	t.Setenv("JANUS_CACHE_DIR", t.TempDir())
+	if err := os.Chmod(os.Getenv("JANUS_CACHE_DIR"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sys := t.TempDir()
+	os.MkdirAll(filepath.Join(sys, "bin"), 0o755)
+	os.MkdirAll(filepath.Join(sys, "lib"), 0o755)
+	leanA, leanB := filepath.Join(sys, "leanA"), filepath.Join(sys, "leanB")
+	os.WriteFile(leanA, []byte("lean-a"), 0o755)
+	os.WriteFile(leanB, []byte("lean-b"), 0o755)
+	newTC := func(v, lean string) *toolchain {
+		return &toolchain{version: v, lean: lean, leanchecker: lean, sysroot: sys, libDir: filepath.Join(sys, "lib")}
+	}
+	toml := []byte("name = \"p\"\n\n[[lean_lib]]\nname = \"P\"\n")
+	mk := func(mod func(in *consumerResultInputs)) string {
+		pkg := &consumerPkg{Root: "/x/p", Lakefile: "lakefile.toml", Files: map[string][]byte{"lakefile.toml": toml, "P.lean": []byte("p")}}
+		pkg.Sha256 = treeSha(pkg.Files)
+		out := t.TempDir()
+		in := &consumerResultInputs{
+			fw: &framework{Source: "directory", Sha256: "fwsha"}, fwPins: &pinnedLib{want: pins{"Janus.Foo": "h1"}},
+			auditExeSha: "audit", tc: newTC("Lean 4.99", leanA), lakeSha: "lake", sb: &sandbox{mode: "bwrap", bwrap: "/usr/bin/bwrap"},
+			thm: "P.correctness", opts: map[string]string{}, pkg: pkg,
+			req: &consumerRequest{Outdir: out, rel: "P.lean", proofSrc: []byte("p"),
+				cr: &CheckResult{BinPath: filepath.Join(out, "bin"), Lean: []byte("ext"), Identity: &Identity{BinarySha256: "bin"}}},
+		}
+		if mod != nil {
+			mod(in)
+		}
+		return in.key()
+	}
+	verifierMu.Lock()
+	verifierDone = true
+	verifierMu.Unlock()
+	verifierComp = "src:aaa"
+	base := mk(nil)
+	if base == "" {
+		t.Fatal("no key")
+	}
+	rep := &verifiedReport{Theorem: "P.correctness"}
+	storeResult(base, rep)
+	if lookupResult(base) == nil {
+		t.Fatal("the recorded entry is not found under its own key")
+	}
+	miss := func(name, key string) {
+		t.Helper()
+		if key == base || lookupResult(key) != nil {
+			t.Errorf("%s: a cached pass was served (key unchanged or entry found)", name)
+		}
+	}
+	verifierComp = "src:bbb" // (a) a different janus binary (source identity) ...
+	miss("janus source", mk(nil))
+	verifierComp = "exe:aaa" // ... or an executable fallback of the same text
+	miss("janus executable", mk(nil))
+	verifierComp = "src:aaa"
+	miss("framework sources", mk(func(in *consumerResultInputs) { in.fw.Sha256 = "fwsha2" })) // (b)
+	miss("framework build", mk(func(in *consumerResultInputs) { in.fwPins = &pinnedLib{want: pins{"Janus.Foo": "h2"}} }))
+	miss("auditor build", mk(func(in *consumerResultInputs) { in.auditExeSha = "audit2" }))
+	miss("toolchain version", mk(func(in *consumerResultInputs) { in.tc = newTC("Lean 4.100", leanA) })) // (c)
+	miss("toolchain executable", mk(func(in *consumerResultInputs) { in.tc = newTC("Lean 4.99", leanB) }))
+	miss("lake executable", mk(func(in *consumerResultInputs) { in.lakeSha = "lake2" }))
+	if mk(nil) != base || lookupResult(mk(nil)) == nil {
+		t.Error("the unchanged inputs no longer hit")
+	}
+}
