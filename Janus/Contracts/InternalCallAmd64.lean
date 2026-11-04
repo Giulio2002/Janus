@@ -104,6 +104,45 @@ theorem codeIn_ofImpl64 (P Q : Program) (impl : List Segment)
   · show pc ≠ Q.exitAddr
     rw [hq.2]; exact g3
 
+/-- **The runtime's code does not overlap the extracted code** (amd64; the one premise on `impl` the
+auditor allows, as `ImplApart Extracted.program impl`): see `Janus.ImplApart`. -/
+def ImplApart (P : Program) (impl : List Segment) : Prop :=
+  (P.segments ++ impl).Pairwise Segment.Apart ∧
+    ∀ seg ∈ P.segments ++ impl, ∀ i < seg.bytes.length,
+      P.stubAt (seg.base + i) = none ∧ seg.base + i ≠ P.exitAddr
+
+instance (P : Program) (impl : List Segment) : Decidable (ImplApart P impl) := by
+  unfold ImplApart; infer_instance
+
+theorem Program.fetchIn_none_of_apart {segs : List Segment} {seg : Segment}
+    (h : ∀ x ∈ segs, Segment.Apart x seg) {i : Nat} (hi : i < seg.bytes.length) :
+    Program.fetchIn segs (seg.base + i) = none := by
+  cases hf : Program.fetchIn segs (seg.base + i) with
+  | none => rfl
+  | some w =>
+    obtain ⟨x, hx, h1, h2⟩ := Program.fetchIn_index hf
+    have := h x hx
+    unfold Segment.Apart at this
+    omega
+
+theorem codeIn_restrict_of_apart64 {P : Program} {impl : List Segment} (h : ImplApart P impl)
+    (names : List String) : CodeIn64 ((P.onlySegments names).link impl) (P.link impl) :=
+  codeIn_restrict64 P names impl h.1 h.2
+
+theorem codeIn_ofImpl_of_apart64 {P : Program} {impl : List Segment} (h : ImplApart P impl) :
+    CodeIn64 (P.ofImpl impl) (P.link impl) := by
+  refine codeIn_ofImpl64 P P impl ⟨rfl, rfl⟩ fun seg hseg i hi => ?_
+  obtain ⟨h1, h2⟩ := h.2 seg (List.mem_append_right _ hseg) i hi
+  exact ⟨Program.fetchIn_none_of_apart (seg := seg)
+    (fun x hx => (List.pairwise_append.1 h.1).2.2 x hx seg hseg) hi, h1, h2⟩
+
+theorem codeIn_ofImpl_restrict_of_apart64 {P : Program} {impl : List Segment} (h : ImplApart P impl)
+    (names : List String) : CodeIn64 (P.ofImpl impl) ((P.onlySegments names).link impl) := by
+  refine codeIn_ofImpl64 P (P.onlySegments names) impl ⟨rfl, rfl⟩ fun seg hseg i hi => ?_
+  obtain ⟨h1, h2⟩ := h.2 seg (List.mem_append_right _ hseg) i hi
+  exact ⟨Program.fetchIn_none_of_apart (seg := seg)
+    (fun x hx => (List.pairwise_append.1 h.1).2.2 x (List.mem_filter.1 hx).1 seg hseg) hi, h1, h2⟩
+
 /-- The argument registers `argReg k, argReg (k+1), …` hold `args` (recursive form of `CallSetup.args`). -/
 def ArgsFrom64 (s : State) (k : Nat) : List W64 → Prop
   | [] => True

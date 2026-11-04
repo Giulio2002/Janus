@@ -49,7 +49,10 @@ allocator of its own (`Extracted.program.link Witness.AllocW.impl`, `link []`, a
 `{ Extracted.program with … }`, an `∃ impl` inside the statement): the audit rejects it, so a report
 never reads "contract assumed" for a theorem that assumed nothing. Concrete implementations belong in
 `Witness.nonvacuous` / `Witness.returns`, which are checked structurally and reported as `Role: WITNESS`
-(docs/SOUNDNESS.md, "Round 14").
+(docs/SOUNDNESS.md, "Round 14"). A contract may also be assumed about the runtime's own code,
+`Extracted.program.ofImpl impl` (no user code; same discipline), and the one premise allowed on `impl` is
+`ImplApart Extracted.program impl` ("the runtime's code does not overlap the extracted function's code"): see "Internal
+calls" below and docs/SOUNDNESS.md "Round 15".
 
 The list does not change the run semantics. There is no code at a contract address in
 `Extracted.program.segments`, so control reaching it faults with `noCode`, exactly as for a

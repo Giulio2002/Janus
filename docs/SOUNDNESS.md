@@ -2356,3 +2356,38 @@ start state. When a witness is verified in the same call as main theorems, `janu
 that the main theorem it supports is among them. Residual: a witness is matched against a theorem of the
 proof module, not against the theorem the reader happens to verify alone; the report names the matched
 main theorem (`matchedMain`) so the reader can see it.
+
+## Round 15: `Extracted.program.ofImpl impl` and the placement premise (internal calls)
+
+*Requested for fv-uint256 `ToBig` (a function that calls another function of the same extraction); the audit
+change is small and confined to the contract-program check (`audit/roundofimpl/`).*
+
+An internal callee is proved about its own code (`Program.onlySegments`) and moved to the whole program
+(`Ensures.toSummaryIn`, docs/RUNTIME-CONTRACTS.md, "Internal calls"). Its runtime contract hypotheses must
+then be about a program the callee's run and the caller's run both contain: the runtime's own code and no
+user code, `Janus.Program.ofImpl P impl = {P with segments := impl}` (`Janus.Amd64.Program.ofImpl`). A
+contract about it is a hypothesis about the runtime alone: `….of_codeIn` with `codeIn_ofImpl_of_apart`
+transports it forward to `Extracted.program.link impl`, so assuming it excludes only runtimes that jump into
+the extracted code.
+
+The auditor (`checkContractHyps`, Janus/Tools/Audit.lean) changes in four places and nowhere else:
+
+1. A runtime contract hypothesis may take `Extracted.program.ofImpl impl` as its program, with exactly the
+   discipline of `Extracted.program.link impl`: `impl` a variable bound by the statement, the program
+   argument literally `Extracted.program`, `impl` mentioned only inside `link`/`ofImpl` (`implFormNames`,
+   `linkVars`, `strayImpl`), no premise constraining it, the same pinned-contract allowlist and origin check.
+   Hypotheses over `link` and over `ofImpl` may be mixed.
+2. `ofImpl` is accepted nowhere else (`concreteRuntime`): not as the program of a statement about the
+   extracted function, not under a function (`(Extracted.program.ofImpl impl).exitAddr = 0`).
+3. A concrete implementation (`Extracted.program.ofImpl Impl0`) or another program (`(Extracted.program.withExit 5).ofImpl impl`)
+   is rejected like the `link` forms.
+4. The ONE premise allowed on `impl` besides the contracts and the model laws is exactly
+   `Janus.ImplApart Extracted.program impl` (`isImplApartPremise`; amd64 `Janus.Amd64.ImplApart`; the constant
+   must come from a trusted module): "the runtime's code does not overlap the extracted function's code" (the
+   segments' code ranges are pairwise disjoint and no instruction is at a stub or exit address). It is true of
+   every real binary, a Witness proves it for its stubs by `decide`, and it is what `codeIn_restrict` and
+   `codeIn_ofImpl` need. A different program (`ImplApart (… .withExit 5) impl`), a different predicate, the
+   predicate combined with another constraint (one premise `ImplApart … ∧ …`, or a second premise), or the
+   predicate in the conclusion is rejected.
+
+Regression rows: `audit/roundofimpl/run-roundofimpl.sh` (arm64 and amd64; controls verify, the attacks are rejected).

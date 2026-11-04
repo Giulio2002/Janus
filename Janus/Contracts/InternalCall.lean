@@ -141,6 +141,52 @@ theorem codeIn_ofImpl (P Q : Program) (impl : List Segment)
   · show seg.base + 4 * i ≠ Q.exitAddr
     rw [hq.2]; exact h3
 
+/-- **The runtime's code does not overlap the extracted code** (the one premise on `impl` the auditor
+allows, in exactly the form `ImplApart Extracted.program impl`): the segments of `P` and of `impl` have
+pairwise disjoint code ranges, and no instruction word of either is at a stub address or at the exit
+address of `P`. True of every real binary (the runtime's functions are not the extracted function's
+code); a Witness proves it for its stubs by `decide`. It is exactly what `codeIn_restrict` and
+`codeIn_ofImpl` need. -/
+def ImplApart (P : Program) (impl : List Segment) : Prop :=
+  (P.segments ++ impl).Pairwise Segment.Apart ∧
+    ∀ seg ∈ P.segments ++ impl, ∀ i < seg.words.length,
+      P.stubAt (seg.base + 4 * i) = none ∧ seg.base + 4 * i ≠ P.exitAddr
+
+instance (P : Program) (impl : List Segment) : Decidable (ImplApart P impl) := by
+  unfold ImplApart; infer_instance
+
+theorem Program.fetchIn_none_of_apart {segs : List Segment} {seg : Segment}
+    (h : ∀ x ∈ segs, Segment.Apart x seg) {i : Nat} (hi : i < seg.words.length) :
+    Program.fetchIn segs (seg.base + 4 * i) = none := by
+  cases hf : Program.fetchIn segs (seg.base + 4 * i) with
+  | none => rfl
+  | some w =>
+    obtain ⟨x, hx, j, hj, hpc⟩ := Program.fetchIn_index hf
+    have := h x hx
+    unfold Segment.Apart at this
+    omega
+
+/-- With `ImplApart`, the callee's own code (with `impl` linked) is the whole program's code. -/
+theorem codeIn_restrict_of_apart {P : Program} {impl : List Segment} (h : ImplApart P impl)
+    (names : List String) : CodeIn ((P.onlySegments names).link impl) (P.link impl) :=
+  codeIn_restrict P names impl h.1 h.2
+
+/-- With `ImplApart`, the runtime's own code (no user code) is in every program that links it:
+`P.link impl` and `(P.onlySegments names).link impl`. -/
+theorem codeIn_ofImpl_of_apart {P : Program} {impl : List Segment} (h : ImplApart P impl) :
+    CodeIn (P.ofImpl impl) (P.link impl) := by
+  refine codeIn_ofImpl P P impl ⟨rfl, rfl⟩ fun seg hseg i hi => ?_
+  obtain ⟨h1, h2⟩ := h.2 seg (List.mem_append_right _ hseg) i hi
+  exact ⟨Program.fetchIn_none_of_apart (seg := seg)
+    (fun x hx => (List.pairwise_append.1 h.1).2.2 x hx seg hseg) hi, h1, h2⟩
+
+theorem codeIn_ofImpl_restrict_of_apart {P : Program} {impl : List Segment} (h : ImplApart P impl)
+    (names : List String) : CodeIn (P.ofImpl impl) ((P.onlySegments names).link impl) := by
+  refine codeIn_ofImpl P (P.onlySegments names) impl ⟨rfl, rfl⟩ fun seg hseg i hi => ?_
+  obtain ⟨h1, h2⟩ := h.2 seg (List.mem_append_right _ hseg) i hi
+  exact ⟨Program.fetchIn_none_of_apart (seg := seg)
+    (fun x hx => (List.pairwise_append.1 h.1).2.2 x (List.mem_filter.1 hx).1 seg hseg) hi, h1, h2⟩
+
 /-- The argument registers `X(k), X(k+1), …` hold `args` (a recursive form of `CallSetup.args` that
 `simp` evaluates on a literal list). -/
 def ArgsFrom (s : State) (k : Nat) : List W64 → Prop

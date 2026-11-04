@@ -1346,6 +1346,31 @@ def isStateType (t : Expr) : Bool :=
 
 def linkNames : List Name := [`Janus.Program.link, `Janus.Amd64.Program.link]
 
+/-- `Program.ofImpl P impl`: the program with no user code, only the runtime's segments. It may be the program of
+a runtime contract hypothesis (with the same discipline as `link`), never anything else (round 15, internal
+calls): a contract about the runtime's own code transports forward to `link impl` (`….of_codeIn`). -/
+def ofImplNames : List Name := [`Janus.Program.ofImpl, `Janus.Amd64.Program.ofImpl]
+
+/-- `ImplApart P impl`: the runtime's code does not overlap the extracted code (round 15). -/
+def implApartNames : List Name := [`Janus.ImplApart, `Janus.Amd64.ImplApart]
+
+/-- Is `t` EXACTLY `ImplApart Extracted.program v` for a variable `v` (of the trusted module)? This is the only
+premise the auditor allows on a runtime implementation variable besides the pinned contracts and model laws:
+"the runtime's code does not overlap the extracted function's code". -/
+def isImplApartPremise (env : Environment) (t : Expr) : Bool :=
+  let t := t.consumeMData
+  match t.getAppFn with
+  | .const c _ =>
+    implApartNames.contains c && t.getAppNumArgs == 2 &&
+      (t.getArg! 0).consumeMData.isConstOf `Extracted.program && (t.getArg! 1).consumeMData.isFVar &&
+      (match env.getModuleIdxFor? c with
+        | some idx => trustedModule env.header.moduleNames[idx.toNat]!
+        | none => false)
+  | _ => false
+
+/-- The linking forms through which an implementation variable may occur. -/
+def implFormNames : List Name := linkNames ++ ofImplNames
+
 /-- Constants that build a program or a segment by hand: not available to a main theorem. -/
 def handBuiltNames : List Name := [`Janus.Program.mk, `Janus.Amd64.Program.mk]
 
@@ -1369,7 +1394,7 @@ def programHeadOk (c : Name) : Bool :=
 partial def linkVars (e : Expr) (acc : Array FVarId := #[]) : Array FVarId :=
   match e with
   | .app .. =>
-    let acc := if e.getAppFn.isConst && linkNames.any e.getAppFn.isConstOf && e.getAppNumArgs == 2 then
+    let acc := if e.getAppFn.isConst && implFormNames.any e.getAppFn.isConstOf && e.getAppNumArgs == 2 then
         match (e.getArg! 1).consumeMData with
         | .fvar v => acc.push v
         | _ => acc
@@ -1404,7 +1429,7 @@ partial def concreteRuntime (outer : Std.HashSet FVarId) (e : Expr) : MetaM (Opt
         return some s!"quantifies a runtime implementation (`{← show_ e}`, a `List Segment`) inside the statement (an `∃` or a lambda): the implementation must be a variable of the whole statement (round 14)"
     return none
   | .const c _ =>
-    if handBuiltNames.contains c || linkNames.contains c then
+    if handBuiltNames.contains c || implFormNames.contains c then
       return some s!"uses {c} unapplied: a program is `Extracted.program` or `Extracted.program.link impl` for a variable `impl` of the statement (round 14)"
     if let some t ← tyOf e then
       if isSegListType t then
@@ -1416,6 +1441,21 @@ partial def concreteRuntime (outer : Std.HashSet FVarId) (e : Expr) : MetaM (Opt
     let fn := e.getAppFn
     let args := e.getAppArgs
     if let .const c _ := fn then
+      -- Round 15 (internal calls): `Program.ofImpl` (the runtime's code alone, no user code) is the program of a
+      -- runtime contract hypothesis, with the same discipline as `link`: `Extracted.program.ofImpl impl`, `impl` a
+      -- variable of the statement. It is not the program of a statement about the extracted function.
+      if ofImplNames.contains c then
+        return some s!"mentions `{← show_ e}`: `Program.ofImpl` (the runtime's code alone) is only the program of a runtime contract hypothesis (`… (Extracted.program.ofImpl impl) …`), never of a statement about the extracted function (round 15)"
+      if isRuntimeContract (← getEnv) c then
+        for a in args do
+          let a' := a.consumeMData
+          if a'.getAppFn.isConst && ofImplNames.any a'.getAppFn.isConstOf then
+            let ok := a'.getAppNumArgs == 2 && (a'.getArg! 0).consumeMData.isConstOf `Extracted.program &&
+              match (a'.getArg! 1).consumeMData with | .fvar v => outer.contains v | _ => false
+            unless ok do
+              return some s!"mentions `{← show_ a'}`: a runtime contract may be assumed about `Extracted.program.ofImpl impl` only for a variable `impl` of the statement (round 15)"
+          else if let some m ← concreteRuntime outer a then return some m
+        return none
       if linkNames.contains c then
         let ok := args.size == 2 && (args[0]!.consumeMData).isConstOf `Extracted.program &&
           match (args[1]!).consumeMData with | .fvar v => outer.contains v | _ => false
@@ -1457,7 +1497,7 @@ partial def strayImpl (ivs : Std.HashSet FVarId) (e : Expr) : Option FVarId :=
   | .fvar v => if ivs.contains v then some v else none
   | .app .. =>
     let fn := e.getAppFn
-    if fn.isConst && linkNames.any fn.isConstOf && e.getAppNumArgs == 2 && (e.getArg! 1).consumeMData.isFVar then none
+    if fn.isConst && implFormNames.any fn.isConstOf && e.getAppNumArgs == 2 && (e.getArg! 1).consumeMData.isFVar then none
     else e.getAppArgs.foldl (fun r a => r <|> strayImpl ivs a) (strayImpl ivs fn)
   | .lam _ d b _ | .forallE _ d b _ => strayImpl ivs d <|> strayImpl ivs b
   | .letE _ t v b _ => strayImpl ivs t <|> strayImpl ivs v <|> strayImpl ivs b
@@ -1515,7 +1555,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
             return some s!"assumes the runtime contract {c} for the runtime argument `{(← Meta.ppExpr a).pretty 10000}`, which is not a variable of the statement: a contract is an assumption about the runtime only when the theorem quantifies its code, runtime-owned memory, readiness predicate and models; a closed choice (such as `fun _ _ _ _ => True`, `[]` or a concrete model) can make it false for every implementation and the theorem vacuous (round 10 V1; round 11: every contract argument that is not the program or a number is a runtime parameter, whatever its type)"
           rtVars := rtVars.insert a.fvarId!
         | some false =>
-          let ok := (a.isAppOfArity `Janus.Program.link 2 || a.isAppOfArity `Janus.Amd64.Program.link 2) &&
+          let ok := (implFormNames.any fun n => a.isAppOfArity n 2) &&
             (a.getArg! 0).isConstOf `Extracted.program && isVar (a.getArg! 1).consumeMData
           -- the `morestack` contracts are relations over the call state at a `morestack` stub:
           -- there is no implementation code to link (the program is only consulted through
@@ -1525,7 +1565,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
             c == `Janus.Contracts.StackAmd64.MorestackContract64) && a.isConstOf `Extracted.program
           if noCode then continue
           unless ok do
-            return some s!"assumes the runtime contract {c} about the program `{(← Meta.ppExpr a).pretty 10000}`, which is not `Extracted.program.link impl` for a variable `impl` of the statement (round 10 V1)"
+            return some s!"assumes the runtime contract {c} about the program `{(← Meta.ppExpr a).pretty 10000}`, which is not `Extracted.program.link impl` (or `Extracted.program.ofImpl impl`) for a variable `impl` of the statement (round 10 V1, round 15)"
           rtVars := rtVars.insert (a.getArg! 1).consumeMData.fvarId!
         | none => pure ()
     -- Round 14 (V2): a main theorem never chooses the implementation of the runtime
@@ -1543,7 +1583,12 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
       if !ivSet.isEmpty then
         let mut stray := strayImpl ivSet body
         for x in xs do
-          if stray.isNone then stray := strayImpl ivSet (← instantiateMVars (← Meta.inferType x))
+          if stray.isNone then
+            let tx ← instantiateMVars (← Meta.inferType x)
+            -- Round 15: the one premise on `impl` the auditor allows is exactly `ImplApart Extracted.program impl`
+            unless isImplApartPremise env tx && (match tx.consumeMData.getArg! 1 |>.consumeMData with
+                | .fvar v => bound.contains v | _ => false) do
+              stray := strayImpl ivSet tx
         if let some v := stray then
           return some s!"mentions the runtime implementation variable `{(← v.getUserName)}` other than as `Extracted.program.link {(← v.getUserName)}`: a main theorem may constrain the implementation only through the pinned contracts and model laws, not through a premise or precondition about the code (round 14, rt-auditv2)"
       for v in ivs do
@@ -1578,7 +1623,10 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
             isVar t'.appArg!.consumeMData &&
             !t'.getAppArgs.pop.any (·.hasAnyFVar (rtVars.contains ·))
         | _ => false
-      unless isContract || isLaws || depthBound bound rtVars t' do
+      -- Round 15: "the runtime's code does not overlap the extracted function's code"
+      let isApart := isImplApartPremise env t' &&
+        (match t'.getArg! 1 |>.consumeMData with | .fvar v => bound.contains v | _ => false)
+      unless isContract || isLaws || isApart || depthBound bound rtVars t' do
         return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}), which constrains a runtime variable of a contract hypothesis; only the contracts and the model laws may mention them (round 10 V1, round 11)"
     return none
 

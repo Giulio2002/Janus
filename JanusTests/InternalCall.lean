@@ -54,6 +54,25 @@ example (a : Nat) (R : RtInv) (h : NewobjectLiveContract (P.ofImpl impl) a 4096 
     NewobjectLiveContract (P.link impl) a 4096 R :=
   NewobjectLiveContract.of_codeIn (codeIn_ofImpl P P impl ⟨rfl, rfl⟩ (by decide)) h
 
+theorem apart : ImplApart P impl := by decide
+
+example (a : Nat) (R : RtInv) (h : NewobjectLiveContract (P.ofImpl impl) a 4096 R) :
+    NewobjectLiveContract (P.link impl) a 4096 R :=
+  NewobjectLiveContract.of_codeIn (codeIn_ofImpl_of_apart apart) h
+
+example (a : Nat) (R : RtInv) (h : NewobjectLiveContract (P.ofImpl impl) a 4096 R) :
+    NewobjectLiveContract ((P.onlySegments ["callee"]).link impl) a 4096 R :=
+  NewobjectLiveContract.of_codeIn (codeIn_ofImpl_restrict_of_apart apart ["callee"]) h
+
+example : CodeIn ((P.onlySegments ["callee"]).link impl) (P.link impl) :=
+  codeIn_restrict_of_apart apart ["callee"]
+
+/-- An implementation placed over the extracted code is not apart. -/
+example : ¬ ImplApart P [⟨"bad", 0x2004, [0xd65f03c0]⟩] := by decide
+
+/-- ... nor one on a stub address. -/
+example : ¬ ImplApart { P with stubs := [⟨"s", 0x50000, .morestack⟩] } impl := by decide
+
 /-- The callee's program with the runtime linked is still the callee's code inside the whole program. -/
 example : CodeIn ((P.onlySegments ["callee"]).link impl) (P.link impl) :=
   codeIn_restrict P ["callee"] impl (by decide) (by decide)
@@ -105,5 +124,16 @@ example (a : Nat) (R : RtInv) (h : NewobjectLiveContract64 (P.ofImpl impl) a 409
 
 example : CodeIn64 ((P.onlySegments ["callee"]).link impl) (P.link impl) :=
   codeIn_restrict64 P ["callee"] impl (by decide) (by decide)
+
+theorem apart : ImplApart P impl := by decide
+
+example (a : Nat) (R : RtInv) (h : NewobjectLiveContract64 (P.ofImpl impl) a 4096 R) :
+    NewobjectLiveContract64 (P.link impl) a 4096 R :=
+  NewobjectLiveContract64.of_codeIn (codeIn_ofImpl_of_apart64 apart) h
+
+example : CodeIn64 ((P.onlySegments ["callee"]).link impl) (P.link impl) :=
+  codeIn_restrict_of_apart64 apart ["callee"]
+
+example : ¬ ImplApart P [⟨"bad", 0x2003, [0xc3]⟩] := by decide
 
 end JanusTests.InternalCall.Amd
