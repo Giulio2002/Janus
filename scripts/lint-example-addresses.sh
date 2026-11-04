@@ -75,7 +75,8 @@ lit = re.compile(r'(?<![\w.#])(0x[0-9a-fA-F_]+|[0-9][0-9_]*)(?![\w.])')
 bad = []
 files = 0
 for top in [a for a in sys.argv[1:] if a != '--ranges']:
-    for root, _, fs in os.walk(top):
+    for root, ds, fs in os.walk(top):
+        ds[:] = sorted(d for d in ds if not d.startswith('.'))   # scratch copies (.print-proofs.XXXX)
         for f in sorted(fs):
             if not f.endswith('.lean'):
                 continue

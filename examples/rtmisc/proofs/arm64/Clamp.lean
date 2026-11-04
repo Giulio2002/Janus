@@ -29,6 +29,13 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts.Instr
 
 namespace Proof
 
+/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "pkgN" : term => `(janus_eval% pkgVar)
+local macro "ctrN" : term => `(janus_eval% ctr)
+local macro "ctr4N" : term => `(janus_eval% (ctr + 4))
+local macro "ctr8N" : term => `(janus_eval% (ctr + 8))
+
+
 /-- The function's counter block: the word `ADRP`+`STR` at `Clamp+0x4` writes (`ctr[0]`). -/
 def ctr : Nat :=
   adrpLdTarget (Extracted.entry + 4) (segWord Extracted.program "example.com/rtmisc/cover.Clamp" 1)
@@ -60,10 +67,10 @@ theorem correctness (x hi : BitVec 64) :
   rw [hP] at hp hp' hd ⊢
   janus_run
   all_goals
-    have h4 := Memory.readLE_lt s.mem 1432196 4
-    have hc3 := Memory.readLE_lt s.mem 1519980 4
-    have hc4 := Memory.readLE_lt s.mem 1519984 4
-    have hc5 := Memory.readLE_lt s.mem 1519988 4
+    have h4 := Memory.readLE_lt s.mem (pkgN) 4
+    have hc3 := Memory.readLE_lt s.mem (ctrN) 4
+    have hc4 := Memory.readLE_lt s.mem (ctr4N) 4
+    have hc5 := Memory.readLE_lt s.mem (ctr8N) 4
     refine ⟨by omega, ?_⟩
     rw [bumped3]
     simp only [ran, covWord, bump, Nat.reduceMul, Nat.reduceAdd]

@@ -88,7 +88,7 @@ theorem printuint_k (impl : List Amd64.Segment)
       have hfa1 : MemFrame S.mem m [(SP - 232, SP)] :=
         MemFrame.trans (rs := [(SP - 80, SP)]) (by janus_frame) hfm (by
           intro a' n h; simp only [outside_cons, outside_nil, and_true] at h ⊢; omega)
-      have hfa1' : MemFrame S.mem (Arm64.Memory.writeLE m (SP - 72) 8 4483988) [(SP - 232, SP)] :=
+      have hfa1' : MemFrame S.mem (Arm64.Memory.writeLE m (SP - 72) 8 4483988) [(SP - 232, SP)] :=  -- addr-ok: print binary pinned by PrintCode (Program.Equiv fails if the layout moves)
         hfa1.writeLE _ (r := (SP - 232, SP)) (by simp) (by omega) (by omega)
       have hfa : MemFrame S.mem m' [(SP - 232, SP), (MP + 264, MP + 268), (MP + 279, MP + 280),
           (BI, BI + 8), (BL, BL + 512)] :=

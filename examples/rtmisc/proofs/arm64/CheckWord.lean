@@ -28,6 +28,10 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.
 
 namespace Proof
 
+/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "rodN" : term => `(janus_eval% Extracted.dataAddr.«type:uint64#703ad2db»)
+
+
 /-- The element type: `ADRP`+`ADD` at `Word+0x1c` (`type:uint64`). -/
 def elemType : Nat :=
   adrpLdTarget (Extracted.entry + 0x1c) (segWord Extracted.program "example.com/rtmisc/checkptr.Word" 7)
@@ -64,7 +68,7 @@ theorem correctness (impl : List Segment) (C : CheckptrModel) (hl : C.Laws)
     have hpb := hseg.readLE 8 8 (by decide +kernel)
     have hsz := hseg.readLE 0 8 (by decide +kernel)
     have hlen : (Extracted.program.data[0]'(by decide)).bytes.length = 256 := by decide +kernel
-    have hbase : (Extracted.program.data[0]'(by decide)).base = 615680 := rfl
+    have hbase : (Extracted.program.data[0]'(by decide)).base = (rodN) := rfl
     have hpb0 : leOfBytes (((Extracted.program.data[0]'(by decide)).bytes.drop 8).take 8) = 0 := by decide +kernel
     have hsz8 : leOfBytes (((Extracted.program.data[0]'(by decide)).bytes.drop 0).take 8) = 8 := by decide +kernel
     rw [hlen, hbase] at hacc0 hdj1
@@ -80,10 +84,10 @@ theorem correctness (impl : List Segment) (C : CheckptrModel) (hl : C.Laws)
     simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, typPtrBytes, typSize,
       Nat.reduceMod, Nat.reducePow, Memory.accessible_writeLE, h_x0]
     have e1 : (((s.mem.writeLE (BitVec.toNat s.sp - 48) 8 ret).writeLE (BitVec.toNat s.sp - 56) 8
-        (BitVec.toNat (s.regs 29))).writeLE (BitVec.toNat s.sp + 8) 8 p.toNat).readLE (615680 + 8) 8 = 0 := by
+        (BitVec.toNat (s.regs 29))).writeLE (BitVec.toNat s.sp + 8) 8 p.toNat).readLE ((rodN) + 8) 8 = 0 := by
       simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint]; exact hpb
     have e2 : (((s.mem.writeLE (BitVec.toNat s.sp - 48) 8 ret).writeLE (BitVec.toNat s.sp - 56) 8
-        (BitVec.toNat (s.regs 29))).writeLE (BitVec.toNat s.sp + 8) 8 p.toNat).readLE 615680 8 = 8 := by
+        (BitVec.toNat (s.regs 29))).writeLE (BitVec.toNat s.sp + 8) 8 p.toNat).readLE (rodN) 8 = 8 := by
       simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint]; simpa using hsz
     refine ⟨by decide, Memory.accessible_mono _ hacc0 (by omega) (by omega), fun h => absurd e1 h, ?_⟩
     rw [e2]

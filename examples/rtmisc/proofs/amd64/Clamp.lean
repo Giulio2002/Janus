@@ -27,6 +27,13 @@ the extracted bytes (writable globals the extractor does not copy).
 namespace Proof
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Contracts.Instrument
 
+/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "pkgN" : term => `(janus_eval% pkgVar)
+local macro "ctrN" : term => `(janus_eval% ctr)
+local macro "ctr4N" : term => `(janus_eval% (ctr + 4))
+local macro "ctr8N" : term => `(janus_eval% (ctr + 8))
+
+
 /-- The function's counter block: the operand of `MOVL $3, ctr(IP)` at `Clamp+0x0`. -/
 def ctr : Nat := ripTarget Extracted.program Extracted.entry
 
@@ -54,10 +61,10 @@ theorem correctness (x hi : BitVec 64) :
   janus_eval_nat hP : pkgVar
   rw [hC] at hc hc' hd hds ⊢
   rw [hP] at hp hp' hd ⊢
-  have h4 := Arm64.Memory.readLE_lt s.mem 5539052 4
-  have hc3 := Arm64.Memory.readLE_lt s.mem 5626412 4
-  have hc4 := Arm64.Memory.readLE_lt s.mem 5626416 4
-  have hc5 := Arm64.Memory.readLE_lt s.mem 5626420 4
+  have h4 := Arm64.Memory.readLE_lt s.mem (pkgN) 4
+  have hc3 := Arm64.Memory.readLE_lt s.mem (ctrN) 4
+  have hc4 := Arm64.Memory.readLE_lt s.mem (ctr4N) 4
+  have hc5 := Arm64.Memory.readLE_lt s.mem (ctr8N) 4
   have hlt : decide (hi.toNat < x.toNat) = !decide (x.toNat ≤ hi.toNat) := by
     by_cases h : x.toNat ≤ hi.toNat <;> simp [h] <;> omega
   janus64_run

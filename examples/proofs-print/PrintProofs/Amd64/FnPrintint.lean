@@ -112,7 +112,7 @@ theorem printint_k (impl : List Amd64.Segment)
         have hfa1 : MemFrame S.mem m [(SP - 232, SP), (SP + 8, SP + 16)] :=
           MemFrame.trans (rs := [(SP - 80, SP), (SP + 8, SP + 16)]) (by janus_frame) hfm (by
             intro a' n h; simp only [outside_cons, outside_nil, and_true] at h ⊢; omega)
-        have hfa1' : MemFrame S.mem (Arm64.Memory.writeLE (Arm64.Memory.writeLE m (SP - 64 + (i + 35)) 1 45) (SP - 72) 8 4484171) [(SP - 232, SP), (SP + 8, SP + 16)] :=
+        have hfa1' : MemFrame S.mem (Arm64.Memory.writeLE (Arm64.Memory.writeLE m (SP - 64 + (i + 35)) 1 45) (SP - 72) 8 4484171) [(SP - 232, SP), (SP + 8, SP + 16)] :=  -- addr-ok: print binary pinned by PrintCode (Program.Equiv fails if the layout moves)
           ((hfa1.writeLE _ (r := (SP - 232, SP)) (by simp) (by omega) (by omega)).writeLE _ (r := (SP - 232, SP)) (by simp) (by omega) (by omega))
         have hfa : MemFrame S.mem m' [(SP - 232, SP), (SP + 8, SP + 16), (MP + 264, MP + 268), (MP + 279, MP + 280),
             (BI, BI + 8), (BL, BL + 512)] :=
@@ -162,7 +162,7 @@ theorem printint_k (impl : List Amd64.Segment)
         have hfa1 : MemFrame S.mem m [(SP - 232, SP), (SP + 8, SP + 16)] :=
           MemFrame.trans (rs := [(SP - 80, SP), (SP + 8, SP + 16)]) (by janus_frame) hfm (by
             intro a' n h; simp only [outside_cons, outside_nil, and_true] at h ⊢; omega)
-        have hfa1' : MemFrame S.mem (Arm64.Memory.writeLE m (SP - 72) 8 4484171) [(SP - 232, SP), (SP + 8, SP + 16)] :=
+        have hfa1' : MemFrame S.mem (Arm64.Memory.writeLE m (SP - 72) 8 4484171) [(SP - 232, SP), (SP + 8, SP + 16)] :=  -- addr-ok: print binary pinned by PrintCode (Program.Equiv fails if the layout moves)
           hfa1.writeLE _ (r := (SP - 232, SP)) (by simp) (by omega) (by omega)
         have hfa : MemFrame S.mem m' [(SP - 232, SP), (SP + 8, SP + 16), (MP + 264, MP + 268), (MP + 279, MP + 280),
             (BI, BI + 8), (BL, BL + 512)] :=
