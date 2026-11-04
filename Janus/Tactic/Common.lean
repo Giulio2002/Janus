@@ -972,6 +972,10 @@ partial def provePreCore (clean : MVarId → TacticM (List MVarId)) (closer : TS
   let some g := gs.head? | return #[]
   let t ← instantiateMVars (← g.getType)
   if t.isAppOfArity ``And 2 then return ← provePreCore clean closer g depth
+  -- `p → q` (`0 < n → m.accessible …`): assume `p`, prove `q` (the closers see the context)
+  if t.isForall && !t.bindingBody!.hasLooseBVars then
+    let (_, g') ← g.intro1P
+    return ← provePreCore clean closer g' depth
   let saved ← saveState
   let ok ← try
       let rest ← Tactic.run g <| withoutRecover (evalTactic closer)
@@ -1171,6 +1175,49 @@ def moveAccessible (g : MVarId) (d : LocalDecl) (up : Bool) : MetaM MVarId := g.
   let eqT ← mkCongrArg fn eqv
   g.assign (← mkEqMPR eqT g')
   return g'.mvarId!
+
+/-- The facts `m.accessible a n w = true` (and, with `arith`, the comparisons `a ≤ b`, `a < b` of naturals) among the
+conjuncts of the proposition `ty` (proved by `pf`): `ty` itself, or the conjunction it is, or the conjunction that its
+definition unfolds to (`depth` unfoldings), with the `And` projections as proofs. A named predicate such as the
+postcondition of a runtime summary (a new array: its range is writable, and below `2^48`) states them this way. -/
+partial def namedPredicateFacts (pf ty : Expr) (depth : Nat) (arith : Bool) : MetaM (Array (Expr × Expr)) := do
+  let ty ← instantiateMVars ty
+  if let some (_, l, _) := ty.eq? then
+    return if l.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then #[(pf, ty)] else #[]
+  if arith && (ty.isAppOfArity ``LE.le 4 || ty.isAppOfArity ``LT.lt 4) && (ty.getArg! 0).isConstOf ``Nat then
+    return #[(pf, ty)]
+  if ty.isAppOfArity ``And 2 then
+    return (← namedPredicateFacts (← mkAppM ``And.left #[pf]) (ty.getArg! 0) depth arith) ++
+      (← namedPredicateFacts (← mkAppM ``And.right #[pf]) (ty.getArg! 1) depth arith)
+  if depth == 0 || !ty.getAppFn.isConst || ty.isForall then return #[]
+  match ← unfoldDefinition? ty with
+  | some ty' => namedPredicateFacts (← mkExpectedTypeHint pf ty') ty' (depth - 1) arith
+  | none => return #[]
+
+/-- Add to the context of `g` the facts stated inside the hypotheses `hs` that are named predicates
+(`namedPredicateFacts`), as hypotheses `<pre><i>`. `none` if there are none. -/
+def addNamedPredicateFacts (g : MVarId) (hs : Array LocalDecl) (arith : Bool) (pre : String) :
+    MetaM (Option MVarId) := g.withContext do
+  let mut found : Array (Expr × Expr) := #[]
+  for d in hs do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ty.getAppFn.isConst do continue
+    unless ← isProp ty do continue
+    if ty.isAppOfArity ``Eq 3 || ty.isAppOfArity ``And 2 || ty.isAppOfArity ``Janus.MemFrame 3 then continue
+    found := found ++ (← namedPredicateFacts d.toExpr ty 2 arith)
+  if found.isEmpty then return none
+  let mut g := g
+  for (pf, ty) in found, i in [0:found.size] do
+    g ← g.withContext do
+      let (_, g') ← (← g.assert (Name.mkSimple s!"{pre}{i}") ty pf).intro1P
+      return g'
+  return some g
+
+/-- `addNamedPredicateFacts` for the whole context (accessibility facts only). -/
+def addDerivedAccessible (g : MVarId) : MetaM (Option MVarId) := g.withContext do
+  let hs : Array LocalDecl := (← getLCtx).decls.toArray.filterMap id
+  addNamedPredicateFacts g hs false "h_acc"
 
 /-! ## Sparse omega
 

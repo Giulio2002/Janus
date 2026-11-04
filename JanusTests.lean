@@ -40,4 +40,6 @@ import JanusTests.JanusExact
 import JanusTests.AddrRefute
 import JanusTests.FrameClear
 import JanusTests.CallPre
+import JanusTests.AccSub
+import JanusTests.AccSub64
 import JanusTests.CallPre64

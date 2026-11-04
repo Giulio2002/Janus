@@ -599,6 +599,12 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
       | none => pure g''
     let g'' ← Common.destructPost g'' fv[0]! fv[1]! fv[2]!
     let g'' ← normFrames cfg g'' before
+    -- the facts a named predicate of the postcondition states (the range of a new array is accessible and
+    -- below `2^48`): hypotheses for the discharger and `omega`
+    let g'' ← g''.withContext do
+      let all : Array LocalDecl := (← getLCtx).decls.toArray.filterMap id
+      let hs := all.filter fun d => !before.contains d.fvarId
+      return (← Common.addNamedPredicateFacts g'' hs true "h_post").getD g''
     let g'' ← if mvs.isEmpty then pure g'' else Common.addApartFacts g'' before
     out := out ++ [g'']
   return out
@@ -892,7 +898,12 @@ partial def accessibleSearch (cur : MVarId) (visited : Array Expr) (fuel : Nat) 
     return false
 
 def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withContext do
-  accessibleSearch g #[] 16
+  let saved ← saveState
+  if ← accessibleSearch g #[] 16 then return true
+  saved.restore
+  -- the accessible ranges that named predicates (a runtime summary's postcondition) state
+  let some g' ← Common.addDerivedAccessible g | return false
+  accessibleSearch g' #[] 16
 
 elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
   let g ← getMainGoal
