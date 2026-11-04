@@ -146,7 +146,7 @@ theorem correctness (p c : BitVec 64) :
   have hgr := hg.readable
   simp only [regSP, regG, stackguard0Offset, stackguard0] at hacc hle hnw hgl hgb hnw2 hgr
   janus64_run [hfsa, BitVec.toNat_or, Nat.or_eq_zero_iff, BitVec.natCast_eq_ofNat]
-  refine ⟨⟨?_, rfl⟩, ?_⟩
+  refine ⟨?_, ?_⟩
   · rw [htls.g]; simp [regG]
   have hx : c.toNat % 256 < 256 := Nat.mod_lt _ (by decide)
   have hB : c.toNat % 256 % 4294967296 % 340282366920938463463374607431768211456 = c.toNat % 256 := by omega

@@ -211,7 +211,6 @@ theorem go_spec (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) :
   have hb' : BitVec.ofNat 32 (b.toNat % 4294967296) = b := by
     apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_ofNat, Nat.reducePow, Nat.mod_mod]
     exact Nat.mod_eq_of_lt b.isLt
-  refine ⟨rfl, ?_⟩
   rw [hb']; unfold mul; omega
 
 /-! ## Composition -/
