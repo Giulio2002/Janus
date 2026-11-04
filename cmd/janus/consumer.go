@@ -928,7 +928,6 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 // LEAN_PATH, used for the janus-audit script and leanchecker. Only the audit directory is
 // writable; the framework, consumer and dependency builds are read-only.
 func (ws *consumerWS) runLeanDirect(leanPath string, argv ...string) (string, error) {
-	consumerTimer.mark("layout check + hash consumer lib (newPinnedLib)")
 	auditDir := filepath.Join(ws.Dir, "audit")
 	_ = os.MkdirAll(auditDir, 0o755)
 	return runLeanProtected(ws.sb, ws.tc, auditDir, nil, ws.protected(true), leanPath, argv...)
@@ -1297,6 +1296,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	}
 	pinned = append(pinned, untrusted...)
 
+	consumerTimer.mark("layout check, pin consumer builds")
 	// Theorem, axiom and statement audit by the trusted janus-audit (no proof code runs):
 	// the generated Audit.lean imports only Janus.Tools.Audit, never the proof.
 	auditDir := filepath.Join(ws.Dir, "audit")
@@ -1337,7 +1337,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		r.audit = ar
 	}
 
-	consumerTimer.mark("module layout, pins, theorem audit")
+	consumerTimer.mark("theorem audit")
 	// Kernel replay of every non-core module of each passing theorem's import closure (the
 	// framework, Extracted, JanusTrusted, every consumer and dependency module), after checking
 	// that each comes from its home: one leanchecker pass over the union, reusing cached passing
