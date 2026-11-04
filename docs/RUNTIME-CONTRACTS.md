@@ -154,6 +154,15 @@ precondition; `allocH_intro`/`allocH64_intro` and `heapZero_of_bytes` discharge 
 `FromBig` witnesses are the same pattern written out by hand). The allocator is a model, not the Go
 runtime: the witness shows that the hypotheses are satisfiable, not that the runtime meets them.
 
+**`janus_alloc_witness_ofimpl` / `janus64_alloc_witness_ofimpl`** (same module): the variant for a theorem whose
+contract is about the runtime's own code `Extracted.program.ofImpl impl` and which assumes
+`ImplApart Extracted.program impl` (see "Internal calls"). Same `types := [t₁, …]` argument; the namespace `AllocW`
+holds `impl`, `rt`, `H`, `linked` (the `link` program, for the call setup), `linkedO` (the `ofImpl` program),
+`hap : ImplApart Extracted.program impl` (by `decide`: the placement premise a Witness must exhibit) and `hnewO` (the
+contract over `ofImpl impl`, by `janus_run`). The main theorem derives the `link` contract it executes with
+`NewobjectContract.of_codeIn (codeIn_ofImpl_of_apart hap) hnewO`; the audit round (`audit/roundofimpl`) checks both a
+witness exhibiting `hap` (accepted) and one that omits it (rejected, like any hypothesis the witness does not state).
+
 ### 5. Readiness of the runtime (`RtReady`, round 9)
 
 A `Summary` speaks about **every** state satisfying its precondition. A runtime function's
