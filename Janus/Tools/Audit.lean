@@ -2083,21 +2083,15 @@ partial def flattenAnd (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
   if e.isAppOfArity ``And 2 then flattenAnd (e.getArg! 1) (flattenAnd (e.getArg! 0) acc)
   else acc.push e
 
-/-- `e` with `mdata` dropped, applied lambdas beta-reduced (`(fun s => P s ∧ Q s) s`), `let`s instantiated
-and heads that are REDUCIBLE abbreviations unfolded, repeatedly: the same proposition, so a witness that
-states the precondition as an applied lambda (copied from the main theorem's `pre`) is read as the
-conjunction it is. Arbitrary (non-reducible) definitions are not unfolded. -/
+/-- `e` with `mdata` dropped, applied lambdas beta-reduced (`(fun s => P s ∧ Q s) s`) and `let`s instantiated,
+repeatedly: the same proposition, so a witness that states the precondition as an applied lambda (copied from
+the main theorem's `pre`) is read as the conjunction it is. Definitions are NOT unfolded (a premise
+`CallPre n s` of the main theorem stays one conjunct, as it is in the witness). -/
 partial def conjHead (e : Expr) : MetaM Expr := do
   let e := e.consumeMData.headBeta
   match e with
   | .letE _ _ v b _ => conjHead (b.instantiate1 v)
-  | _ =>
-    if let .const c _ := e.getAppFn then
-      if (← getReducibilityStatus c) == .reducible then
-        if let some e2 ← Meta.unfoldDefinition? e then
-          let e3 ← conjHead e2
-          if e3.isAppOfArity ``And 2 || e3.isAppOfArity ``Exists 2 then return e3
-    return e
+  | _ => return e
 
 /-- The conjuncts of `e` with every `∃` binder on the way (leading, or inside a conjunction:
 `∃ impl, C ∧ ∃ s, s.pc = … ∧ P`) opened as a local variable, for the continuation `k`. -/

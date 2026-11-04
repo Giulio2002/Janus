@@ -124,6 +124,8 @@ theorem hB : Access1 (Extracted.program.link implAt)
     (Extracted.program.contractAddr "runtime.mapaccess1_fast64") (MC ck64) := by
   rw [addrB]; exact hB0
 
+def emp : AMap (BitVec 64) (BitVec 64) := AMap.empty
+
 def dat : DataSegment := Extracted.data.head!
 def mem0 : Janus.Arm64.Memory := Janus.Contracts.LiveStubMap.withData mmem64 dat
 
@@ -174,7 +176,7 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec
 
 /-- The theorem fires: `InsertGet(map, 5, 7)` returns what the theorem says. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (s'.regs 0 = 7 ∧ (MC ck64).Rep s'.mem (BitVec.ofNat 64 MP).toNat ((AMap.empty : AMap (BitVec 64) (BitVec 64)).set 5 7)) :=
+    (s'.regs 0 = 7 ∧ (MC ck64).Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7)) :=
   correctness implAt (MC ck64) (MC_laws _) HAssign hcon hB (BitVec.ofNat 64 MP) 5 7 AMap.empty ret hret s0 setup pre
 
 end Witness

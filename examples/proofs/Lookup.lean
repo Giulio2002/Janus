@@ -78,6 +78,8 @@ theorem hacc : Access2 (Extracted.program.link implAt)
     (Extracted.program.contractAddr "runtime.mapaccess2_fast64") (ME (BitVec 64)) := by
   rw [addr]; exact hacc0
 
+def emp : AMap (BitVec 64) (BitVec 64) := AMap.empty
+
 def dat : DataSegment := Extracted.data.head!
 def mem0 : Memory := withData mmem dat
 def ret : Nat := 0x1000
@@ -124,9 +126,9 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
 
 /-- The theorem fires: `Lookup(map, 5)` on the empty map returns `0` and `false`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (s'.regs 0 = ((AMap.empty : AMap (BitVec 64) (BitVec 64)) 5).getD 0 ∧
-      (s'.regs 1).toNat % 256 = ((AMap.empty : AMap (BitVec 64) (BitVec 64)) 5).isSome.toNat) :=
-  correctness implAt (ME _) (ME_laws _) hacc (BitVec.ofNat 64 MP) 5 AMap.empty ret hret s0 setup pre
+    (s'.regs 0 = (emp 5).getD 0 ∧
+      (s'.regs 1).toNat % 256 = (emp 5).isSome.toNat) :=
+  correctness implAt (ME _) (ME_laws _) hacc (BitVec.ofNat 64 MP) 5 emp ret hret s0 setup pre
 
 end Witness
 

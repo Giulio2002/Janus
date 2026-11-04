@@ -88,6 +88,8 @@ theorem hcon : Access2Ptr (Extracted.program.link implAt)
     (Extracted.program.contractAddr "runtime.mapaccess2") (ME (BitVec 128)) := by
   rw [addr]; exact h0
 
+def emp128 : AMap (BitVec 128) (BitVec 64) := AMap.empty
+
 def dat : DataSegment := Extracted.data.head!
 def mem0 : Janus.Arm64.Memory := Janus.Contracts.LiveStubMap.withData mmem64 dat
 
@@ -138,7 +140,7 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec
 /-- The theorem fires: `LookupKey16(map, key)` returns what the theorem says. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
     (let key := BitVec.ofNat 128 (s0.mem.readLE (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL).toNat 16)
-    s'.regs 0 = ((AMap.empty : AMap (BitVec 128) (BitVec 64)) key).getD 0 ∧ (s'.regs 3).toNat % 256 = ((AMap.empty : AMap (BitVec 128) (BitVec 64)) key).isSome.toNat) :=
+    s'.regs 0 = (emp128 key).getD 0 ∧ (s'.regs 3).toNat % 256 = (emp128 key).isSome.toNat) :=
   correctness implAt (ME (BitVec 128)) (ME_laws _) hcon (BitVec.ofNat 64 MP) (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL) AMap.empty ret hret s0 setup pre
 
 end Witness

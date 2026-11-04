@@ -79,6 +79,8 @@ theorem hcon : Access2 (Extracted.program.link implAt)
     (Extracted.program.contractAddr "runtime.mapaccess2_fast64") (ME (BitVec 64)) := by
   rw [addr]; exact h0
 
+def emp : AMap (BitVec 64) (BitVec 64) := AMap.empty
+
 def dat : DataSegment := Extracted.data.head!
 def mem0 : Janus.Arm64.Memory := Janus.Contracts.LiveStubMap.withData mmem64 dat
 
@@ -125,8 +127,8 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec
 
 /-- The theorem fires: `Lookup(map, 5)` returns what the theorem says. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (s'.regs 0 = ((AMap.empty : AMap (BitVec 64) (BitVec 64)) 5).getD 0 ∧ (s'.regs 3).toNat % 256 = ((AMap.empty : AMap (BitVec 64) (BitVec 64)) 5).isSome.toNat) :=
-  correctness implAt (ME (BitVec 64)) (ME_laws _) hcon (BitVec.ofNat 64 MP) 5 AMap.empty ret hret s0 setup pre
+    (s'.regs 0 = (emp 5).getD 0 ∧ (s'.regs 3).toNat % 256 = (emp 5).isSome.toNat) :=
+  correctness implAt (ME (BitVec 64)) (ME_laws _) hcon (BitVec.ofNat 64 MP) 5 emp ret hret s0 setup pre
 
 end Witness
 

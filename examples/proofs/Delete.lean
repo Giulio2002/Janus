@@ -76,6 +76,8 @@ theorem hcon : Contracts.Map.Delete (Extracted.program.link implAt)
     (Extracted.program.contractAddr "runtime.mapdelete_fast64") (ME (BitVec 64)) := by
   rw [addr]; exact h0
 
+def emp : AMap (BitVec 64) (BitVec 64) := AMap.empty
+
 def dat : DataSegment := Extracted.data.head!
 def mem0 : Memory := withData mmem dat
 
@@ -122,8 +124,8 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
 
 /-- The theorem fires: `Delete(map, 5)` returns what the theorem says. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (IsMap (ME (BitVec 64)) s'.mem (BitVec.ofNat 64 MP).toNat ((AMap.empty : AMap (BitVec 64) (BitVec 64)).erase 5) ∧ (ME (BitVec 64)).Env s'.mem (s0.regs 28)) :=
-  correctness implAt (ME (BitVec 64)) (ME_laws _) hcon (BitVec.ofNat 64 MP) 5 AMap.empty ret hret s0 setup pre
+    (IsMap (ME (BitVec 64)) s'.mem (BitVec.ofNat 64 MP).toNat (emp.erase 5) ∧ (ME (BitVec 64)).Env s'.mem (s0.regs 28)) :=
+  correctness implAt (ME (BitVec 64)) (ME_laws _) hcon (BitVec.ofNat 64 MP) 5 emp ret hret s0 setup pre
 
 end Witness
 

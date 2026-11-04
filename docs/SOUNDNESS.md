@@ -2384,8 +2384,7 @@ for exactly that theorem** is verified in the same run:
   witness does not exhibit is rejected.
 * **Matching.** Conjuncts of the witness are matched after beta-reduction (an applied lambda
   `(fun s => P s ∧ Q s) s` copied from the main theorem's precondition reads as the conjunction),
-  `let`-instantiation and unfolding of reducible abbreviations that lead to `∧`/`∃`; other definitions are not
-  unfolded. A lambda body that leaves a conjunct out is a weaker witness and does not match.
+  and `let`-instantiation; definitions are not unfolded (a premise `CallPre n s` stays one conjunct). A lambda body that leaves a conjunct out is a weaker witness and does not match.
 * **Not accepted.** `Witness.returns` alone: a concrete run shows that the program fires, but its
   statement does not say that the contract hypotheses hold of the runtime it uses, so it does not show
   the hypotheses jointly satisfiable. It is reported (`nonVacuityReturns`) when verified. An anonymous
