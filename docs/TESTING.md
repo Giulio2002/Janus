@@ -250,6 +250,7 @@ re-record on a green full gate and say why in the commit message.
 | (new) speed regression check, timeline, streamed results | on top of the above |
 | CI `lake build Janus JanusTests` and `... janus-oracle-amd64` (not default Lake targets) | prebuild `lake`: `lake build JanusTests janus-oracle-amd64` |
 | CI `go vet ./...` | lane `govet` |
+| (new) `scripts/lint-example-addresses.sh`: no hard-coded address of the example binaries (a literal in [0x400000, 0x600000), not a multiple of 0x10000) in `examples/**/*.lean`; take it from the extraction (`janus_eval% (Extracted.entry + k)`, `segAddr`, `Extracted.dataAddr.«…»`) or mark a genuine constant `-- addr-ok: <why>`. Why: adding one example to the shared binary moved code by 64 bytes and data by 128 and broke StackGrow/ScratchSum | runs in lane `axiom`, after `ci-axiom-guard.sh` |
 | CI `JanusASL/tools/test_asl_cache.sh`, `test_asl_mod_cache.sh` | lane `cachekeys` |
 | CI decoder coverage of the arm64 examples (`janus blockers`) | lane `decoder` (`scripts/decoder-coverage.sh`, also called by ci.yml) |
 | CI `scripts/oracle.sh quick` (qemu) and `scripts/oracle-amd64.sh quick` (native), MISMATCH check | lane `oracle` (in the lake tree, after `rtasl-prove`) |
