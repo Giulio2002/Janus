@@ -403,6 +403,29 @@ the readiness predicates `StubAlloc.NewReadyAt rt heap` / `MallocReadyAt heap` /
 `janus_newobject heap hrt` / `janus_mallocgc` / `janus_makeslice` (amd64 `janus64_*`) prove the contract at the
 program's own address; `hrt : (heap, heap + 0x10000) ∈ rt`. `StubAlloc.fresh_heap_at` is `AllocSat.fresh_heap` over any `rt`.
 
+**Internal calls (a callee of the same extraction)** (`InternalCall.lean`, `InternalCallAmd64.lean`). `Ensures p …` quantifies
+over return addresses with `RetAddr p ret`, which includes `notCode` (outside *every* segment of `p`); a call from one function
+of an extraction to another returns inside `p`, so `Ensures.toSummary` cannot serve it. The callee's proof needs less: `ret`
+outside the code the callee *executes* (its own segments and the runtime stand-in `impl`). So prove the callee about its own code
+and move the result up:
+
+```lean
+def P0 : Program := (Extracted.program.onlySegments ["callee"]).link impl      -- the callee's own code (+ runtime)
+theorem calleeEns : Ensures P0 calleeEntry args pre post := ...                 -- RetAddr P0 holds for the caller's return site
+theorem hc : CodeIn P0 (Extracted.program.link impl) := codeIn_restrict _ ["callee"] impl (by decide) (by decide)
+def S := Ensures.toSummaryIn calleeEns (by decide) hc          -- amd64: also `(hlen : args.length ≤ numIntRegs)`
+-- in the caller: janus_run … calls [S]     (precondition: RetAddr P0 X30 ∧ ArgsFrom s 0 args ∧ pre; postcondition:
+--  sp/g/fp/platform restored ∧ post s s')
+```
+
+The side conditions of `codeIn_restrict` (segments pairwise apart, no stub or exit address on code) are `decide`. The callee's
+`post` must say what the caller needs of memory (a summary's post is all the caller learns: add `s'.mem = s.mem` or a `MemFrame`).
+Runtime contracts are hypotheses about the program with **no user code**, `Program.ofImpl P impl = {P with segments := impl}`
+(state both the callee's and the caller's theorem over it); `….of_codeIn` with `codeIn_ofImpl` moves a contract to
+`(P.onlySegments names).link impl` and to `P.link impl` (`NewobjectLiveContract.of_codeIn`, `MemmoveLive.of_codeIn`,
+`RtLiveContract.of_codeIn`, `NewobjectContract.of_codeIn`, …, and the `…64` twins). The other direction (a contract about the
+whole program to one about the callee's code) is not sound for an arbitrary `impl`, which may jump into the extraction's code.
+
 **From `Ensures` to a callee summary** (`Janus.Tactic.Bridge`, `Janus.Amd64.Bridge`). `janus_run … calls [S]`
 and `Summary.of_codeIn` take `S : Summary p a pre post`, while a function theorem is stated as `Ensures`
 or `Reaches (p.withExit ret) s (IsReturn Q)`. `Reaches.toReachesRet` turns a returning run of

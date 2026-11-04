@@ -26,6 +26,10 @@ namespace Janus.Contracts.LiveStub
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Toy
 
+/-- `TysOK` of a literal list of descriptors is decided by evaluation. -/
+instance instDecidableTysOK (tys : Tys) : Decidable (TysOK tys) := by
+  unfold TysOK; infer_instance
+
 /-- The registers the copy uses: `X3…X8, X11…X15`. -/
 def growReg (j : Nat) : Nat := if j < 6 then j + 3 else j + 5
 
@@ -43,7 +47,7 @@ theorem outside_toyRt_heap_bump {tys : Tys} {a k : Nat} (h : Outside a k (toyRt 
   exact ⟨h.1.1, h.1.2.1⟩
 
 /-- The heap at the bump pointer is writable for as much as the budget allows. -/
-theorem toy_heap_acc {tys : Tys} {b L g ob : Nat} {m : Memory}
+theorem toy_heap_acc {tys : Tys} {b g ob : Nat} {m : Memory}
     {L' : List (Nat × Nat)} (h : toyInv tys b L' g (view (toyRt tys) L' m)) (hob : ob ≤ b) :
     m.accessible (m.readLE BUMP 8) ob true = true := by
   obtain ⟨p, hp, hH, h16, hbud, hL, hzero, hac, hacB, hacW, hty0⟩ := h
@@ -241,16 +245,22 @@ macro_rules
       intro L b s hpc pre
       have pre0 := pre
       have ⟨⟨h30a, h30b, _, _, _, _, _⟩, _⟩ := pre
+      obtain ⟨hc1, hc2, hc3, hc4, hc5, hokx, hinvx, hcostx, hLsx, hWsx⟩ := pre0
       obtain ⟨oldp0, hq0, hq1, hq2, hq3, hq4, hacB', hq5⟩ :=
-        Janus.Contracts.LiveStub.growslice_unpack (by decide) (t := $t) (by simp) $hok rfl pre0
+        Janus.Contracts.LiveStub.growslice_unpack (by decide) (t := $t) (by decide) $hok rfl pre
       have hheap := Janus.Contracts.LiveStub.toy_heap_acc (ob := (($n - $num) * ($t).2.1))
-        pre0.2.2.2.2.2.2.1 (Nat.le_trans (by decide) hq4)
+        (g := (s.regs 28).toNat) (L' := L) (tys := _) hinvx (Nat.le_trans (by decide) hq4)
       first
-        | (have hread := Janus.Contracts.LiveStub.growslice_read pre0 hq0 hq2 hq5 rfl (by decide))
+        | (have hread := Janus.Contracts.LiveStub.growslice_read pre hq0 hq2 hq5 rfl (by decide))
         | skip
+      open Janus.Contracts.Toy Janus.Tactic in
+        simp only [BUMP, Nat.reduceSub, Nat.reduceMul] at hheap hacB'
+      first | (simp only [Nat.reduceSub, Nat.reduceMul] at hread) | skip
       change Janus.Tactic.ReachesRet _ _ s _
       janus_run
-      exact Janus.Contracts.LiveStub.growslice_finish (by decide) (t := $t) (cap := $cap) (A := $A) (by simp) $hok rfl
-        (by decide) (by decide) (by decide) rfl (by decide) (by decide) (by decide) (by decide) (by decide)
-        pre0 rfl rfl rfl rfl rfl rfl rfl rfl rfl (by simp [setReg]) rfl (by simp [setReg])
-        (by (try simp only [Janus.Contracts.LiveStub.readLE_mod_of_le, Nat.reducePow, Nat.reduceLeDiff]); rfl)))
+      open Janus.Tactic in
+        exact Janus.Contracts.LiveStub.growslice_finish (by decide) (t := $t) (cap := $cap) (A := $A)
+          (by decide) $hok rfl (by decide) (by decide) (by decide) rfl (by decide) (by decide)
+          (by decide) (by decide) (by decide)
+          pre rfl rfl rfl rfl rfl rfl rfl rfl rfl (by simp [setReg, Janus.Contracts.Toy.BUMP]) rfl (by simp [setReg])
+          (by (try simp only [Janus.Contracts.LiveStub.readLE_mod_of_le, Nat.reducePow, Nat.reduceLeDiff]); rfl)))

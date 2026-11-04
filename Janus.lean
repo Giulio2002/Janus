@@ -58,6 +58,10 @@ import Janus.Contracts.LiveStubAmd64
 import Janus.Contracts.LiveStubMem
 import Janus.Contracts.LiveStubSlice
 import Janus.Contracts.LiveStubSliceAmd64
+import Janus.Contracts.LiveStubGrow
+import Janus.Contracts.LiveStubGrowAmd64
+import Janus.Contracts.InternalCall
+import Janus.Contracts.InternalCallAmd64
 import Janus.Contracts.StubAlloc
 import Janus.Contracts.StubAllocAmd64
 import Janus.Amd64.Bridge

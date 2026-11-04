@@ -33,6 +33,20 @@ def growCodeN (ob A cap : Nat) : List Nat :=
 def growsliceSeg (addr ob A cap : Nat) : Janus.Amd64.Segment :=
   ⟨"live-stub.growslice", addr, growCodeN ob A cap⟩
 
+/-- The heap block at the bump pointer is apart from the return-address slot. -/
+theorem toy_heap_apart64 {tys : Tys} {ok : Nat → List Nat → Prop} {b g ob n : Nat} {L : List (Nat × Nat)}
+    {s : State} (h : toyInv tys b L g (view (toyRt tys) L s.mem)) (hob : ob ≤ b)
+    (hWs : LiveSep (liveWin64 s 4096 n) (toyR tys ok).rt) :
+    Apart (s.mem.readLE BUMP 8) ob (s.regs 4).toNat 8 := by
+  obtain ⟨p, hp, hH, h16, hbud, hL, hzero, hac, hacB, hacW, hty0⟩ := h
+  have hpm : s.mem.readLE BUMP 8 = p := by
+    rw [← readLE_view (rt := toyRt tys) (L := L) (inRanges_bump tys) (outside_live hL (by simp [BUMP, HEAP]))]
+    exact hp
+  have hw := hWs ((s.regs 4).toNat, (s.regs 4).toNat + 8) (by simp [liveWin64])
+  simp only [Nat.add_sub_cancel_left] at hw
+  rw [hpm]
+  exact ((inRanges_heap (tys := tys) (n := ob) hH (by simp only [HEND, HEAP, HSIZE] at *; omega)).apart hw).symm
+
 /-- What the request pins (amd64: `RAX, RBX, RCX, RDI, RSI`). -/
 theorem growslice_unpack64 {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr : Nat}
     {t : Nat × Nat × Nat} (ht : t ∈ tys) {n c0 num K : Nat}
@@ -206,19 +220,26 @@ macro_rules
       intro L b s hpc pre
       have pre0 := pre
       have ⟨⟨hra, hal, h3, h4, h5⟩, _⟩ := pre
+      obtain ⟨hc1, hc2, hc3, hc4, hc5, hokx, hinvx, hcostx, hLsx, hWsx⟩ := pre0
       obtain ⟨oldp0, hq0, hq1, hq2, hq3, hq4, hacB', hq5⟩ :=
-        Janus.Contracts.LiveStubAmd64.growslice_unpack64 (by decide) (t := $t) (by simp) $hok rfl pre0
+        Janus.Contracts.LiveStubAmd64.growslice_unpack64 (by decide) (t := $t) (by decide) $hok rfl pre
       have hheap := Janus.Contracts.LiveStub.toy_heap_acc (ob := (($n - $num) * ($t).2.1))
-        pre0.2.2.2.2.2.2.1 (Nat.le_trans (by decide) hq4)
+        (g := (s.regs 14).toNat) (L' := L) (tys := _) hinvx (Nat.le_trans (by decide) hq4)
+      have hap := Janus.Contracts.LiveSatAmd64.bump_apart64 hWsx
+      have hapH := Janus.Contracts.LiveStubAmd64.toy_heap_apart64 (ob := (($n - $num) * ($t).2.1)) (g := (s.regs 14).toNat)
+        (L := L) (tys := _) hinvx (Nat.le_trans (by decide) hq4) hWsx
       first
-        | (have hread := Janus.Contracts.LiveStubAmd64.growslice_read64 pre0 hq0 hq2 hq5 rfl (by decide))
+        | (have hread := Janus.Contracts.LiveStubAmd64.growslice_read64 pre hq0 hq2 hq5 rfl (by decide))
         | skip
+      open Janus.Contracts.Toy in
+        simp only [BUMP, Nat.reduceSub, Nat.reduceMul] at hheap hacB' hapH
+      first | (simp only [Nat.reduceSub, Nat.reduceMul] at hread) | skip
       change Janus.Amd64.Tactic.ReachesRet _ _ s _
       janus64_run
       open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janus.Contracts.Toy in
         exact Janus.Contracts.LiveStubAmd64.growslice_finish64 (by decide) (t := $t) (cap := $cap) (A := $A)
-          (by simp) $hok rfl (by decide) (by decide) (by decide) rfl (by decide) (by decide) (by decide)
-          (by decide) (by decide) pre0 (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
+          (by decide) $hok rfl (by decide) (by decide) (by decide) rfl (by decide) (by decide) (by decide)
+          (by decide) (by decide) pre (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
           (by simp [setRegF]) (by simp) (by simp) (by simp) (by simp) rfl rfl
-          (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
+          (by simp [setRegF, BUMP]) (by simp [setRegF]) (by simp [setRegF])
           (by (try simp only [Janus.Contracts.LiveStub.readLE_mod_of_le, Nat.reducePow, Nat.reduceLeDiff]); rfl)))

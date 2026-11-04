@@ -34,9 +34,11 @@ theorem hok2 : ∀ args, ok 0x61000 args → ∃ p, args = [p, 9, 8, 1, (0x30000
   · exfalso; omega
   · exact ⟨p, h⟩
 
+set_option maxHeartbeats 4000000 in
 theorem g1 : RtLiveContract linked 0x60000 4096 R growsliceSpec growsliceLive := by
   janus_live_growslice (0x30000, 1, 0) 5 0 5 16 8 hok1
 
+set_option maxHeartbeats 4000000 in
 theorem g2 : RtLiveContract linked 0x61000 4096 R growsliceSpec growsliceLive := by
   janus_live_growslice (0x30000, 1, 0) 9 8 1 16 16 hok2
 
@@ -69,9 +71,11 @@ theorem hok2 : ∀ args, ok 0x461000 args → ∃ p, args = [p, 9, 8, 1, (0x3000
   · exfalso; omega
   · exact ⟨p, h⟩
 
+set_option maxHeartbeats 4000000 in
 theorem g1 : RtLiveContract64 linked 0x460000 4096 R growsliceSpec growsliceLive := by
   janus64_live_growslice (0x30000, 1, 0) 5 0 5 16 8 hok1
 
+set_option maxHeartbeats 4000000 in
 theorem g2 : RtLiveContract64 linked 0x461000 4096 R growsliceSpec growsliceLive := by
   janus64_live_growslice (0x30000, 1, 0) 9 8 1 16 16 hok2
 
