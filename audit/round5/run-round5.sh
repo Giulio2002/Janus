@@ -93,7 +93,7 @@ dep_block() {
 echo "== E1h-j/E3e: a pinned git dependency with a custom Decidable instance and a 'regs' structure"
 type tmark >/dev/null 2>&1 && tmark "== E1h-j/E3e: a pinned git dependency with a custo"
 dep="$(audit/round5/dep/setup.sh "$root/$W/dep" "$root")" || { echo "  dependency fixture failed"; broken+=(dep-setup); }
-d() { out="$("$J" verify $W/Add --janus-root "$root" --proof "$dep/R5Proofs/Proofs.lean" --proof-root "$dep" --theorem "R5Proofs.$1" 2>&1)"; }
+d() { out="$("$J" verify $W/Add --janus-root "$root" --proof "$dep/R5Proofs/Proofs.lean" --proof-root "$dep" --allow-unchecked-provenance --theorem "R5Proofs.$1" 2>&1)"; }
 d decInst;  row E1h_dep_instance_in_decide blocked
 d decDef;   row E1i_dep_classvalued_def blocked
 d decBody;  row E1j_dep_def_body_uses_inst Verified 'Dependency constants in the statement: DecLib.isZero (def, DecLib)'

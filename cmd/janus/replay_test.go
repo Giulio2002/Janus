@@ -323,7 +323,7 @@ func TestR1FrameworkTamper(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			defer parallel(t)()
 			pkg := r1Package(t, c.dep)
-			args := append([]string{"verify", add, "--proof", filepath.Join(pkg, c.proof), "--proof-root", pkg, "--theorem", c.thm}, c.flags...)
+			args := append([]string{"verify", add, "--proof", filepath.Join(pkg, c.proof), "--proof-root", pkg, "--theorem", c.thm, "--allow-unchecked-provenance"}, c.flags...)
 			code, out, stderr := runR1(c.mode, args...)
 			// The verdict must be the first line after janus' own progress notices (a cold cache
 			// prints "Building the Janus framework ..." first; nothing else may precede it).
@@ -337,8 +337,8 @@ func TestR1FrameworkTamper(t *testing.T) {
 	t.Run("honest after tamper", func(t *testing.T) {
 		defer parallel(t)()
 		pkg := r1Package(t, false)
-		runR1("ensures", "verify", add, "--proof", filepath.Join(pkg, "R1/Plain.lean"), "--proof-root", pkg, "--theorem", "R1.Plain.claim", "--unsafe-no-sandbox")
-		if code, out, stderr := runR1("", "verify", add, "--proof", filepath.Join(pkg, "R1/Plain.lean"), "--proof-root", pkg, "--theorem", "R1.Plain.claim"); code != 0 {
+		runR1("ensures", "verify", add, "--proof", filepath.Join(pkg, "R1/Plain.lean"), "--proof-root", pkg, "--theorem", "R1.Plain.claim", "--unsafe-no-sandbox", "--allow-unchecked-provenance")
+		if code, out, stderr := runR1("", "verify", add, "--proof", filepath.Join(pkg, "R1/Plain.lean"), "--proof-root", pkg, "--theorem", "R1.Plain.claim", "--allow-unchecked-provenance"); code != 0 {
 			t.Fatalf("honest proof after a tampered run: %d\n%s\n%s", code, out, stderr)
 		}
 	})

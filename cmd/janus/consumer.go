@@ -488,6 +488,8 @@ type consumerWS struct {
 	// replayCache: reuse cached passing kernel replays (off with --fresh or without a
 	// sandbox); replayFresh: also replay each theorem module with leanchecker --fresh.
 	replayCache, replayFresh bool
+	// allowUnchecked: accept a package whose oleans janus cannot build itself (provenance.go).
+	allowUnchecked bool
 	// asl: the trusted JanusASL build, with --asl (each passing request then gets its ASL stage).
 	asl *aslBuild
 	// auditExe is the compiled auditor of the cached framework base and auditExeSha the SHA-256
@@ -525,6 +527,10 @@ func (ws *consumerWS) janusLib() string {
 // dependency packages too (after their build, for the audit and the replay).
 func (ws *consumerWS) protected(readOnlyBuilds bool) []string {
 	dirs := []string{ws.JanusDir}
+	// janus's own oleans and trusted sources (provenance.go): never writable by a sandboxed process
+	if st, err := os.Stat(ws.ownDir()); err == nil && st.IsDir() {
+		dirs = append(dirs, ws.ownDir())
+	}
 	if readOnlyBuilds {
 		dirs = append(dirs, ws.Root)
 		if _, err := os.Stat(ws.DepsDir); err == nil {
@@ -1254,6 +1260,7 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 	defer ws.close()
 	tm.mark("workspace open")
 	ws.replayFresh = opts["replay-fresh"] != ""
+	ws.allowUnchecked = opts["allow-unchecked-provenance"] != ""
 	ws.asl = asl
 	ws.dg = dg
 	verifyGroup(fw, pkg, ws, group)
@@ -1312,6 +1319,14 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	}
 	extractedPath := reqs[0].cr.Extracted
 	mapPaths := ws.mapper(pkg, extractedPath)
+
+	// Olean provenance (provenance.go): janus compiles the closure itself when it can reproduce Lake's options.
+	provenance := provUnchecked
+	ob, why := newOwnBuild(ws, pkg)
+	if ob == nil && !ws.allowUnchecked {
+		failAll(provDiag("The oleans of this package cannot be built by janus itself: " + why + ", so the report could not attest that the verified environment is what the hashed source compiles to."))
+		return
+	}
 
 	leanVersion := ws.tc.version
 
@@ -1406,6 +1421,35 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	}
 
 	consumerTimer.mark("lake query of the modules (re-runs the lakefile), pin recheck")
+	if ob != nil {
+		// Lake's oleans (and the lakefile's last word) are ignored from here on: the audit, the replay and the pins
+		// use only the oleans janus compiled from the hashed source.
+		if err := ob.reset(); err != nil {
+			failAll(wsDiag(err))
+			return
+		}
+		for _, r := range reqs {
+			if r.Err != nil {
+				continue
+			}
+			if _, err := ob.ensure(r.module, r.rel); err != nil {
+				r.Err = err
+			}
+		}
+		own, ownDeps, err := ob.libs()
+		if err != nil {
+			failAll(wsDiag(err))
+			return
+		}
+		libDir, depLibs = own, ownDeps
+		searchDirs = []string{janusLib, libDir}
+		for _, d := range pkg.Deps {
+			searchDirs = append(searchDirs, depLibs[d.Info.Name])
+		}
+		leanPath = ws.tc.leanPathEnv(searchDirs...)
+		provenance = provChecked
+		consumerTimer.mark(fmt.Sprintf("olean provenance (%d compiled, %d from the store)", ob.compiled, ob.hits))
+	}
 	// Module identity across the framework, the consumer and its dependencies (deps.go); the
 	// dependency module roots tell the auditor which constants come from declared dependencies.
 	depRoots, err := checkModuleLayout(janusLib, ws.janusFiles, libDir, depLibs, ws.tc.libDir)
@@ -1664,6 +1708,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			MatchedMains:          r.audit.MatchedMains,
 			MatchedModules:        r.audit.MatchedModules,
 			ContractHyps:          r.audit.ContractHyps,
+			OleanProvenance:       provenance,
 			Consumer: &consumerInfo{
 				Root: pkg.Root, Lakefile: pkg.Lakefile, Module: r.module, SnapshotSha256: pkg.Sha256,
 				Files: pkg.fileHashes(), Dependency: pkg.Dep, Dependencies: pkg.depInfos(), AllowPathDeps: pkg.opts.AllowPathDeps,

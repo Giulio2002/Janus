@@ -2444,3 +2444,28 @@ for exactly that theorem** is verified in the same run:
   policy and the same marking as a fresh run; the opt-out does not make cache hits count differently.
   `verify-batch`: the witness must be a request of the same batch and extraction.
 * Residual: a witness shows satisfiability by a concrete (toy) runtime, not by the real one (V3).
+
+## Olean provenance of a consumer package (round 15a)
+
+Lake builds the consumer's modules in the sandbox, and a sandboxed process (the lakefile, an elaborated
+module, an earlier run) can write the persistent workspace's `.lake/build`. Lake accepts any olean whose
+trace matches, so an olean of a different source (the variant's olean and output hashes, the genuine trace
+kept) was audited, replayed and pinned while the report attested the hashed source: the verdict block
+showed the variant's statement under the original source (audit/round15a; also on Janus main c7950624).
+The kernel and the auditor still checked the planted olean, so no false theorem was accepted, but the
+source attestation, and a result-cache entry keyed on it, were misleading.
+
+`janus verify --proof-root` therefore never audits Lake's oleans. For the theorem's consumer/dependency
+import closure, in dependency order, janus runs `lean -o` itself, sandboxed, on the hashed source (a trusted,
+protected copy of the snapshot), with the package's `[leanOptions]`, and only those oleans (a janus-owned,
+protected directory) are on the search path of the audit, the replay and the pins. Warm runs reuse the
+trusted olean store (`v1/oleans`: HMAC'd entries keyed by the toolchain, the framework build, the module, its
+source hash, its options and the olean hashes of its own imports; re-hashed on use), so an unchanged module is
+not compiled again (arm64 `examples/consumer` Add: +2.0 s cold, +0.002 s warm; amd64 Add: +1.0 s / +0.002 s).
+The compile is authoritative; byte equality with Lake's olean is not required.
+
+Only a configuration inside the strict `lakefile.toml` subset (the one the result cache accepts) can be
+reproduced, because janus must know every option Lake would pass. Any other (`lakefile.lean`, unparsed
+options, `moreLeanArgs`, an external `srcDir`) is refused ("olean provenance") unless
+`--allow-unchecked-provenance` is given; the report then says `oleanProvenance: "unchecked"` and the verdict
+block "Olean provenance: NOT CHECKED". Reports of a checked run say `"checked"`.

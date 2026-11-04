@@ -163,7 +163,7 @@ r1() {
   local dep=""; [ "${1:-}" = dep ] && { dep=dep; shift; }
   r1pkg "$R1/$name" $dep
   local out; out=$(JANUS_R1_MODE=$mode "$J" verify --janus-root "$root" $W/Add --proof "$R1/$name/R1/$proof.lean" \
-    --proof-root "$R1/$name" --theorem "$thm" "$@" 2>&1)
+    --proof-root "$R1/$name" --allow-unchecked-provenance --theorem "$thm" "$@" 2>&1)
   local what; what=$(grep -m1 -E '^  (modified|unexpected|missing) ' <<<"$out" | sed 's/^  //; s/ (pinned.*//')
   printf '%s%s [%s]' "$(grep -m1 -E '^(Verified|Invalid)' <<<"$out" | cut -c1-90)" "${what:+ … $what}" "$(grep -m1 'Stage:' <<<"$out" | sed 's/.*Stage: //')"
 }

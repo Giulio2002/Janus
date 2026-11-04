@@ -118,6 +118,9 @@ type verifiedReport struct {
 	NonVacuityWitness string `json:"nonVacuityWitness,omitempty"`
 	// NonVacuityReturns names a verified Witness.returns for this theorem, when there is one (informational).
 	NonVacuityReturns string `json:"nonVacuityReturns,omitempty"`
+	// OleanProvenance (consumer packages): "checked" (every consumer/dependency module of the environment was
+	// compiled by janus itself from the hashed source) or "unchecked" (--allow-unchecked-provenance: Lake's oleans).
+	OleanProvenance string `json:"oleanProvenance,omitempty"`
 	// Cached: this report is the recorded result of an earlier verification with exactly the
 	// same inputs (resultcache.go), made at CachedFrom.
 	Cached     bool   `json:"cached,omitempty"`
@@ -274,7 +277,7 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "no-result-cache", "allow-no-witness", "full-errors", "keep-workspace")
+	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "no-result-cache", "allow-no-witness", "allow-unchecked-provenance", "full-errors", "keep-workspace")
 	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root", "results")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -296,6 +299,9 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	}
 	if flags["asl"] {
 		opts["asl"] = "true"
+	}
+	if flags["allow-unchecked-provenance"] {
+		opts["allow-unchecked-provenance"] = "true"
 	}
 	if flags["no-result-cache"] { // neither read nor write the verification-result cache (resultcache.go)
 		opts["no-result-cache"] = "true"
@@ -440,6 +446,12 @@ func printVerifiedAt(stdout io.Writer, outdir, reportPath string, r *verifiedRep
 		fmt.Fprintln(stdout, l)
 	}
 	fmt.Fprintln(stdout, nonVacuityLine(r))
+	switch r.OleanProvenance {
+	case provChecked:
+		fmt.Fprintln(stdout, "  Olean provenance: checked (the consumer/dependency modules were compiled by janus from the hashed source)")
+	case provUnchecked:
+		fmt.Fprintln(stdout, "  Olean provenance: NOT CHECKED (--allow-unchecked-provenance: the oleans are the ones Lake built in the sandbox, not shown to be compiled from the hashed source)")
+	}
 	if len(r.Kernel) > 0 {
 		fmt.Fprintf(stdout, "  Kernel interface: %s (.syscall stubs: their effect is the kernel contract of Janus.Kernel, under ReturnsK/EnsuresK only)\n",
 			termSafe(strings.Join(r.Kernel, ", ")))
