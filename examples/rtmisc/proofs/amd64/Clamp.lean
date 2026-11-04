@@ -27,12 +27,6 @@ the extracted bytes (writable globals the extractor does not copy).
 namespace Proof
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Contracts.Instrument
 
-/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
-local macro "pkgN" : term => `(janus_eval% pkgVar)
-local macro "ctrN" : term => `(janus_eval% ctr)
-local macro "ctr4N" : term => `(janus_eval% (ctr + 4))
-local macro "ctr8N" : term => `(janus_eval% (ctr + 8))
-
 
 /-- The function's counter block: the operand of `MOVL $3, ctr(IP)` at `Clamp+0x0`. -/
 def ctr : Nat := ripTarget Extracted.program Extracted.entry
@@ -43,6 +37,12 @@ def pkgVar : Nat := ripTarget Extracted.program (Extracted.entry + 0xa)
 /-- The blocks a call runs: the entry block (counter 0), then `return x` (counter 1) when
 `x ≤ hi`, or the `if` body `return hi` (counter 2) when `x > hi`. -/
 def ran (x hi : Nat) (i : Nat) : Bool := i == 0 || (i == 1 && x ≤ hi) || (i == 2 && hi < x)
+
+/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "pkgN" : term => `(janus_eval% pkgVar)
+local macro "ctrN" : term => `(janus_eval% ctr)
+local macro "ctr4N" : term => `(janus_eval% (ctr + 4))
+local macro "ctr8N" : term => `(janus_eval% (ctr + 8))
 
 theorem correctness (x hi : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, hi]

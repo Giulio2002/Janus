@@ -29,12 +29,6 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts.Instr
 
 namespace Proof
 
-/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
-local macro "pkgN" : term => `(janus_eval% pkgVar)
-local macro "ctrN" : term => `(janus_eval% ctr)
-local macro "ctr4N" : term => `(janus_eval% (ctr + 4))
-local macro "ctr8N" : term => `(janus_eval% (ctr + 8))
-
 
 /-- The function's counter block: the word `ADRP`+`STR` at `Clamp+0x4` writes (`ctr[0]`). -/
 def ctr : Nat :=
@@ -49,6 +43,12 @@ def pkgVar : Nat :=
 /-- The blocks a call runs: the entry block (counter 0), then `return x` (counter 1) when
 `x ≤ hi`, or the `if` body `return hi` (counter 2) when `x > hi`. -/
 def ran (x hi : Nat) (i : Nat) : Bool := i == 0 || (i == 1 && x ≤ hi) || (i == 2 && hi < x)
+
+/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "pkgN" : term => `(janus_eval% pkgVar)
+local macro "ctrN" : term => `(janus_eval% ctr)
+local macro "ctr4N" : term => `(janus_eval% (ctr + 4))
+local macro "ctr8N" : term => `(janus_eval% (ctr + 8))
 
 theorem correctness (x hi : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, hi]
