@@ -1231,7 +1231,10 @@ def frameworkSpecs : List Name :=
    `decoderuneSpec, `countrunesSpec, `gostringSpec, `gostringnSpec, `gobytesSpec, `growsliceSpec,
    `growsliceNoAliasSpec, `growsliceBufSpec, `growsliceBufNoAliasSpec, `makeslicecopySpec,
    `moveSliceSpec, `moveSliceNoScanSpec, `moveSliceNoCapSpec, `moveSliceNoCapNoScanSpec,
-   `slicecopySpec, `typedslicecopySpec, `wbZeroSpec, `wbMoveSpec].map (`Janus.Contracts ++ ·)
+   `slicecopySpec, `typedslicecopySpec, `wbZeroSpec, `wbMoveSpec,
+   -- the live data of the growslice specs (`LiveSpec`: cost, fresh and kept objects), the second description
+   -- argument of `RtLiveContract` (round 15)
+   `growsliceLive, `growsliceNoAliasLive, `growsliceBufLive, `growsliceBufNoAliasLive].map (`Janus.Contracts ++ ·)
 
 def frameworkSpecsNat : List Name :=
   [`concatstringSpec, `concatbyteSpec].map (`Janus.Contracts ++ ·)
@@ -1241,7 +1244,7 @@ def frameworkFmts : List Name := [`Janus.Float.binary32, `Janus.Float.binary64]
 /-- Which allow-listed type is `ty`: `some true` for `RtSpec`, `some false` for `Fmt`. -/
 def frameworkConstParamType (ty : Expr) : Option Bool :=
   let ty := ty.consumeMData
-  if ty.isConstOf `Janus.Contracts.RtSpec then some true
+  if ty.isConstOf `Janus.Contracts.RtSpec || ty.isConstOf `Janus.Contracts.LiveSpec then some true
   else if ty.isConstOf `Janus.Float.Fmt then some false
   else none
 

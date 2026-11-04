@@ -225,4 +225,24 @@ theorem r21 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : 
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
 
+/-- CONTROL: the live growslice contract with the framework's own spec and live data. -/
+theorem ctl11 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (hg : RtLiveContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") 4096 R growsliceSpec growsliceLive) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
+/-- R22: a live contract with a consumer-built live spec (an impossible budget). -/
+theorem r22 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (hg : RtLiveContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") 4096 R growsliceSpec
+      { growsliceLive with cost := fun _ _ => 2 ^ 70 }) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
+
+/-- R23: a live contract with the empty live spec. -/
+theorem r23 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (hg : RtLiveContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") 4096 R growsliceSpec {}) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
+
 end Proof
