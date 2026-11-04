@@ -502,21 +502,45 @@ partial def countWrites (m : Expr) : Nat :=
 
 /-- Explain one obstacle: the failing side condition and the hypotheses that would discharge
 it. -/
-def explainObstacle (o : Obstacle) : TacticM MessageData := do
+def explainObstacle (o : Obstacle) (discharge : Option (MVarId → TacticM Bool) := none) :
+    TacticM MessageData := do
   match o with
   | .access fn m a n w =>
     let m0 := stripWrites m
-    let goal ← mkEq (mkAppN (mkConst ``Janus.Arm64.Memory.accessible) #[m0, a, n, toExpr w])
-      (mkConst ``Bool.true)
     let kind := if w then "write" else "read"
     let nw := countWrites m
+    -- the memories related to `m0` by `MemFrame` hypotheses (the discharger follows these links)
+    let mut mems : Array Expr := #[m0]
+    for _ in [0:16] do
+      let mut grew := false
+      for d in ← getLCtx do
+        if d.isImplementationDetail then continue
+        let ty ← instantiateMVars d.type
+        unless ty.isAppOfArity ``Janus.MemFrame 3 do continue
+        let x := stripWrites (ty.getArg! 0)
+        let y := stripWrites (ty.getArg! 1)
+        if mems.contains x && !mems.contains y then mems := mems.push y; grew := true
+        else if mems.contains y && !mems.contains x then mems := mems.push x; grew := true
+      unless grew do break
+    -- the exact side goal, attempted with the discharger of the step
+    let full ← mkEq (mkAppN (mkConst ``Janus.Arm64.Memory.accessible) #[m, a, n, toExpr w])
+      (mkConst ``Bool.true)
+    let proved ← match discharge with
+      | none => pure none
+      | some f =>
+        let saved ← saveState
+        let g ← mkFreshExprSyntheticOpaqueMVar full
+        let r ← try some <$> f g.mvarId! catch _ => pure (some false)
+        saved.restore
+        pure r
     let mut facts : Array MessageData := #[]
     for d in ← getLCtx do
       if d.isImplementationDetail then continue
       let ty ← instantiateMVars d.type
       let some (_, l, _) := ty.eq? | continue
       unless l.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do continue
-      unless ← withReducible (isDefEq (stripWrites (l.getArg! 0)) m0) do continue
+      let lm := stripWrites (l.getArg! 0)
+      unless ← mems.anyM fun x => withReducible (isDefEq lm x) do continue
       let b := l.getArg! 1
       let k := l.getArg! 2
       let w' := l.getArg! 3
@@ -530,7 +554,39 @@ def explainObstacle (o : Obstacle) : TacticM MessageData := do
       unless okHi do why := why.push m!"{← inl hi} is not provable by omega"
       unless okW do why := why.push m!"the region is only known to be readable"
       let status := if why.isEmpty then m!"covers the access" else MessageData.joinSep why.toList "; "
-      facts := facts.push m!"  {d.userName} : {← inl ty}\n      {status}"
+      facts := facts.push m!"  {d.userName} : {← inl ty}\n      {status} (checked on its own)"
+    -- the other obligations of a store: read-only data and the stack alignment
+    let mut dataHyp : Option LocalDecl := none
+    let mut hasDdisj := false
+    let mut writable : Array Name := #[]
+    for d in ← getLCtx do
+      if d.isImplementationDetail then continue
+      let ty ← instantiateMVars d.type
+      if ty.getAppFn.constName?.any (·.components.getLast? == some `DataLoaded) then dataHyp := some d
+      if d.userName.toString.startsWith "h_ddisj" then hasDdisj := true
+      if let some (_, l, r) := ty.eq? then
+        if l.isAppOfArity ``Janus.Arm64.Memory.accessible 4 && (l.getArg! 3).isConstOf ``Bool.true &&
+            r.isConstOf ``Bool.true && d.userName.toString != "h_data" then
+          if ← mems.anyM fun x => withReducible (isDefEq (stripWrites (l.getArg! 0)) x) then
+            writable := writable.push d.userName
+    let verdict : MessageData ← match proved with
+      | some true =>
+        let hint : MessageData := match dataHyp with
+          | some d =>
+            if w && !hasDdisj then
+              m!" The memory has the read-only data `{d.userName}`: a store must be shown disjoint from it; \
+                try `janus_data {d.userName} [{", ".intercalate (writable.toList.map toString)}]` (a writable range of the same memory) before `janus_run`."
+            else m!""
+          | none => m!""
+        pure m!"The accessibility side goal IS discharged (the discharger proves the goal above), so the \
+          instruction is stuck on another obligation (disjointness from read-only data, the stack \
+          alignment, or an aliasing read); `set_option trace.janus.disch true` shows each goal.{hint}"
+      | some false =>
+        pure m!"Obligation that failed: ACCESSIBILITY. The discharger (the one the step uses: hypotheses about the \
+          memory and, through `MemFrame` links, about its {mems.size - 1} related memories) could not prove the \
+          goal above."
+      | none => pure m!""
+    let factsMsg := verdict
     let wrap ← match findWrap a with
       | some x =>
         -- `(2^64 - k) + y` is `y - k`: it does not wrap when `k ≤ y`
@@ -551,14 +607,14 @@ def explainObstacle (o : Obstacle) : TacticM MessageData := do
             `StackWritable` give `… ≤ 2^48`)."
       | none => pure m!""
     let m0S ← inl m0
-    let factsMsg := if facts.isEmpty then
-        m!"There is no `accessible` hypothesis about {m0S} in the context."
-      else m!"The `accessible` hypotheses about {m0S}:\n{MessageData.joinSep facts.toList "\n"}"
+    let factsMsg := m!"{factsMsg}\n" ++ (if facts.isEmpty then
+        m!"There is no `accessible` hypothesis about {m0S} (or a memory related to it by `MemFrame`) in the context."
+      else m!"The `accessible` hypotheses about {m0S} and its related memories:\n{MessageData.joinSep facts.toList "\n"}")
     let writes := if nw = 0 then m!"" else m!" (the memory is {m0S} after {nw} stores, which do \
       not change what is accessible)"
     let aS ← inlS a
     return m!"cannot prove that the {n}-byte {kind} at {← inl a} is allowed{writes}:\
-      {indentExpr goal}\n{factsMsg}{wrap}\nIt is discharged by a hypothesis \
+      {indentExpr full}\n{factsMsg}{wrap}\nIt is discharged by a hypothesis \
       `{← inlS m0}.accessible b k w = true` with `b ≤ {aS}` and `{aS} + {n} ≤ b + k` provable by \
       omega{if w then " and `w = true`" else ""}: \
       state the region in the precondition (`Ptr`, `Buffer`, `StackOK`, `StackWritable`) together \
@@ -579,8 +635,8 @@ def explainObstacle (o : Obstacle) : TacticM MessageData := do
       amd64 a `none` flag is architecturally undefined and reading it faults."
 
 /-- The message for an instruction that `simp` could not evaluate to `.ok s'` or a branch. -/
-def explainStuck (tac : String) (st : Status) (accessFns : List (Name × Bool)) (r : Expr) :
-    TacticM MessageData := do
+def explainStuck (tac : String) (st : Status) (accessFns : List (Name × Bool)) (r : Expr)
+    (discharge : Option (MVarId → TacticM Bool) := none) : TacticM MessageData := do
   let obs ← obstacles accessFns r
   -- report each access/alias once (simp leaves several copies in `match` arms)
   let mut seen : Array Obstacle := #[]
@@ -594,7 +650,7 @@ def explainStuck (tac : String) (st : Status) (accessFns : List (Name × Bool)) 
   -- accesses first: an unresolved access usually also leaves a `match` on its result
   let accs := seen.filter fun | .access .. | .alias .. => true | _ => false
   let shown := if accs.isEmpty then seen else accs
-  let expl ← shown.mapM explainObstacle
+  let expl ← shown.mapM (explainObstacle · discharge)
   if expl.isEmpty then
     return m!"{tac}: stuck {st.where_}: the instruction did not evaluate to `.ok s'` or a \
       branch; the unevaluated term is{indentExpr r}"

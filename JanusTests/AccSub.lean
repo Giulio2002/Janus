@@ -148,4 +148,56 @@ theorem new_array_store (ret : Nat) (hret : RetAddr callNew ret) (S : State) (v 
     Reaches (callNew.withExit ret) S (IsReturn fun _ => True) := by
   janus_run calls [hg]
 
+/-! ## `janus_data hd [*]`: every writable range of the context is disjoint from the read-only data
+
+`str x1, [x0]; adrp x2, page; add x2, x2, #0x100; ldr x0, [x2]; ret` stores into a writable buffer and then reads the
+first word of a table: the store is disjoint from the table because the buffer is writable (`DataLoaded`). -/
+
+def storeTbl : Program where
+  segments := [{ name := "storeTbl", base := 0x40000, words := [0xf9000001, 0x90000002, 0x91040042, 0xf9400040, 0xd65f03c0] }]
+  stubs := []
+  exitAddr := 0
+  data := [{ name := ".rodata", base := 0x40100, bytes := [7, 0, 0, 0, 0, 0, 0, 0] }]
+
+theorem store_tbl (p v : W64) :
+    Ensures storeTbl 0x40000 [p, v]
+      (fun s => storeTbl.DataLoaded s.mem ∧ s.mem.accessible p.toNat 8 true = true ∧ p.toNat + 8 ≤ 2 ^ 48)
+      (fun _ s' => (s'.regs 0).toNat = 7) := by
+  intro ret hret s hs ⟨hd, hw, hp⟩
+  janus_intro hs
+  janus_data hd [*]
+  janus_run
+
+/-! ## The diagnostic names the failed obligation and prints the exact side goal
+
+The step's own discharger (with the `MemFrame` links) is run on the goal it could not prove; the message prints that
+goal and says `ACCESSIBILITY` when the discharger fails on it. -/
+
+#guard_msgs (substring := true) in
+/-- error: janus_run: stuck at pc 0x10004 (storeA+0x4): str x1, [x3] -/
+theorem diag_access (rs : List (Nat × Nat)) (ret : Nat) (hret : RetAddr storeA ret) (s S : State)
+    (P l C : Nat) (v : W64) (hfr : MemFrame s.mem S.mem rs) (hacc : S.mem.accessible P C true = true)
+    (hl : l + 9 ≤ C) (hP : P + C ≤ 2 ^ 48) (hpc : S.pc = 0x10000#64) (h0 : S.regs 0 = BitVec.ofNat 64 P)
+    (h1 : S.regs 1 = v) (h2 : S.regs 2 = BitVec.ofNat 64 (l + C)) (h30 : S.regs 30 = BitVec.ofNat 64 ret) :
+    Reaches (storeA.withExit ret) S (IsReturn fun _ => True) := by
+  janus_run
+
+#guard_msgs (substring := true) in
+/-- error: Obligation that failed: ACCESSIBILITY -/
+theorem diag_access2 (rs : List (Nat × Nat)) (ret : Nat) (hret : RetAddr storeA ret) (s S : State)
+    (P l C : Nat) (v : W64) (hfr : MemFrame s.mem S.mem rs) (hacc : S.mem.accessible P C true = true)
+    (hl : l + 9 ≤ C) (hP : P + C ≤ 2 ^ 48) (hpc : S.pc = 0x10000#64) (h0 : S.regs 0 = BitVec.ofNat 64 P)
+    (h1 : S.regs 1 = v) (h2 : S.regs 2 = BitVec.ofNat 64 (l + C)) (h30 : S.regs 30 = BitVec.ofNat 64 ret) :
+    Reaches (storeA.withExit ret) S (IsReturn fun _ => True) := by
+  janus_run
+
+#guard_msgs (substring := true) in
+/-- error: S.mem.accessible (P + (l + C)) 8 true = true -/
+theorem diag_access3 (rs : List (Nat × Nat)) (ret : Nat) (hret : RetAddr storeA ret) (s S : State)
+    (P l C : Nat) (v : W64) (hfr : MemFrame s.mem S.mem rs) (hacc : S.mem.accessible P C true = true)
+    (hl : l + 9 ≤ C) (hP : P + C ≤ 2 ^ 48) (hpc : S.pc = 0x10000#64) (h0 : S.regs 0 = BitVec.ofNat 64 P)
+    (h1 : S.regs 1 = v) (h2 : S.regs 2 = BitVec.ofNat 64 (l + C)) (h30 : S.regs 30 = BitVec.ofNat 64 ret) :
+    Reaches (storeA.withExit ret) S (IsReturn fun _ => True) := by
+  janus_run
+
 end JanusTests.AccSub

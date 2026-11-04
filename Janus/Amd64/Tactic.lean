@@ -1515,6 +1515,69 @@ def isRetPC (pc ret : Expr) : MetaM Bool := do
     withReducible (isDefEq r ret)
   | _ => return false
 
+theorem accessible_sub {m : Memory} {a n b k : Nat} {w w' : Bool}
+    (h : m.accessible b k w' = true) (hw : (w = false ∨ w' = true)) (h1 : b ≤ a)
+    (h2 : a + n ≤ b + k) : m.accessible a n w = true :=
+  Janus.Arm64.Memory.accessible_sub m h hw h1 h2
+
+/-- `m.accessible a n w = true` from a hypothesis about the same memory term (stores stripped; no `MemFrame`
+step). -/
+def accessibleFromHyps (g : MVarId) : TacticM Bool := g.withContext do
+  let gs ← Common.simpNoRfl g (← `(tactic| simp only [Janus.Arm64.Memory.accessible_writeLE, State.mem]))
+  let some g := gs.head? | return true
+  let t ← instantiateMVars (← g.getType)
+  let some (_, lhs, _) := t.eq? | return false
+  unless lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do return false
+  let m := lhs.getArg! 0
+  for d in ← Common.accessibleOrder lhs do
+    let ty ← instantiateMVars d.type
+    let some (_, l, _) := ty.eq? | continue
+    unless l.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do continue
+    unless ← isDefEq (l.getArg! 0) m do continue
+    let saved ← saveState
+    let ok ← try
+        let gs ← Tactic.run g do
+          let f ← mkConstWithFreshMVarLevels ``accessible_sub
+          let (ms, _, _) ← forallMetaTelescopeReducing (← inferType f) (some 8)
+          unless ← isDefEq ms[7]! d.toExpr do throwError "janus64_disch: no match"
+          let gs ← (← getMainGoal).apply (mkAppN f ms)
+          for g' in gs do
+            if ← g'.isAssigned then continue
+            let rest ← withoutRecover <| Tactic.run g' (evalTactic (← `(tactic| first | decide | janus_omega)))
+            unless rest.isEmpty do throwError "janus64_disch: side goal"
+          setGoals []
+        pure gs.isEmpty
+      catch _ => pure false
+    if ok then return true
+    saved.restore
+  return false
+
+/-- Prove `m.accessible a n w = true` from the context: against the hypotheses about the goal's own memory
+first, then one `MemFrame` step at a time against those about each earlier memory (see the arm64 twin). -/
+partial def accessibleSearch (cur : MVarId) (visited : Array Expr) (fuel : Nat) : TacticM Bool := cur.withContext do
+    if fuel == 0 then return false
+    let cur ← Common.stripWritesProof cur
+    let saved ← saveState
+    if ← accessibleFromHyps cur then return true
+    saved.restore
+    let some (_, lhs, _) := (← instantiateMVars (← cur.getType)).eq? | return false
+    let visited := visited.push (lhs.getArg! 0)
+    for (d, up, m') in ← Common.accessibleFrameLinks cur do
+      if visited.contains (Common.stripWrites m') then continue
+      let saved ← saveState
+      let g' ← Common.moveAccessible cur d up
+      if ← accessibleSearch g' visited (fuel - 1) then return true
+      saved.restore
+    return false
+
+def dischargeAccessible (g : MVarId) : TacticM Bool := g.withContext do
+  let saved ← saveState
+  if ← accessibleSearch g #[] 16 then return true
+  saved.restore
+  -- the accessible ranges that named predicates (a runtime summary's postcondition) state
+  let some g' ← Common.addDerivedAccessible g | return false
+  accessibleSearch g' #[] 16
+
 /-- What a fault means, and what usually rules it out. -/
 def explainFault (f : Expr) : MessageData :=
   match f.getAppFn.constName? with
@@ -1561,7 +1624,7 @@ partial def afterExec (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := do
         ({explainFault f}){← g.withContext Common.branchConds}"
     | _ =>
       let st ← cfg.status.get
-      throwError (← g.withContext (Common.explainStuck tacName st accessFns r))
+      throwError (← g.withContext (Common.explainStuck tacName st accessFns r (some dischargeAccessible)))
   | .reaches _ s _ | .reachesRet _ _ s _ =>
     let s ← instantiateMVars s
     if s.isAppOfArity ``ite 5 then
@@ -1870,69 +1933,6 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
   replaceMainGoal finished
 
 /-! ## Discharger -/
-
-theorem accessible_sub {m : Memory} {a n b k : Nat} {w w' : Bool}
-    (h : m.accessible b k w' = true) (hw : (w = false ∨ w' = true)) (h1 : b ≤ a)
-    (h2 : a + n ≤ b + k) : m.accessible a n w = true :=
-  Janus.Arm64.Memory.accessible_sub m h hw h1 h2
-
-/-- `m.accessible a n w = true` from a hypothesis about the same memory term (stores stripped; no `MemFrame`
-step). -/
-def accessibleFromHyps (g : MVarId) : TacticM Bool := g.withContext do
-  let gs ← Common.simpNoRfl g (← `(tactic| simp only [Janus.Arm64.Memory.accessible_writeLE, State.mem]))
-  let some g := gs.head? | return true
-  let t ← instantiateMVars (← g.getType)
-  let some (_, lhs, _) := t.eq? | return false
-  unless lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do return false
-  let m := lhs.getArg! 0
-  for d in ← Common.accessibleOrder lhs do
-    let ty ← instantiateMVars d.type
-    let some (_, l, _) := ty.eq? | continue
-    unless l.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do continue
-    unless ← isDefEq (l.getArg! 0) m do continue
-    let saved ← saveState
-    let ok ← try
-        let gs ← Tactic.run g do
-          let f ← mkConstWithFreshMVarLevels ``accessible_sub
-          let (ms, _, _) ← forallMetaTelescopeReducing (← inferType f) (some 8)
-          unless ← isDefEq ms[7]! d.toExpr do throwError "janus64_disch: no match"
-          let gs ← (← getMainGoal).apply (mkAppN f ms)
-          for g' in gs do
-            if ← g'.isAssigned then continue
-            let rest ← withoutRecover <| Tactic.run g' (evalTactic (← `(tactic| first | decide | janus_omega)))
-            unless rest.isEmpty do throwError "janus64_disch: side goal"
-          setGoals []
-        pure gs.isEmpty
-      catch _ => pure false
-    if ok then return true
-    saved.restore
-  return false
-
-/-- Prove `m.accessible a n w = true` from the context: against the hypotheses about the goal's own memory
-first, then one `MemFrame` step at a time against those about each earlier memory (see the arm64 twin). -/
-partial def accessibleSearch (cur : MVarId) (visited : Array Expr) (fuel : Nat) : TacticM Bool := cur.withContext do
-    if fuel == 0 then return false
-    let cur ← Common.stripWritesProof cur
-    let saved ← saveState
-    if ← accessibleFromHyps cur then return true
-    saved.restore
-    let some (_, lhs, _) := (← instantiateMVars (← cur.getType)).eq? | return false
-    let visited := visited.push (lhs.getArg! 0)
-    for (d, up, m') in ← Common.accessibleFrameLinks cur do
-      if visited.contains (Common.stripWrites m') then continue
-      let saved ← saveState
-      let g' ← Common.moveAccessible cur d up
-      if ← accessibleSearch g' visited (fuel - 1) then return true
-      saved.restore
-    return false
-
-def dischargeAccessible (g : MVarId) : TacticM Bool := g.withContext do
-  let saved ← saveState
-  if ← accessibleSearch g #[] 16 then return true
-  saved.restore
-  -- the accessible ranges that named predicates (a runtime summary's postcondition) state
-  let some g' ← Common.addDerivedAccessible g | return false
-  accessibleSearch g' #[] 16
 
 elab_rules : tactic | `(tactic| janus64_disch) => do
   let g ← getMainGoal
