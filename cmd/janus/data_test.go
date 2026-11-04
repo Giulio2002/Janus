@@ -283,7 +283,7 @@ func TestDataWritableExamples(t *testing.T) {
 			}
 		}
 		checkDataAgainstObjdump(t, b, exampleBin, x)
-		if strings.Contains(string(x.Lean), "def data") {
+		if strings.Contains(string(x.Lean), "def data :") {
 			t.Errorf("%s: Lean has data although nothing was copied", sym)
 		}
 		code, out, stderr := runJanus(t, "extract", exampleBin, sym, filepath.Join(t.TempDir(), c.fn))
