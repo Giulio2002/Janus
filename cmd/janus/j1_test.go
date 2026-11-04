@@ -572,9 +572,9 @@ func TestConsumerReplayPlanUsesPinsTamperCaught(t *testing.T) {
 	}
 }
 
-// Round 15c R2: an olean that is a symlink is pinned as "not-a-regular-file" (no content hash),
-// so a plan keyed by the pins must not treat two different link targets as the same module.
-func TestRound15cSymlinkOleanKeyFollowsContent(t *testing.T) {
+// Round 15c R2: a module-data file that is a symlink (or any non-regular file) is refused when
+// pinning (fail closed), and, defence in depth, a plan never puts a non-digest pin into a key.
+func TestRound15cSymlinkOleanRefused(t *testing.T) {
 	privateCache(t)
 	lib := t.TempDir()
 	tgt := t.TempDir()
@@ -584,27 +584,32 @@ func TestRound15cSymlinkOleanKeyFollowsContent(t *testing.T) {
 	if err := os.Symlink(filepath.Join(tgt, "good.olean"), link); err != nil {
 		t.Fatal(err)
 	}
-	pl, err := newPinnedLib("the consumer package build", lib, nil)
+	if _, err := newPinnedLib("the consumer package build", lib, nil); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("a symlinked olean was pinned: %v", err)
+	}
+	// a directory where a module-data file is expected
+	d2 := t.TempDir()
+	if err := os.Mkdir(filepath.Join(d2, "B.olean"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newPinnedLib("x", d2, nil); err == nil {
+		t.Fatal("a directory named like an olean was pinned")
+	}
+	// the plan hashes the file, never a sentinel pin
+	writeBytes(t, filepath.Join(tgt, "C.olean"), []byte("c1"))
+	c := filepath.Join(tgt, "C.olean")
+	resolved := map[string]string{"C": c}
+	graph := map[string][]string{"C": {"Init"}}
+	k1, err := planReplayPinned(resolved, graph, "v1", false, map[string]string{c: "not-a-regular-file"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ps := pinSet{pl}
-	resolved := map[string]string{"A": link}
-	graph := map[string][]string{"A": {"Init"}}
-	k1, err := planReplayPinned(resolved, graph, "v1", false, ps.absHashes())
+	writeBytes(t, c, []byte("c2"))
+	k2, err := planReplayPinned(resolved, graph, "v1", false, map[string]string{c: "not-a-regular-file"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.Remove(link)
-	if err := os.Symlink(filepath.Join(tgt, "evil.olean"), link); err != nil {
-		t.Fatal(err)
-	}
-	pl2, _ := newPinnedLib("the consumer package build", lib, nil)
-	k2, err := planReplayPinned(resolved, graph, "v1", false, pinSet{pl2}.absHashes())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if k1.keys["A"] == k2.keys["A"] {
-		t.Fatal("two different link targets share one replay key (a cached passing replay would be reused)")
+	if k1.keys["C"] == k2.keys["C"] {
+		t.Fatal("a non-digest pin was put into the replay key")
 	}
 }
