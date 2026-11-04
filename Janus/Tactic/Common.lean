@@ -1782,6 +1782,29 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
     let sub ← mkFreshExprSyntheticOpaqueMVar subTy
     let sg := sub.mvarId!
     let ok ← try
+        -- the three closers of the side goal; the one that works on the goal's own hypotheses (`janus_clear_irrel`) goes
+        -- first (the full context of a run holds hundreds of facts, and an `omega` over
+        -- it spends seconds per fact on a side condition about two or three addresses)
+        let altFull ← `(tacticSeq|
+          (try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
+                Nat.reduceMod] at *
+           repeat' apply And.intro
+           all_goals first | (with_reducible assumption) | janus_omega_sparse | omega))
+        let altClear ← `(tacticSeq|
+          (janus_clear_irrel
+           try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
+                Nat.reduceMod] at *
+           repeat' apply And.intro
+           all_goals first | omega | (with_reducible assumption)))
+        let altApart ← `(tacticSeq|
+          (janus_apart_facts
+           try simp only [Janus.Apart] at *
+           janus_clear_irrel2
+           try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
+                Nat.reduceMod] at *
+           repeat' apply And.intro
+           all_goals first | omega | (with_reducible assumption)))
+        let closers ← `(tactic| first | $altClear | $altFull | $altApart)
         let gs ← Tactic.run sg <| withoutRecover (evalTactic (← `(tactic|
           (intro a n h
            refine ⟨h, ?_⟩
@@ -1789,23 +1812,7 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
            simp only [Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true,
              and_imp]
            intros
-           first
-           | (try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
-                Nat.reduceMod] at *
-              repeat' apply And.intro
-              all_goals first | (with_reducible assumption) | janus_omega_sparse | omega)
-           | (janus_clear_irrel
-              try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
-                Nat.reduceMod] at *
-              repeat' apply And.intro
-              all_goals first | omega | (with_reducible assumption))
-           | (janus_apart_facts
-              try simp only [Janus.Apart] at *
-              janus_clear_irrel2
-              try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
-                Nat.reduceMod] at *
-              repeat' apply And.intro
-              all_goals first | omega | (with_reducible assumption))))))
+           $closers))))
         pure gs.isEmpty
       catch _ => pure false
     unless ok do saved.restore; continue
