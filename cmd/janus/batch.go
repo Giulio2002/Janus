@@ -65,7 +65,7 @@ type batchResults struct {
 }
 
 func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "unsafe-no-sandbox", "allow-path-deps", "asl")
+	args, flags := takeBoolFlags(args, "json", "fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "full-errors", "keep-workspace")
 	pos, opts, err := parseArgs(args, "results", "janus-root")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -73,7 +73,7 @@ func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
 	if len(pos) != 1 {
 		return jsonFailure(stdout, flags["json"], usageErr("verify-batch takes exactly one requests file"))
 	}
-	res, err := verifyBatch(pos[0], opts["janus-root"], flags["fresh"], flags["unsafe-no-sandbox"], flags["allow-path-deps"], flags["json"], flags["asl"], stdout, stderr)
+	res, err := verifyBatch(pos[0], opts["janus-root"], flags["fresh"], flags["unsafe-no-sandbox"], flags["allow-path-deps"], flags["json"], flags["asl"], diagFlags{FullErrors: flags["full-errors"], KeepWorkspace: flags["keep-workspace"]}, stdout, stderr)
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], err)
 	}
@@ -100,7 +100,7 @@ func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, quiet, asl bool, stdout, stderr io.Writer) (*batchResults, error) {
+func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, quiet, asl bool, dg diagFlags, stdout, stderr io.Writer) (*batchResults, error) {
 	if err := memGuardConfigErr(); err != nil {
 		return nil, err
 	}
@@ -243,6 +243,12 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 			if asl {
 				opts["asl"] = "true"
 			}
+			if dg.FullErrors {
+				opts["full-errors"] = "true"
+			}
+			if dg.KeepWorkspace {
+				opts["keep-workspace"] = "true"
+			}
 			mark := memMark()
 			r.Report, r.Err = verify(r.Outdir, opts, stderr)
 			r.Report, r.Err = memOutcome(mark, r.Report, r.Err)
@@ -321,12 +327,14 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 				continue
 			}
 			ws.asl = aslB
+			ws.dg = dg
 			verifyGroup(fw, pkg, ws, greqs)
+			ws.reportKept(stderr)
 			for _, r := range greqs {
 				r.Report, r.Err = memOutcomeSkip(mark, ws.memOwn, r.Report, r.Err)
 			}
 			g := batchGroup{ProofRoot: root, SnapshotSha256: pkg.Sha256, ExtractedSha256: k, Workspace: ws.Dir, Requests: gi, Rebuilt: []string{}}
-			if ws.temp {
+			if ws.temp && !dg.KeepWorkspace {
 				g.Workspace = "(temporary, --fresh)"
 			}
 			for _, r := range greqs {

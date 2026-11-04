@@ -259,7 +259,7 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "no-result-cache")
+	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "no-result-cache", "full-errors", "keep-workspace")
 	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root", "results")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -284,6 +284,11 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	}
 	if flags["no-result-cache"] { // neither read nor write the verification-result cache (resultcache.go)
 		opts["no-result-cache"] = "true"
+	}
+	for _, n := range diagFlagNames { // output-only flags (diagflags.go): they never reach a cache key
+		if flags[n] {
+			opts[n] = "true"
+		}
 	}
 	if flags["allow-path-deps"] {
 		if opts["proof-root"] == "" {
@@ -692,6 +697,8 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	// One result-cache key per theorem: each binds its own theorem name (and every other input),
 	// so an entry recorded for one theorem can never answer for another.
 	resultKeys := make([]string, len(outs))
+	dg := diagFlagsOf(opts)
+	keepWS := dg.KeepWorkspace
 	if resultCacheOK(sb, opts) {
 		// Created before any sandboxed step, so the sandbox's tmpfs always covers it.
 		keyOK := false
@@ -709,6 +716,9 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			in := cacheIn
 			in.thm = outs[i].Theorem
 			resultKeys[i] = in.key()
+			if keepWS { // --keep-workspace needs a real run (a hit builds no workspace); a pass is still recorded below
+				continue
+			}
 			if prevs[i] = lookupResult(resultKeys[i]); prevs[i] != nil {
 				anyHit = true
 			}
@@ -880,6 +890,25 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	if err := os.WriteFile(filepath.Join(workDir, "Proof.lean"), proofSrc, 0o644); err != nil {
 		return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
+	if dg.KeepWorkspace {
+		// Registered after the removals of trustedDir and workDir, so it runs before them, on every outcome.
+		keepRoot := root
+		if opts["fresh"] != "" && fw.Source != "directory" {
+			keepRoot = fw.speculativeRoot(false) // the --fresh build is temporary; the cached one is byte-identical
+		}
+		defer func() {
+			if keepRoot == "" {
+				fmt.Fprintln(stderr, "Warning: --keep-workspace with --fresh needs the cached framework build, which does not exist yet; run once without --fresh.")
+				return
+			}
+			dir, kerr := keepSingleFileWorkspace(outdir, keepRoot, trustedDir, proofPath, proofSrc)
+			if kerr != nil {
+				fmt.Fprintf(stderr, "Warning: --keep-workspace: %v\n", kerr)
+				return
+			}
+			reportKept(stderr, dir, "cd "+dir+" && lake env lean Proof.lean   (or any scratch file importing Extracted and Janus)")
+		}()
+	}
 	proofPathEnv := tc.leanPathEnv(trustedDir, janusLibDir, workDir)
 	searchDirs := []string{trustedDir, janusLibDir, workDir, tc.libDir}
 	if err := noForeignModule(map[string]string{
@@ -916,12 +945,21 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	// Compile the proof, sandboxed. It imports the trusted Extracted; its output is Proof.olean.
 	if out, err := sandboxed(tc.lean, "--root="+workDir, filepath.Join(workDir, "Proof.lean"), "-o", filepath.Join(workDir, "Proof.olean")); err != nil {
 		out = mapPaths(out)
+		logPath := ""
+		if dg.FullErrors {
+			// Display only: the compile failed; run it once more with the printer limits raised.
+			argv := append(append([]string{tc.lean}, fullLeanOpts...), "--root="+workDir, filepath.Join(workDir, "Proof.lean"), "-o", filepath.Join(workDir, "ProofDiag.olean"))
+			if full, _ := sandboxed(argv...); strings.TrimSpace(full) != "" {
+				out = mapPaths(full)
+			}
+			logPath = writeFullOutput(outdir, filepath.Base(proofPath), out)
+		}
 		msg := "Lean rejected the proof " + displayPath(proofPath) + "."
-		if s := summarizeLeanErrors(out, 2000); s != "" {
+		if s := summarizeLeanErrors(out, dg.errLimit()); s != "" {
 			msg += "\n" + s
 		}
-		return &diag{Invalid: true, Msg: msg, Stage: "proof checking",
-			Next: "Fix the proof. It must import Extracted (and Janus) and prove " + strings.Join(thmNames(outs, todo), ", ") + ".", Details: out}
+		return withFullOutput(&diag{Invalid: true, Msg: msg, Stage: "proof checking",
+			Next: "Fix the proof. It must import Extracted (and Janus) and prove " + strings.Join(thmNames(outs, todo), ", ") + ".", Details: out}, logPath)
 	}
 	tm.mark("proof compile")
 	// The auditor executable is hashed while the pins are checked: both read only files that no

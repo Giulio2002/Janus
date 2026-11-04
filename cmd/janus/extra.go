@@ -17,6 +17,7 @@ var extraCommands = map[string]func(args []string, stdout, stderr io.Writer) err
 }
 
 const extraUsage = `  janus verify <outdir> --proof FILE --proof-root PKG [--theorem NAME] [--json] [--fresh] [--asl]
+  janus verify ... [--full-errors] [--keep-workspace]   (also verify-batch: untruncated Lean goals; keep a workspace for lake env lean)
   janus verify-batch <requests.json> [--results FILE] [--json] [--fresh] [--janus-root DIR] [--asl]
   janus init <dir> [--name NAME] [--rev REV | --janus-path DIR] [--no-update]
   janus explain <verified.json | outdir>

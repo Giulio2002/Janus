@@ -261,7 +261,7 @@ name (a capitalised identifier, not `Janus` or `Extracted`).
 ## Batch verification
 
 ```sh
-janus verify-batch requests.json [--results FILE] [--json] [--fresh] [--unsafe-no-sandbox] [--allow-path-deps] [--asl]
+janus verify-batch requests.json [--results FILE] [--json] [--fresh] [--unsafe-no-sandbox] [--allow-path-deps] [--asl] [--full-errors] [--keep-workspace]
 ```
 
 ```json
@@ -301,6 +301,33 @@ as an `ASL:` line under its `PASS`; an ASL failure does not make the request fai
 theorem stated through its own definition (`Computes Extracted.program Extracted.entry spec`) is
 accepted when that definition unfolds to `Janus.GoABI.Ensures`. No consumer or dependency module
 may live under the `JanusASL`, `ArmASL`, `Sail`, `JanusASLWords` or `JanusASLCorollary` roots.
+
+## Iterating on a failing proof
+
+A failed `janus verify --proof-root` costs a full verification. Two opt-in flags (accepted by
+`verify` and `verify-batch`) make the edit loop cheap without changing what is checked, trusted or
+cached; the default output is unchanged.
+
+* **`--full-errors`** shows the whole failure. Lean prints goals and hypotheses with deep terms and
+  proof terms elided as `⋯` (`pp.deepTerms`, `pp.proofs`, `pp.maxSteps`), and janus cuts each error
+  of the summary at 2000 characters. After a proof module has failed to build, janus reruns that
+  module once in the same sandbox with the printer limits lifted and prints its complete output
+  (`Details:`, the `details` field of `--json`), and writes it to
+  `<outdir>/diag/<module path, / as .>.lean-output.log`. The rerun is display only; it never runs
+  for a proof that builds and cannot change a verdict.
+* **`--keep-workspace`** prints the consumer workspace (on arm64 and amd64 alike, after a pass or a
+  failure): it holds the built `Extracted` module (`janus/.lake/build/lib/lean/Extracted.olean`) and
+  your package's builds, so a scratch file is checked in seconds instead of a verification:
+
+  ```sh
+  cd <workspace>/root && lake env lean Scratch.lean      # Scratch.lean: import Extracted, your lemmas, then trace_state / your probe
+  ```
+
+  With `--fresh` the throwaway workspace is kept instead of removed. A cache hit builds no
+  workspace, so with the flag janus skips the result-cache read for that run (a pass is recorded as
+  usual). The workspace is **never evidence**: janus does not read it back, no cache key mentions
+  it, and what `lake env lean` prints there proves nothing; only `janus verify` does. It is cache
+  content: `janus cache gc` removes it after the retention period below.
 
 ## Support cache
 
