@@ -122,7 +122,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
 /-- The theorem fires: `NewMap()` returns what the theorem says. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
     ((s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty ∧ (MC ck64).Env s'.mem (s0.regs 28)) :=
-  correctness implAt (MC ck64) (MC_laws _) HMake hcon  ret hret s0 setup pre
+  correctness implAt (MC ck64) (MC_laws _) HMake hcon ret hret s0 setup ⟨pre.1, pre.2.1⟩
 
 end Witness
 

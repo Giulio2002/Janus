@@ -154,7 +154,7 @@ theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s'
 (audit/round15/run-round15.sh): a witness of any name whose statement is `∃ …` is read by the
 auditor like `nonvacuous` (`alt`), also when the precondition is an applied lambda (`lam`); a witness
 that leaves a conjunct of the precondition out (`weak`, `lamWeak`) does not instantiate the theorem;
-`otherMain` has one more hypothesis (`hz`) that no witness here exhibits. -/
+`otherMain` has one more hypothesis (`hz : a ≠ b`) that no witness here exhibits. -/
 
 theorem alt : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
     (s : State),
@@ -203,7 +203,7 @@ end Witness
 
 
 theorem otherMain (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
-    (hz : 5 ≤ rt.length) (hnew : NewobjectContract (Extracted.program.link impl)
+    (hz : a ≠ b) (hnew : NewobjectContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b]
       (fun s => GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
