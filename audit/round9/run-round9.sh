@@ -13,7 +13,9 @@ cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 J="$root/audit/round9/bin/janus"; mkdir -p "$(dirname "$J")"
 CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
+# JANUS_AUDIT_PREBUILT=1 (audit/run-rounds.sh built everything once): no build here, a concurrent lake build would rewrite the
+# framework while other lanes verify against it.
+[ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 [ -d artifacts/amd64/NewPair ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
 W=audit/round9/work/rows; rm -rf "$W"; mkdir -p "$W"
