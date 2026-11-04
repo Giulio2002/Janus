@@ -259,7 +259,7 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl")
+	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "no-result-cache")
 	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root", "results")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -281,6 +281,9 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	}
 	if flags["asl"] {
 		opts["asl"] = "true"
+	}
+	if flags["no-result-cache"] { // neither read nor write the verification-result cache (resultcache.go)
+		opts["no-result-cache"] = "true"
 	}
 	if flags["allow-path-deps"] {
 		if opts["proof-root"] == "" {
