@@ -2442,3 +2442,71 @@ checked like the `RtSpec`: only the named framework constants (`growsliceLive`, 
 `audit/roundofimpl`. Consumer-defined `ImplApart` look-alikes: one that states nothing, a wrapper that unfolds to the trusted
 predicate, and a predicate about an unrelated variable are accepted (they constrain nothing the statement is about; controls
 `Shadow.ctl7`, `ctl8`, `ctl9`, `ctl10`); a look-alike that constrains `impl` is rejected (`Shadow2.r12`).
+## Non-vacuity is required for contract-assuming main theorems
+
+A main theorem whose statement applies runtime-contract hypotheses (`contractHyps` non-empty, the report
+line "Runtime contracts assumed: …") is only as meaningful as the joint satisfiability of its
+precondition, those contracts and the program. Each pinned contract is proved satisfiable on its own
+(`_satisfiable`), but nothing about the pieces together made a vacuous main theorem fail. `janus verify`
+now rejects such a theorem (stage `non-vacuity`, no report written) unless a **kernel-checked witness
+for exactly that theorem** is verified in the same run:
+
+* **Accepted form.** A theorem of the proof's `Witness` namespace, verified in the same call (single
+  `--theorem` runs cannot carry a witness: list both, or use `--allow-no-witness`), whose audited role is
+  `witness-nonvacuous` and whose `matchedMain` (same proof module) is the main theorem. The role comes from the
+  STATEMENT: `…Witness.nonvacuous` by convention, but any named theorem under a `Witness` component whose
+  statement is an `∃ …` is checked as a non-vacuity witness. The auditor's W2 matcher (round 14) then
+  demands a conjunct for every hypothesis of the main theorem, contract hypotheses included, every premise of
+  its unfolded conclusion (return address, call state, entry, arguments, precondition conjuncts), and a
+  type that has an element for every binder; a witness with a weaker precondition, for another theorem, or
+  from another module does not match and the main theorem fails.
+* **Which theorems need one.** A main theorem whose statement ASSUMES a runtime contract: one applied in a
+  premise or in the non-contract part of the conclusion (`contractHyps`). A theorem whose conclusion IS a
+  contract (it proves `Access1 Extracted.program …` for the program's own code) assumes nothing by stating it.
+  Every such theorem of a proof module needs its own: a witness supports the main theorems of its module it
+  is an instance of (`matchedMains` in the audit record; `matchedMain` is the first), so one witness serves
+  `correctness` and a `full_write` that share a precondition, and a main theorem with an extra hypothesis the
+  witness does not exhibit is rejected.
+* **Matching.** Conjuncts of the witness are matched after beta-reduction (an applied lambda
+  `(fun s => P s ∧ Q s) s` copied from the main theorem's precondition reads as the conjunction),
+  and `let`-instantiation; definitions are not unfolded (a premise `CallPre n s` stays one conjunct). A lambda body that leaves a conjunct out is a weaker witness and does not match.
+* **Not accepted.** `Witness.returns` alone: a concrete run shows that the program fires, but its
+  statement does not say that the contract hypotheses hold of the runtime it uses, so it does not show
+  the hypotheses jointly satisfiable. It is reported (`nonVacuityReturns`) when verified. An anonymous
+  `example := correctness …` cannot be referenced by the auditor (it has no name and leaves nothing in
+  the environment); state it as a named `theorem` under `Witness`.
+* **Report.** Every report (text and `verified.json`) carries `nonVacuity`: `shown` (+ `nonVacuityWitness`),
+  `not-shown` (a theorem with no contract hypothesis and no witness in the run: still verified),
+  `opted-out`, or `witness` (the report is itself a witness). Text line: "Non-vacuity: shown by W" /
+  "NOT SHOWN".
+* **Opt-out.** `--allow-no-witness` (`verify`, `verify-batch`) verifies the theorem anyway and marks it
+  "non-vacuity NOT shown (opted out)" in text and JSON. The status is computed after the run from the
+  verified reports of that run and is never stored in the result cache, so a cache hit gets the same
+  policy and the same marking as a fresh run; the opt-out does not make cache hits count differently.
+  `verify-batch`: the witness must be a request of the same batch and extraction.
+* Residual: a witness shows satisfiability by a concrete (toy) runtime, not by the real one (V3).
+
+## Olean provenance of a consumer package (round 15a)
+
+Lake builds the consumer's modules in the sandbox, and a sandboxed process (the lakefile, an elaborated
+module, an earlier run) can write the persistent workspace's `.lake/build`. Lake accepts any olean whose
+trace matches, so an olean of a different source (the variant's olean and output hashes, the genuine trace
+kept) was audited, replayed and pinned while the report attested the hashed source: the verdict block
+showed the variant's statement under the original source (audit/round15a; also on Janus main c7950624).
+The kernel and the auditor still checked the planted olean, so no false theorem was accepted, but the
+source attestation, and a result-cache entry keyed on it, were misleading.
+
+`janus verify --proof-root` therefore never audits Lake's oleans. For the theorem's consumer/dependency
+import closure, in dependency order, janus runs `lean -o` itself, sandboxed, on the hashed source (a trusted,
+protected copy of the snapshot), with the package's `[leanOptions]`, and only those oleans (a janus-owned,
+protected directory) are on the search path of the audit, the replay and the pins. Warm runs reuse the
+trusted olean store (`v1/oleans`: HMAC'd entries keyed by the toolchain, the framework build, the module, its
+source hash, its options and the olean hashes of its own imports; re-hashed on use), so an unchanged module is
+not compiled again (arm64 `examples/consumer` Add: +2.0 s cold, +0.002 s warm; amd64 Add: +1.0 s / +0.002 s).
+The compile is authoritative; byte equality with Lake's olean is not required.
+
+Only a configuration inside the strict `lakefile.toml` subset (the one the result cache accepts) can be
+reproduced, because janus must know every option Lake would pass. Any other (`lakefile.lean`, unparsed
+options, `moreLeanArgs`, an external `srcDir`) is refused ("olean provenance") unless
+`--allow-unchecked-provenance` is given; the report then says `oleanProvenance: "unchecked"` and the verdict
+block "Olean provenance: NOT CHECKED". Reports of a checked run say `"checked"`.

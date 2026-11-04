@@ -162,6 +162,20 @@ holds `impl`, `rt`, `H`, `linked` (the `link` program, for the call setup), `lin
 contract over `ofImpl impl`, by `janus_run`). The main theorem derives the `link` contract it executes with
 `NewobjectContract.of_codeIn (codeIn_ofImpl_of_apart hap) hnewO`; the audit round (`audit/roundofimpl`) checks both a
 witness exhibiting `hap` (accepted) and one that omits it (rejected, like any hypothesis the witness does not state).
+**Witnessing other contract families (stubs at the program's own contract addresses).** `janus verify`
+requires a non-vacuity witness for every main theorem that assumes runtime contracts
+(docs/SOUNDNESS.md, "Non-vacuity is required"). The stub library places short machine code at the
+addresses `Extracted.program.contractAddr` gives and proves the contract for it by running the code
+(`janus_run` at the real address; the stubs are position independent). Each family has its own file and
+ISA twin: `LiveStub*` (live allocation), `AllocWitness` (`janus_makeslice_witness`,
+`janus_growslice_witness`, `janus_alloc_witness`, and their `janus64_` twins), `LiveStubMap[Amd64]` (the
+map entry points on the models `MapModel0.ME`/`MC`: `janus_map_access1/2/2ptr/assign/makesmall/delete/clear`
+and `janus_map_access1mc`), `LiveStubStr` (`runtime.cmpstring`, `janus_cmpstring_witness`) and
+`LiveStubSys[Amd64]` (`runtime.entersyscall`/`exitsyscall`/`convT64`: `janus_sys_sched`,
+`janus_sys_convt64`). The linked program must be a closed constant and the address a numeral
+(`local macro "cA" : term => `(janus_eval% (Extracted.program.contractAddr "…"))`). Examples:
+`examples/proofs/{Lookup,Insert,InsertGet,NewMap,MinStr,MakeSlice,AppendOne,MakeAdder}.lean`,
+`examples/proofs-sys/*/WriteOut.lean` and their amd64 twins. The stubs are models, not the Go runtime.
 
 ### 5. Readiness of the runtime (`RtReady`, round 9)
 

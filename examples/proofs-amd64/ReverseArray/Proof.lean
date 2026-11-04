@@ -22,6 +22,16 @@ theorem half (m : Memory) (a k j : Nat) (hk : k = j) (hj : j = 0 ∨ j = 8) :
     show (18446744073709551616 : Nat) = 256 ^ 8 from rfl,
     Janus.Arm64.Memory.readLE_mod m _ _ 8 (by omega)]
 
+/-- The same half with the (redundant) `% 2^64` already dropped by the executor's simp set, as it
+leaves the high half of a 16-byte read: `v / 2^64` of a 16-byte value is below `2^64`. -/
+theorem half_hi (m : Memory) (a : Nat) :
+    m.readLE a 16 / 18446744073709551616 = m.readLE (a + 8) 8 := by
+  rw [show (18446744073709551616 : Nat) = 256 ^ 8 from rfl, Janus.Arm64.Memory.readLE_div m a 16 8 (by omega)]
+
+/-- The low half, as `v / 1 % 2^64`. -/
+theorem half_lo (m : Memory) (a : Nat) :
+    m.readLE a 16 / 1 % 18446744073709551616 = m.readLE a 8 := half m a 0 0 rfl (by omega)
+
 set_option maxHeartbeats 2000000 in
 theorem correctness (out inp : BitVec 64) :
     Ensures Extracted.program Extracted.entry [out, inp]
@@ -41,6 +51,8 @@ theorem correctness (out inp : BitVec 64) :
   all_goals intro i hi4; janus64_cases hi4
   all_goals janus64_simp
   all_goals first
+    | exact half_hi _ _
+    | exact half_lo _ _
     | with_reducible exact half _ _ _ 0 (by omega) (by omega)
     | (rw [half _ _ _ 8 (by omega) (by omega)]; done)
     | (rw [half _ _ _ 0 (by omega) (by omega), Nat.add_zero]; done)

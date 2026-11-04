@@ -40,7 +40,7 @@ theorem correctness (crc p : BitVec 64) :
   have hgr := hg.readable
   simp only [regSP, regG, stackguard0Offset, stackguard0] at hacc hle hnw hgl hgb hnw2 hgr
   janus64_run [hfsa]
-  refine ⟨⟨?_, rfl⟩, ?_⟩
+  refine ⟨?_, ?_⟩
   · rw [htls.g]; simp [regG]
   · have hc : (~~~BitVec.setWidth 32 crc).toNat = crc.toNat % 2 ^ 32 ^^^ 4294967295 := by
       rw [BitVec.toNat_not, BitVec.toNat_setWidth, xor_ones32 _ (Nat.mod_lt _ (by decide))]

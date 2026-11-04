@@ -33,6 +33,11 @@ gate_decoder() {
       cmp -s "$d/janus-decode-gate" "$root/.lake/build/bin/janus-decode" || { echo "audit/bin/janus-decode-gate differs from the current .lake/build/bin/janus-decode" >&2; return 1; }
     fi
     echo "$d/janus-decode-gate"
+  elif [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ]; then
+    # audit/run-rounds.sh (outside the gate) built janus-decode once and saved it; no lane builds
+    local p="$root/audit/bin/janus-decode-prebuilt"
+    [ -x "$p" ] || { echo "JANUS_AUDIT_PREBUILT=1 but audit/bin/janus-decode-prebuilt (saved by audit/run-rounds.sh) is missing" >&2; return 1; }
+    echo "$p"
   else
     local lb; lb="$(cd "$root" && lake build janus-decode 2>&1)" || { echo "lake build janus-decode failed:" >&2; tail -30 <<<"$lb" >&2; return 1; }
     echo "$root/.lake/build/bin/janus-decode"

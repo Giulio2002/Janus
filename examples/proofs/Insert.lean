@@ -62,4 +62,83 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64))
     simp only [setReg_apply, reduceIte, Nat.reduceEqDiff] at hset
     exact ⟨(hset v).1, (hset v).2.1⟩
 
+/-! ## Non-vacuity witness
+
+The stub of `Janus/Contracts/LiveStubMap.lean` sits at `runtime.mapassign_fast64`'s address in this program;
+`janus_map_assign` proves `Assign` for it (the model `MC`: one map of at most one entry) by running the stub code. Below, a
+concrete call state of `Insert(map, 5, 7)` satisfies the whole precondition and the call returns what the
+theorem describes. -/
+
+namespace Witness
+
+open Janus.Contracts.MapModel0 Janus.Contracts.MapSat Janus.Contracts.LiveStubMap
+open Janus.Contracts.IfaceModel (wsp wg)
+
+/-- The contract address, as a numeral (the executor needs concrete addresses). -/
+local macro "cA" : term => `(janus_eval% (Extracted.program.contractAddr "runtime.mapassign_fast64"))
+theorem addr : Extracted.program.contractAddr "runtime.mapassign_fast64" = cA := by decide
+def implAt : List Segment := [assignSeg cA]
+def linked : Program := Extracted.program.link implAt
+
+theorem h0 : Assign linked cA (MC ck64) HAssign := by janus_map_assign
+
+theorem hcon : Assign (Extracted.program.link implAt)
+    (Extracted.program.contractAddr "runtime.mapassign_fast64") (MC ck64) HAssign := by
+  rw [addr]; exact h0
+
+def emp : AMap (BitVec 64) (BitVec 64) := AMap.empty
+
+def dat : DataSegment := Extracted.data.head!
+def mem0 : Memory := withData mmem dat
+
+def ret : Nat := 0x1000
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 MP else if i = 1 then 5 else if i = 2 then 7 else if i = 28 then BitVec.ofNat 64 wg
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (linked.withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s0 :=
+  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+
+set_option maxRecDepth 100000 in
+theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
+  unfold Program.DataLoaded
+  decide
+
+set_option maxRecDepth 100000 in
+theorem callerOK : CallerOK (MC ck64) s0 48 32 := by
+  refine ⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide,
+    by decide, by decide, ?_, ?_, ?_⟩
+  · simp only [MC_priv, MC_depth, priv0, outside_cons, outside_nil, and_true]; decide
+  · simp only [Disjoint, MC_depth]; decide
+  · simp only [MC_priv, priv0, outside_cons, outside_nil, and_true]; decide
+
+set_option maxRecDepth 100000 in
+theorem pre : CallerOK (MC ck64) s0 48 32 ∧ (MC ck64).Typ mapType ∧ (BitVec.ofNat 64 MP).toNat ≠ 0 ∧ (MC ck64).Rep s0.mem (BitVec.ofNat 64 MP).toNat AMap.empty ∧
+    HAssign [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s0.regs 28).toNat (s0.sp.toNat - 48) (rtView (MC ck64).priv s0.mem) :=
+  ⟨callerOK, trivial, by decide, ⟨rfl, by decide, by decide, Or.inl ⟨by decide, rfl⟩⟩, by unfold HAssign; decide⟩
+
+/-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapassign_fast64`
+meeting `Assign` for it, and a call state of `Insert(map, 5, 7)` that satisfies the precondition. -/
+theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64)) (H : RtReady) (ret : Nat)
+    (s : State), M.Laws ∧
+    Assign (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.mapassign_fast64") M H ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s ∧
+    (CallerOK M s 48 32 ∧ M.Typ mapType ∧ (BitVec.ofNat 64 MP).toNat ≠ 0 ∧ M.Rep s.mem (BitVec.ofNat 64 MP).toNat AMap.empty ∧
+    H [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s.regs 28).toNat (s.sp.toNat - 48) (rtView M.priv s.mem)) :=
+  ⟨implAt, (MC ck64), HAssign, ret, s0, (MC_laws _), hcon, hret, setup, pre⟩
+
+/-- The theorem fires: `Insert(map, 5, 7)` returns what the theorem says. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    ((MC ck64).Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7) ∧ (MC ck64).Env s'.mem (s0.regs 28)) :=
+  correctness implAt (MC ck64) (MC_laws _) HAssign hcon (BitVec.ofNat 64 MP) 5 7 AMap.empty ret hret s0 setup pre
+
+end Witness
+
 end Proof

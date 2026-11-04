@@ -186,6 +186,35 @@ def program : Program :=
   { segments := segments, stubs := stubs, exitAddr := exitAddr, data := data, contracts := contracts }
 
 
+/-- anonymous data at 0xbfa51 (.rodata), named by the hash of its first bytes -/
+def dataAddr.«.rodata#72d80f03» : Nat := 0xbfa51
+/-- anonymous data at 0xbfaad (.rodata), named by the hash of its first bytes -/
+def dataAddr.«.rodata#a3d2030d» : Nat := 0xbfaad
+/-- anonymous data at 0xbfba8 (.rodata), named by the hash of its first bytes -/
+def dataAddr.«.rodata#d76ccd8d» : Nat := 0xbfba8
+/-- anonymous data at 0xc8fb7 (.rodata), named by the hash of its first bytes -/
+def dataAddr.«.rodata#7f70d426» : Nat := 0xc8fb7
+/-- anonymous data at 0xc9b18 (.rodata), named by the hash of its first bytes -/
+def dataAddr.«.rodata#7df666ff» : Nat := 0xc9b18
+/-- `runtime.overrideWrite` (.bss, 8 bytes) -/
+def dataAddr.«runtime.overrideWrite» : Nat := 0x168c70
+def dataSize.«runtime.overrideWrite» : Nat := 8
+/-- `runtime.panicking` (.noptrbss, 4 bytes) -/
+def dataAddr.«runtime.panicking» : Nat := 0x18f564
+def dataSize.«runtime.panicking» : Nat := 4
+/-- `runtime.printBacklogIndex` (.noptrbss, 8 bytes) -/
+def dataAddr.«runtime.printBacklogIndex» : Nat := 0x18f688
+def dataSize.«runtime.printBacklogIndex» : Nat := 8
+/-- `runtime.debuglock` (.noptrbss, 8 bytes) -/
+def dataAddr.«runtime.debuglock» : Nat := 0x18f690
+def dataSize.«runtime.debuglock» : Nat := 8
+/-- `runtime.crashFD` (.noptrbss, 8 bytes) -/
+def dataAddr.«runtime.crashFD» : Nat := 0x18f6e8
+def dataSize.«runtime.crashFD» : Nat := 8
+/-- `runtime.printBacklog` (.noptrbss, 512 bytes) -/
+def dataAddr.«runtime.printBacklog» : Nat := 0x190320
+def dataSize.«runtime.printBacklog» : Nat := 512
+
 /-- The entry point of `example.com/print.PrintX`. -/
 def entryPrintX : Nat := 0x931e0
 

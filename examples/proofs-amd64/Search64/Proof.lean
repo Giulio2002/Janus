@@ -208,39 +208,39 @@ theorem correctness (p nq c : BitVec 64) :
     fun off h => Janus.Arm64.Memory.accessible_mono _ hp (by omega) (by omega)
   janus64_cases hn
   · janus64_run [hfsa, hcan', hq0, hq]
-    refine ⟨⟨?_, rfl⟩, ?_⟩
+    refine ⟨?_, ?_⟩
     · rw [htls.g]; simp [regG]
     exact search_result s.mem p.toNat c.toNat 0 (by decide)
   · janus64_run [hfsa, hcan', hq0, hq]
-    refine ⟨⟨?_, rfl⟩, ?_⟩
+    refine ⟨?_, ?_⟩
     · rw [htls.g]; simp [regG]
     exact search_result s.mem p.toNat c.toNat 1 (by decide)
   · janus64_run [hfsa, hcan', hq0, hq]
-    refine ⟨⟨?_, rfl⟩, ?_⟩
+    refine ⟨?_, ?_⟩
     · rw [htls.g]; simp [regG]
     exact search_result s.mem p.toNat c.toNat 2 (by decide)
   · janus64_run [hfsa, hcan', hq0, hq]
-    refine ⟨⟨?_, rfl⟩, ?_⟩
+    refine ⟨?_, ?_⟩
     · rw [htls.g]; simp [regG]
     exact search_result s.mem p.toNat c.toNat 3 (by decide)
   · janus64_run [hfsa, hcan', hq0, hq]
-    refine ⟨⟨?_, rfl⟩, ?_⟩
+    refine ⟨?_, ?_⟩
     · rw [htls.g]; simp [regG]
     exact search_result s.mem p.toNat c.toNat 4 (by decide)
   · janus64_run [hfsa, hcan', hq0, hq]
-    refine ⟨⟨?_, rfl⟩, ?_⟩
+    refine ⟨?_, ?_⟩
     · rw [htls.g]; simp [regG]
     exact search_result s.mem p.toNat c.toNat 5 (by decide)
   · janus64_run [hfsa, hcan', hq0, hq]
-    refine ⟨⟨?_, rfl⟩, ?_⟩
+    refine ⟨?_, ?_⟩
     · rw [htls.g]; simp [regG]
     exact search_result s.mem p.toNat c.toNat 6 (by decide)
   · janus64_run [hfsa, hcan', hq0, hq]
-    refine ⟨⟨?_, rfl⟩, ?_⟩
+    refine ⟨?_, ?_⟩
     · rw [htls.g]; simp [regG]
     exact search_result s.mem p.toNat c.toNat 7 (by decide)
   · janus64_run [hfsa, hcan', hq0, hq]
-    refine ⟨⟨?_, rfl⟩, ?_⟩
+    refine ⟨?_, ?_⟩
     · rw [htls.g]; simp [regG]
     exact search_result s.mem p.toNat c.toNat 8 (by decide)
 

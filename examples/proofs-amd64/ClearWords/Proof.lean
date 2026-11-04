@@ -231,7 +231,7 @@ theorem correctness (b len cap : BitVec 64) :
       have hacc' : t'.mem.accessible ((s.regs 4).toNat - 32) (32 + 16) true = true := by
         rw [hz'.accessible]; simpa using hacc
       janus64_run
-      refine ⟨rfl, fun j hj => hz'.readLE (by omega) (by omega), fun x h1 h2 => ?_⟩
+      refine ⟨fun j hj => hz'.readLE (by omega) (by omega), fun x h1 h2 => ?_⟩
       rw [hz'.2 x, ite_eq_right (by omega), Janus.Arm64.Memory.bytes_writeLE_outside _ (by omega),
         Janus.Arm64.Memory.bytes_writeLE_outside _ (by omega),
         Janus.Arm64.Memory.bytes_writeLE_outside _ (by omega)]

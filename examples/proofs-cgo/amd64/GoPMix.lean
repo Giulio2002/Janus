@@ -227,19 +227,17 @@ theorem go_spec (ax ay bx by_ n : BitVec 64) :
     janus64_simp [h_ret]
   apply ReturnsC.of_reaches
   janus64_run [h4, h5, h14, h15, hfsa', hfsg', hax, hay, hbx, hby, hr]
-  have hz : (s.regs 4).toNat - 24 - ((s.regs 4).toNat - 64 + 40) = 0 := by omega
-  simp only [hz, r0, r1, fw, Nat.mul_zero, Nat.add_zero, Nat.reduceMul]
+  simp only [r0, r1, fw, Nat.mul_zero, Nat.add_zero, Nat.reduceMul]
   janus64_simp
-  have h8 : (s.regs 4).toNat - 16 - ((s.regs 4).toNat - 64 + 40) = 8 := by omega
   simp only [Nat.reducePow] at hax hay hbx hby
-  rw [h8, hax, hay, hbx, hby]
+  rw [hax, hay, hbx, hby]
   simp only [BitVec.ofNat_toNat, BitVec.setWidth_eq]
   have hl := bytesOf_pair_lo (BitVec.ofNat 64 (prod ax ay bx by_)) (n + 1#64)
   have hh := bytesOf_pair_hi (BitVec.ofNat 64 (prod ax ay bx by_)) (n + 1#64)
   simp only [bytesOf, Nat.pow_zero, Nat.reducePow] at hl hh
   rw [hl, hh]
   have hp : prod ax ay bx by_ < 2 ^ 64 := Nat.mod_lt _ (by decide)
-  refine ⟨rfl, ?_, BitVec.ofNat_toNat _ _ |>.trans (BitVec.setWidth_eq _)⟩
+  refine ⟨?_, BitVec.ofNat_toNat _ _ |>.trans (BitVec.setWidth_eq _)⟩
   simp only [BitVec.toNat_ofNat]; omega
 
 /-! ## Composition -/

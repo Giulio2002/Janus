@@ -345,7 +345,7 @@ theorem go_spec (ptr len cap : BitVec 64) :
   apply ReturnsC.of_reaches
   janus64_run [h4, h5, h14, h15, hfsa', hfsg']
   -- the slice was read through the stack stores of `Sum` and `_Cfunc_c_sum`
-  refine ⟨rfl, congrArg (· % 4294967296) ?_⟩
+  refine (congrArg (· % 4294967296) ?_)
   apply sum32_congr
   intro i hi
   clear hmf

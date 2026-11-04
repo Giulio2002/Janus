@@ -548,8 +548,9 @@ name; …`). The classification is informational and untrusted, like reachabilit
 ## Verify
 
 ```sh
-janus verify <outdir> [--proof FILE] [--theorem NAME]... [--proof-root PKG [--allow-path-deps]] [--results FILE] [--json]
+janus verify <outdir> [--proof FILE] [--theorem NAME]... [--proof-root PKG [--allow-path-deps] [--allow-unchecked-provenance]] [--results FILE] [--json]
              [--fresh] [--fresh-framework] [--replay-fresh] [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox] [--asl]
+             [--full-errors] [--keep-workspace]
 janus verify artifacts/Get --proof cmd/janus/testdata/Trivial.lean
 ```
 
@@ -582,12 +583,37 @@ library, Mathlib) when every one of them, transitively, is a git dependency pinn
 40-hex revision and checked out at exactly that revision with no local modifications
 ([details](CONSUMERS.md#extra-dependencies)). `--allow-path-deps` additionally accepts local
 path dependencies other than janus, copied as they are and recorded as `"type": "path"` (not
-pinned). `--json` prints the report as JSON; `--fresh` rebuilds the framework/caches from
+pinned). With `--proof-root`, janus compiles the theorem's consumer/dependency closure itself (olean provenance, SOUNDNESS.md); a package outside the strict `lakefile.toml` subset (a `lakefile.lean`, unparsed options) is refused unless `--allow-unchecked-provenance` is given (the report then says "NOT CHECKED"). `--json` prints the report as JSON; `--fresh` rebuilds the framework/caches from
 scratch (and replays every module, ignoring the replay cache); `--fresh-framework` additionally ignores the gate-private framework verdict store
 (`JANUS_VERDICT_CACHE=<private dir>`, docs/SOUNDNESS.md "Gate-private framework verdicts"), which
 lets `--fresh` verifications of one gate share one replay of an identical framework build; `--replay-fresh` additionally
 replays the theorem's module with `leanchecker --fresh`, re-checking its whole environment,
 Lean core included, from an empty environment (slow: minutes).
+
+**Iterating on a failing proof: `--full-errors` and `--keep-workspace`** (also accepted by
+`verify-batch`). Both are opt-in and output only: they change neither what is checked, nor what is
+trusted, nor what the result cache keys on or records; the default output is unchanged.
+
+* By default a failure prints each Lean error cut at 2000 characters, and Lean itself elides deep
+  terms and proof terms as `⋯` in the goals and hypotheses it prints (`pp.deepTerms`, `pp.proofs`,
+  `pp.maxSteps`). `--full-errors` runs, **after** the proof has already failed to compile, the same
+  sandboxed compile once more with those printer limits lifted (`-Dpp.deepTerms=true
+  -Dpp.proofs=true -Dpp.maxSteps=1000000000`), prints its complete output (`Details:` and the
+  `--json` `details` field, with no per-error cut), and writes it to
+  `<outdir>/diag/<proof file, / as .>.lean-output.log`, naming the path in the `Next:` line. The
+  rerun's result is display only (it cannot turn a failure into a pass and nothing it produces is
+  loaded or cached); a proof that compiles never runs it.
+* `--keep-workspace` leaves, on both ISAs and for passes and failures alike, a directory in which
+  `lake env lean F.lean` works against the built `Extracted` module (its olean and source), and prints it:
+  with `--proof-root`, the consumer workspace of the cache (`<cache>/v1/consumer/<family>/<extraction>`:
+  `cd <workspace>/root && lake env lean Scratch.lean`; with `--fresh` the otherwise temporary
+  workspace is not removed); with a single `--proof` file, `<outdir>/workspace/` (`cd <outdir>/workspace && lake env lean Proof.lean`; a Lake package that
+  requires the framework build and holds `Extracted.lean`, its `.olean`, a copy of the proof as
+  `Proof.lean` and a `lakefile.toml`). Because a result-cache hit builds no workspace, the flag makes
+  the run skip the cache **read**; a pass is recorded exactly as without the flag. A kept workspace
+  is never read back by janus (not as evidence, not as a cache): run `janus verify` again to check
+  anything. A workspace in the cache is removed by `janus cache gc` after the retention period
+  (see [the cache](#cache)); `<outdir>/workspace` stays until the next run replaces it.
 
 **Several theorems in one run.** `--theorem` may be repeated (`--theorem Proof.correctness
 --theorem Proof.Witness.nonvacuous --theorem Proof.Witness.returns`). The proof file is compiled

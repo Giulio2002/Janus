@@ -477,6 +477,7 @@ type consumerWS struct {
 	lock                *fileLock
 	memOwn              [][2]int // job-log ranges of per-request builds killed for memory (already attributed)
 	temp                bool
+	dg                  diagFlags         // --full-errors / --keep-workspace (diagflags.go): output only
 	janusFiles          map[string][]byte // what janus/ must contain: framework + Extracted
 	// pins are the SHA-256 of every module-data file of janus/.lake/build/lib/lean (the trusted
 	// framework build copied from the base, plus the trusted Extracted and JanusTrusted),
@@ -487,6 +488,8 @@ type consumerWS struct {
 	// replayCache: reuse cached passing kernel replays (off with --fresh or without a
 	// sandbox); replayFresh: also replay each theorem module with leanchecker --fresh.
 	replayCache, replayFresh bool
+	// allowUnchecked: accept a package whose oleans janus cannot build itself (provenance.go).
+	allowUnchecked bool
 	// asl: the trusted JanusASL build, with --asl (each passing request then gets its ASL stage).
 	asl *aslBuild
 	// auditExe is the compiled auditor of the cached framework base and auditExeSha the SHA-256
@@ -503,6 +506,17 @@ type consumerWS struct {
 	opened bool
 }
 
+// reportKept (--keep-workspace) prints where the workspace is and how to run Lean in it. The
+// workspace is the ordinary consumer workspace of the cache (or, with --fresh, the temporary one,
+// which is then not removed): janus only reports it.
+func (ws *consumerWS) reportKept(w io.Writer) {
+	if ws == nil || !ws.dg.KeepWorkspace {
+		return
+	}
+	reportKept(w, ws.Dir, "cd "+ws.Root+" && lake env lean YourScratch.lean   (Extracted is "+
+		filepath.Join(ws.janusLib(), "Extracted.olean")+")")
+}
+
 // janusLib is the workspace's framework library directory.
 func (ws *consumerWS) janusLib() string {
 	return filepath.Join(ws.JanusDir, ".lake", "build", "lib", "lean")
@@ -513,6 +527,10 @@ func (ws *consumerWS) janusLib() string {
 // dependency packages too (after their build, for the audit and the replay).
 func (ws *consumerWS) protected(readOnlyBuilds bool) []string {
 	dirs := []string{ws.JanusDir}
+	// janus's own oleans and trusted sources (provenance.go): never writable by a sandboxed process
+	if st, err := os.Stat(ws.ownDir()); err == nil && st.IsDir() {
+		dirs = append(dirs, ws.ownDir())
+	}
 	if readOnlyBuilds {
 		dirs = append(dirs, ws.Root)
 		if _, err := os.Stat(ws.DepsDir); err == nil {
@@ -913,7 +931,7 @@ func (ws *consumerWS) close() {
 	if ws.opened {
 		ws.endUse() // the workspace was consistent when it was last used: the next opener may reuse it
 	}
-	if ws.temp {
+	if ws.temp && !ws.dg.KeepWorkspace {
 		os.RemoveAll(ws.Dir)
 	}
 	ws.lock.unlock()
@@ -1130,6 +1148,8 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 	var cFwPins *pinnedLib
 	cAuditSha := ""
 	cacheOn := resultCacheOK(sb, opts)
+	dg := diagFlagsOf(opts)
+	keepWS := dg.KeepWorkspace
 	if cacheOn {
 		if p, perr := frameworkPins(filepath.Join(lease.dir, ".lake", "build", "lib", "lean"), fw.Files); perr == nil && len(p.want) > 0 {
 			cFwPins, cAuditSha = p, fw.stampedAuditExe(lease.dir)
@@ -1188,6 +1208,9 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 					anyHit = true
 				}
 			}
+			if keepWS { // --keep-workspace needs a real run (a hit opens no workspace); a pass is still recorded below
+				anyHit = false
+			}
 			if anyHit && consumerInputsUnchanged(fw, pkg, group, opts) && func() bool {
 				// the keys, recomputed from the bytes as they are now, must be the ones just looked up
 				for k, r := range group {
@@ -1237,8 +1260,11 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 	defer ws.close()
 	tm.mark("workspace open")
 	ws.replayFresh = opts["replay-fresh"] != ""
+	ws.allowUnchecked = opts["allow-unchecked-provenance"] != ""
 	ws.asl = asl
+	ws.dg = dg
 	verifyGroup(fw, pkg, ws, group)
+	ws.reportKept(stderr)
 	for k, i := range groupIdx {
 		outs[i].Report, outs[i].Err = group[k].Report, group[k].Err
 		if group[k].Err == nil && group[k].Report != nil && keys[k] != "" && !group[k].Report.Cached {
@@ -1293,6 +1319,14 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	}
 	extractedPath := reqs[0].cr.Extracted
 	mapPaths := ws.mapper(pkg, extractedPath)
+
+	// Olean provenance (provenance.go): janus compiles the closure itself when it can reproduce Lake's options.
+	provenance := provUnchecked
+	ob, why := newOwnBuild(ws, pkg)
+	if ob == nil && !ws.allowUnchecked {
+		failAll(provDiag("The oleans of this package cannot be built by janus itself: " + why + ", so the report could not attest that the verified environment is what the hashed source compiles to."))
+		return
+	}
 
 	leanVersion := ws.tc.version
 
@@ -1387,6 +1421,35 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	}
 
 	consumerTimer.mark("lake query of the modules (re-runs the lakefile), pin recheck")
+	if ob != nil {
+		// Lake's oleans (and the lakefile's last word) are ignored from here on: the audit, the replay and the pins
+		// use only the oleans janus compiled from the hashed source.
+		if err := ob.reset(); err != nil {
+			failAll(wsDiag(err))
+			return
+		}
+		for _, r := range reqs {
+			if r.Err != nil {
+				continue
+			}
+			if _, err := ob.ensure(r.module, r.rel); err != nil {
+				r.Err = err
+			}
+		}
+		own, ownDeps, err := ob.libs()
+		if err != nil {
+			failAll(wsDiag(err))
+			return
+		}
+		libDir, depLibs = own, ownDeps
+		searchDirs = []string{janusLib, libDir}
+		for _, d := range pkg.Deps {
+			searchDirs = append(searchDirs, depLibs[d.Info.Name])
+		}
+		leanPath = ws.tc.leanPathEnv(searchDirs...)
+		provenance = provChecked
+		consumerTimer.mark(fmt.Sprintf("olean provenance (%d compiled, %d from the store)", ob.compiled, ob.hits))
+	}
 	// Module identity across the framework, the consumer and its dependencies (deps.go); the
 	// dependency module roots tell the auditor which constants come from declared dependencies.
 	depRoots, err := checkModuleLayout(janusLib, ws.janusFiles, libDir, depLibs, ws.tc.libDir)
@@ -1642,7 +1705,10 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			Contracts:             r.cr.Identity.contractList(),
 			Role:                  r.audit.Role,
 			MatchedMain:           r.audit.MatchedMain,
+			MatchedMains:          r.audit.MatchedMains,
+			MatchedModules:        r.audit.MatchedModules,
 			ContractHyps:          r.audit.ContractHyps,
+			OleanProvenance:       provenance,
 			Consumer: &consumerInfo{
 				Root: pkg.Root, Lakefile: pkg.Lakefile, Module: r.module, SnapshotSha256: pkg.Sha256,
 				Files: pkg.fileHashes(), Dependency: pkg.Dep, Dependencies: pkg.depInfos(), AllowPathDeps: pkg.opts.AllowPathDeps,
@@ -1665,20 +1731,34 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 
 // buildFailure classifies a failed build of a request's module by where Lean reported errors.
 func buildFailure(out string, r *consumerRequest, ws *consumerWS, pkg *consumerPkg) error {
-	summary := summarizeLeanErrors(out, 2000)
+	// --full-errors: the classification below uses the build's own output; what is SHOWN is a
+	// rerun of the failing module with the pretty-printer limits raised (display only).
+	shown, logPath := out, ""
+	if ws.dg.FullErrors {
+		argv := append(append([]string{"env", "lean"}, fullLeanOpts...), filepath.Join(ws.Root, filepath.FromSlash(r.rel)))
+		if _, full, _ := ws.run(argv...); strings.TrimSpace(full) != "" {
+			shown = ws.mapper(pkg, r.cr.Extracted)(full)
+			shown = strings.ReplaceAll(shown, pkg.Root+string(filepath.Separator), displayPath(pkg.Root)+string(filepath.Separator))
+		}
+		logPath = writeFullOutput(r.Outdir, r.rel, shown)
+	}
+	summary := summarizeLeanErrors(shown, ws.dg.errLimit())
 	if summary == "" {
-		summary = lastLines(out, 20)
+		summary = lastLines(shown, 20)
 	}
 	ex := displayPath(r.cr.Extracted)
+	var d *diag
 	switch {
 	case strings.Contains(out, ex+":") && regexp.MustCompile(regexp.QuoteMeta(ex)+`:\d+:\d+: error`).MatchString(out):
-		return &diag{Invalid: true, Msg: "Lean rejected the extracted program " + ex + ".\n" + summary, Stage: "extraction elaboration",
-			Next: "Check that the Janus framework matches this extractor version.", Details: out}
+		d = &diag{Invalid: true, Msg: "Lean rejected the extracted program " + ex + ".\n" + summary, Stage: "extraction elaboration",
+			Next: "Check that the Janus framework matches this extractor version.", Details: shown}
 	case regexp.MustCompile(`(?m)Janus/[^\s:]+\.lean:\d+:\d+: error`).MatchString(out) && !strings.Contains(out, pkg.Root):
-		return &diag{Invalid: true, Msg: "Building the Janus framework failed.\n" + summary, Stage: "Janus library build", Details: out}
+		d = &diag{Invalid: true, Msg: "Building the Janus framework failed.\n" + summary, Stage: "Janus library build", Details: shown}
+	default:
+		d = &diag{Invalid: true, Msg: "Lean rejected the proof module " + r.rel + " (or a module it imports).\n" + summary, Stage: "proof checking",
+			Next: "Fix the proof. It must import Extracted and prove " + r.Theorem + ".", Details: shown}
 	}
-	return &diag{Invalid: true, Msg: "Lean rejected the proof module " + r.rel + " (or a module it imports).\n" + summary, Stage: "proof checking",
-		Next: "Fix the proof. It must import Extracted and prove " + r.Theorem + ".", Details: out}
+	return withFullOutput(d, logPath)
 }
 
 func lastLines(s string, n int) string {

@@ -38,3 +38,4 @@ import JanusTests.OmegaCap
 import JanusTests.AddrSub
 import JanusTests.JanusExact
 import JanusTests.AddrRefute
+import JanusTests.FrameClear

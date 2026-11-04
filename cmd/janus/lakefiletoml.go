@@ -47,6 +47,7 @@ type tomlPair struct {
 	str   string   // the decoded value when it is a string
 	isStr bool     // the value is a string
 	strs  []string // every string of the value (the string itself, or the strings of an array)
+	raw   string   // the value as written (trimmed)
 }
 
 type tomlScanner struct {
@@ -257,11 +258,12 @@ func parseLakefileToml(src string) ([]tomlPair, bool) {
 			t.i++
 			t.skipSpaces()
 			t.strs = nil
+			vstart := t.i
 			str, isStr := t.value()
 			if t.bad {
 				break
 			}
-			out = append(out, tomlPair{table: table, key: key, str: str, isStr: isStr, strs: t.strs})
+			out = append(out, tomlPair{table: table, key: key, str: str, isStr: isStr, strs: t.strs, raw: t.s[vstart:t.i]})
 			t.endOfLine()
 		}
 	}
@@ -274,7 +276,9 @@ func srcDirInside(v string) bool {
 		return false
 	}
 	for _, c := range strings.Split(v, "/") {
-		if c == ".." {
+		// the snapshot skips dot directories and skippedDirs, while the workspace keeps .lake across runs and a
+		// sandboxed build can write there: sources below them are not covered by the cache key (round 15a)
+		if c == ".." || (strings.HasPrefix(c, ".") && c != ".") || skippedDirs[c] {
 			return false
 		}
 	}
@@ -328,7 +332,20 @@ var moduleNameKeys = map[string]bool{
 }
 
 func plainModuleName(v string) bool {
-	return v != "" && !strings.Contains(v, "..") && !strings.ContainsAny(v, "/\\«»\x00:")
+	if v == "" || strings.Contains(v, "..") || strings.ContainsAny(v, "/\\«»\x00:") {
+		return false
+	}
+	// a module `a.b.C` is the file a/b/C.lean below srcDir: no empty component and none of the directories the
+	// snapshot skips (round 15a), so every file a root can name is a file of the snapshot
+	for _, c := range strings.Split(v, ".") {
+		if c == "" && !strings.Contains(v, "*") && !strings.Contains(v, "+") {
+			return false
+		}
+		if skippedDirs[c] {
+			return false
+		}
+	}
+	return true
 }
 
 // leanOptionOK: the option names a package may set in [leanOptions] and still be cached. Options

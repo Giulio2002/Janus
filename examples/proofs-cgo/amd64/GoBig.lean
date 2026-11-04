@@ -271,7 +271,7 @@ theorem go_spec (x y : BitVec 64) :
     janus64_simp [h_ret]
   apply ReturnsC.of_reaches
   janus64_run [h4, h5, h14, h15, hfsa', hfsg', hr, readLE_writeLE_pair_lo, readLE_writeLE_pair_hi]
-  refine ⟨rfl, ?_, ?_⟩ <;> apply BitVec.eq_of_toNat_eq <;>
+  refine ⟨?_, ?_⟩ <;> apply BitVec.eq_of_toNat_eq <;>
     simp only [BitVec.toNat_ofNat, BitVec.toNat_add, BitVec.toNat_sub, Nat.mod_mod]
 
 /-! ## Composition -/

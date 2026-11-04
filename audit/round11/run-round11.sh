@@ -14,7 +14,9 @@ export PATH=/usr/local/go/bin:$PATH
 R=audit/round11
 J="$root/$R/bin/janus"; mkdir -p "$(dirname "$J")"
 CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
+# JANUS_AUDIT_PREBUILT=1 (audit/run-rounds.sh built everything once): no build here (a concurrent lake build rewrites the framework
+# under the other lanes: "the Janus framework build changed after the trusted compile").
+[ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 W=$R/work/rows; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-round11.XXXXXX")" || exit 1
@@ -51,7 +53,7 @@ check() {
   if [ "$2" = 0 ]; then printf '  %-40s ok       %s\n' "$1" "$3"
   else printf '  %-40s FAILED   %s   <-- BROKEN\n' "$1" "$3"; broken+=("$1"); fi
 }
-v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
+v() { out="$("$J" verify --allow-no-witness --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
 
 echo "== L1: a closed runtime model in a contract hypothesis (any model type, not a whitelist)"
 type tmark >/dev/null 2>&1 && tmark "== L1: a closed runtime model in a contract hypoth"

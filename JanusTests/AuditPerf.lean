@@ -1,4 +1,5 @@
 import Janus.Tools.Audit
+import Janus  -- build-order edge: the #eval below imports `Janus` at elaboration time
 
 /-!
 # The auditor's whole-environment passes stay linear (regression)

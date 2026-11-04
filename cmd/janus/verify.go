@@ -87,6 +87,11 @@ type verifiedReport struct {
 	Role string `json:"role,omitempty"`
 	// MatchedMain is, for a witness, the main theorem of the proof module that it instantiates.
 	MatchedMain string `json:"matchedMain,omitempty"`
+	// MatchedMains is every main theorem of the proof module the witness is an instance of (MatchedMain is the
+	// first): one witness may serve several main theorems that share a precondition.
+	MatchedMains []string `json:"matchedMains,omitempty"`
+	// MatchedModules[i] is the module that declares MatchedMains[i].
+	MatchedModules []string `json:"matchedModules,omitempty"`
 	// ContractHyps are the runtime contracts the STATEMENT applies, computed from the statement
 	// itself (round 14): "NewobjectContract@runtime.newobject". Empty: the statement assumes
 	// nothing about the runtime, whatever the extraction left out (Contracts).
@@ -105,6 +110,17 @@ type verifiedReport struct {
 	// Notes flag operations of the statement (and of the disclosed definitions) whose standard
 	// Lean meaning often reads unexpectedly (round 7 K1). They are not errors.
 	Notes []string `json:"notes,omitempty"`
+	// NonVacuity (policy): "shown" (a kernel-checked non-vacuity witness, NonVacuityWitness, verified in the
+	// same run, supports THIS theorem), "not-shown" (none; only possible for a theorem without runtime-contract
+	// hypotheses, or when opted out), "opted-out" (--allow-no-witness: a contract-assuming theorem accepted
+	// without a witness) or "witness" (this report is itself a witness). Set after the run, never cached.
+	NonVacuity        string `json:"nonVacuity,omitempty"`
+	NonVacuityWitness string `json:"nonVacuityWitness,omitempty"`
+	// NonVacuityReturns names a verified Witness.returns for this theorem, when there is one (informational).
+	NonVacuityReturns string `json:"nonVacuityReturns,omitempty"`
+	// OleanProvenance (consumer packages): "checked" (every consumer/dependency module of the environment was
+	// compiled by janus itself from the hashed source) or "unchecked" (--allow-unchecked-provenance: Lake's oleans).
+	OleanProvenance string `json:"oleanProvenance,omitempty"`
 	// Cached: this report is the recorded result of an earlier verification with exactly the
 	// same inputs (resultcache.go), made at CachedFrom.
 	Cached     bool   `json:"cached,omitempty"`
@@ -125,6 +141,8 @@ type auditResult struct {
 	Notes             []string   `json:"notes"`               // surprising standard operations (round 7 K1)
 	Role              string     `json:"role"`                // round 14: main, witness-nonvacuous, witness-returns
 	MatchedMain       string     `json:"matchedMain"`         // round 14: for a witness, the main theorem it supports
+	MatchedMains      []string   `json:"matchedMains"`        // every main theorem of the module the witness supports
+	MatchedModules    []string   `json:"matchedModules"`      // the module declaring each of them
 	ContractHyps      []string   `json:"contractHyps"`        // round 14: the contracts the STATEMENT applies ("Contract@runtime.fn")
 	Imports           [][]string `json:"imports"`             // [module, direct imports…] for every non-core module
 }
@@ -259,7 +277,7 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "no-result-cache")
+	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "no-result-cache", "allow-no-witness", "allow-unchecked-provenance", "full-errors", "keep-workspace")
 	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root", "results")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -282,8 +300,16 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	if flags["asl"] {
 		opts["asl"] = "true"
 	}
+	if flags["allow-unchecked-provenance"] {
+		opts["allow-unchecked-provenance"] = "true"
+	}
 	if flags["no-result-cache"] { // neither read nor write the verification-result cache (resultcache.go)
 		opts["no-result-cache"] = "true"
+	}
+	for _, n := range diagFlagNames { // output-only flags (diagflags.go): they never reach a cache key
+		if flags[n] {
+			opts[n] = "true"
+		}
 	}
 	if flags["allow-path-deps"] {
 		if opts["proof-root"] == "" {
@@ -297,6 +323,9 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	}
 	r, err := verifyAndReport(outdir, opts, stderr)
 	if err != nil {
+		return jsonFailure(stdout, flags["json"], err)
+	}
+	if err := nonVacuitySingle(outdir, r, flags["allow-no-witness"]); err != nil {
 		return jsonFailure(stdout, flags["json"], err)
 	}
 	if flags["json"] {
@@ -415,6 +444,13 @@ func printVerifiedAt(stdout io.Writer, outdir, reportPath string, r *verifiedRep
 	fmt.Fprintf(stdout, "  Lean: %s\n", r.LeanVersion)
 	for _, l := range roleLines(r) {
 		fmt.Fprintln(stdout, l)
+	}
+	fmt.Fprintln(stdout, nonVacuityLine(r))
+	switch r.OleanProvenance {
+	case provChecked:
+		fmt.Fprintln(stdout, "  Olean provenance: checked (the consumer/dependency modules were compiled by janus from the hashed source)")
+	case provUnchecked:
+		fmt.Fprintln(stdout, "  Olean provenance: NOT CHECKED (--allow-unchecked-provenance: the oleans are the ones Lake built in the sandbox, not shown to be compiled from the hashed source)")
 	}
 	if len(r.Kernel) > 0 {
 		fmt.Fprintf(stdout, "  Kernel interface: %s (.syscall stubs: their effect is the kernel contract of Janus.Kernel, under ReturnsK/EnsuresK only)\n",
@@ -692,6 +728,8 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	// One result-cache key per theorem: each binds its own theorem name (and every other input),
 	// so an entry recorded for one theorem can never answer for another.
 	resultKeys := make([]string, len(outs))
+	dg := diagFlagsOf(opts)
+	keepWS := dg.KeepWorkspace
 	if resultCacheOK(sb, opts) {
 		// Created before any sandboxed step, so the sandbox's tmpfs always covers it.
 		keyOK := false
@@ -709,6 +747,9 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			in := cacheIn
 			in.thm = outs[i].Theorem
 			resultKeys[i] = in.key()
+			if keepWS { // --keep-workspace needs a real run (a hit builds no workspace); a pass is still recorded below
+				continue
+			}
 			if prevs[i] = lookupResult(resultKeys[i]); prevs[i] != nil {
 				anyHit = true
 			}
@@ -880,6 +921,25 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	if err := os.WriteFile(filepath.Join(workDir, "Proof.lean"), proofSrc, 0o644); err != nil {
 		return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
+	if dg.KeepWorkspace {
+		// Registered after the removals of trustedDir and workDir, so it runs before them, on every outcome.
+		keepRoot := root
+		if opts["fresh"] != "" && fw.Source != "directory" {
+			keepRoot = fw.speculativeRoot(false) // the --fresh build is temporary; the cached one is byte-identical
+		}
+		defer func() {
+			if keepRoot == "" {
+				fmt.Fprintln(stderr, "Warning: --keep-workspace with --fresh needs the cached framework build, which does not exist yet; run once without --fresh.")
+				return
+			}
+			dir, kerr := keepSingleFileWorkspace(outdir, keepRoot, trustedDir, proofPath, proofSrc)
+			if kerr != nil {
+				fmt.Fprintf(stderr, "Warning: --keep-workspace: %v\n", kerr)
+				return
+			}
+			reportKept(stderr, dir, "cd "+dir+" && lake env lean Proof.lean   (or any scratch file importing Extracted and Janus)")
+		}()
+	}
 	proofPathEnv := tc.leanPathEnv(trustedDir, janusLibDir, workDir)
 	searchDirs := []string{trustedDir, janusLibDir, workDir, tc.libDir}
 	if err := noForeignModule(map[string]string{
@@ -916,12 +976,21 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	// Compile the proof, sandboxed. It imports the trusted Extracted; its output is Proof.olean.
 	if out, err := sandboxed(tc.lean, "--root="+workDir, filepath.Join(workDir, "Proof.lean"), "-o", filepath.Join(workDir, "Proof.olean")); err != nil {
 		out = mapPaths(out)
+		logPath := ""
+		if dg.FullErrors {
+			// Display only: the compile failed; run it once more with the printer limits raised.
+			argv := append(append([]string{tc.lean}, fullLeanOpts...), "--root="+workDir, filepath.Join(workDir, "Proof.lean"), "-o", filepath.Join(workDir, "ProofDiag.olean"))
+			if full, _ := sandboxed(argv...); strings.TrimSpace(full) != "" {
+				out = mapPaths(full)
+			}
+			logPath = writeFullOutput(outdir, filepath.Base(proofPath), out)
+		}
 		msg := "Lean rejected the proof " + displayPath(proofPath) + "."
-		if s := summarizeLeanErrors(out, 2000); s != "" {
+		if s := summarizeLeanErrors(out, dg.errLimit()); s != "" {
 			msg += "\n" + s
 		}
-		return &diag{Invalid: true, Msg: msg, Stage: "proof checking",
-			Next: "Fix the proof. It must import Extracted (and Janus) and prove " + strings.Join(thmNames(outs, todo), ", ") + ".", Details: out}
+		return withFullOutput(&diag{Invalid: true, Msg: msg, Stage: "proof checking",
+			Next: "Fix the proof. It must import Extracted (and Janus) and prove " + strings.Join(thmNames(outs, todo), ", ") + ".", Details: out}, logPath)
 	}
 	tm.mark("proof compile")
 	// The auditor executable is hashed while the pins are checked: both read only files that no
@@ -1192,6 +1261,8 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			Contracts:         cr.Identity.contractList(),
 			Role:              ar.Role,
 			MatchedMain:       ar.MatchedMain,
+			MatchedMains:      ar.MatchedMains,
+			MatchedModules:    ar.MatchedModules,
 			ContractHyps:      ar.ContractHyps,
 			Notes:             ar.Notes,
 		}
@@ -1367,6 +1438,7 @@ func cmdVerifyMany(outdir string, opts map[string]string, flags map[string]bool,
 		return jsonFailure(stdout, flags["json"], err)
 	}
 	checkWitnessSupport(outdir, outs)
+	applyNonVacuity(outdir, outs, flags["allow-no-witness"])
 	failed := 0
 	var aslErr error
 	mj := multiJSON{Schema: 1}
@@ -1574,6 +1646,19 @@ func roleLines(r *verifiedReport) []string {
 // THEM. The audit matches a witness against the module's main theorem (`matchedMain`); if that theorem
 // is not among the main theorems verified in this same call, the witness would sit beside a
 // correctness claim it says nothing about, so it fails and its report is withdrawn.
+// witnessSupportsAny: the witness supports at least one of the verified main theorems.
+func witnessSupportsAny(w *verifiedReport, mains map[string]bool) bool {
+	if mains[w.MatchedMain] {
+		return true
+	}
+	for _, m := range w.MatchedMains {
+		if mains[m] {
+			return true
+		}
+	}
+	return false
+}
+
 func checkWitnessSupport(outdir string, outs []thmOutcome) {
 	mains := map[string]bool{}
 	for _, o := range outs {
@@ -1591,7 +1676,7 @@ func checkWitnessSupport(outdir string, outs []thmOutcome) {
 	sort.Strings(names)
 	for i := range outs {
 		o := &outs[i]
-		if o.Err != nil || o.Report == nil || !strings.HasPrefix(o.Report.Role, "witness-") || mains[o.Report.MatchedMain] {
+		if o.Err != nil || o.Report == nil || !strings.HasPrefix(o.Report.Role, "witness-") || witnessSupportsAny(o.Report, mains) {
 			continue
 		}
 		o.Err = &diag{Invalid: true, Stage: "theorem audit",

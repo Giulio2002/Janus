@@ -99,13 +99,14 @@ verify_one() {
   : > "$out/verify.log"
   start=$(date +%s.%N)
   ok=1
-  for thm in correctness full_output Witness.nonvacuous Witness.returns; do
-    if ! jv "$out" --proof "$snap/PrintProofs/${isa^}/$n.lean" --proof-root "$snap" \
-        --theorem "Proof.$thm" \
-        ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
-      ok=0; echo "  $target: Proof.$thm FAILED"
-    fi
-  done
+  # one run for all four theorems: a contract-assuming main theorem is accepted only together with the
+  # non-vacuity witness verified in the same call (docs/SOUNDNESS.md)
+  if ! jv "$out" --proof "$snap/PrintProofs/${isa^}/$n.lean" --proof-root "$snap" \
+      --theorem "Proof.correctness" --theorem "Proof.full_output" \
+      --theorem "Proof.Witness.nonvacuous" --theorem "Proof.Witness.returns" \
+      ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
+    ok=0; echo "  $target: FAILED (see $out/verify.log)"
+  fi
   t=$(echo "$(date +%s.%N) - $start" | bc)
   if [ $ok = 1 ]; then
     printf '%-18s ok  %6.1fs\n' "$target" "$t" | tee "$lines/${isa}_$n"

@@ -41,7 +41,7 @@ row() {
   [ -n "$status" ] && broken+=("$name")
   return 0
 }
-v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
+v() { out="$("$J" verify --allow-no-witness --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
 
 echo "== N7: allocation, slice and write-barrier contracts are pinned to the runtime's code"
 # pin ARCH FUNCTION ENTRY [EXTRA --contract ...]: the untampered binary extracts with FUNCTION a

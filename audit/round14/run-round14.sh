@@ -92,7 +92,7 @@ for spec in "EmptyBinder 'binder of type'" "PcPremise 'program counter'"; do
   eval set -- $spec; f=$1; pat=$2
   all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/$f.lean "$W/NewPair" --theorem $P.correctness --theorem $P.Witness.nonvacuous 2>&1)"
   echo " ($f: a main theorem that is vacuous by an empty binder / unsatisfiable pc premise; its genuine witness must not verify)"
-  row correctness Verified
+  row correctness blocked 'Stage: non-vacuity'   # round 15: no witness verified for it either
   row Witness.nonvacuous blocked 'round 14, W2' "$pat"
 done
 all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/V2Attacks.lean "$W/NewPair" --theorem $P.pinpre1 --theorem $P.exc1 \

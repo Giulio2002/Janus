@@ -64,6 +64,11 @@ import Janus.Contracts.InternalCall
 import Janus.Contracts.InternalCallAmd64
 import Janus.Contracts.StubAlloc
 import Janus.Contracts.StubAllocAmd64
+import Janus.Contracts.LiveStubMap
+import Janus.Contracts.LiveStubMapAmd64
+import Janus.Contracts.LiveStubStr
+import Janus.Contracts.LiveStubSys
+import Janus.Contracts.LiveStubSysAmd64
 import Janus.Amd64.Bridge
 import Janus.Amd64.FFISat
 import Janus.Contracts.MapAmd64

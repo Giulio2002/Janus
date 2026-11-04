@@ -300,7 +300,6 @@ theorem correctness (p n cap : BitVec 64) (c : BitVec 64) :
   simp only [hasAVX2, reduceRipTarget] at hav hav1 hdav
   janus64_run [hav1, Nat.and_self, cmpeq_msb_mod32, cmpeq_msb_zero, lowbyte p c]
   all_goals
-    refine ⟨rfl, ?_⟩
     have hc' : c.toNat % 256 < 256 := Nat.mod_lt _ (by decide)
     rw [index_split _ _ _ hc']
     simp only [Nat.mod_eq_of_lt (replBytes_lt 32 _ hc')] at *
