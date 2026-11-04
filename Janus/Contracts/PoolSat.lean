@@ -43,7 +43,7 @@ theorem toyInv_drop {tys : Tys} (hty : TysOK tys) {b : Nat} {L L' : List (Nat ×
   · rw [eq _ _ (inRanges_bump tys) (Or.inl hb)]; exact hp
   · rw [eq _ _ (inRanges_heap (n := 1) (by omega) (by omega)) (Or.inr hi)]; exact hz i hi hi'
   · have hr := hT t ht
-    have ht' : t.1 + 16 ≤ BUMP := (hty t ht).1
+    have ht' : t.1 + 16 ≤ HEAP := hty.heap ht
     rw [eq _ _ (inRanges_ty ht (n := 8) (by omega)) (Or.inl (by omega)),
       eq _ _ (InRanges.sub (inRanges_ty ht (n := 16) (by omega)) (by omega) (by omega)) (Or.inl (by omega))]
     exact hr

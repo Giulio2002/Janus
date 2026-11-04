@@ -62,20 +62,26 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List 
   by_cases hdp : dp = sp
   · subst hdp
     janus64_run
-    refine ⟨rfl, fun i hi => ?_, RtInv.inv_frame (ws := [((s.regs 4).toNat - 4144, (s.regs 4).toNat + 40)])
+    refine ⟨fun i hi => ?_, RtInv.inv_frame (ws := [((s.regs 4).toNat - 4144, (s.regs 4).toNat + 40)])
       (by janus_frame)
       (fun r hr => by
         simp only [List.mem_singleton] at hr; subst hr
         have e : (s.regs 4).toNat + 40 - ((s.regs 4).toNat - 4144) = 4184 := by omega
         simp only [e]; exact hout) hinv, by janus_frame⟩
-    have hf : MemFrame s.mem _ [((s.regs 4).toNat - 4144, (s.regs 4).toNat + 40)] := by janus_frame
-    refine hf.bytes ?_
+    refine Janus.MemFrame.bytes (m := s.mem) (rs := [((s.regs 4).toNat - 4144, (s.regs 4).toNat + 40)]) (by janus_frame) ?_
     unfold Apart at hapd
     simp only [Janus.outside_cons, Janus.outside_nil, and_true]
     omega
   · obtain ⟨hok, hb48d, hb48s, haccd, haccs, hd2⟩ := hdest hdp
+    have hne : dp.toNat ≠ sp.toNat := fun h => hdp (BitVec.eq_of_toNat_eq h)
+    have hdl64 := dp.isLt
+    have hsl64 := sp.isLt
     janus64_run calls [hm]
-    all_goals first | rfl | exact ⟨by assumption, by assumption, by assumption, by janus_frame⟩
+    all_goals try (exfalso; omega)
+    unfold Apart at haps
+    refine ⟨fun i hi => ?_, by assumption, by janus_frame⟩
+    rw [‹Mem.Copied _ _ _ _ _› i hi]
+    repeat rw [Memory.bytes_writeLE_outside _ (by omega)]
 
 namespace Witness
 

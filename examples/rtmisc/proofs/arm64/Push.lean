@@ -78,13 +78,35 @@ theorem correctness (impl : List Segment) (R : RtInv) (b : Nat) (L : List (Nat �
     hdj, hdt, hroom, hgrow⟩
   janus_intro hs
   janus_eval_nat h_ut : u8Type
+  unfold Apart at hdj
   janus_data hd [hw]
   by_cases hl : len.toNat < cap.toNat
   · obtain ⟨hacc, hdest⟩ := hroom hl
     janus_run
+    refine ⟨fun _ => ⟨?_, by janus_frame⟩, fun h => absurd h (by omega)⟩
+    refine RtInv.inv_frame' (ws := [(ptr.toNat + len.toNat, ptr.toNat + len.toNat + 1),
+      (s.sp.toNat - 4200, s.sp.toNat + 40)]) (by janus_frame) ?_ hinv
+    intro r hr
+    simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hr
+    rcases hr with rfl | rfl
+    · rcases hdest with h | h
+      · right; exact InRanges.sub h (by first | (dsimp only; omega) | omega) (by first | (dsimp only; omega) | omega)
+      · left; exact Outside.of_sub h (by first | (dsimp only; omega) | omega) (by first | (dsimp only; omega) | omega)
+    · left
+      have e : s.sp.toNat + 40 - (s.sp.toNat - 4200) = 4240 := by omega
+      simp only [e]; exact hout
   · obtain ⟨hok, hcost, hrd⟩ := hgrow (by omega)
     rw [h_ut] at hok hdt
-    janus_run calls [hg]
+    janus_run until [Extracted.entry + 0x3c] calls [hg]
+    rename_i r0 r1 r2 jk fl vr M exm epm hfr hpost hlf hfresh hapart hinv2
+    obtain ⟨hr1, hr2, hin, hb48, hacc, hcp, hz, -⟩ := hpost
+    have hle := le_growCap 1 true (len.toNat + 1) cap.toNat (by decide)
+    have hr2ne : r2.toNat ≠ 0 := by omega
+    rw [if_neg hr2ne] at hinv2
+    have hacc' : M.accessible r0.toNat r2.toNat true = true := by simpa using hacc
+    have hacc2 : M.accessible (r0.toNat + len.toNat) 1 true = true :=
+      Memory.accessible_mono _ hacc' (by omega) (by omega)
+    janus_run
 
 namespace Witness
 
@@ -113,8 +135,8 @@ theorem ut_eq : u8Type = u8A := by decide
 
 theorem hok_gr : ∀ args, ok grA args → ∃ p, args = [p, 1, 0, 1, (u8A, 1, 0).1] := fun _ h => ⟨0, h.2⟩
 
-/-- The contract at `Push`'s own address: one tactic. -/
 set_option maxHeartbeats 4000000 in
+/-- The contract at `Push`'s own address: one tactic. -/
 theorem model_gr : RtLiveContract linked grA 4096 R growsliceSpec growsliceLive := by
   janus_live_growslice (u8A, 1, 0) 1 0 1 16 8 hok_gr
 

@@ -81,13 +81,35 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List 
   have hg2 := hg.readable
   simp only [regSP, Janus.Amd64.GoABI.regG, Janus.Amd64.GoABI.stackguard0Offset, Janus.Amd64.GoABI.stackguard0] at hgl hg3 hg1 hg2 hb' ha hw hout hal hga hgr ⊢
   janus_eval_nat h_ut : u8Type
+  unfold Apart at hdj
   janus64_data hd [hw]
   by_cases hl : len.toNat < cap.toNat
   · obtain ⟨hacc, hdest⟩ := hroom hl
     janus64_run
+    refine ⟨fun _ => ⟨?_, by janus_frame⟩, fun h => absurd h (by omega)⟩
+    refine RtInv.inv_frame' (ws := [(ptr.toNat + len.toNat, ptr.toNat + len.toNat + 1),
+      ((s.regs 4).toNat - 4176, (s.regs 4).toNat + 40)]) (by janus_frame) ?_ hinv
+    intro r hr
+    simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hr
+    rcases hr with rfl | rfl
+    · rcases hdest with h | h
+      · right; exact InRanges.sub h (by first | (dsimp only; omega) | omega) (by first | (dsimp only; omega) | omega)
+      · left; exact Outside.of_sub h (by first | (dsimp only; omega) | omega) (by first | (dsimp only; omega) | omega)
+    · left
+      have e : (s.regs 4).toNat + 40 - ((s.regs 4).toNat - 4176) = 4216 := by omega
+      simp only [e]; exact hout
   · obtain ⟨hok, hcost, hrd⟩ := hgrow (by omega)
     rw [h_ut] at hok hdt
-    janus64_run calls [hgs]
+    janus64_run until [Extracted.entry + 0x31] calls [hgs]
+    rename_i r0 r1 r2 jk fl vx vy M ym ep hfr hpost hlf hfresh hapart hinv2
+    obtain ⟨hr1, hr2, hin, hb48, hacc, hcp, hz, -⟩ := hpost
+    have hle := le_growCap 1 true (len.toNat + 1) cap.toNat (by decide)
+    have hr2ne : r2.toNat ≠ 0 := by omega
+    rw [if_neg hr2ne] at hinv2
+    have hacc' : M.accessible r0.toNat r2.toNat true = true := by simpa using hacc
+    have hacc2 : M.accessible (r0.toNat + len.toNat) 1 true = true :=
+      Memory.accessible_mono _ hacc' (by omega) (by omega)
+    janus64_run
 
 namespace Witness
 

@@ -50,11 +50,13 @@ run() { # file dir thms...
   all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/$f "$W/$d" "${targs[@]}" 2>&1)"
 }
 echo "== arm64: controls (a contract over ofImpl; with ImplApart; mixed link/ofImpl)"
-run OfImplAttacks.lean NewPair ctl1 ctl2 ctl3 ctl4 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 Shadow.r12 r13 r14 r15 r16 r17 r18
+run OfImplAttacks.lean NewPair ctl1 ctl2 ctl3 ctl4 ctl5 ctl6 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 Shadow.r12 r13 r14 r15 r16 r17 r18 r19 r20 r21
 row ctl1 Verified 'Role: main theorem'
 row ctl2 Verified 'Role: main theorem'
 row ctl3 Verified 'Role: main theorem'
 row ctl4 Verified 'Role: main theorem'
+row ctl5 Verified 'Role: main theorem'
+row ctl6 Verified 'Role: main theorem'
 echo "== arm64: attacks"
 row r1 blocked 'ofImpl impl'
 row r2 blocked 'other than as'
@@ -67,7 +69,7 @@ row r8 blocked 'other than as'
 row r9 blocked 'other than as'
 row r10 blocked 'other than as'
 row r11 blocked 'round 14'
-for r in Shadow.r12 r13 r14 r15 r16 r17 r18; do row $r blocked; done
+for r in Shadow.r12 r13 r14 r15 r16 r17 r18 r19 r20 r21; do row $r blocked; done
 echo "== amd64"
 run OfImplAttacksAmd64.lean NewPair64 ctl1 ctl2 r1 r5 r6 r8 r9
 row ctl1 Verified 'Role: main theorem'

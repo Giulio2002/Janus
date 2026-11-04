@@ -57,20 +57,22 @@ theorem correctness (impl : List Segment) (R : RtInv) (b : Nat) (L : List (Nat �
   by_cases hdp : dp = sp
   · subst hdp
     janus_run
-    refine ⟨rfl, fun i hi => ?_, RtInv.inv_frame (ws := [(s.sp.toNat - 4152, s.sp.toNat + 40)])
+    refine ⟨fun i hi => ?_, RtInv.inv_frame (ws := [(s.sp.toNat - 4152, s.sp.toNat + 40)])
       (by janus_frame)
       (fun r hr => by
         simp only [List.mem_singleton] at hr; subst hr
         have e : s.sp.toNat + 40 - (s.sp.toNat - 4152) = 4192 := by omega
         simp only [e]; exact hout) hinv, by janus_frame⟩
-    have hf : MemFrame s.mem _ [(s.sp.toNat - 4152, s.sp.toNat + 40)] := by janus_frame
-    refine hf.bytes ?_
+    refine Janus.MemFrame.bytes (m := s.mem) (rs := [(s.sp.toNat - 4152, s.sp.toNat + 40)]) (by janus_frame) ?_
     unfold Apart at hapd
     simp only [Janus.outside_cons, Janus.outside_nil, and_true]
     omega
   · obtain ⟨hok, hb48d, hb48s, haccd, haccs, hd2⟩ := hdest hdp
     janus_run calls [hm]
-    all_goals first | rfl | exact ⟨by assumption, by assumption, by assumption, by janus_frame⟩
+    unfold Apart at haps
+    refine ⟨fun i hi => ?_, by assumption, by janus_frame⟩
+    rw [‹Mem.Copied _ _ _ _ _› i hi]
+    repeat rw [Memory.bytes_writeLE_outside _ (by omega)]
 
 namespace Witness
 
