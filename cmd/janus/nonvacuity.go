@@ -120,7 +120,7 @@ func applyNonVacuity(outdir string, outs []thmOutcome, allow bool) {
 		var werr error
 		if len(outs) == 1 {
 			werr = writeReport(filepath.Join(outdir, "verified.json"), o.Report)
-		} else {
+		} else if werr = os.MkdirAll(filepath.Join(outdir, verifiedDir), 0o755); werr == nil {
 			werr = writeReport(filepath.Join(outdir, verifiedDir, o.Theorem+".json"), o.Report)
 			if werr == nil && i == 0 {
 				werr = writeReport(filepath.Join(outdir, "verified.json"), o.Report)

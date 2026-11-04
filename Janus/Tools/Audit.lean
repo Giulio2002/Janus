@@ -1847,8 +1847,8 @@ unsafe def prepareClean : IO (ImportState × Environment) := do
 
 /-- Round 14: the runtime contracts the statement `e` applies, as `Contract@runtime.function` (the
 function named by the `contractAddr` literal in the application), each once. -/
-def contractUses (env : Environment) (e : Expr) : Array String :=
-  (contractApps env e).foldl (init := #[]) fun acc app =>
+def contractNames (apps : Array Expr) : Array String :=
+  apps.foldl (init := #[]) fun acc app =>
     let c := app.getAppFn.constName!.toString
     let isAddr (x : Expr) : Bool :=
       (x.getAppFn.isConstOf `Janus.Program.contractAddr || x.getAppFn.isConstOf `Janus.Amd64.Program.contractAddr) &&
@@ -1857,6 +1857,25 @@ def contractUses (env : Environment) (e : Expr) : Array String :=
       | some x => (match x.appArg! with | .lit (.strVal a) => s!"{c}@{a}" | _ => c)
       | none => c
     if acc.contains s then acc else acc.push s
+
+def contractUses (env : Environment) (e : Expr) : Array String :=
+  contractNames (contractApps env e)
+
+/-- The runtime contracts a MAIN theorem ASSUMES: those applied in its premises and in the part of
+its conclusion that is not itself a contract. A theorem whose conclusion IS a contract (it proves the
+contract of the program's own code) assumes nothing by stating it; the non-vacuity policy
+(`janus verify`: a main theorem that assumes contracts needs a witness) must not count it. A witness
+exhibits its contracts, so for a non-main theorem every application counts. -/
+def assumedContracts (ty : Expr) (main : Bool) : MetaM (Array String) := do
+  let env ← getEnv
+  if !main then return contractUses env ty
+  Meta.forallTelescope ty fun xs body => do
+    let mut apps : Array Expr := #[]
+    for x in xs do
+      let t ← Meta.inferType x
+      if ← Meta.isProp t then apps := contractApps env t apps
+    for t in conclParts env body do apps := contractApps env t apps
+    return contractNames apps
 
 /-- Build the clean environment: import only `Janus` and `Extracted`, with initializers so pp
 works, then add type-only stubs for the dependency constants the statement reaches, re-add the
@@ -1986,7 +2005,7 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
         for n in ← hazardNotes t do
           let n := s!"in {ci.name}: {n}"
           unless notes.contains n do notes := notes.push n
-    return (sigStr, explicit.fmt.pretty 10000, defs, extOut, notes, contractUses (← getEnv) expanded)
+    return (sigStr, explicit.fmt.pretty 10000, defs, extOut, notes, ← assumedContracts expanded main)
   match ← (Core.CoreM.toIO' (Meta.MetaM.run' printAll) { mkCoreCtx with options := opts } { env }).toBaseIO with
   | .ok a => return a
   | .error e => fail e.toString
@@ -2061,10 +2080,26 @@ partial def flattenAnd (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
   if e.isAppOfArity ``And 2 then flattenAnd (e.getArg! 1) (flattenAnd (e.getArg! 0) acc)
   else acc.push e
 
+/-- `e` with `mdata` dropped, applied lambdas beta-reduced (`(fun s => P s ∧ Q s) s`), `let`s instantiated
+and heads that are REDUCIBLE abbreviations unfolded, repeatedly: the same proposition, so a witness that
+states the precondition as an applied lambda (copied from the main theorem's `pre`) is read as the
+conjunction it is. Arbitrary (non-reducible) definitions are not unfolded. -/
+partial def conjHead (e : Expr) : MetaM Expr := do
+  let e := e.consumeMData.headBeta
+  match e with
+  | .letE _ _ v b _ => conjHead (b.instantiate1 v)
+  | _ =>
+    if let .const c _ := e.getAppFn then
+      if (← getReducibilityStatus c) == .reducible then
+        if let some e2 ← Meta.unfoldDefinition? e then
+          let e3 ← conjHead e2
+          if e3.isAppOfArity ``And 2 || e3.isAppOfArity ``Exists 2 then return e3
+    return e
+
 /-- The conjuncts of `e` with every `∃` binder on the way (leading, or inside a conjunction:
 `∃ impl, C ∧ ∃ s, s.pc = … ∧ P`) opened as a local variable, for the continuation `k`. -/
 partial def withConjs {α} (e : Expr) (k : Array Expr → MetaM α) : MetaM α := do
-  let e := e.consumeMData
+  let e ← conjHead e
   if e.isAppOfArity ``And 2 then
     withConjs (e.getArg! 0) fun ca => withConjs (e.getArg! 1) fun cb => k (ca ++ cb)
   else if e.isAppOfArity ``Exists 2 then
@@ -2239,7 +2274,7 @@ partial def matchPremises (ps : List Expr) (cs : Array Expr) : MetaM (Option Str
         | none => return none
         | some w => last := some w
       st.restore
-    return last <|> some s!"`{(← Meta.ppExpr p).pretty 300}` is not among the conjuncts of the witness"
+    return last <|> some s!"`{(← Meta.ppExpr p).pretty 300}` is not among the conjuncts of the witness (conjuncts are matched after beta-reduction)"
 
 /-- The Prop-typed metavariables of a telescope, as non-trivial conjuncts, structural ones first. -/
 def premisesOf (ms : Array Expr) : MetaM (List Expr) := do
