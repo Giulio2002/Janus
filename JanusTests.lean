@@ -16,6 +16,7 @@ import JanusTests.Diagnostics
 import JanusTests.Carry
 import JanusTests.CongrCost
 import JanusTests.Audit
+import JanusTests.AuditPerf
 import JanusTests.Float
 import JanusTests.Dynamic
 import JanusTests.Kernel

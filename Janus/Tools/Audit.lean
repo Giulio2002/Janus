@@ -289,9 +289,12 @@ def isGeneratedEqnLemma (env : Environment) (n : Name) : Bool :=
 independently elaborated trusted copy, exactly like `program` and `entry`: a statement may mention
 them, and a planted or shadowed definition of one differs from the trusted copy and is rejected. -/
 def checkDataSymIdentities (env : Environment) : AuditM Unit := do
+  -- `env.header.moduleNames` rebuilds the array of every module name on EACH call: it is taken once,
+  -- and the cheap name test runs first (calling it per constant made the audit ~9 s instead of ~1.5 s)
+  let modNames := env.header.moduleNames
   let names := env.const2ModIdx.fold (init := #[]) fun acc n idx =>
-    if env.header.moduleNames[idx.toNat]? == some `Extracted && n.getPrefix.getPrefix == `Extracted &&
-        (n.getPrefix == `Extracted.dataAddr || n.getPrefix == `Extracted.dataSize) then acc.push n else acc
+    if n.getPrefix.getPrefix == `Extracted && (n.getPrefix == `Extracted.dataAddr || n.getPrefix == `Extracted.dataSize) &&
+        modNames[idx.toNat]? == some `Extracted then acc.push n else acc
   for n in names.qsort Name.lt do
     checkIdentity env (n.replacePrefix `Extracted .anonymous)
 
@@ -2637,8 +2640,9 @@ unsafe def runASLImpl (userThm proofMod corThm corMod marker trusted words : Str
     let cx := mkCtx envA depRoots aslTrustedRoots
     -- reserved namespaces: only the trusted builds may declare Extracted/JanusASL/ArmASL/Sail/
     -- JanusASLWords names, and the corollary module only the corollary
+    let modNamesA := envA.header.moduleNames -- once: the projection rebuilds the array on every call
     for (n, idx) in envA.const2ModIdx.toList do
-      let m := envA.header.moduleNames[idx.toNat]!
+      let m := modNamesA[idx.toNat]!
       if cx.trusted m then continue
       if (n.anyS (· == "Extracted") || imitatesExtracted n) && !isGeneratedEqnLemma envA n then
         fail s!"a non-trusted module declares {n}, whose name shadows the Extracted namespace"
