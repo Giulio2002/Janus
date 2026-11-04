@@ -20,6 +20,8 @@ import JanusTests.Diagnostics
 import JanusTests.Carry
 import JanusTests.CongrCost
 import JanusTests.Audit
+import JanusTests.BitVecLit
+import JanusTests.AuditPerf
 import JanusTests.Float
 import JanusTests.Dynamic
 import JanusTests.Kernel
@@ -35,3 +37,4 @@ import JanusTests.KernelSafeMemory
 import JanusTests.OmegaCap
 import JanusTests.AddrSub
 import JanusTests.JanusExact
+import JanusTests.AddrRefute

@@ -452,7 +452,7 @@ the framework replay itself. `audit/run-rounds.sh` creates one store per run.
 
 ### Verification-result cache
 
-A successful `janus verify` of a single proof file (not `--proof-root`) is recorded in
+A successful `janus verify` of a single proof file is recorded (consumer packages: see below) in
 `v1/result`, and an identical later verification prints the recorded report, marked `Cached:`,
 instead of compiling, auditing and replaying again. This makes the cache part of the trusted
 base. What it relies on:
@@ -482,7 +482,7 @@ base. What it relies on:
   it cannot), on top of the read-only cache. A proof or a lakefile can neither read the key nor
   write an entry. The unshare fallback hides /tmp, /dev/shm and /run behind private tmpfs mounts, so a cache or verdict store under
   them cannot be bound back and the fallback refuses (fail-closed; the error says to move JANUS_CACHE_DIR / JANUS_VERDICT_CACHE).
-* **Bypass.** `--fresh`, `--unsafe-no-sandbox` and `JANUS_RESULT_CACHE=off` neither read nor
+* **Bypass.** `--fresh`, `--unsafe-no-sandbox`, `--no-result-cache` and `JANUS_RESULT_CACHE=off` neither read nor
   write the cache. Without a sandbox the proof runs unconfined with the user's privileges, and
   anything it does to the cache (or to the replay and trusted-compile caches) is outside the
   threat model, as before; rerun with `--fresh` after running an untrusted proof unsandboxed.
@@ -492,6 +492,50 @@ base. What it relies on:
 * **Threats out of scope.** Anything running as the same user outside the sandbox (an
   unsandboxed proof, other software of that user) can write the cache directly, and can also
   replace the framework build and the replay cache; the cache does not defend against it.
+
+**Consumer packages (`--proof-root`).** The same cache, authenticity, isolation and bypass rules
+apply to a verification of a theorem of a consumer package (`resultcache.go`,
+`consumerResultInputs`). The key covers: the verifier, the framework (sources' hash, every compiled
+module, the compiled auditor), the toolchain identity and the SHA-256 of the `lake` executable, the
+sandbox, the theorem, `--replay-fresh` and `--allow-path-deps`, the **snapshot hash of the whole
+package** (every `.lean`, `.toml`, `.json` and `lean-toolchain` file, hence the lakefile, the
+manifest and every module the proof imports), the proof's place in the package, the janus
+dependency's pin, every other Lake dependency (type, URL, revision, tree hash of the files copied
+into the workspace), and the artifact (`Extracted.lean`, `identity.json`, the binary's SHA-256 and its
+place relative to the artifact directory). Only these files reach the build (the workspace is
+synchronised from the snapshot; `.lake`, `.git`, `artifacts`, dotfiles and non-source files are not
+copied), so they are the verdict's whole input. After a hit the package, the extraction, the
+binary, the framework pin and the dependencies are read again, and the keys recomputed from the
+bytes as they are then must equal the ones looked up; otherwise the verification runs. A hit
+reports this run's package location. `--asl` verifications are not cached.
+
+Red-team checklist for the consumer-package cache (each row must be a miss, never a pass):
+
+1. Stale entry: edit any file of the package (the proof, an imported module, `lakefile.toml`/`.lean`,
+   `lake-manifest.json`, `lean-toolchain`), add or delete a module, rename the proof file.
+   (`TestConsumerResultCache`.)
+2. Edit made between the key computation and the hit (a race): the re-read and recomputed keys
+   differ, so the entry is not used.
+3. Extraction changes: another `Extracted.lean`, `identity.json`, binary bytes, a binary at another
+   path, another symbol, contract flags (they are recorded in `identity.json`).
+4. Swapped environment: another Lean toolchain (same version string, rebuilt library), `lake`
+   executable, `leanchecker`, janus executable or source (verifier identity), framework sources or
+   compiled module, auditor, sandbox mode.
+5. Dependencies: a changed revision/tree of another Lake dependency, a path dependency's contents,
+   `--allow-path-deps` toggled.
+6. Tampered entry: edit the report, the key, the MAC, truncate, copy another key's entry over it,
+   symlink it, make the result directory group-writable (round 8 C1 refusals).
+   (`TestConsumerResultCache`, `audit/round7`, `audit/round8`.)
+7. Key collision: two different packages/theorems with the same textual fields; every field is
+   written with `%q`/fixed separators and the large inputs are SHA-256 digests; the theorem name and
+   proof place are in the key, so an entry for one theorem never answers for another.
+8. Symbolic-link tricks: a symlinked source file or directory in the package is rejected by the
+   snapshot before a key exists; a symlinked proof path resolves through `proofRel`; a symlinked
+   entry or cache directory is refused.
+9. Bypass flags: `--fresh`, `--unsafe-no-sandbox`, `--asl`, `JANUS_RESULT_CACHE=off` neither read
+   nor write the cache.
+10. Hit content: the reported package location is this run's; the recorded report still lists the
+    statement, axioms, replay and definitions of the run that proved it.
 
 `audit/round7/run-cache.sh` (run by `audit/round7/run-round7.sh`) attacks the cache: a proof and a lakefile that look for the key and
 the entries and try to plant one (bubblewrap and unshare), a tampered entry, an entry recorded

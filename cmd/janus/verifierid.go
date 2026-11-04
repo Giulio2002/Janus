@@ -45,7 +45,7 @@ import (
 )
 
 // resultCacheSchema is bumped whenever the meaning of a cached entry or of the key changes.
-const resultCacheSchema = 2
+const resultCacheSchema = 3
 
 const verifierIDVersion = "janus-verifier-id-v1"
 

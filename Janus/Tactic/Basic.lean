@@ -634,6 +634,14 @@ theorem readLE_writeLE_inside_lt (m : Memory) {a n b k : Nat} (v : Nat)
     (m.writeLE a n v).readLE b k = v / 256 ^ (b - a) % 256 ^ k :=
   Memory.readLE_writeLE_inside m v h1 h2
 
+/-- `toNat` of a bit-vector literal `(k : BitVec n)` (the `OfNat` form, e.g. the `0 : BitVec 128` of a
+register that `janus_intro` states, or of a callee's precondition). `no_index` makes it match the
+literal whatever form its numeral argument has (a raw literal as the elaborator writes it, or an
+`OfNat.ofNat Nat k _` application): the core simp lemmas (`BitVec.toNat_zero`, `BitVec.toNat_ofNat`)
+are about `BitVec.ofNat` / `0#w` and do not fire on it. -/
+@[janus_exec, janus_post] theorem bv_toNat_lit (n k : Nat) :
+    BitVec.toNat (no_index (OfNat.ofNat k : BitVec n)) = k % 2 ^ n := Eq.symm (Eq.symm rfl)
+
 /-- A zero-width read (see `Janus.Tactic.ReadOverlap`, whose results can contain one). -/
 @[janus_exec, janus_post] theorem readLE_zero_eq (m : Memory) (a : Nat) : m.readLE a 0 = 0 :=
   Memory.readLE_zero_eq m a
