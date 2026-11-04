@@ -44,14 +44,16 @@ var lakefileTomlKeys = map[string]bool{
 type tomlPair struct {
 	table string // "" at the top level, else the table name
 	key   string
-	str   string // the decoded value when it is a string
-	isStr bool
+	str   string   // the decoded value when it is a string
+	isStr bool     // the value is a string
+	strs  []string // every string of the value (the string itself, or the strings of an array)
 }
 
 type tomlScanner struct {
-	s   string
-	i   int
-	bad bool
+	s    string
+	i    int
+	bad  bool
+	strs []string // strings scanned since the last reset
 }
 
 func (t *tomlScanner) fail() { t.bad = true }
@@ -129,6 +131,7 @@ func (t *tomlScanner) value() (str string, isStr bool) {
 		}
 		str = t.s[start:t.i]
 		t.i++
+		t.strs = append(t.strs, str)
 		return str, true
 	case c == '\'':
 		if strings.HasPrefix(t.s[t.i:], `'''`) {
@@ -150,6 +153,7 @@ func (t *tomlScanner) value() (str string, isStr bool) {
 		}
 		str = t.s[start:t.i]
 		t.i++
+		t.strs = append(t.strs, str)
 		return str, true
 	case c == '[':
 		t.i++
@@ -252,11 +256,12 @@ func parseLakefileToml(src string) ([]tomlPair, bool) {
 			}
 			t.i++
 			t.skipSpaces()
+			t.strs = nil
 			str, isStr := t.value()
 			if t.bad {
 				break
 			}
-			out = append(out, tomlPair{table: table, key: key, str: str, isStr: isStr})
+			out = append(out, tomlPair{table: table, key: key, str: str, isStr: isStr, strs: t.strs})
 			t.endOfLine()
 		}
 	}
@@ -292,7 +297,10 @@ func lakefileCacheable(files map[string][]byte, config string) bool {
 	}
 	for _, p := range pairs {
 		if p.table == "leanOptions" {
-			continue // option names; their values are plain scalars (checked by the scanner)
+			if !leanOptionOK(p.key) { // option names only from a whitelist; the values are plain scalars
+				return false
+			}
+			continue
 		}
 		if !lakefileTomlKeys[p.key] {
 			return false
@@ -300,6 +308,42 @@ func lakefileCacheable(files map[string][]byte, config string) bool {
 		if p.key == "srcDir" && (!p.isStr || !srcDirInside(p.str)) {
 			return false
 		}
+		if moduleNameKeys[p.key] {
+			for _, v := range p.strs {
+				if !plainModuleName(v) {
+					return false
+				}
+			}
+		}
 	}
 	return true
+}
+
+// moduleNameKeys hold module/library/target names (or globs of module names): Lake resolves them
+// below srcDir, and a name that contains a path separator, `..` or a quoted-identifier marker can
+// resolve elsewhere (`roots = ["«..».«..».X"]`).
+var moduleNameKeys = map[string]bool{
+	"roots": true, "globs": true, "name": true, "libName": true, "root": true, "exeName": true,
+	"defaultTargets": true,
+}
+
+func plainModuleName(v string) bool {
+	return v != "" && !strings.Contains(v, "..") && !strings.ContainsAny(v, "/\\«»\x00:")
+}
+
+// leanOptionOK: the option names a package may set in [leanOptions] and still be cached. Options
+// that make Lean load code or write files (plugins, trace outputs, debug.*) are not among them.
+func leanOptionOK(name string) bool {
+	name = strings.TrimPrefix(name, "weak.")
+	for _, p := range []string{"pp.", "linter."} {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	switch name {
+	case "maxHeartbeats", "maxRecDepth", "autoImplicit", "relaxedAutoImplicit", "synthInstance.maxHeartbeats",
+		"synthInstance.maxSize", "exponentiation.threshold", "tactic.hygienic", "Elab.async", "warningAsError":
+		return true
+	}
+	return false
 }

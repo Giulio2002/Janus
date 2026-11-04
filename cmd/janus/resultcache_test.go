@@ -150,7 +150,7 @@ func TestLakefileCacheable(t *testing.T) {
 	if !ok(base + "srcDir = \"src/lean\"\n") {
 		t.Error("a relative srcDir inside the package must be cacheable")
 	}
-	if !ok(base + "roots = [\"A\", # c\n  'B',\n]\nprecompileModules = true\n\n[leanOptions]\npp.unicode.fun = true\nautoImplicit = false\n") {
+	if !ok(base + "roots = [\"A\", # c\n  'B',\n]\nprecompileModules = true\n\n[leanOptions]\npp.unicode.fun = true\nautoImplicit = false\nweak.linter.unusedVariables = false\nmaxHeartbeats = 400000\n") {
 		t.Error("arrays, comments, booleans and leanOptions must be cacheable")
 	}
 	for name, extra := range map[string]string{
@@ -165,6 +165,17 @@ func TestLakefileCacheable(t *testing.T) {
 		"unknown table":          "\n[[input_file]]\nname = \"x\"\n",
 		"inline srcDir":          "srcDir=\"/abs\"\n",
 		"srcDir with tail":       "srcDir = \"/abs\" # c\n",
+		"roots escape":           "roots = [\"«..».«..».X\"]\n",
+		"roots slash":            "roots = [\"A/B\"]\n",
+		"roots backslash":        "roots = ['A\\B']\n",
+		"roots dotdot":           "roots = [\"A..B\"]\n",
+		"globs escape":           "globs = [\"«..».+\"]\n",
+		"libName slash":          "libName = \"a/b\"\n",
+		"root slash":             "root = \"../X\"\n",
+		"exeName guille":         "exeName = \"«x»\"\n",
+		"debug option":           "\n[leanOptions]\ndebug.skipKernelTC = true\n",
+		"plugin option":          "\n[leanOptions]\nplugin = \"x\"\n",
+		"trace output":           "\n[leanOptions]\ntrace.profiler.output = \"/tmp/x\"\n",
 		"quoted key":             "\"srcDir\" = \"/abs/ext\"\n",
 		"literal key":            "'srcDir' = '/abs/ext'\n",
 		"quoted link args":       "\"moreLinkArgs\" = [\"-L/x\"]\n",
