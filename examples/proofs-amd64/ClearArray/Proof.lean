@@ -21,8 +21,6 @@ theorem correctness (p : BitVec 64) :
   obtain ⟨⟨-, hnw, hacc⟩, ⟨hpw, hp⟩, hd⟩ := hpre
   simp only [regSP, Nat.sub_zero, Nat.zero_add, GoABI.Disjoint] at hacc hnw hd
   janus64_run
-  have z : (BitVec.toNat (OfNat.ofNat 0 : BitVec 128)) = 0 := rfl
-  simp only [z]
   refine ⟨?_, by janus64_simp [onlyWrites_writeLE_iff, onlyWrites_self]⟩
   rw [show (40 : Nat) = 16 + (8 + 16) from rfl, Janus.Arm64.Memory.readLE_add, Janus.Arm64.Memory.readLE_add]
   janus64_simp [Janus.Tactic.readLE_writeLE_inside, Nat.zero_div, Nat.zero_mod]
