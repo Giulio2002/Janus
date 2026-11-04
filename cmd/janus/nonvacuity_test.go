@@ -121,3 +121,28 @@ func TestNonVacuitySingleAndBatch(t *testing.T) {
 		t.Error("batch without witness")
 	}
 }
+
+func TestNonVacuityMatchedMains(t *testing.T) {
+	// one witness serving two main theorems (a precondition they share)
+	w := nvWit("P.Witness.nonvacuous", "P.correctness", "witness-nonvacuous")
+	w.MatchedMains = []string{"P.correctness", "P.full_write"}
+	outs, _ := runNV(t, false, nvMain("P.correctness", "C@f"), nvMain("P.full_write", "C@f"), w)
+	for _, o := range outs {
+		if o.Err != nil {
+			t.Fatalf("%s: %v", o.Theorem, o.Err)
+		}
+	}
+	if outs[1].Report.NonVacuity != nvShown || outs[1].Report.NonVacuityWitness != "P.Witness.nonvacuous" {
+		t.Errorf("second main: %+v", outs[1].Report)
+	}
+	// a third main the witness does not serve is rejected
+	outs, _ = runNV(t, false, nvMain("P.correctness", "C@f"), nvMain("P.third", "C@f"), w)
+	if outs[0].Err != nil || outs[1].Err == nil {
+		t.Errorf("correctness ok, third rejected: %v / %v", outs[0].Err, outs[1].Err)
+	}
+	// checkWitnessSupport keeps a witness that supports any verified main
+	mains := map[string]bool{"P.full_write": true}
+	if !witnessSupportsAny(w, mains) || witnessSupportsAny(w, map[string]bool{"P.third": true}) {
+		t.Error("witnessSupportsAny")
+	}
+}

@@ -2375,6 +2375,17 @@ for exactly that theorem** is verified in the same run:
   its unfolded conclusion (return address, call state, entry, arguments, precondition conjuncts), and a
   type that has an element for every binder; a witness with a weaker precondition, for another theorem, or
   from another module does not match and the main theorem fails.
+* **Which theorems need one.** A main theorem whose statement ASSUMES a runtime contract: one applied in a
+  premise or in the non-contract part of the conclusion (`contractHyps`). A theorem whose conclusion IS a
+  contract (it proves `Access1 Extracted.program …` for the program's own code) assumes nothing by stating it.
+  Every such theorem of a proof module needs its own: a witness supports the main theorems of its module it
+  is an instance of (`matchedMains` in the audit record; `matchedMain` is the first), so one witness serves
+  `correctness` and a `full_write` that share a precondition, and a main theorem with an extra hypothesis the
+  witness does not exhibit is rejected.
+* **Matching.** Conjuncts of the witness are matched after beta-reduction (an applied lambda
+  `(fun s => P s ∧ Q s) s` copied from the main theorem's precondition reads as the conjunction),
+  `let`-instantiation and unfolding of reducible abbreviations that lead to `∧`/`∃`; other definitions are not
+  unfolded. A lambda body that leaves a conjunct out is a weaker witness and does not match.
 * **Not accepted.** `Witness.returns` alone: a concrete run shows that the program fires, but its
   statement does not say that the contract hypotheses hold of the runtime it uses, so it does not show
   the hypotheses jointly satisfiable. It is reported (`nonVacuityReturns`) when verified. An anonymous
