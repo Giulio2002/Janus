@@ -1376,7 +1376,9 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			for _, r := range passing {
 				replayed[r] = kernelReplay{Tool: "leanchecker", Status: "unavailable", Modules: []string{}, Note: "leanchecker not found in the Lean toolchain"}
 			}
-		} else if plan, err := planReplay(union, graph, ws.tc.cacheID(), ws.replayCache); err != nil {
+		} else if plan, err := planReplayPinned(union, graph, ws.tc.cacheID(), ws.replayCache, pinned.absHashes()); err != nil {
+			// (the module-data files are already hashed in the pins, which are re-checked after the
+			// replay: the keys use those hashes instead of reading ~500 MB of framework modules again)
 			failAll(err)
 			return
 		} else {
