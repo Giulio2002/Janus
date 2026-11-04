@@ -477,6 +477,7 @@ type consumerWS struct {
 	lock                *fileLock
 	memOwn              [][2]int // job-log ranges of per-request builds killed for memory (already attributed)
 	temp                bool
+	dg                  diagFlags         // --full-errors / --keep-workspace (diagflags.go): output only
 	janusFiles          map[string][]byte // what janus/ must contain: framework + Extracted
 	// pins are the SHA-256 of every module-data file of janus/.lake/build/lib/lean (the trusted
 	// framework build copied from the base, plus the trusted Extracted and JanusTrusted),
@@ -501,6 +502,17 @@ type consumerWS struct {
 	baseLease *frameworkLease
 	// opened: openWorkspace finished (close then clears the busy marker, see beginUse).
 	opened bool
+}
+
+// reportKept (--keep-workspace) prints where the workspace is and how to run Lean in it. The
+// workspace is the ordinary consumer workspace of the cache (or, with --fresh, the temporary one,
+// which is then not removed): janus only reports it.
+func (ws *consumerWS) reportKept(w io.Writer) {
+	if ws == nil || !ws.dg.KeepWorkspace {
+		return
+	}
+	reportKept(w, ws.Dir, "cd "+ws.Root+" && lake env lean YourScratch.lean   (Extracted is "+
+		filepath.Join(ws.janusLib(), "Extracted.olean")+")")
 }
 
 // janusLib is the workspace's framework library directory.
@@ -913,7 +925,7 @@ func (ws *consumerWS) close() {
 	if ws.opened {
 		ws.endUse() // the workspace was consistent when it was last used: the next opener may reuse it
 	}
-	if ws.temp {
+	if ws.temp && !ws.dg.KeepWorkspace {
 		os.RemoveAll(ws.Dir)
 	}
 	ws.lock.unlock()
@@ -1130,6 +1142,8 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 	var cFwPins *pinnedLib
 	cAuditSha := ""
 	cacheOn := resultCacheOK(sb, opts)
+	dg := diagFlagsOf(opts)
+	keepWS := dg.KeepWorkspace
 	if cacheOn {
 		if p, perr := frameworkPins(filepath.Join(lease.dir, ".lake", "build", "lib", "lean"), fw.Files); perr == nil && len(p.want) > 0 {
 			cFwPins, cAuditSha = p, fw.stampedAuditExe(lease.dir)
@@ -1188,6 +1202,9 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 					anyHit = true
 				}
 			}
+			if keepWS { // --keep-workspace needs a real run (a hit opens no workspace); a pass is still recorded below
+				anyHit = false
+			}
 			if anyHit && consumerInputsUnchanged(fw, pkg, group, opts) && func() bool {
 				// the keys, recomputed from the bytes as they are now, must be the ones just looked up
 				for k, r := range group {
@@ -1238,7 +1255,9 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 	tm.mark("workspace open")
 	ws.replayFresh = opts["replay-fresh"] != ""
 	ws.asl = asl
+	ws.dg = dg
 	verifyGroup(fw, pkg, ws, group)
+	ws.reportKept(stderr)
 	for k, i := range groupIdx {
 		outs[i].Report, outs[i].Err = group[k].Report, group[k].Err
 		if group[k].Err == nil && group[k].Report != nil && keys[k] != "" && !group[k].Report.Cached {
@@ -1667,20 +1686,34 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 
 // buildFailure classifies a failed build of a request's module by where Lean reported errors.
 func buildFailure(out string, r *consumerRequest, ws *consumerWS, pkg *consumerPkg) error {
-	summary := summarizeLeanErrors(out, 2000)
+	// --full-errors: the classification below uses the build's own output; what is SHOWN is a
+	// rerun of the failing module with the pretty-printer limits raised (display only).
+	shown, logPath := out, ""
+	if ws.dg.FullErrors {
+		argv := append(append([]string{"env", "lean"}, fullLeanOpts...), filepath.Join(ws.Root, filepath.FromSlash(r.rel)))
+		if _, full, _ := ws.run(argv...); strings.TrimSpace(full) != "" {
+			shown = ws.mapper(pkg, r.cr.Extracted)(full)
+			shown = strings.ReplaceAll(shown, pkg.Root+string(filepath.Separator), displayPath(pkg.Root)+string(filepath.Separator))
+		}
+		logPath = writeFullOutput(r.Outdir, r.rel, shown)
+	}
+	summary := summarizeLeanErrors(shown, ws.dg.errLimit())
 	if summary == "" {
-		summary = lastLines(out, 20)
+		summary = lastLines(shown, 20)
 	}
 	ex := displayPath(r.cr.Extracted)
+	var d *diag
 	switch {
 	case strings.Contains(out, ex+":") && regexp.MustCompile(regexp.QuoteMeta(ex)+`:\d+:\d+: error`).MatchString(out):
-		return &diag{Invalid: true, Msg: "Lean rejected the extracted program " + ex + ".\n" + summary, Stage: "extraction elaboration",
-			Next: "Check that the Janus framework matches this extractor version.", Details: out}
+		d = &diag{Invalid: true, Msg: "Lean rejected the extracted program " + ex + ".\n" + summary, Stage: "extraction elaboration",
+			Next: "Check that the Janus framework matches this extractor version.", Details: shown}
 	case regexp.MustCompile(`(?m)Janus/[^\s:]+\.lean:\d+:\d+: error`).MatchString(out) && !strings.Contains(out, pkg.Root):
-		return &diag{Invalid: true, Msg: "Building the Janus framework failed.\n" + summary, Stage: "Janus library build", Details: out}
+		d = &diag{Invalid: true, Msg: "Building the Janus framework failed.\n" + summary, Stage: "Janus library build", Details: shown}
+	default:
+		d = &diag{Invalid: true, Msg: "Lean rejected the proof module " + r.rel + " (or a module it imports).\n" + summary, Stage: "proof checking",
+			Next: "Fix the proof. It must import Extracted and prove " + r.Theorem + ".", Details: shown}
 	}
-	return &diag{Invalid: true, Msg: "Lean rejected the proof module " + r.rel + " (or a module it imports).\n" + summary, Stage: "proof checking",
-		Next: "Fix the proof. It must import Extracted and prove " + r.Theorem + ".", Details: out}
+	return withFullOutput(d, logPath)
 }
 
 func lastLines(s string, n int) string {
