@@ -127,6 +127,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List 
     have hin' : InRanges r0.toNat r2.toNat R.rt := by simpa using hin
     have hdj2 := InRanges.disjoint hin' hout
     janus64_run
+    rw [show len.toNat + 1 + r0.toNat - 1 = r0.toNat + len.toNat by omega]
     refine ⟨fun h => absurd h hl, fun _ => ⟨hr2, hin', ?_,
       ⟨b - roundupsize (nextslicecap (len.toNat + 1) cap.toNat) true,
         L ++ [(r0.toNat, r0.toNat + r2.toNat)], ?_, ?_⟩, ?_⟩⟩
