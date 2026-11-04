@@ -40,6 +40,8 @@ row() { # NAME expect(blocked|Verified) pattern...
     Verified) case $verdict in *verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
+  # every attack must be stopped by its rule, never by an incomplete proof
+  if grep -q sorryAx <<<"$out"; then status=BROKEN; verdict="$verdict (rejected by sorryAx, not by the audit rule)"; fi
   printf '  %-34s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   if [ $# -eq 0 ] && [ "$expect" = blocked ]; then sed -n 2,4p <<<"$out" | cut -c1-220 | sed 's/^/      /'; fi
