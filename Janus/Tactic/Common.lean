@@ -1819,6 +1819,10 @@ can name it; its elaborator is `Janus.Contracts.Live`'s (without that module it 
 closers go on). -/
 syntax "janus_live" : tactic
 
+/-- `janus_callpre`: close the `DataLoaded` and `RetAddr` parts of the precondition of an internal callee's summary
+(`Janus.Contracts.CallPre`; without that module it fails and the closers go on). -/
+syntax "janus_callpre" : tactic
+
 /-- `janus_apart`: `omega` with the `Apart` hypotheses of the context, one at a time. -/
 elab "janus_apart" : tactic => do
   let g ← getMainGoal
