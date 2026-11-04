@@ -571,3 +571,40 @@ func TestConsumerReplayPlanUsesPinsTamperCaught(t *testing.T) {
 		t.Fatalf("a framework module modified after pinning was not caught: %v", err)
 	}
 }
+
+// Round 15c R2: an olean that is a symlink is pinned as "not-a-regular-file" (no content hash),
+// so a plan keyed by the pins must not treat two different link targets as the same module.
+func TestRound15cSymlinkOleanKeyFollowsContent(t *testing.T) {
+	privateCache(t)
+	lib := t.TempDir()
+	tgt := t.TempDir()
+	writeBytes(t, filepath.Join(tgt, "good.olean"), []byte("good"))
+	writeBytes(t, filepath.Join(tgt, "evil.olean"), []byte("evil"))
+	link := filepath.Join(lib, "A.olean")
+	if err := os.Symlink(filepath.Join(tgt, "good.olean"), link); err != nil {
+		t.Fatal(err)
+	}
+	pl, err := newPinnedLib("the consumer package build", lib, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := pinSet{pl}
+	resolved := map[string]string{"A": link}
+	graph := map[string][]string{"A": {"Init"}}
+	k1, err := planReplayPinned(resolved, graph, "v1", false, ps.absHashes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(link)
+	if err := os.Symlink(filepath.Join(tgt, "evil.olean"), link); err != nil {
+		t.Fatal(err)
+	}
+	pl2, _ := newPinnedLib("the consumer package build", lib, nil)
+	k2, err := planReplayPinned(resolved, graph, "v1", false, pinSet{pl2}.absHashes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k1.keys["A"] == k2.keys["A"] {
+		t.Fatal("two different link targets share one replay key (a cached passing replay would be reused)")
+	}
+}
