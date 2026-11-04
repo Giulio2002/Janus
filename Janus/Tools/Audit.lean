@@ -614,6 +614,16 @@ def roleOf (n : Name) : Role :=
       else .auxiliary
   | _ => .auxiliary
 
+/-- The role of a theorem from its name AND statement. A theorem of a `Witness` namespace under any
+name other than `nonvacuous`/`returns` whose statement is an `∃` is a non-vacuity witness candidate
+(`Role.nonvacuous`): `checkWitness` still demands that it instantiate a main theorem's whole
+hypotheses (contract hypotheses included), so the semantic match, not the name, decides. -/
+def roleOfTy (n : Name) (ty : Expr) : Role :=
+  match roleOf n with
+  | .auxiliary =>
+    if n.components.any (· == `Witness) && ty.consumeMData.isAppOfArity ``Exists 2 then .nonvacuous else .auxiliary
+  | r => r
+
 /-- Reject a statement or definition that mentions the undefined-value stream. -/
 def checkUndefStream (witness : Bool) (e : Expr) : MetaM (Option String) := do
   let fields := getStructureFields (← getEnv) `Janus.Amd64.State
@@ -1921,7 +1931,7 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     -- `Witness.nonvacuous` / `Witness.returns` AND that is not the main theorem (`main` is the role verdict
     -- of the caller) gets the concrete-start-state exemption; any theorem of a `Witness` namespace that is
     -- the main theorem, or an auxiliary lemma, never does
-    let isWitness := !main && (roleOf thm == Role.nonvacuous || roleOf thm == Role.returns)
+    let isWitness := !main && (roleOfTy thm thmType == Role.nonvacuous || roleOfTy thm thmType == Role.returns)
     if let some m ← checkUndefStream isWitness expanded then
       throwError s!"the statement {m}"
     for ci in extDefs do
@@ -2403,7 +2413,7 @@ def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmTyp
           whys := whys.push s!"{c}: the statement is not its guarantee `{(← Meta.ppExpr mr).pretty 200}`"
           st.restore
       return .error s!"is not the guarantee of any main theorem of the proof module at a start state ({"; ".intercalate whys.toList})"
-  | _ => return .error "is a lemma of a Witness namespace, not a verifiable result: only Witness.nonvacuous and Witness.returns are"
+  | _ => return .error "is a lemma of a Witness namespace, not a verifiable result: only a `∃ …` non-vacuity witness (any name; `Witness.nonvacuous` by convention) and `Witness.returns` are"
 
 unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array String)
     (pre? : Option (ImportState × Environment)) : IO Unit := do
@@ -2463,7 +2473,7 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     -- Round 14: the role of the theorem. A witness (`Witness.nonvacuous`/`Witness.returns`) is
     -- checked structurally against a main theorem of the module; every other theorem is a main
     -- theorem, whose runtime is quantified (`checkContractHyps … main`).
-    let role := roleOf thmN
+    let role := roleOfTy thmN ci.type
     let matchedMain ← match role with
       | .main => pure ""
       | _ => do

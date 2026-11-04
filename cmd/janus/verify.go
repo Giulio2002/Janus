@@ -105,6 +105,14 @@ type verifiedReport struct {
 	// Notes flag operations of the statement (and of the disclosed definitions) whose standard
 	// Lean meaning often reads unexpectedly (round 7 K1). They are not errors.
 	Notes []string `json:"notes,omitempty"`
+	// NonVacuity (policy): "shown" (a kernel-checked non-vacuity witness, NonVacuityWitness, verified in the
+	// same run, supports THIS theorem), "not-shown" (none; only possible for a theorem without runtime-contract
+	// hypotheses, or when opted out), "opted-out" (--allow-no-witness: a contract-assuming theorem accepted
+	// without a witness) or "witness" (this report is itself a witness). Set after the run, never cached.
+	NonVacuity        string `json:"nonVacuity,omitempty"`
+	NonVacuityWitness string `json:"nonVacuityWitness,omitempty"`
+	// NonVacuityReturns names a verified Witness.returns for this theorem, when there is one (informational).
+	NonVacuityReturns string `json:"nonVacuityReturns,omitempty"`
 	// Cached: this report is the recorded result of an earlier verification with exactly the
 	// same inputs (resultcache.go), made at CachedFrom.
 	Cached     bool   `json:"cached,omitempty"`
@@ -259,7 +267,7 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl")
+	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "allow-no-witness")
 	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root", "results")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -294,6 +302,9 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	}
 	r, err := verifyAndReport(outdir, opts, stderr)
 	if err != nil {
+		return jsonFailure(stdout, flags["json"], err)
+	}
+	if err := nonVacuitySingle(outdir, r, flags["allow-no-witness"]); err != nil {
 		return jsonFailure(stdout, flags["json"], err)
 	}
 	if flags["json"] {
@@ -413,6 +424,7 @@ func printVerifiedAt(stdout io.Writer, outdir, reportPath string, r *verifiedRep
 	for _, l := range roleLines(r) {
 		fmt.Fprintln(stdout, l)
 	}
+	fmt.Fprintln(stdout, nonVacuityLine(r))
 	if len(r.Kernel) > 0 {
 		fmt.Fprintf(stdout, "  Kernel interface: %s (.syscall stubs: their effect is the kernel contract of Janus.Kernel, under ReturnsK/EnsuresK only)\n",
 			termSafe(strings.Join(r.Kernel, ", ")))
@@ -1364,6 +1376,7 @@ func cmdVerifyMany(outdir string, opts map[string]string, flags map[string]bool,
 		return jsonFailure(stdout, flags["json"], err)
 	}
 	checkWitnessSupport(outdir, outs)
+	applyNonVacuity(outdir, outs, flags["allow-no-witness"])
 	failed := 0
 	var aslErr error
 	mj := multiJSON{Schema: 1}
