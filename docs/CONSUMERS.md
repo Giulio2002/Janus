@@ -321,6 +321,7 @@ cached; the default output is unchanged.
 
   ```sh
   cd <workspace>/root && lake env lean Scratch.lean      # Scratch.lean: import Extracted, your lemmas, then trace_state / your probe
+  lake env lean -Dpp.deepTerms=true -Dpp.proofs=true -Dpp.maxSteps=1000000000 Scratch.lean   # goals with nothing elided
   ```
 
   With `--fresh` the throwaway workspace is kept instead of removed. A cache hit builds no

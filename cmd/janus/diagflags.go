@@ -152,5 +152,5 @@ func keepSingleFileWorkspace(outdir, fwRoot, trustedDir, proofPath string, proof
 
 // reportKept tells the user where the kept workspace is and how to use it.
 func reportKept(w io.Writer, dir, how string) {
-	fmt.Fprintf(w, "Kept workspace: %s\n  Use: %s\n  (diagnostics only: janus never reads it back, and `janus cache gc` may remove an unused one)\n", dir, how)
+	fmt.Fprintf(w, "Kept workspace: %s\n  Use: %s\n  Untruncated goals: add %s to lean\n  (diagnostics only: janus never reads it back, and `janus cache gc` may remove an unused one)\n", dir, how, strings.Join(fullLeanOpts, " "))
 }

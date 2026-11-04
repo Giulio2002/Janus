@@ -1691,6 +1691,7 @@ func buildFailure(out string, r *consumerRequest, ws *consumerWS, pkg *consumerP
 		argv := append(append([]string{"env", "lean"}, fullLeanOpts...), filepath.Join(ws.Root, filepath.FromSlash(r.rel)))
 		if _, full, _ := ws.run(argv...); strings.TrimSpace(full) != "" {
 			shown = ws.mapper(pkg, r.cr.Extracted)(full)
+			shown = strings.ReplaceAll(shown, pkg.Root+string(filepath.Separator), displayPath(pkg.Root)+string(filepath.Separator))
 		}
 		logPath = writeFullOutput(r.Outdir, r.rel, shown)
 	}

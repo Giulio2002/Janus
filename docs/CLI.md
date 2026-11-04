@@ -607,7 +607,7 @@ trusted, nor what the result cache keys on or records; the default output is unc
   `lake env lean F.lean` works against the built `Extracted` module (its olean and source), and prints it:
   with `--proof-root`, the consumer workspace of the cache (`<cache>/v1/consumer/<family>/<extraction>`:
   `cd <workspace>/root && lake env lean Scratch.lean`; with `--fresh` the otherwise temporary
-  workspace is not removed); with a single `--proof` file, `<outdir>/workspace/` (a Lake package that
+  workspace is not removed); with a single `--proof` file, `<outdir>/workspace/` (`cd <outdir>/workspace && lake env lean Proof.lean`; a Lake package that
   requires the framework build and holds `Extracted.lean`, its `.olean`, a copy of the proof as
   `Proof.lean` and a `lakefile.toml`). Because a result-cache hit builds no workspace, the flag makes
   the run skip the cache **read**; a pass is recorded exactly as without the flag. A kept workspace
