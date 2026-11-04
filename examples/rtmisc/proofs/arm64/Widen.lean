@@ -30,6 +30,13 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Float
 
 namespace Proof
 
+/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "headN" : term => `(janus_eval% (segAddr Extracted.program "runtime.f32to64" + 200))
+local macro "headM" : term => `(janus_eval% (segAddr Extracted.program "runtime.f32to64" + 32))
+local macro "packN" : term => `(janus_eval% (segAddr Extracted.program "runtime.fpack64"))
+local macro "retN" : term => `(janus_eval% (Extracted.entry + 28))
+
+
 /-- `UBFIZ X1, X4, #29, #32` as executed. -/
 theorem ubfiz29 (x : BitVec 64) :
     x.rotateRight 35 &&& 2305843008676823040#64 &&& 2305843009213693951#64 = (x &&& 4294967295#64) <<< 29 := by
@@ -109,12 +116,12 @@ theorem sub_bits (b : BitVec 64) (m j : Nat) (hm : m < 2 ^ 32) (hj : j ≤ 23) :
   exact or_pack64 _ _ (b.toNat % 2 ^ 32 / 2 ^ 31) (Nat.mod_lt _ (by decide)) (by omega)
 
 /-- The loop head `CMPW $0x800000, R4` of the subnormal normalisation in `funpack32`. -/
-abbrev head : Nat := 0x677a8
+abbrev head : Nat := (headN)
 
 /-- The memory at the loop head: the frames of `Widen` and `f32to64` (saved `X30`, `X29`). -/
 def M (s : State) (ret : Nat) : Memory :=
   (((s.mem.writeLE (BitVec.toNat s.sp - 48) 8 ret).writeLE (BitVec.toNat s.sp - 56) 8
-    (BitVec.toNat (s.regs 29))).writeLE (BitVec.toNat s.sp - 96) 8 548236).writeLE
+    (BitVec.toNat (s.regs 29))).writeLE (BitVec.toNat s.sp - 96) 8 (retN)).writeLE
     (BitVec.toNat s.sp - 104) 8 (BitVec.toNat s.sp - 56)
 
 /-- The normalisation loop `for mant < 1<<23 { mant <<= 1; exp-- }` of a subnormal binary32
@@ -189,7 +196,7 @@ theorem correctness (b : BitVec 64) :
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hgd⟩
   janus_intro hs
   simp only [Disjoint] at hgd
-  janus_run until [0x67700]
+  janus_run until [(headM)]
   have hF : b &&& 8388607#64 = BitVec.ofNat 64 (b.toNat % 2 ^ 23) := by
     apply BitVec.eq_of_toNat_eq
     rw [BitVec.toNat_and, BitVec.toNat_ofNat, BitVec.toNat_ofNat,
@@ -210,7 +217,7 @@ theorem correctness (b : BitVec 64) :
   have hEi : (BitVec.ofNat 64 E - 127#64).toInt = (E : Int) - 127 := by
     rw [Tactic.toInt64_cond, BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat]
     split <;> omega
-  janus_run [ubfiz29, lsl32] until [0x677a8, 0x67200]
+  janus_run [ubfiz29, lsl32] until [(headN), (packN)]
   · -- +0 / -0
     janus_run
     rw [cvt32to64_zero _ (by omega) (by omega), show (2147483648 : Nat) = 2 ^ 31 by rfl, and_two_pow_eq]

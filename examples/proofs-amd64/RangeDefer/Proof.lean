@@ -1508,7 +1508,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   refine ⟨?_, ?_⟩
   · apply BitVec.eq_of_toNat_eq
     rw [BitVec.toNat_add, BitVec.toNat_add, BitVec.toNat_ofNat]; simp; omega
-  · rw [hfx]
+  · rw [hfx]; rfl
 
 
 /-! ## Non-vacuity

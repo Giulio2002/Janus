@@ -32,6 +32,10 @@ def cgoAddr : Nat :=
   adrpLdTarget (Extracted.entry + 0x20) (segWord Extracted.program "runtime.KeepAlive" 8)
     (segWord Extracted.program "runtime.KeepAlive" 9) 0
 
+
+/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "cgoN" : term => `(janus_eval% cgoAddr)
+
 theorem correctness : KeepAliveContract Extracted.program Extracted.entry cgoAddr := by
   intro s hpc ⟨hpre, hcgo, hdis⟩
   obtain ⟨-, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩ := hpre
@@ -40,7 +44,7 @@ theorem correctness : KeepAliveContract Extracted.program Extracted.entry cgoAdd
   janus_eval_nat hC : cgoAddr
   simp only [hC, Spec.Disjoint, softDepth] at hc1 hc2 hc3 hdis
   have hr : ∀ v1 v2 v3, (((s.mem.writeLE (BitVec.toNat s.sp - 32) 8 v1).writeLE (BitVec.toNat s.sp - 40) 8 v2).writeLE
-      (BitVec.toNat s.sp + 8) 8 v3).readLE 1432095 1 = 0 := by
+      (BitVec.toNat s.sp + 8) 8 v3).readLE (cgoN) 1 = 0 := by
     intro v1 v2 v3
     simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint]
     exact hc3
@@ -55,13 +59,13 @@ A call with `SP = 0x20000` (`[SP - 512, SP + 0x100)` writable), a goroutine at `
 
 namespace Witness
 
-theorem cgoAddr_eq : cgoAddr = 1432095 := by decide
+theorem cgoAddr_eq : cgoAddr = (cgoN) := by decide
 
 def wsp : Nat := 0x20000
 def wg : Nat := 0x50000
 
 def smem : Memory :=
-  ⟨fun _ => 0, [⟨wsp - 512, 0x300, true⟩, ⟨wg, 0x100, false⟩, ⟨1432095, 8, false⟩]⟩
+  ⟨fun _ => 0, [⟨wsp - 512, 0x300, true⟩, ⟨wg, 0x100, false⟩, ⟨(cgoN), 8, false⟩]⟩
 
 def s0 : State :=
   { regs := fun i => if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 0x200000 else 0,

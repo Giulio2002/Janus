@@ -208,7 +208,7 @@ theorem formatBase10 (impl : List Segment) :
   generalize (s.regs 3).toNat = u at *
   janus_eval_nat h_smv : SM
   rw [h_smv] at h_sm hsma ap3 ap4
-  have hdat : ∀ j, j < 200 → s.mem.readLE (823223 + j) 1 = smallsByte j := h_sm
+  have hdat : ∀ j, j < 200 → s.mem.readLE (823223 + j) 1 = smallsByte j := h_sm  -- addr-ok: print binary pinned by PrintCode (Program.Equiv fails if the layout moves)
   -- the final chunk (`lo < 2^29`), two digits at a time, ending at `i`
   have tail : ∀ lo (S : State) (i : Nat), lo < 2 ^ 29 → (Janus.Spec.Print.decimal lo).length ≤ i →
       i ≤ 20 → S.pc = BitVec.ofNat 64 (segAddr P "internal/strconv.formatBase10" + 0x118) →
@@ -218,14 +218,14 @@ theorem formatBase10 (impl : List Segment) :
       MemFrame s.mem S.mem [(SP - 24, SP - 8), (SP + 8, SP + 16), (a, a + 20)] →
       S.mem.readLE (SP - 16) 8 = (s.regs 30).toNat → S.mem.readLE (SP - 24) 8 = (s.regs 29).toNat →
       S.dczid = s.dczid → S.tpidr = s.tpidr → S.fpcr = s.fpcr → S.fpsr = s.fpsr →
-      S.mem.accessible 823223 200 false = true →
-      (∀ j, j < 200 → S.mem.readLE (823223 + j) 1 = smallsByte j) →
+      S.mem.accessible 823223 200 false = true →  -- addr-ok: print binary pinned by PrintCode (Program.Equiv fails if the layout moves)
+      (∀ j, j < 200 → S.mem.readLE (823223 + j) 1 = smallsByte j) →  -- addr-ok: print binary pinned by PrintCode (Program.Equiv fails if the layout moves)
       ReachesRet (P.link impl) (s.regs regLR) S (FbTail s SP a i lo S.mem) := by
     intro lo
     induction lo using Nat.strongRecOn with
     | _ lo ih =>
     intro S i hlo hlen hi20 hpc' hsp' h0 h1 h2 h3 hg' h18 hf h_rd1 h_rd2 hdz htp hfc hfs hsmS h_rdsm
-    have hsep3 : a + 20 ≤ 823223 ∨ 823223 + 200 ≤ a := ap3
+    have hsep3 : a + 20 ≤ 823223 ∨ 823223 + 200 ≤ a := ap3  -- addr-ok: print binary pinned by PrintCode (Program.Equiv fails if the layout moves)
     by_cases h100 : 100 ≤ lo
     · have hl3 : 3 ≤ i := by
         have := Janus.Spec.Print.decimal_append_two h100
@@ -300,8 +300,8 @@ theorem formatBase10 (impl : List Segment) :
       MemFrame s.mem S.mem [(SP - 24, SP - 8), (SP + 8, SP + 16), (a, a + 20)] →
       S.mem.readLE (SP - 16) 8 = (s.regs 30).toNat → S.mem.readLE (SP - 24) 8 = (s.regs 29).toNat →
       S.dczid = s.dczid → S.tpidr = s.tpidr → S.fpcr = s.fpcr → S.fpsr = s.fpsr →
-      S.mem.accessible 823223 200 false = true →
-      (∀ j, j < 200 → S.mem.readLE (823223 + j) 1 = smallsByte j) → U < 2 ^ 64 →
+      S.mem.accessible 823223 200 false = true →  -- addr-ok: print binary pinned by PrintCode (Program.Equiv fails if the layout moves)
+      (∀ j, j < 200 → S.mem.readLE (823223 + j) 1 = smallsByte j) → U < 2 ^ 64 →  -- addr-ok: print binary pinned by PrintCode (Program.Equiv fails if the layout moves)
       ReachesRet (P.link impl) (s.regs regLR) S (FbTail s SP a i U S.mem) := by
     intro U
     induction U using Nat.strongRecOn with
@@ -355,7 +355,7 @@ theorem formatBase10 (impl : List Segment) :
         rw [show U % 1000000000 = U by omega] at *
         chunk_digits
   -- the entry: the prologue, then the loop head with `i = 20`
-  have hsep4 : SP - 24 + 40 ≤ 823223 ∨ 823223 + 200 ≤ SP - 24 := ap4
+  have hsep4 : SP - 24 + 40 ≤ 823223 ∨ 823223 + 200 ≤ SP - 24 := ap4  -- addr-ok: print binary pinned by PrintCode (Program.Equiv fails if the layout moves)
   janus_run until [segAddr P "internal/strconv.formatBase10" + 0x28]
   refine ReachesRet.mono' (outer u _ 20 (length_decimal_le 19 u (by omega)) (Nat.le_refl _) ?_ ?_ ?_ ?_ ?_
     ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ hul) ?_
