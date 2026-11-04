@@ -33,6 +33,7 @@ def stubSegs (P : Janus.Amd64.Program) : List Janus.Amd64.Segment :=
 end Janus.Contracts.LiveStubAmd64
 
 syntax "janus64_live_newobject" : tactic
+set_option hygiene false in
 macro_rules
   | `(tactic| janus64_live_newobject) => `(tactic| (
       intro L b s hpc pre
@@ -42,12 +43,13 @@ macro_rules
       have hap := Janus.Contracts.LiveSatAmd64.bump_apart64 pre.2.2.2.2.2.2
       change Janus.Amd64.Tactic.ReachesRet _ _ s _
       janus64_run
-      open Janus Janus.Amd64 Janus.Contracts Janus.Contracts.Toy Janus.Contracts.LiveSatAmd64 in
+      open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Toy Janus.Contracts.LiveSatAmd64 in
         exact finish_newobjectD (by intro t ht; simp at ht) _ (by simp [retAddrOf]) (by simp [setRegF])
           (by simp [setRegF]) (by simp [setRegF]) (by simp) (by simp) (by simp) (by simp) rfl rfl
           (by simp [setRegF, BUMP]) (by simp [BUMP]) pre))
 
 syntax "janus64_live_makeslice" : tactic
+set_option hygiene false in
 macro_rules
   | `(tactic| janus64_live_makeslice) => `(tactic| (
       intro L b s hpc pre
@@ -57,12 +59,13 @@ macro_rules
       have hap := Janus.Contracts.LiveSatAmd64.bump_apart64 pre.2.2.2.2.2.2
       change Janus.Amd64.Tactic.ReachesRet _ _ s _
       janus64_run
-      open Janus Janus.Amd64 Janus.Contracts Janus.Contracts.Toy Janus.Contracts.LiveSatAmd64 in
+      open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Toy Janus.Contracts.LiveSatAmd64 in
         exact finish_makesliceD (by intro t ht; simp at ht) _ (by simp [retAddrOf]) (by simp [setRegF])
           (by simp [setRegF]) (by simp [setRegF]) (by simp) (by simp) (by simp) (by simp) rfl rfl
           (by simp [setRegF, BUMP]) (by simp [BUMP]) pre))
 
 syntax "janus64_live_mallocgc" : tactic
+set_option hygiene false in
 macro_rules
   | `(tactic| janus64_live_mallocgc) => `(tactic| (
       intro L b s hpc pre
@@ -71,19 +74,20 @@ macro_rules
       have hap := Janus.Contracts.LiveSatAmd64.bump_apart64 pre.2.2.2.2.2.2
       change Janus.Amd64.Tactic.ReachesRet _ _ s _
       janus64_run
-      open Janus Janus.Amd64 Janus.Contracts Janus.Contracts.Toy Janus.Contracts.LiveSatAmd64 in
+      open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Toy Janus.Contracts.LiveSatAmd64 in
         exact finish_mallocgcD (by intro t ht; simp at ht) _ (by simp [retAddrOf]) (by simp [setRegF])
           (by simp [setRegF]) (by simp [setRegF]) (by simp) (by simp) (by simp) (by simp) rfl rfl
           (by simp [setRegF, BUMP]) (by simp [BUMP]) pre))
 
 syntax "janus64_live_wb " term : tactic
+set_option hygiene false in
 macro_rules
   | `(tactic| janus64_live_wb $n) => `(tactic| (
       intro L b s hpc pre
       have ⟨hra, hal, h3, h4, h5⟩ := pre.1
       change Janus.Amd64.Tactic.ReachesRet _ _ s _
       janus64_run
-      open Janus Janus.Amd64 Janus.Contracts Janus.Contracts.Toy Janus.Contracts.LiveSatAmd64 in
+      open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Toy Janus.Contracts.LiveSatAmd64 in
         exact wb_post64 (n := $n) (by intro t ht; simp at ht) (by omega) pre.2.2.1 pre.2.2.2.2
           (by simp [retAddrOf])
           (by intro i; simp only [setRegF]; by_cases h4 : i = 4 <;> by_cases h11 : i = 11 <;> simp [h4, h11])

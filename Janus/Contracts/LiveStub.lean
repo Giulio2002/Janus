@@ -59,6 +59,7 @@ end Janus.Contracts.LiveStub
 /-- Prove `NewobjectLiveContract linked a 4096 (toyR [] ok)` for `linked` with
 `LiveStub.newobjectSeg a` linked in. -/
 syntax "janus_live_newobject" : tactic
+set_option hygiene false in
 macro_rules
   | `(tactic| janus_live_newobject) => `(tactic| (
       intro L b s hpc pre
@@ -71,6 +72,7 @@ macro_rules
 
 /-- `MakesliceLiveContract` against `LiveStub.makesliceSeg`. -/
 syntax "janus_live_makeslice" : tactic
+set_option hygiene false in
 macro_rules
   | `(tactic| janus_live_makeslice) => `(tactic| (
       intro L b s hpc pre
@@ -83,6 +85,7 @@ macro_rules
 
 /-- `MallocgcLiveContract` against `LiveStub.mallocgcSeg`. -/
 syntax "janus_live_mallocgc" : tactic
+set_option hygiene false in
 macro_rules
   | `(tactic| janus_live_mallocgc) => `(tactic| (
       intro L b s hpc pre
@@ -94,6 +97,7 @@ macro_rules
 
 /-- `WbLiveContract linked a 4096 (toyR [] ok) n` against `LiveStub.wbSeg`, for `n ≤ 8` slots. -/
 syntax "janus_live_wb " term : tactic
+set_option hygiene false in
 macro_rules
   | `(tactic| janus_live_wb $n) => `(tactic| (
       intro L b s hpc pre

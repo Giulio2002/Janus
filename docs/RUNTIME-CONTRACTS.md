@@ -341,6 +341,48 @@ function, meets every contract for every live set and budget; the allocators rea
 type descriptor (advance `64·size`, within the invariant's slack), so descriptors may lie in
 read-only data. The examples' `Witness.nonvacuous` use them.
 
+**Satisfiability at a program's own contract addresses** (`LiveStub.lean`, `LiveStubAmd64.lean`). The
+proofs above run the toy at `A0` of a toy program. A **Witness** for a theorem about an extracted function
+`P` needs the live contracts for `P.link impl` at the addresses `P.contractAddr "runtime.newobject"`,
+`"runtime.gcWriteBarrier1"`, ... (the stub runtime is the stand-in for the Go runtime; the contract is
+a hypothesis of the main theorem and the Witness shows it is satisfiable there). `LiveStub` packages the
+`LiveSat` proofs so a consumer does not redo them:
+
+```lean
+open Janus.Contracts.LiveStub
+def newA : Nat := janus_eval% (Extracted.program.contractAddr "runtime.newobject")
+def wbA  : Nat := janus_eval% (Extracted.program.contractAddr "runtime.gcWriteBarrier1")
+def implAt : List Segment := [newobjectSeg newA, wbSeg wbA]      -- or: stubSegs Extracted.program
+def R : RtInv := toyR [] ok                                       -- `ok`: the (address, args) requests served
+def linked : Program := Extracted.program.link implAt             -- a closed constant
+theorem model_new : NewobjectLiveContract linked newA 4096 R := by janus_live_newobject
+theorem model_wb  : WbLiveContract linked wbA 4096 R 1       := by janus_live_wb 1
+theorem addr_new : Extracted.program.contractAddr "runtime.newobject" = newA := by decide
+```
+
+`janus_live_newobject`, `janus_live_makeslice`, `janus_live_mallocgc`, `janus_live_wb n` (arm64) and
+`janus64_live_*` (amd64, `LiveStubAmd64`, contracts `…LiveContract64`) expand to `intro; janus_run;
+exact (LiveSat finishing lemma)`: the stub code is *run* by the executor at the program's address, so the
+result is an ordinary kernel-checked proof of the contract statement and the trusted base does not grow
+(no axiom, no new trusted definition: `newobjectSeg` etc. are only machine code in a segment). The
+auditor's Witness rules are unchanged (`nonvacuous` still states `∃ impl R …` with the contract
+hypotheses of the main theorem at `Extracted.program.link impl`). Requirements: the program must be a
+closed constant (the executor evaluates its code; use a `def`); the stub must fit in the gap before the next
+function (`wbSeg` is 12 bytes on arm64, 7 on amd64: `gcWriteBarrier1` and `2` are 16/32 bytes apart);
+the runtime is `toyR [] ok` (type descriptors are read from memory, outside the runtime's own ranges).
+`LiveStub.stubSegs P` builds the stub segments of every live allocation contract `P` lists. Other
+contracts (`growslice`, `memmove`, `memclr`, `typedmemmove`) follow the same shape: a code definition in
+`LiveSat`/`LiveSatAmd64`, a finishing lemma, and one macro. `examples/rtmisc/proofs/{arm64,amd64}/Cons.lean`
+is a worked example (a function with one `newobject` and one barrier store).
+
+**From `Ensures` to a callee summary** (`Janus.Tactic.Bridge`, `Janus.Amd64.Bridge`). `janus_run … calls [S]`
+and `Summary.of_codeIn` take `S : Summary p a pre post`, while a function theorem is stated as `Ensures`
+or `Reaches (p.withExit ret) s (IsReturn Q)`. `Reaches.toReachesRet` turns a returning run of
+`p.withExit ret` into `ReachesRet p ret s Q`, and `Ensures.toSummary h hx` (`hx : p.fetch p.exitAddr = none`,
+`by decide` for an extracted program) turns `Ensures p entry args pre post` into a `Summary` whose
+precondition is `∃ ret, RetAddr p ret ∧ CallSetup (p.withExit ret) entry args s ∧ pre s` and whose
+postcondition is `ABIReturn s s' ∧ post s s'`.
+
 **Examples** (`examples/rtmisc/live/live.go`; `examples/rtmisc/proofs/{arm64,amd64}`):
 
 | Function | Guarantee |
