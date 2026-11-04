@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Round 15a (audit/round15a): Lake configurations whose sources or settings the result-cache key
@@ -267,5 +268,73 @@ func TestRound15aOleanStore(t *testing.T) {
 	os.WriteFile(filepath.Join(dir(k2), k2+".olean"), []byte("x"), 0o600)
 	if _, ok := oleanStoreGet(k2); ok {
 		t.Error("an entry without a valid MAC was served")
+	}
+}
+
+// Round 15a, olean provenance: a planted Lake olean (the variant's olean and output hashes, the
+// genuine trace kept) is never the environment that is audited and replayed: janus compiled the
+// module itself from the hashed source. The unchanged package reuses the stored olean (no compile).
+func TestRound15aPlantedOlean(t *testing.T) {
+	needLeanSlow(t)
+	useTestCache(t)
+	add := mustExtract(t, "example.com/basic.Add")
+	pkgS := consumerCopy(t, "toml")
+	pkgV := consumerCopyAt(t, "toml", repoRoot, filepath.Join(t.TempDir(), "variant"))
+	vsrc := filepath.Join(pkgV, "ConsumerExample", "Add.lean")
+	b, err := os.ReadFile(vsrc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vb := strings.Replace(string(b), "Computes Extracted.program Extracted.entry addSpec :=", "Computes Extracted.program Extracted.entry (fun x y => addSpec x y) :=", 1)
+	if vb == string(b) {
+		t.Fatal("cannot build the variant")
+	}
+	os.WriteFile(vsrc, []byte(vb), 0o644)
+	verify := func(pkg string) *verifiedReport {
+		t.Helper()
+		code, out, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(pkg, "ConsumerExample", "Add.lean"), "--proof-root", pkg,
+			"--theorem", "ConsumerExample.Add.correctness", "--no-result-cache")
+		if code != 0 {
+			t.Fatalf("verify %s: %d\n%s\n%s", pkg, code, out, stderr)
+		}
+		return readReport(t, add)
+	}
+	t0 := time.Now()
+	rS := verify(pkgS)
+	cold := time.Since(t0)
+	if rS.OleanProvenance != provChecked || strings.Contains(rS.Statement, "fun x y") {
+		t.Fatalf("provenance %q, statement %s", rS.OleanProvenance, rS.Statement)
+	}
+	// the unchanged package: the stored oleans are reused, nothing is compiled again
+	before := ownCompiles.Load()
+	t0 = time.Now()
+	verify(pkgS)
+	warm := time.Since(t0)
+	if n := ownCompiles.Load() - before; n != 0 {
+		t.Errorf("an unchanged package compiled %d module(s) again", n)
+	}
+	t.Logf("provenance overhead: cold %v, warm %v", cold, warm)
+	rV := verify(pkgV)
+	if !strings.Contains(rV.Statement, "fun x y") {
+		t.Fatalf("the variant's statement is not distinguishable: %s", rV.Statement)
+	}
+	L := filepath.Join(".lake", "build", "lib", "lean", "ConsumerExample")
+	planted := 0
+	for _, f := range []string{"Add.olean", "Add.ilean", "Add.olean.hash", "Add.ilean.hash"} {
+		data, err := os.ReadFile(filepath.Join(rV.Consumer.Workspace, "root", L, f))
+		if err != nil {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(rS.Consumer.Workspace, "root", L, f), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		planted++
+	}
+	if planted == 0 {
+		t.Fatal("nothing planted")
+	}
+	r2 := verify(pkgS)
+	if r2.Statement != rS.Statement || strings.Contains(r2.Statement, "fun x y") || r2.OleanProvenance != provChecked {
+		t.Errorf("the planted olean decided the audited statement:\n%s\nwant\n%s", r2.Statement, rS.Statement)
 	}
 }

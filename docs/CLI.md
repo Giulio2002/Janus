@@ -548,7 +548,7 @@ name; …`). The classification is informational and untrusted, like reachabilit
 ## Verify
 
 ```sh
-janus verify <outdir> [--proof FILE] [--theorem NAME]... [--proof-root PKG [--allow-path-deps]] [--results FILE] [--json]
+janus verify <outdir> [--proof FILE] [--theorem NAME]... [--proof-root PKG [--allow-path-deps] [--allow-unchecked-provenance]] [--results FILE] [--json]
              [--fresh] [--fresh-framework] [--replay-fresh] [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox] [--asl]
 janus verify artifacts/Get --proof cmd/janus/testdata/Trivial.lean
 ```
@@ -582,7 +582,7 @@ library, Mathlib) when every one of them, transitively, is a git dependency pinn
 40-hex revision and checked out at exactly that revision with no local modifications
 ([details](CONSUMERS.md#extra-dependencies)). `--allow-path-deps` additionally accepts local
 path dependencies other than janus, copied as they are and recorded as `"type": "path"` (not
-pinned). `--json` prints the report as JSON; `--fresh` rebuilds the framework/caches from
+pinned). With `--proof-root`, janus compiles the theorem's consumer/dependency closure itself (olean provenance, SOUNDNESS.md); a package outside the strict `lakefile.toml` subset (a `lakefile.lean`, unparsed options) is refused unless `--allow-unchecked-provenance` is given (the report then says "NOT CHECKED"). `--json` prints the report as JSON; `--fresh` rebuilds the framework/caches from
 scratch (and replays every module, ignoring the replay cache); `--fresh-framework` additionally ignores the gate-private framework verdict store
 (`JANUS_VERDICT_CACHE=<private dir>`, docs/SOUNDNESS.md "Gate-private framework verdicts"), which
 lets `--fresh` verifications of one gate share one replay of an identical framework build; `--replay-fresh` additionally

@@ -61,7 +61,7 @@ P=$W/R1; rm -rf "$P"; cp -r audit/attacks/R1_pkg "$P"
 sed -i "s|@JANUS@|$root|; s|-- @EXTRA_REQUIRE@||" "$P/lakefile.lean"
 echo "-- run $(date +%s%N)" >> "$P/lakefile.lean"
 printf "{\"version\":\"1.2.0\",\"packagesDir\":\".lake/packages\",\"name\":\"r1\",\"lakeDir\":\".lake\",\"fixedToolchain\":false,\"packages\":[{\"type\":\"path\",\"scope\":\"\",\"name\":\"janus\",\"manifestFile\":\"lake-manifest.json\",\"inherited\":false,\"dir\":\"%s\",\"configFile\":\"lakefile.toml\"}]}\n" "$root" > "$P/lake-manifest.json"
-out="$(JANUS_R1_MODE=resultcache "$J" verify --janus-root "$root" $W/Add3 --proof "$P/R1/Plain.lean" --proof-root "$P" --theorem R1.Plain.claim 2>&1)"
+out="$(JANUS_R1_MODE=resultcache "$J" verify --janus-root "$root" $W/Add3 --proof "$P/R1/Plain.lean" --proof-root "$P" --allow-unchecked-provenance --theorem R1.Plain.claim 2>&1)"
 ok=yes; [ -e "$C/v1/result/planted-by-lakefile" ] && ok=no; grep -q "RC2-VISIBLE" <<<"$out" && ok=no
 row RC2_lakefile_probe "$(verdict "$out") [cache invisible: $([ $ok = yes ] && echo yes || echo NO)]" "$([ "$(verdict "$out" | cut -c1-8)" = Verified ] && echo $ok || echo no)"'
 

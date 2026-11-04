@@ -561,13 +561,18 @@ func TestConsumerLakefileLean(t *testing.T) {
 	useTestCache(t)
 	pkg := consumerCopy(t, "lean")
 	max := mustExtract(t, "example.com/basic.Max")
-	code, out, stderr := runJanus(t, "verify", max, "--proof", filepath.Join(pkg, "ConsumerExample", "Max.lean"), "--proof-root", pkg,
-		"--theorem", "ConsumerExample.Max.result_ge_left")
-	if code != 0 || !strings.HasPrefix(out, "Verified: ConsumerExample.Max.result_ge_left\n") {
+	args := []string{"verify", max, "--proof", filepath.Join(pkg, "ConsumerExample", "Max.lean"), "--proof-root", pkg,
+		"--theorem", "ConsumerExample.Max.result_ge_left"}
+	// round 15a: oleans janus cannot build itself are refused unless the opt-out is given
+	if code, out, stderr := runJanus(t, args...); code == 0 || !strings.Contains(out+stderr, "olean provenance") {
+		t.Fatalf("a lakefile.lean package was accepted by default: %d\n%s\n%s", code, out, stderr)
+	}
+	code, out, stderr := runJanus(t, append(args, "--allow-unchecked-provenance")...)
+	if code != 0 || !strings.HasPrefix(out, "Verified: ConsumerExample.Max.result_ge_left\n") || !strings.Contains(out, "Olean provenance: NOT CHECKED") {
 		t.Fatalf("%d\n%s\n%s", code, out, stderr)
 	}
-	if r := readReport(t, max); r.Consumer.Lakefile != "lakefile.lean" {
-		t.Errorf("lakefile %s", r.Consumer.Lakefile)
+	if r := readReport(t, max); r.Consumer.Lakefile != "lakefile.lean" || r.OleanProvenance != provUnchecked {
+		t.Errorf("lakefile %s provenance %q", r.Consumer.Lakefile, r.OleanProvenance)
 	}
 }
 
@@ -980,7 +985,7 @@ func TestConsumerResultCacheExternalSrc(t *testing.T) {
 	writeFile(t, filepath.Join(ext, "ExtDep.lean"), "def extX : Nat := 1\n")
 	add := mustExtract(t, "example.com/basic.Add")
 	verify := func() (int, string) {
-		code, out, stderr := runJanus(t, "verify", add, "--proof", addf, "--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness")
+		code, out, stderr := runJanus(t, "verify", add, "--proof", addf, "--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness", "--allow-unchecked-provenance")
 		return code, out + stderr
 	}
 	if code, out := verify(); code != 0 {
