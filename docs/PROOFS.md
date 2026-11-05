@@ -806,6 +806,20 @@ condition by `omega`, `Outside` unfolded), and, if nothing reads a stored value 
 `mem0`, in the goal and in `hf_mem0`. If a stored value is still read it keeps the chain, keeps `hf_mem0` and
 says so (an info message): the chain is then not abstracted, because the stored values matter.
 
+### Finding the `omega` calls that dominate a run (`janus.omega.log`)
+
+`set_option janus.omega.log 500` prints, on stderr, a line for every internal `omega` call of `janus_run`/`janus64_run`
+(branch pruning, callee preconditions, side conditions) that took at least 500 ms: the call site (`cap`, `focused`,
+`prune(full)`, `staged(full)`, …), the number of disjunctive hypotheses, whether it closed the goal, and the goal. Stderr,
+not an info message: a failed call is rolled back with the state, and it is the one worth seeing. Measured on `DivModB`
+(amd64) with it: the 54 s `omega` of the profile was one callee-precondition side condition (`buffer ∩ x = ∅`) with
+seven disjunctions in the context, run on the *full* context, whose four-limb comparison facts made every split
+expensive; the context of the goal's own variables (`omegaFocused`) closes it at once. So the callee-precondition
+closers are now `… | janus_omega_sparse | janus_omega_focus | janus_omega_cap | …`, `omegaStaged` tries the focused context before
+the full one also under `janus.omega.cap`, and `omegaSparse` ranks the relevant disjunctions by the number of goal atoms
+they share (the fact about `x` before the facts that only mention the stack pointer) and tries the best five singly and
+the best four pairwise instead of none when more than five are relevant.
+
 ### Warning: `‹T›` and `assumption` after `janus_run` (linter `janusAssumption`)
 
 `assumption` and `‹T›` unify the wanted type with every hypothesis at default transparency; in the context
