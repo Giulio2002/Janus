@@ -574,11 +574,12 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
   let hpc ← mkExpectedTypeHint hpc
     (← mkEq (← mkAppM ``State.pc #[s]) (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) entry))
   let hpreM ← mkFreshExprSyntheticOpaqueMVar (mkApp pre s).headBeta
+  let regs := Common.callRegions.get (← getOptions)
   let lem ← match ← goalKind g with
     | .reachesRet _ ret _ Q =>
-      pure <| mkAppN (mkConst ``ReachesRet.call_regions) #[p, entry, pre, post, s, ret, Q, hsum, hpc, hpreM]
+      pure <| mkAppN (mkConst (if regs then ``ReachesRet.call_regions else ``ReachesRet.call)) #[p, entry, pre, post, s, ret, Q, hsum, hpc, hpreM]
     | .reaches _ _ Q =>
-      pure <| mkAppN (mkConst ``Reaches.call_regions) #[p, entry, pre, post, s, Q, hsum, hpc, hpreM]
+      pure <| mkAppN (mkConst (if regs then ``Reaches.call_regions else ``Reaches.call)) #[p, entry, pre, post, s, Q, hsum, hpc, hpreM]
     | _ => throwError "{tacName}: unexpected goal at a call"
   let gs ← Common.applyFast g lem
   Common.setPhase cfg.status s!"proving the precondition of the summary of {callee}"
@@ -595,7 +596,7 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
     let mut before ← g'.withContext do return (← getLCtx).getFVarIds
     let (fv, g'') ← g'.introNP 3
     -- the callee's run keeps the regions of the call state (`Program.Steps.regions`): `hrg…`
-    let (_, g'') ← g''.intro (← Common.regionsName g'' hname)
+    let g'' ← if regs then pure (← g''.intro (← Common.regionsName g'' hname)).2 else pure g''
     -- `calls [hS := S]`: the whole postcondition as `hS`, left alone by the steps below
     let g'' ← match hname with
       | some n => do
