@@ -200,6 +200,27 @@ theorem store_tbl_named (ret : Nat) (hret : RetAddr storeTbl ret) (s S : State) 
   janus_data hd [hw]
   janus_run
 
+
+/-! ## The new array behind a structure field and an existential, as in a runtime contract's postcondition
+
+`RtLivePost` states `∃ …, s' = … ∧ MemFrame … ∧ sp.post … m ∧ …` with `sp : RtSpec` a structure instance whose `post`
+field is `fun … => … ∧ GrownArray …`: the fact is under a field projection of a constant, then a definition. -/
+
+structure ToySpec where
+  post : Memory → Nat → Nat → Prop
+
+def toySpec : ToySpec where
+  post m r0 c := 0 < c ∧ NewArr m r0 c
+
+theorem new_array_field (ret : Nat) (hret : RetAddr callNew ret) (S : State) (v : W64)
+    (hg : Summary callNew 0x70014 (fun s => (s.regs 30).toNat % 4 = 0 ∧ (s.regs 30).toNat < 2 ^ 56)
+      (fun s s' => ∃ (r0 c : Nat) (m : Memory), s'.mem = m ∧ toySpec.post m r0 c ∧ s'.regs 0 = BitVec.ofNat 64 r0 ∧
+        s'.pc = s.regs 30 ∧ s'.sp = s.sp ∧ s'.regs 30 = s.regs 30 ∧ s'.regs 19 = s.regs 19 ∧
+        MemFrame s.mem m [(r0, r0 + c)] ∧ (∀ i, i ≠ 0 → s'.regs i = s.regs i)))
+    (hpc : S.pc = 0x70000#64) (h30 : S.regs 30 = BitVec.ofNat 64 ret) :
+    Reaches (callNew.withExit ret) S (IsReturn fun _ => True) := by
+  janus_run calls [hg]
+
 /-! ## The diagnostic names the failed obligation and prints the exact side goal
 
 The step's own discharger (with the `MemFrame` links) is run on the goal it could not prove; the message prints that

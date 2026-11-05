@@ -1291,19 +1291,36 @@ def moveAccessible (g : MVarId) (d : LocalDecl) (up : Bool) : MetaM MVarId := g.
   g.assign (← mkEqMPR eqT g')
   return g'.mvarId!
 
+/-- One unfolding step of a named predicate: a definition (`GrownArray …`) or a field of a structure instance
+(`growsliceSpec.post …`, a projection of a `def` whose value is a structure literal), beta/projection-reduced. -/
+def unfoldStep? (ty : Expr) : MetaM (Option Expr) := do
+  match ← unfoldDefinition? ty with
+  | some t => return some (← whnfCore t)
+  | none =>
+    let t ← whnfCore ty
+    if t != ty then return some t
+    -- a projection function applied to a constant structure instance (`growsliceSpec.post …`): reduce it by delta
+    let env ← getEnv
+    let isProj := ty.getAppFn.isProj ||
+      (match ty.getAppFn.constName? with | some c => env.isProjectionFn c | none => false)
+    if isProj then
+      let t ← withDefault (whnf ty)
+      return if t != ty then some t else none
+    return none
+
 /-- Cheap syntactic test (no proof terms): does `ty`, unfolded up to `depth` definitions, mention `Memory.accessible`?
 Guards the named-predicate fallbacks, so that the many `Apart`/`Outside`/`RetAddr` hypotheses of a context are not
 unfolded and projected. -/
 partial def mentionsAccessible (ty : Expr) (depth : Nat) : MetaM Bool := do
   let ty ← instantiateMVars ty
   if (ty.find? fun x => x.isConstOf ``Janus.Arm64.Memory.accessible).isSome then return true
-  if depth == 0 || !ty.getAppFn.isConst then return false
-  let c := ty.getAppFn.constName!
+  if depth == 0 || !(ty.getAppFn.isConst || ty.getAppFn.isProj) then return false
+  let c := ty.getAppFn.constName?.getD Name.anonymous
   if c == ``Eq || c == ``LE.le || c == ``LT.lt || c == ``Ne || c == ``Or || c == ``Not || c == ``Janus.MemFrame
       || c == ``Janus.Apart || c == ``Janus.Outside || c == ``Janus.InRanges then return false
   if ty.isAppOfArity ``And 2 then
     return (← mentionsAccessible (ty.getArg! 0) depth) || (← mentionsAccessible (ty.getArg! 1) depth)
-  match ← unfoldDefinition? ty with
+  match ← unfoldStep? ty with
   | some ty' => mentionsAccessible ty' (depth - 1)
   | none => return false
 
@@ -1320,8 +1337,8 @@ partial def namedPredicateFacts (pf ty : Expr) (depth : Nat) (arith : Bool) : Me
   if ty.isAppOfArity ``And 2 then
     return (← namedPredicateFacts (← mkAppM ``And.left #[pf]) (ty.getArg! 0) depth arith) ++
       (← namedPredicateFacts (← mkAppM ``And.right #[pf]) (ty.getArg! 1) depth arith)
-  if depth == 0 || !ty.getAppFn.isConst || ty.isForall then return #[]
-  match ← unfoldDefinition? ty with
+  if depth == 0 || !(ty.getAppFn.isConst || ty.getAppFn.isProj) || ty.isForall then return #[]
+  match ← unfoldStep? ty with
   | some ty' => namedPredicateFacts (← mkExpectedTypeHint pf ty') ty' (depth - 1) arith
   | none => return #[]
 
@@ -1333,11 +1350,11 @@ def addNamedPredicateFacts (g : MVarId) (hs : Array LocalDecl) (arith : Bool) (p
   for d in hs do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
-    unless ty.getAppFn.isConst do continue
+    unless ty.getAppFn.isConst || ty.getAppFn.isProj do continue
     unless ← isProp ty do continue
     if ty.isAppOfArity ``Eq 3 || ty.isAppOfArity ``And 2 || ty.isAppOfArity ``Janus.MemFrame 3 then continue
-    unless ← mentionsAccessible ty 2 do continue
-    found := found ++ (← namedPredicateFacts d.toExpr ty 2 arith)
+    unless ← mentionsAccessible ty 4 do continue
+    found := found ++ (← namedPredicateFacts d.toExpr ty 4 arith)
   if found.isEmpty then return none
   let mut g := g
   for (pf, ty) in found, i in [0:found.size] do
