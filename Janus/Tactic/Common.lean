@@ -1729,9 +1729,25 @@ def dischargeLiveForall (g : MVarId) : TacticM Bool := do
       -- keep it only if it is about the same list
       let (_, g4) ← (← g3.assert `h_live aty app).intro1P
       g3 := g4
+    -- first `omega` in the context restricted to the hypotheses about the goal's atoms (`r` and the
+    -- window addresses): the instantiated facts are all there, while the context after several
+    -- calls holds a dozen unrelated disjunctions (`Disjoint`/`Apart` facts of other pointers) that a
+    -- full-context `omega` splits (2^n cases of ~0.3 s each: minutes, or an unbounded search when the
+    -- goal is not provable from the instantiated facts); the full context is the fallback
+    let saved2 ← saveState
+    try
+      let gs ← Tactic.run g3 <| withoutRecover do
+        evalTactic (← `(tactic|
+          (try simp only [Janus.Apart, Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true] at *)))
+        let g' ← clearIrrelevant (← getMainGoal)
+        replaceMainGoal [g']
+        evalTactic (← `(tactic| omega))
+      if gs.isEmpty then return true
+    catch _ => pure ()
+    saved2.restore
     let gs ← Tactic.run g3 <| withoutRecover (evalTactic (← `(tactic|
       (try simp only [Janus.Apart, Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true] at *
-       omega))))
+       janus_omega_cap))))
     if gs.isEmpty then return true
     saved.restore; return false
   catch _ => saved.restore; return false
