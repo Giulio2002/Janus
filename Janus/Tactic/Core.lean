@@ -920,10 +920,8 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
 
 /-! ## Discharger -/
 
-elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
+def janusdischBody : TacticM Unit := withoutRecover do
   let g ← getMainGoal
-  let g ← Common.normNatConsts g
-  replaceMainGoal [g]
   let t ← instantiateMVars (← g.getType)
   if (← isTracingEnabledFor `janus.disch) then
     let hs ← g.withContext do (← getLCtx).foldlM (init := #[]) fun acc d =>
@@ -988,6 +986,20 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
       | janus_omega
       | (simp -failIfUnchanged (disch := janus_omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
           Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; janus_omega)))
+
+/-- `janus_disch`: the discharger; if it fails and the goal mentions named numeric constants (`Extracted.dataAddr.«…»`), once
+more with them replaced by their literals (checked only on failure: scanning every side condition costs more than it
+saves). -/
+elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
+  let g0 ← getMainGoal
+  let saved ← saveState
+  try janusdischBody
+  catch e =>
+    saved.restore
+    let (g1, changed) ← Common.normNatConsts g0
+    unless changed do throw e
+    replaceMainGoal [g1]
+    janusdischBody
 
 /-! ## Arithmetic -/
 

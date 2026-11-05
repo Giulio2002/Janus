@@ -1042,9 +1042,11 @@ def unfoldNatConsts (e : Expr) : MetaM (Option Expr) := do
     | .const n [] => (vals.get? n).map mkNatLit
     | _ => none)
 
-/-- `g` with the named numeric constants of its target and hypotheses replaced by literals (a new goal, `defeq`). -/
-def normNatConsts (g : MVarId) : MetaM MVarId := g.withContext do
+/-- `g` with the named numeric constants of its target and hypotheses replaced by literals (a new goal, `defeq`), and
+whether anything changed. -/
+def normNatConsts (g : MVarId) : MetaM (MVarId × Bool) := g.withContext do
   let mut g := g
+  let mut changed := false
   for d in (← g.getDecl).lctx do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
@@ -1052,10 +1054,12 @@ def normNatConsts (g : MVarId) : MetaM MVarId := g.withContext do
     if ty.approxDepth.toNat > 30 then continue
     if let some ty' ← unfoldNatConsts ty then
       g ← g.replaceLocalDeclDefEq d.fvarId ty'
+      changed := true
   let t ← instantiateMVars (← g.getType)
   if let some t' ← unfoldNatConsts t then
     g ← g.replaceTargetDefEq t'
-  return g
+    changed := true
+  return (g, changed)
 
 /-! ## Callee preconditions -/
 
@@ -1071,7 +1075,7 @@ that could not be proved. -/
 partial def provePreCore (clean : MVarId → TacticM (List MVarId)) (closer : TSyntax `tactic)
     (g : MVarId) (depth : Nat := 4) : TacticM (Array Expr) := g.withContext do
   if ← g.isAssigned then return #[]
-  let g ← normNatConsts g
+  let g := (← normNatConsts g).1
   let t ← whnfR (← instantiateMVars (← g.getType)).headBeta
   let g ← g.replaceTargetDefEq t
   if t.isAppOfArity ``And 2 then

@@ -1949,10 +1949,8 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
 
 /-! ## Discharger -/
 
-elab_rules : tactic | `(tactic| janus64_disch) => do
+def janus64dischBody : TacticM Unit := do
   let g ← getMainGoal
-  let g ← Common.normNatConsts g
-  replaceMainGoal [g]
   let t ← instantiateMVars (← g.getType)
   -- `Outside a n [literal ranges]` is closed but has no `Decidable` instance
   if t.isAppOfArity ``Janus.Outside 3 && !t.hasMVar then
@@ -1984,6 +1982,20 @@ elab_rules : tactic | `(tactic| janus64_disch) => do
   | some false => throwError "janus64_disch: carry bound does not hold for all limb values"
   | none => pure ()
   evalTactic (← `(tactic| first | janus_apart | janus_omega))
+
+/-- `janus64_disch`: the discharger; if it fails and the goal mentions named numeric constants (`Extracted.dataAddr.«…»`), once
+more with them replaced by their literals (checked only on failure: scanning every side condition costs more than it
+saves). -/
+elab_rules : tactic | `(tactic| janus64_disch) => do
+  let g0 ← getMainGoal
+  let saved ← saveState
+  try janus64dischBody
+  catch e =>
+    saved.restore
+    let (g1, changed) ← Common.normNatConsts g0
+    unless changed do throw e
+    replaceMainGoal [g1]
+    janus64dischBody
 
 /-! ## Syntax -/
 
