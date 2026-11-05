@@ -35,6 +35,7 @@ import JanusTests.AVX
 import JanusTests.AVX512
 import JanusTests.KernelSafeMemory
 import JanusTests.OmegaCap
+import JanusTests.LiveForallFocus
 import JanusTests.AddrSub
 import JanusTests.JanusExact
 import JanusTests.AddrRefute
