@@ -1,0 +1,181 @@
+import Janus.Contracts.ErrorfRealStageDefs
+import Janus.Contracts.ErrorfRealFmt
+
+/-!
+# The memory the real-format `fmt.errorf` stub leaves (ISA-independent)
+
+The stub (arm64 `ErrorfRealSat`, amd64 `ErrorfRealSatAmd64`) turns the two operands into decimal strings in
+stack scratch, allocates, writes the object, and copies text, literals and digits into the message block.
+`finalMem` is the memory it leaves, as a chain of stores; the lemmas of this file read the message and the
+object off it.
+-/
+
+namespace Janus.Contracts.ErrorfRealFinal
+
+open Janus Janus.Arm64 Janus.Spec Janus.Spec.Errorf Janus.Contracts Janus.Contracts.ErrorfMem
+  Janus.Contracts.ErrorfRealFmt Janus.Contracts.ErrorfRealStages
+
+/-- The scratch memory after both decimal conversions (before the allocation). -/
+def scratchMem (m0 : Memory) (sp0 l1 n1 l2 a1 a2 : Nat) : Memory :=
+  putBytes ((putBytes m0 (sp0 - 16 - l1) (natBytes a1)).writeLE (sp0 - 16 - l1 - 1) 1 (48 - 3 * n1))
+    (sp0 - 48 - l2) (natBytes a2)
+
+/-- The memory after the allocation part (`allocMem` on the scratch memory). -/
+def midMem (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e : Nat) : Memory :=
+  allocMem (scratchMem m0 sp0 l1 n1 l2 a1 a2) (sp0 - 48 - l2) n2 p A Lm e
+
+/-- The memory the stub leaves. -/
+def finalMem (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) : Memory :=
+  let M := midMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e
+  let m3 := putBytes M (p + 32) (strBytes M tp tl)
+  let d1 := p + 32 + tl
+  let st1 := sp0 - 16 - l1 - n1
+  let len1 := sp0 - 16 - st1
+  let M1 := putBytes m3 d1 [58, 32, 104, 97, 118, 101, 32]
+  let m4 := putBytes M1 (d1 + 7) (strBytes M1 st1 len1)
+  let d2 := d1 + 7 + len1
+  let st2 := sp0 - 48 - l2 - n2
+  let len2 := sp0 - 48 - st2
+  let M2 := putBytes m4 d2 [44, 32, 119, 97, 110, 116, 32]
+  let m5 := putBytes M2 (d2 + 7) (strBytes M2 st2 len2)
+  putBytes m5 (d2 + 7 + len2) [32, 98, 121, 116, 101, 115]
+
+set_option maxRecDepth 100000
+
+/-- Where the text lies, as the stub needs it: outside the `BUMP` cell, outside the heap block it writes,
+outside the scratch window. -/
+def TextOK (sp0 p tp tl : Nat) : Prop :=
+  tl = 0 ∨ ((tp + tl ≤ 4194304 ∨ 4194312 ≤ tp) ∧ (tp + tl ≤ p ∨ 536870912 ≤ tp) ∧
+    (tp + tl ≤ sp0 - 4096 ∨ sp0 - 8 ≤ tp))
+
+theorem mid_text (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) (hsp : 4096 ≤ sp0)
+    (hl1 : l1 ≤ 19) (hl2 : l2 ≤ 19) (hn1 : n1 ≤ 1) (hn2 : n2 ≤ 1)
+    (hlen1 : (natBytes a1).length = l1) (hlen2 : (natBytes a2).length = l2)
+    (hp : 268435456 ≤ p) (hpA : p + 32 ≤ 536870912) (hT : TextOK sp0 p tp tl) :
+    strBytes (midMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e) tp tl = strBytes m0 tp tl := by
+  by_cases h0 : tl = 0
+  · subst h0; simp [strBytes]
+  have hT' : (tp + tl ≤ 4194304 ∨ 4194312 ≤ tp) ∧ (tp + tl ≤ p ∨ 536870912 ≤ tp) ∧
+      (tp + tl ≤ sp0 - 4096 ∨ sp0 - 8 ≤ tp) := by rcases hT with h | h; exact absurd h h0; exact h
+  unfold midMem allocMem scratchMem
+  simp (disch := omega) only [strBytes_writeLE_out, strBytes_putBytes_out, hlen1, hlen2]
+
+theorem mid_s1 (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e : Nat) (hsp : 4096 ≤ sp0)
+    (hl1 : l1 ≤ 19) (hl2 : l2 ≤ 19) (hn1 : n1 ≤ 1) (hn2 : n2 ≤ 1)
+    (hlen1 : (natBytes a1).length = l1) (hlen2 : (natBytes a2).length = l2)
+    (hp : 268435456 ≤ p) (hpA : p + 32 ≤ 536870912) (hscrB : sp0 ≤ 4194304 ∨ 4194312 + 4096 ≤ sp0)
+    (hscrH : sp0 ≤ 268435456 ∨ 536870912 + 4096 ≤ sp0) :
+    strBytes (midMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e) (sp0 - 16 - l1 - n1) (sp0 - 16 - (sp0 - 16 - l1 - n1)) =
+      (if n1 = 1 then [45] else []) ++ natBytes a1 := by
+  have hb := natBytes_lt256 a1
+  have hl1p : 1 ≤ l1 := by rw [← hlen1]; exact natBytes_length_pos a1
+  unfold midMem allocMem scratchMem
+  simp (disch := omega) only [strBytes_writeLE_out, strBytes_putBytes_out, hlen1, hlen2]
+  rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn1 with rfl | rfl
+  · have e1 : sp0 - 16 - (sp0 - 16 - l1 - 0) = l1 := by omega
+    rw [e1, show sp0 - 16 - l1 - 0 = sp0 - 16 - l1 by omega]
+    simp (disch := omega) only [strBytes_writeLE_out]
+    have := strBytes_putBytes m0 (sp0 - 16 - l1) (natBytes a1) hb
+    rw [hlen1] at this
+    simpa using this
+  · have e1 : sp0 - 16 - (sp0 - 16 - l1 - 1) = l1 + 1 := by omega
+    rw [e1, strBytes_succ]
+    have e2 : sp0 - 16 - l1 - 1 + 1 = sp0 - 16 - l1 := by omega
+    rw [e2]
+    simp (disch := omega) only [strBytes_writeLE_out]
+    have := strBytes_putBytes m0 (sp0 - 16 - l1) (natBytes a1) hb
+    rw [hlen1] at this
+    rw [this, Janus.Arm64.Memory.bytes_writeLE (m := (putBytes m0 (sp0 - 16 - l1) (natBytes a1)))]
+    simp
+
+theorem mid_s2 (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e : Nat) (hsp : 4096 ≤ sp0)
+    (hl1 : l1 ≤ 19) (hl2 : l2 ≤ 19) (hn1 : n1 ≤ 1) (hn2 : n2 ≤ 1)
+    (hlen1 : (natBytes a1).length = l1) (hlen2 : (natBytes a2).length = l2)
+    (hp : 268435456 ≤ p) (hpA : p + 32 ≤ 536870912) (hscrB : sp0 ≤ 4194304 ∨ 4194312 + 4096 ≤ sp0)
+    (hscrH : sp0 ≤ 268435456 ∨ 536870912 + 4096 ≤ sp0) :
+    strBytes (midMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e) (sp0 - 48 - l2 - n2) (sp0 - 48 - (sp0 - 48 - l2 - n2)) =
+      (if n2 = 1 then [45] else []) ++ natBytes a2 := by
+  have hb := natBytes_lt256 a2
+  have hl2p : 1 ≤ l2 := by rw [← hlen2]; exact natBytes_length_pos a2
+  unfold midMem allocMem scratchMem
+  simp (disch := omega) only [strBytes_writeLE_out]
+  rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn2 with rfl | rfl
+  · have e1 : sp0 - 48 - (sp0 - 48 - l2 - 0) = l2 := by omega
+    rw [e1, show sp0 - 48 - l2 - 0 = sp0 - 48 - l2 by omega]
+    simp (disch := omega) only [strBytes_writeLE_out]
+    have := strBytes_putBytes ((putBytes m0 (sp0 - 16 - l1) (natBytes a1)).writeLE (sp0 - 16 - l1 - 1) 1 (48 - 3 * n1))
+      (sp0 - 48 - l2) (natBytes a2) hb
+    rw [hlen2] at this
+    simpa using this
+  · have e1 : sp0 - 48 - (sp0 - 48 - l2 - 1) = l2 + 1 := by omega
+    rw [e1, strBytes_succ]
+    have e2 : sp0 - 48 - l2 - 1 + 1 = sp0 - 48 - l2 := by omega
+    rw [e2]
+    simp (disch := omega) only [strBytes_writeLE_out]
+    have := strBytes_putBytes ((putBytes m0 (sp0 - 16 - l1) (natBytes a1)).writeLE (sp0 - 16 - l1 - 1) 1 (48 - 3 * n1))
+      (sp0 - 48 - l2) (natBytes a2) hb
+    rw [hlen2] at this
+    rw [this, Janus.Arm64.Memory.bytes_writeLE (m := (putBytes ((putBytes m0 (sp0 - 16 - l1) (natBytes a1)).writeLE (sp0 - 16 - l1 - 1) 1 (48 - 3 * n1)) (sp0 - 48 - l2) (natBytes a2)))]
+    simp
+
+/-- The message the stub builds: the text, `": have "`, number 1, `", want "`, number 2, `" bytes"`. -/
+def msgList (T : List Nat) (n1 n2 a1 a2 : Nat) : List Nat :=
+  T ++ [58, 32, 104, 97, 118, 101, 32] ++ ((if n1 = 1 then [45] else []) ++ natBytes a1) ++
+    [44, 32, 119, 97, 110, 116, 32] ++ ((if n2 = 1 then [45] else []) ++ natBytes a2) ++ [32, 98, 121, 116, 101, 115]
+
+theorem final_eq (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) (hsp : 4096 ≤ sp0)
+    (hl1 : l1 ≤ 19) (hl2 : l2 ≤ 19) (hn1 : n1 ≤ 1) (hn2 : n2 ≤ 1)
+    (hlen1 : (natBytes a1).length = l1) (hlen2 : (natBytes a2).length = l2)
+    (hp : 268435456 ≤ p) (hpA : p + A ≤ 536870912) (hA : 2 * Lm + 48 ≤ A) (hLm : Lm = tl + (l1 + n1) + (l2 + n2) + 20)
+    (hscrB : sp0 ≤ 4194304 ∨ 4194312 + 4096 ≤ sp0) (hscrH : sp0 ≤ 268435456 ∨ 536870912 + 4096 ≤ sp0)
+    (hT : TextOK sp0 p tp tl) :
+    finalMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl =
+      putBytes (midMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e) (p + 32) (msgList (strBytes m0 tp tl) n1 n2 a1 a2) := by
+  have hpA' : p + 32 ≤ 536870912 := by omega
+  have hl1p : 1 ≤ l1 := by rw [← hlen1]; exact natBytes_length_pos a1
+  have hl2p : 1 ≤ l2 := by rw [← hlen2]; exact natBytes_length_pos a2
+  have hTx := mid_text m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl hsp hl1 hl2 hn1 hn2 hlen1 hlen2 hp hpA' hT
+  have hS1 := mid_s1 m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e hsp hl1 hl2 hn1 hn2 hlen1 hlen2 hp hpA' hscrB hscrH
+  have hS2 := mid_s2 m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e hsp hl1 hl2 hn1 hn2 hlen1 hlen2 hp hpA' hscrB hscrH
+  have hTlen : (strBytes m0 tp tl).length = tl := by simp [strBytes]
+  have hD1len : ((if n1 = 1 then [45] else []) ++ natBytes a1).length = sp0 - 16 - (sp0 - 16 - l1 - n1) := by
+    rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn1 with rfl | rfl <;> simp [hlen1] <;> omega
+  have hD2len : ((if n2 = 1 then [45] else []) ++ natBytes a2).length = sp0 - 48 - (sp0 - 48 - l2 - n2) := by
+    rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn2 with rfl | rfl <;> simp [hlen2] <;> omega
+  simp only [finalMem]
+  rw [hTx]
+  have hM1 : strBytes (putBytes (putBytes (midMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e) (p + 32) (strBytes m0 tp tl))
+      (p + 32 + tl) [58, 32, 104, 97, 118, 101, 32]) (sp0 - 16 - l1 - n1) (sp0 - 16 - (sp0 - 16 - l1 - n1)) =
+      (if n1 = 1 then [45] else []) ++ natBytes a1 := by
+    rw [← hS1]
+    simp (disch := (simp only [List.length_cons, List.length_nil, hTlen]; omega)) only [strBytes_putBytes_out]
+  rw [hM1]
+  have hM2 : strBytes (putBytes (putBytes (putBytes (putBytes (midMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e) (p + 32)
+      (strBytes m0 tp tl)) (p + 32 + tl) [58, 32, 104, 97, 118, 101, 32]) (p + 32 + tl + 7)
+      ((if n1 = 1 then [45] else []) ++ natBytes a1)) (p + 32 + tl + 7 + (sp0 - 16 - (sp0 - 16 - l1 - n1)))
+      [44, 32, 119, 97, 110, 116, 32]) (sp0 - 48 - l2 - n2) (sp0 - 48 - (sp0 - 48 - l2 - n2)) =
+      (if n2 = 1 then [45] else []) ++ natBytes a2 := by
+    rw [← hS2]
+    simp (disch := (simp only [List.length_cons, List.length_nil, hTlen, hD1len]; omega)) only [strBytes_putBytes_out]
+  rw [hM2]
+  unfold msgList
+  generalize midMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e = M at *
+  generalize strBytes m0 tp tl = T at *
+  generalize (if n1 = 1 then [45] else []) ++ natBytes a1 = D1 at *
+  generalize (if n2 = 1 then [45] else []) ++ natBytes a2 = D2 at *
+  have e1 : p + 32 + tl = p + 32 + T.length := by rw [hTlen]
+  have e2 : p + 32 + T.length + 7 = p + 32 + (T ++ [58, 32, 104, 97, 118, 101, 32]).length := by simp only [List.length_append, List.length_cons, List.length_nil]; omega
+  have e3 : p + 32 + (T ++ [58, 32, 104, 97, 118, 101, 32]).length + (sp0 - 16 - (sp0 - 16 - l1 - n1)) =
+      p + 32 + (T ++ [58, 32, 104, 97, 118, 101, 32] ++ D1).length := by
+    simp only [List.length_append, List.length_cons, List.length_nil, hD1len]; omega
+  have e4 : p + 32 + (T ++ [58, 32, 104, 97, 118, 101, 32] ++ D1).length + 7 =
+      p + 32 + (T ++ [58, 32, 104, 97, 118, 101, 32] ++ D1 ++ [44, 32, 119, 97, 110, 116, 32]).length := by
+    simp only [List.length_append, List.length_cons, List.length_nil]; omega
+  have e5 : p + 32 + (T ++ [58, 32, 104, 97, 118, 101, 32] ++ D1 ++ [44, 32, 119, 97, 110, 116, 32]).length +
+      (sp0 - 48 - (sp0 - 48 - l2 - n2)) =
+      p + 32 + (T ++ [58, 32, 104, 97, 118, 101, 32] ++ D1 ++ [44, 32, 119, 97, 110, 116, 32] ++ D2).length := by
+    simp only [List.length_append, List.length_cons, List.length_nil, hD2len]; omega
+  rw [e1, ← putBytes_append, e2, ← putBytes_append, e3, ← putBytes_append, e4, ← putBytes_append,
+    e5, ← putBytes_append]
+
+end Janus.Contracts.ErrorfRealFinal

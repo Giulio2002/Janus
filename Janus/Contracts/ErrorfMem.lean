@@ -142,4 +142,13 @@ theorem view_putBytes (rt L : List (Nat × Nat)) (m : Memory) (a : Nat) (bs : Li
                                   · exact Or.inr ⟨r, hr, by omega, by simp at h2 ⊢; omega⟩),
       view_writeLE_live ⟨r, hr, h1, by simp at h2; omega⟩]
 
+theorem strBytes_writeLE_out (m : Memory) (a k v p n : Nat) (h : p + n ≤ a ∨ a + k ≤ p) :
+    strBytes (m.writeLE a k v) p n = strBytes m p n := by
+  simp only [strBytes]
+  apply List.map_congr_left
+  intro i hi
+  simp only [List.mem_range] at hi
+  rw [Janus.Arm64.Memory.bytes_writeLE (m := m)]
+  rw [if_neg (by omega)]
+
 end Janus.Contracts.ErrorfMem
