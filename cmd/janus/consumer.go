@@ -1182,10 +1182,9 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 			outs[i].Err = err
 			continue
 		}
-		if !bytes.Equal(pkg.Files[r.rel], r.proofSrc) {
-			outs[i].Err = &diag{Invalid: true, Msg: "The proof changed while the package was read.", Stage: "stale input", Next: "Rerun janus verify."}
-			continue
-		}
+		// The snapshot is the single source of truth: the proof that is checked (and hashed into the report) is
+		// the snapshot's copy, so editing the file under --proof-root during the run is safe.
+		r.proofSrc = pkg.Files[r.rel]
 		group = append(group, r)
 		groupIdx = append(groupIdx, i)
 	}
@@ -1278,10 +1277,7 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 // computed from (the package sources, the extraction and its binary, the framework and the other
 // dependencies): a hit is used only if all of it is still byte-identical.
 func consumerInputsUnchanged(fw *framework, pkg *consumerPkg, group []*consumerRequest, opts map[string]string) bool {
-	now := &consumerPkg{Root: pkg.Root, excluded: pkg.excluded}
-	if err := now.snapshot(); err != nil || now.Sha256 != pkg.Sha256 {
-		return false
-	}
+	// (The live --proof-root is not re-read: the keys and the result refer to the snapshot taken at the start.)
 	if compareFramework(pkg.Dep.Dir, fw) != nil {
 		return false
 	}
@@ -1609,9 +1605,10 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		if err := pinned.check("the verification"); err != nil {
 			return err
 		}
-		now := &consumerPkg{Root: pkg.Root, excluded: pkg.excluded}
-		if err := now.snapshot(); err != nil || now.Sha256 != pkg.Sha256 {
-			return &diag{Invalid: true, Msg: "The consumer package sources changed during verification.", Stage: "stale input", Next: "Rerun janus verify."}
+		// The workspace copy of the snapshot must be what was snapshotted (nothing the build ran rewrote a source). The
+		// live --proof-root is NOT compared: the run checks, and the report names, the snapshot taken at the start.
+		if err := wsMatchesSnapshot(ws.Root, pkg.Files); err != nil {
+			return err
 		}
 		if err := compareFramework(pkg.Dep.Dir, fw); err != nil {
 			d := err.(*diag)
@@ -1792,4 +1789,15 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// wsMatchesSnapshot reports whether every file of the snapshot is still, byte for byte, in the workspace copy.
+func wsMatchesSnapshot(root string, files map[string][]byte) error {
+	for rel, want := range files {
+		got, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil || !bytes.Equal(got, want) {
+			return &diag{Invalid: true, Msg: "The consumer package sources in the workspace changed during verification.", Stage: "stale input", Next: "Rerun janus verify."}
+		}
+	}
+	return nil
 }
