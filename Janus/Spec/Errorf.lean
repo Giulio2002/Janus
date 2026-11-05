@@ -50,8 +50,10 @@ def parseFmt : List Nat → Option (List Seg)
   | 0x25 :: 0x77 :: t => parseRest t
   | _ => none
 
-/-- The decimal digits of `n`, as bytes. -/
-def natBytes (n : Nat) : List Nat := (Nat.toDigits 10 n).map Char.toNat
+/-- The decimal digits of `n`, as bytes (`'0' = 48`): the most significant digit first. -/
+def natBytes (n : Nat) : List Nat :=
+  if n < 10 then [48 + n] else natBytes (n / 10) ++ [48 + n % 10]
+decreasing_by omega
 
 /-- `%d` of the integer `v`: an optional `-` and the digits. -/
 def decBytes (v : Int) : List Nat :=
@@ -67,6 +69,87 @@ def renderRest : List Seg → List Int → List Nat
 /-- The message of `fmt.Errorf` for a format of the set: the `%w` operand's text `e`, then
 `renderRest`. -/
 def render (segs : List Seg) (e : List Nat) (ns : List Int) : List Nat := e ++ renderRest segs ns
+
+theorem natBytes_lt {n : Nat} (h : n < 10) : natBytes n = [48 + n] := by
+  rw [natBytes]; simp [h]
+
+theorem natBytes_ge {n : Nat} (h : 10 ≤ n) : natBytes n = natBytes (n / 10) ++ [48 + n % 10] := by
+  rw [natBytes]; simp [Nat.not_lt.mpr h]
+
+/-- The digit `k` places from the right of `n`, as a byte. -/
+def digitByte (n k : Nat) : Nat := 48 + n / 10 ^ k % 10
+
+/-- Reading the digits of `n` from the right: place `k` of the string is the digit `k`. -/
+theorem natBytes_reverse_get (n : Nat) : ∀ k, k < (natBytes n).length →
+    (natBytes n).reverse[k]? = some (digitByte n k) := by
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+    intro k hk
+    by_cases h : n < 10
+    · rw [natBytes_lt h] at hk ⊢
+      have : k = 0 := by simp at hk; omega
+      subst this
+      simp [digitByte, Nat.mod_eq_of_lt h]
+    · have h10 : 10 ≤ n := by omega
+      rw [natBytes_ge h10] at hk ⊢
+      rw [List.reverse_append]
+      cases k with
+      | zero => simp [digitByte]
+      | succ j =>
+        simp only [List.length_append, List.length_singleton] at hk
+        have hj : j < (natBytes (n / 10)).length := by omega
+        have := ih (n / 10) (by omega) j hj
+        simp only [List.reverse_singleton, List.singleton_append, List.getElem?_cons_succ]
+        rw [this]
+        simp [digitByte, Nat.div_div_eq_div_mul, Nat.pow_succ, Nat.mul_comm]
+
+/-- The number of digits as the register code computes it: `1 + #{k ∈ 1..m | n / 10^k ≠ 0}`. -/
+def cntF (n : Nat) : Nat → Nat
+  | 0 => 1
+  | m + 1 => cntF n m + (if n / 10 ^ (m + 1) ≠ 0 then 1 else 0)
+
+theorem cntF_shift (n : Nat) : ∀ m, cntF n (m + 1) = (if n / 10 ≠ 0 then 1 else 0) + cntF (n / 10) m := by
+  intro m
+  induction m with
+  | zero =>
+    show cntF n 0 + (if n / 10 ^ 1 ≠ 0 then 1 else 0) = _ + cntF (n / 10) 0
+    simp only [cntF, Nat.pow_one]; omega
+  | succ m ih =>
+    rw [cntF, ih, cntF]
+    have : n / 10 / 10 ^ (m + 1) = n / 10 ^ (m + 1 + 1) := by
+      rw [Nat.div_div_eq_div_mul, ← Nat.pow_succ']
+    rw [this]
+    omega
+
+theorem natBytes_length (n : Nat) : ∀ m, n < 10 ^ (m + 1) → (natBytes n).length = cntF n m := by
+  intro m
+  induction m generalizing n with
+  | zero =>
+    intro h
+    rw [natBytes_lt (by simpa using h)]; simp [cntF]
+  | succ m ih =>
+    intro h
+    by_cases h10 : n < 10
+    · rw [natBytes_lt h10]
+      have : n / 10 = 0 := by omega
+      have h2 : ∀ k, n / 10 ^ (k + 1) = 0 := fun k => by
+        apply Nat.div_eq_of_lt
+        have : 10 ≤ 10 ^ (k + 1) := Nat.le_self_pow (by omega) 10
+        omega
+      have : cntF n (m + 1) = 1 := by
+        clear ih h
+        induction m with
+        | zero =>
+          show cntF n 0 + (if n / 10 ^ (0 + 1) ≠ 0 then 1 else 0) = 1
+          rw [h2 0]; simp [cntF]
+        | succ m ih' => rw [cntF, ih', h2]; simp
+      rw [this]; simp
+    · have h10' : 10 ≤ n := by omega
+      rw [natBytes_ge h10', List.length_append, cntF_shift, ih (n / 10) (by
+        rw [Nat.pow_succ] at h
+        omega)]
+      have : n / 10 ≠ 0 := by omega
+      simp [this]; omega
 
 /-- An `int` read as two's complement from a 64-bit word. -/
 def toSigned (v : Nat) : Int := if v < 2 ^ 63 then (v : Int) else (v : Int) - 2 ^ 64
