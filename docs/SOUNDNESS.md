@@ -2510,3 +2510,30 @@ reproduced, because janus must know every option Lake would pass. Any other (`la
 options, `moreLeanArgs`, an external `srcDir`) is refused ("olean provenance") unless
 `--allow-unchecked-provenance` is given; the report then says `oleanProvenance: "unchecked"` and the verdict
 block "Olean provenance: NOT CHECKED". Reports of a checked run say `"checked"`.
+
+## Spec binding (roundspecbind): a contract's spec describes the function it is stated at
+
+The auditor used to check only that the spec argument of a contract hypothesis is one of the framework's named
+constants (`isFrameworkConstArg`), not that it describes the function the contract is stated AT:
+`RtContract … (contractAddr "runtime.newobject") … growsliceSpec` verified, and the report said
+`RtContract@runtime.newobject` (a contract that no implementation of `newobject` meets, labelled as `newobject`'s).
+Likewise a live contract could pair the spec of one function with the live data of another, and a contract about
+`link impl2` (or `ofImpl impl2`) was reported as assumed for a statement that runs `link impl`.
+
+`Janus/Tools/Audit.lean` now has a table from each allow-listed spec constant (`specRuntimeNames`, with the
+numeral specs `concatstringSpec k`/`concatbyteSpec k` giving `runtime.concatstring<k>`/`concatbyte<k>`) to the runtime
+function(s) it describes, and one from each allow-listed live constant to its spec (`liveSpecOf`). A contract
+hypothesis is rejected when
+
+* the address is `contractAddr P "runtime.f"` and the spec does not describe `runtime.f`;
+* the live data of an `RtLiveContract` are not those of its spec argument;
+* a dedicated contract (`NewobjectContract`, `MakesliceContract`, `MallocgcContract`, `GrowsliceContract`, the
+  write-barrier contracts, plain or live, both ISAs) is stated at another function's address;
+* the address is taken from a program other than `Extracted.program`;
+* in a main theorem, its program is `link impl'` / `ofImpl impl'` for an implementation variable other than the one the
+  statement runs (`Extracted.program.link impl`).
+
+The "Runtime contracts assumed" line (and `contractHyps`) prints the spec and live constants:
+`Janus.Contracts.RtContract@runtime.growslice[growsliceSpec]`,
+`Janus.Contracts.RtLiveContract@runtime.growslice[growsliceSpec/growsliceLive]`. Rows: `audit/roundspecbind`
+(round 15b's q1-q4, p1, s15 plus `SpecBind.lean` / `SpecBind64.lean`).

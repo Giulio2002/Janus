@@ -65,9 +65,13 @@ ctl ctl4
 ctl ctl5
 ctl ctl8
 ctl ctl9
-ctl ctl10
+# spec binding (roundspecbind): ctl10 is a contract about ANOTHER variable's runtime code: it says nothing about the runtime the statement
+# quantifies, so the auditor rejects it before the non-vacuity gate
+row ctl10 blocked 'about the runtime implementation `impl2`' 'but the statement runs `Extracted.program.link impl`'
 ctl Shadow.ctl7
-ctl ctl11
+# ctl11 states the growslice spec at the address of runtime.newobject (the only contract NewPair has): the spec of another function, rejected;
+# the growslice live contract is a control in audit/roundspecbind (g2)
+row ctl11 blocked 'with the spec `growsliceSpec`' 'which describes runtime.growslice'
 echo "== arm64: attacks"
 row r1 blocked 'ofImpl impl'
 row r2 blocked 'other than as'
