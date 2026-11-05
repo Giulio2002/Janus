@@ -178,7 +178,7 @@ theorem concatstring_impl (k : Nat) :
   janus_run
   apply rtPost_const <;> (try rfl) <;> (try simp [setReg])
   rw [strPairs_zero _ (by simpa [concatstringSpec, Ready, H0] using ha)]
-  simp [strBytes]
+  simp [strBytes, CatStrAt]
 
 theorem concatstring_satisfiable (k : Nat) (hk : k ≤ 7) : Satisfiable (concatstringSpec k) := by
   have ha := fun j => args_zero (1 + 2 * k) j (by omega)
@@ -219,7 +219,7 @@ theorem concatstrings_impl :
   zero_impl
   simp only [concatstringsSpec] at ha ⊢
   rw [ha 2]
-  simp [strHdrs, catBytes, strBytes]
+  simp [strHdrs, catBytes, strBytes, CatStrAt]
 
 theorem concatstrings_satisfiable : Satisfiable concatstringsSpec := by
   have ha := fun j => args_zero 4 j (by decide)
@@ -267,16 +267,16 @@ theorem concatbytes_satisfiable : Satisfiable concatbytesSpec := by
 
 /-! ## Conversions -/
 
-theorem slicebytetostring_impl :
-    RtContract (toy.link (at0 (constCode 0 0 0))) A0 rtW wstack H0 slicebytetostringSpec := by
+theorem slicebytetostring_impl (st : Nat) :
+    RtContract (toy.link (at0 (constCode 0 0 0))) A0 rtW wstack H0 (slicebytetostringSpec st) := by
   zero_impl
   simp only [slicebytetostringSpec] at ha ⊢
   rw [ha 2]
-  simp [strBytes]
+  simp [strBytes, StrAt]
 
-theorem slicebytetostring_satisfiable : Satisfiable slicebytetostringSpec := by
+theorem slicebytetostring_satisfiable (st : Nat) : Satisfiable (slicebytetostringSpec st) := by
   have ha := fun j => args_zero 3 j (by decide)
-  refine sat_zero _ (by decide) slicebytetostring_impl ?_ ?_ rfl rfl
+  refine sat_zero _ (by show 3 ≤ 16; decide) (slicebytetostring_impl st) ?_ ?_ rfl rfl
   · simp only [slicebytetostringSpec] at ha ⊢
     rw [ha 0, ha 1, ha 2]
     exact ⟨Or.inl rfl, ⟨by decide, by simp⟩, fun h => absurd rfl h⟩

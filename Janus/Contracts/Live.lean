@@ -853,13 +853,27 @@ def strsLen (xs : List (Nat × Nat)) : Nat := (xs.map (·.2)).sum
 /-- A string result: its bytes stay live. -/
 def strKeep : List Nat → Memory → Nat → Nat → Nat → List (Nat × Nat) := fun _ _ r0 r1 _ => range0 r0 r1
 
+/-- The number of non-empty operands (`concatstrings`' `count`). -/
+def nonEmptyCount (xs : List (Nat × Nat)) : Nat := (xs.filter fun x => x.2 ≠ 0).length
+
+/-- A concatenation result `(r0, n)` is a new object exactly when `count ≥ 2` and the caller's buffer is not used
+(`rawstring`, `mallocgc`); with `count = 1` it is the operand itself, with a buffer and `n ≤ 32` the buffer. -/
+def catStrFresh (buf : Nat) (xs : List (Nat × Nat)) (r0 n : Nat) : List (Nat × Nat) :=
+  if 2 ≤ nonEmptyCount xs ∧ (buf = 0 ∨ 32 < n) then range0 r0 n else []
+
+/-- … and otherwise its bytes stay live (shared with an operand or the buffer). -/
+def catStrKeep (buf : Nat) (xs : List (Nat × Nat)) (r0 n : Nat) : List (Nat × Nat) :=
+  if 2 ≤ nonEmptyCount xs ∧ (buf = 0 ∨ 32 < n) then [] else range0 r0 n
+
 def concatstringLive (k : Nat) : LiveSpec where
   cost a _ := roundupsize (strsLen (strPairs a 1 k)) true
-  keep := strKeep
+  fresh a _ r0 r1 _ := catStrFresh (arg a 0) (strPairs a 1 k) r0 r1
+  keep a _ r0 r1 _ := catStrKeep (arg a 0) (strPairs a 1 k) r0 r1
 
 def concatstringsLive : LiveSpec where
   cost a m := roundupsize (strsLen (strHdrs m (arg a 1) (arg a 2))) true
-  keep := strKeep
+  fresh a m r0 r1 _ := catStrFresh (arg a 0) (strHdrs m (arg a 1) (arg a 2)) r0 r1
+  keep a m r0 r1 _ := catStrKeep (arg a 0) (strHdrs m (arg a 1) (arg a 2)) r0 r1
 
 /-- A `[]byte` result `(r0, len, cap)` of `rawbyteslice` (the caller's buffer `buf` holds it when
 one was passed and `len ≤ 32`): the array is fresh. -/
@@ -874,9 +888,12 @@ def concatbytesLive : LiveSpec where
   cost a m := roundupsize (strsLen (strHdrs m (arg a 1) (arg a 2))) true
   fresh a m r0 _ r2 := bytesFresh (arg a 0) (strsLen (strHdrs m (arg a 1) (arg a 2))) r0 r2
 
+/-- `slicebytetostring`'s result is a new object exactly when `n ≥ 2` and the caller's buffer is not used (`n = 1` is
+`&staticuint64s[b]`, `n = 0` nothing); otherwise its bytes stay live (the buffer, the static table). -/
 def slicebytetostringLive : LiveSpec where
   cost a _ := roundupsize (arg a 2) true
-  keep := strKeep
+  fresh a _ r0 r1 _ := if 2 ≤ r1 ∧ (arg a 0 = 0 ∨ 32 < r1) then range0 r0 r1 else []
+  keep a _ r0 r1 _ := if 2 ≤ r1 ∧ (arg a 0 = 0 ∨ 32 < r1) then [] else range0 r0 r1
 
 /-- `slicebytetostringtmp` allocates nothing (its result is its operand). -/
 def slicebytetostringtmpLive : LiveSpec := {}
@@ -973,7 +990,7 @@ def bulkBarrierPreWriteLive : LiveSpec := {}
 
 attribute [janus_exec, janus_post] mallocgcRound newobjectRound makesliceRound growsliceRound
 
-attribute [janus_exec, janus_post, janus64_exec, janus64_post] range0 strKeep bytesFresh liveAdds
+attribute [janus_exec, janus_post, janus64_exec, janus64_post] range0 strKeep bytesFresh liveAdds nonEmptyCount catStrFresh catStrKeep
   concatstringLive concatstringsLive concatbyteLive concatbytesLive slicebytetostringLive
   slicebytetostringtmpLive stringtoslicebyteLive stringtosliceruneLive slicerunetostringLive
   intstringLive decoderuneLive countrunesLive gostringLive gostringnLive gobytesLive growsliceLive

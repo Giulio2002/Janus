@@ -1259,6 +1259,12 @@ elab "janus_data " h:ident ws:janusDataWith : tactic => withMainContext do
           throwError "janus_data: {hwE0} is not `m.accessible a n true = true`"
         unless lhs0.isAppOfArity ``Memory.accessible 4 do
           throwError "janus_data: {hwE0} is not `m.accessible a n true = true`"
+        -- the flag must be `true` (writable) and the right side `true`: a read-only `Buffer` hypothesis
+        -- (`accessible … false = true`) used to be accepted and only the kernel rejected the proof (U-DATAWRITE)
+        unless (lhs0.getArg! 3).isConstOf ``Bool.true do
+          throwError "janus_data: {hwE0} is `{hwTy0}`, a hypothesis about READ-ONLY memory (flag `false`): a writable range `m.accessible a n true = true` is required (read-only data may overlap a read-only buffer)"
+        unless (hwTy0.eq?.map (·.2.2)).any (·.isConstOf ``Bool.true) do
+          throwError "janus_data: {hwE0} is `{hwTy0}`: the right side must be `true`"
         -- a writable range of a memory related to the one of `hd` by `MemFrame` hypotheses is transported
         -- (`MemFrame.accessible`: the accessibility of every range is the same in both)
         let hwE? : Option Expr ← if ← withReducible (isDefEq (lhs0.getArg! 0) m) then pure (some hwE0) else do

@@ -67,6 +67,57 @@ def bufWrites (buf n : Nat) : List (Nat × Nat) := if buf = 0 then [] else [(buf
 def StrOut (m : Memory) (p n : Nat) (bs : List Nat) : Prop :=
   n = bs.length ∧ p + n ≤ 2 ^ 48 ∧ (0 < n → m.accessible p n false = true) ∧ strBytes m p n = bs
 
+/-- **Where `slicebytetostring(buf, ptr, n)`'s result `(r0, n)` lives** (`string.go`): nowhere for `n = 0`; for
+`n = 1` at `&runtime.staticuint64s[*ptr]` (`st + 8 * byte`, `st` the address of `staticuint64s`, a data object of the
+binary, not runtime-allocated: `rt` does not contain it); for `n ≥ 2` in the caller's `*tmpBuf` when one was passed
+and `n ≤ 32`, else a new block of `mallocgc`, inside `rt`. A consumer shows the result outside its stack window
+from layout facts (`rt` is outside the window by the precondition of the contract; the buffer and `staticuint64s`
+are the caller's own and the extraction's). -/
+def StrAt (rt : List (Nat × Nat)) (buf st ptr n r0 : Nat) (m0 : Memory) : Prop :=
+  n = 0 ∨ (n = 1 ∧ r0 = st + 8 * m0.readLE ptr 1) ∨ (2 ≤ n ∧ buf ≠ 0 ∧ n ≤ 32 ∧ r0 = buf) ∨
+    (2 ≤ n ∧ (buf = 0 ∨ 32 < n) ∧ InRanges r0 n rt)
+
+/-- **Where `concatstrings(buf, a)`'s result `(r0, n)` lives** (`string.go`): nowhere for `n = 0`; one of the operands
+(`count = 1`, and a buffer was passed or the operand's data is not on the stack: `concatstrings` returns the operand
+itself); the caller's `*tmpBuf` when one was passed and `n ≤ 32`; else a new block (`rawstring`), inside `rt`. -/
+def CatStrAt (rt : List (Nat × Nat)) (buf : Nat) (ops : List (Nat × Nat)) (r0 n : Nat) : Prop :=
+  n = 0 ∨ (r0, n) ∈ ops ∨ (1 ≤ n ∧ buf ≠ 0 ∧ n ≤ 32 ∧ r0 = buf) ∨
+    (1 ≤ n ∧ (buf = 0 ∨ 32 < n) ∧ InRanges r0 n rt)
+
+/-- **A consumer's use of `StrAt`**: the result of `slicebytetostring` is outside the window `[lo, lo + len)` (the stack
+window of its next call, say) when the runtime-owned ranges `rt` are (`Outside lo len rt`, which the precondition of a
+contract gives for the caller's own frame), the caller's buffer is nil or outside, and `runtime.staticuint64s` is
+outside (the layout fact: the binary's data is not on the goroutine stack). Each disjunct of `StrAt` is discharged by
+one hypothesis. -/
+theorem StrAt.outside {rt : List (Nat × Nat)} {buf st ptr n r0 : Nat} {m0 : Memory}
+    (h : StrAt rt buf st ptr n r0 m0) (lo len : Nat) (hrt : Outside lo len rt)
+    (hbuf : buf = 0 ∨ buf + 32 ≤ lo ∨ lo + len ≤ buf) (hst : st + 2048 ≤ lo ∨ lo + len ≤ st) :
+    n = 0 ∨ r0 + n ≤ lo ∨ lo + len ≤ r0 := by
+  rcases h with h0 | ⟨h1, h2⟩ | ⟨h1, h2, h3, h4⟩ | ⟨h1, h2, r, hr, hr1, hr2⟩
+  · exact Or.inl h0
+  · have hb := Janus.Arm64.Memory.readLE_lt m0 ptr 1
+    simp only [Nat.reducePow, Nat.pow_one] at hb
+    omega
+  · omega
+  · have := Janus.MemFrame.outside_mem hrt hr
+    omega
+
+/-- … and the same for a concatenation: the result is an operand (outside, as the caller's operands are), the
+buffer, or inside `rt`. -/
+theorem CatStrAt.outside {rt : List (Nat × Nat)} {buf r0 n : Nat} {ops : List (Nat × Nat)}
+    (h : CatStrAt rt buf ops r0 n) (lo len : Nat) (hrt : Outside lo len rt)
+    (hbuf : buf = 0 ∨ buf + 32 ≤ lo ∨ lo + len ≤ buf)
+    (hops : ∀ x ∈ ops, x.2 = 0 ∨ x.1 + x.2 ≤ lo ∨ lo + len ≤ x.1) :
+    n = 0 ∨ r0 + n ≤ lo ∨ lo + len ≤ r0 := by
+  rcases h with h0 | hm | ⟨h1, h2, h3, h4⟩ | ⟨h1, h2, r, hr, hr1, hr2⟩
+  · exact Or.inl h0
+  · have := hops _ hm
+    simp only at this
+    omega
+  · omega
+  · have := Janus.MemFrame.outside_mem hrt hr
+    omega
+
 /-- The slice `(p, len, cap)` is writable and holds `bs` in its first `len` bytes, zero after. -/
 def BytesHold (m : Memory) (p len cap : Nat) (bs : List Nat) : Prop :=
   len ≤ cap ∧ p + cap ≤ 2 ^ 48 ∧ m.accessible p cap true = true ∧ strBytes m p len = bs ∧
@@ -136,7 +187,8 @@ def concatstringSpec (k : Nat) : RtSpec where
   pre a m := BufOK m (arg a 0) 32 ∧ StrsIn m (arg a 0) (strPairs a 1 k)
   writes a _ := bufWrites (arg a 0) 32
   reads a _ := strPairs a 1 k
-  post _ a m0 r0 r1 _ m := StrOut m r0 r1 (catBytes m0 (strPairs a 1 k))
+  post rt a m0 r0 r1 _ m :=
+    StrOut m r0 r1 (catBytes m0 (strPairs a 1 k)) ∧ CatStrAt rt (arg a 0) (strPairs a 1 k) r0 r1
 
 /-- **`runtime.concatstrings(buf, a []string)`**: the bytes of the concatenation of the strings
 of `a`. Words: `buf, a.ptr, a.len, a.cap`. -/
@@ -148,7 +200,9 @@ def concatstringsSpec : RtSpec where
     Disjoint (arg a 1) (16 * arg a 2) (arg a 0) (if arg a 0 = 0 then 0 else 32)
   writes a _ := bufWrites (arg a 0) 32
   reads a m := (arg a 1, 16 * arg a 2) :: strHdrs m (arg a 1) (arg a 2)
-  post _ a m0 r0 r1 _ m := StrOut m r0 r1 (catBytes m0 (strHdrs m0 (arg a 1) (arg a 2)))
+  post rt a m0 r0 r1 _ m :=
+    StrOut m r0 r1 (catBytes m0 (strHdrs m0 (arg a 1) (arg a 2))) ∧
+      CatStrAt rt (arg a 0) (strHdrs m0 (arg a 1) (arg a 2)) r0 r1
 
 /-- **`runtime.concatbyteK(buf, a0, …)`** (`K = 2 … 5`, `[]byte(a0 + …)`): a new `[]byte`
 holding the bytes of the concatenation (`CatBytesOut`). -/
@@ -174,16 +228,18 @@ def concatbytesSpec : RtSpec where
 /-! ## Conversions -/
 
 /-- **`runtime.slicebytetostring(buf, ptr, n)`** (`string(b)`): a string holding the `n` bytes at
-`ptr`. (For `n = 1` Go returns a pointer into `runtime.staticuint64s`; for `n ≥ 2` the caller's
-buffer if one was passed and `n ≤ 32`, else a new block; only the bytes are promised.) Words:
-`buf, ptr, n`. -/
-def slicebytetostringSpec : RtSpec where
+`ptr`, and where it lives (`StrAt`): `st` is the address of `runtime.staticuint64s` (for `n = 1` Go returns a pointer
+into it), a parameter the statement takes from the extraction (`Extracted.dataAddr.«runtime.staticuint64s»`, which
+`janus extract` emits for a `--contract runtime.slicebytetostring` after checking the object's size and contents;
+the auditor rejects any other value). Words: `buf, ptr, n`. -/
+def slicebytetostringSpec (st : Nat) : RtSpec where
   nargs := 3
   pre a m := BufOK m (arg a 0) 32 ∧ StrIn m (arg a 1) (arg a 2) ∧
     (arg a 0 ≠ 0 → Disjoint (arg a 1) (arg a 2) (arg a 0) 32)
   writes a _ := bufWrites (arg a 0) 32
   reads a _ := [(arg a 1, arg a 2)]
-  post _ a m0 r0 r1 _ m := StrOut m r0 r1 (strBytes m0 (arg a 1) (arg a 2))
+  post rt a m0 r0 r1 _ m :=
+    StrOut m r0 r1 (strBytes m0 (arg a 1) (arg a 2)) ∧ StrAt rt (arg a 0) st (arg a 1) r1 r0 m0
 
 /-- **`runtime.slicebytetostringtmp(ptr, n)`**: the string `(ptr, n)` itself, nothing written.
 Words: `ptr, n`. -/

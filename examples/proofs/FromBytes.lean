@@ -28,14 +28,14 @@ set_option maxRecDepth 20000 in
 set_option maxHeartbeats 4000000 in
 theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (p n c : BitVec 64)
     (hc : RtContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring")
-      rt 4096 H slicebytetostringSpec) :
+      rt 4096 H (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s»)) :
     Ensures (Extracted.program.link impl) Extracted.entry [p, n, c] (Pre rt H p n)
       (fun s s' => StrOut s'.mem (s'.regs 0).toNat (s'.regs 1).toNat (strBytes s.mem p.toNat n.toNat)) := by
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hout, ⟨hp1, hp2⟩, hpo, hH⟩
   janus_intro hs
   simp only [outside_cons, outside_nil, and_true] at hpo
   janus_run [false_implies, implies_true, List.not_mem_nil, forall_const] calls [hc]
-  all_goals assumption
+  all_goals first | assumption | exact And.left (by assumption)
 /-! ## Non-vacuity -/
 
 namespace Witness
@@ -47,14 +47,14 @@ def implAt : List Segment := [{ name := "model", base := cAddr, words := constCo
 def linked : Program := { Extracted.program with segments := Extracted.program.segments ++ implAt }
 theorem linked_eq : Extracted.program.link implAt = linked := rfl
 
-theorem model : RtContract (Extracted.program.link implAt) cAddr rtW 4096 H0 slicebytetostringSpec := by
+theorem model : RtContract (Extracted.program.link implAt) cAddr rtW 4096 H0 (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s») := by
   rw [linked_eq]
   rintro s hpc ⟨⟨h30a, h30b, -⟩, -, -, -, hH⟩
   have ha := ready_of rfl hH
   simp only [Ready, H0, arg, List.getD_eq_getElem?_getD, slicebytetostringSpec] at ha
   janus_run
   apply rtPost_const <;> (try rfl) <;> (try simp [setReg])
-  simp [ha, strBytes]
+  simp [ha, strBytes, StrAt]
 
 def ret : Nat := wret
 theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
@@ -78,7 +78,7 @@ theorem pre : Pre rtW H0 0 0 s0 := by
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
     RtContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring")
-      rt 4096 H slicebytetostringSpec ∧ RetAddr (Extracted.program.link impl) ret ∧
+      rt 4096 H (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s») ∧ RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0] s ∧ Pre rt H 0 0 s :=
   ⟨implAt, rtW, H0, ret, s0, model, hret, setup, pre⟩
 

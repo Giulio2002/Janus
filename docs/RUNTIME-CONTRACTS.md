@@ -1001,7 +1001,7 @@ spec's `writes`.
 | --- | --- | --- |
 | `a + b + …` | `concatstring2..5`, `concatstrings` | `concatstringSpec k`, `concatstringsSpec` |
 | `[]byte` concatenation | `concatbyte2..5`, `concatbytes` | `concatbyteSpec k`, `concatbytesSpec` |
-| `string(b)` | `slicebytetostring`, `slicebytetostringtmp` | `slicebytetostringSpec`, `slicebytetostringtmpSpec` |
+| `string(b)` | `slicebytetostring`, `slicebytetostringtmp` | `slicebytetostringSpec st`, `slicebytetostringtmpSpec` |
 | `[]byte(s)`, `[]rune(s)`, `string(rs)`, `string(rune(v))` | `stringtoslicebyte`, `stringtoslicerune`, `slicerunetostring`, `intstring` | the corresponding `…Spec` |
 | `for _, r := range s` (non-ASCII byte), `len([]rune(s))` | `decoderune`, `countrunes` | `decoderuneSpec`, `countrunesSpec` |
 | C strings (cgo, syscalls) | `gostring`, `gostringn`, `gobytes` | `gostringSpec`, `gostringnSpec`, `gobytesSpec` |
@@ -1009,6 +1009,39 @@ spec's `writes`.
 | `make` + `copy`, escaping stack slices | `makeslicecopy`, `moveSlice*` | `makeslicecopySpec`, `moveSlice*Spec` |
 | `copy` | `slicecopy`, `typedslicecopy` | `slicecopySpec`, `typedslicecopySpec` |
 | pointer stores with the GC marking | `gcWriteBarrier1..8`; `wbZero`, `wbMove`; the `writeBarrier` flag | `WbContract`, `WbContract64`; `wbZeroSpec`, `wbMoveSpec`; `WriteBarrierOn` |
+
+**Where a string result lives (`StrAt`, `CatStrAt`).** A string-returning contract says the bytes (`StrOut`) and
+where the result `(r0, n)` is, so that a consumer can call a second runtime function on it (U-SBTS-POST):
+
+* `slicebytetostringSpec st`: `n = 0` (no bytes); `n = 1` and `r0 = st + 8 * b` with `b` the byte (Go returns
+  `&runtime.staticuint64s[b]`); `2 ≤ n ≤ 32`, a buffer passed, `r0 = buf` (the caller's `*tmpBuf`); else `2 ≤ n` and a new
+  block inside `rt` (`mallocgc`). `st` is **the address of `runtime.staticuint64s`**, a data object of the binary, not
+  runtime-allocated, so it is a separate disjunct and `rt` is not widened (every `rt`-disjointness fact would weaken).
+  `st` is pinned like the contract addresses: `janus extract` with `--contract runtime.slicebytetostring` finds the symbol,
+  checks that it is 2048 bytes in a read-only section holding the words `0, 1, …, 255`, and emits
+  `Extracted.dataAddr.«runtime.staticuint64s»` (an extraction error otherwise; `janus check` regenerates
+  `Extracted.lean` from the binary, so the constant cannot be edited). The auditor accepts that constant and nothing else as
+  the argument of `slicebytetostringSpec` (a numeral, a variable, an offset, an address from another program are rejected:
+  `audit/roundspecbind/attacks/SbtsAddr.lean`, rows `a1`–`a4`; control `c1`).
+* `concatstringSpec k`, `concatstringsSpec`: `n = 0`; the result is one of the operands (Go returns the operand itself when
+  one is non-empty and either a buffer was passed or its data is not on the stack); the caller's buffer (`1 ≤ n ≤ 32`); else a new
+  block inside `rt`.
+* `stringtoslicebyte`, `concatbyte*`, `growslice*` already said `InRanges r0 _ rt` (or the buffer).
+
+`StrAt.outside` / `CatStrAt.outside` (`Janus/Contracts/String.lean`) turn this into "the result is outside the window
+`[lo, lo + len)`" from three layout facts: `Outside lo len rt` (the contract's own precondition for the caller's frame), the
+buffer is nil or outside, and `staticuint64s` is outside (the binary's data is not on the goroutine stack); for a
+concatenation, the operands are outside. `JanusTests/StrAt.lean` derives it for each disjunct.
+
+**Live layer.** `slicebytetostringLive`, `concatstringLive k`, `concatstringsLive` now return the result as `fresh` (apart
+from the live set `L`) exactly when it is a new block (`n ≥ 2` and no buffer for `slicebytetostring`; two or more
+non-empty operands and no buffer for a concatenation), and `keep` (live, shared) otherwise; one of the two, never both.
+
+**Soundness.** The strengthened postconditions are claims about the Go 1.26 runtime (`string.go`): `rawstring` is
+`mallocgc` (inside `rt`, as the already-accepted `rawbyteslice` of `CatBytesOut`), `n = 0` returns `""`, `n = 1` returns
+`&staticuint64s[*ptr]` regardless of the buffer, `n ≥ 2` uses the buffer when `n ≤ len(buf)`, `concatstrings` returns the single
+non-empty operand itself when allowed and otherwise `rawstringtmp`. Satisfiability: the toy implementations return
+`(0, 0, 0)`, the `n = 0` disjunct (`Sat`, `SatAmd64`, `RtSat`, for every `st`).
 
 The UTF-8 decoder the specs use is `Janus.Spec.String.decodeRune`, a transcription of Go's
 `decoderune` (U+FFFD and one byte for every invalid sequence, surrogates and overlong forms
