@@ -46,5 +46,7 @@ import JanusTests.NatNorm
 import JanusTests.ChunkIdentity
 import JanusTests.AssumptionReducible
 import JanusTests.JanusRfl
+import JanusTests.Join
+import JanusTests.ReadBounds
 import JanusTests.CallPre
 import JanusTests.CallPre64

@@ -1397,13 +1397,15 @@ structure Cfg where
   callNames : Array (Nat × Name) := #[]
   /-- Heartbeat budget of the run, in thousands (`janus64_run (budget := N)`). -/
   budget : Option Nat := none
+  /-- `join [pc, …]`: merge the paths that reach one of these addresses (`Common.tryMergeRel`). -/
+  joins : List Nat := []
   status : IO.Ref Status
   cache : IO.Ref StepCache
   facts : IO.Ref (Std.HashMap Nat FetchFact)
 
 def Cfg.new (args : Array Term := #[]) (stops : List Nat := []) (calls : Array (Nat × Expr) := #[])
-    (budget : Option Nat := none) (callNames : Array (Nat × Name) := #[]) : IO Cfg := do
-  return { args, stops, calls, callNames, budget, status := ← IO.mkRef {}, cache := ← IO.mkRef {},
+    (budget : Option Nat := none) (callNames : Array (Nat × Name) := #[]) (joins : List Nat := []) : IO Cfg := do
+  return { args, stops, calls, callNames, budget, joins, status := ← IO.mkRef {}, cache := ← IO.mkRef {},
            facts := ← IO.mkRef {} }
 
 /-- Build the `set` simp context (plus state hypotheses and user arguments) for the current
@@ -1893,7 +1895,9 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
   let mut steps := 0
   let merge := Common.janus.merge.get (← getOptions)
   while !todo.isEmpty do
-    if merge then todo ← Common.pickMerged { memTypes := [``Janus.Arm64.Memory, ``Memory], regChains := [(``setRegF, ``State.regs)], restore := [``reduceSetRegFRestore] } goalPC todo
+    let spec : Common.MergeSpec := { memTypes := [``Janus.Arm64.Memory, ``Memory], regChains := [(``setRegF, ``State.regs)], restore := [``reduceSetRegFRestore] }
+    if !cfg.joins.isEmpty then todo ← Common.pickMerged spec goalPC todo (some cfg.joins)
+    else if merge then todo ← Common.pickMerged spec goalPC todo
     let (g, first) :: rest := todo | break
     todo := rest
     if ← g.isAssigned then continue
@@ -1973,7 +1977,7 @@ elab_rules : tactic | `(tactic| janus64_disch) => do
     if ← Common.dischargeLiveForall g then return
   if let some (_, lhs, _) := t.eq? then
     if lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then
-      if ← dischargeAccessible g then return
+      if ← Common.withJoinSplit g dischargeAccessible then return
       throwError "janus64_disch: cannot prove{indentExpr t}"
   match ← Janus.Carry.dischCarry g with
   | some true => return
@@ -1988,6 +1992,7 @@ syntax janus64Until := (" until " "[" term,* "]")?
 syntax janus64Call := (atomic(ident " := "))? term
 syntax janus64Calls := (" calls " "[" janus64Call,* "]")?
 syntax janus64Budget := (" (" &"budget" " := " num ")")?
+syntax janus64Join := (" join " "[" term,* "]")?
 
 def parseArgs (stx : Syntax) : Array Term :=
   if stx[0].isNone then #[] else stx[0][1].getSepArgs.map (⟨·⟩)
@@ -2049,18 +2054,28 @@ def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) :=
 def parseCallNames (stx : Syntax) : TacticM (Array (Nat × Name)) :=
   return (← parseCallsNamed stx).filterMap fun (n, _, nm) => nm.map (n, ·)
 
+/-- `join [pc, …]`: the addresses where paths are merged (see `Common.tryMergeRel`). -/
+def parseJoin (stx : Syntax) : TacticM (List Nat) := do
+  if stx[0].isNone then return []
+  (stx[0][2].getSepArgs.toList).mapM fun t => do
+    let e ← Term.elabTerm t (some (mkConst ``Nat))
+    Term.synthesizeSyntheticMVarsNoPostponing
+    let e ← instantiateMVars e
+    let some n ← evalNat e | throwError "janus64_run join: not a numeral: {t}"
+    return n
+
 def parseBudget (stx : Syntax) : Option Nat :=
   if stx[0].isNone then none else stx[0][3].isNatLit?
 
 /-- Symbolically execute until every branch reaches an outcome: the return address, a stub, the
 end of a callee (`ReachesRet`), or an `until` address. `calls [h, …]` uses callee summaries
 instead of executing the callees; `(budget := N)` limits the run to `N` thousand heartbeats. -/
-elab "janus64_run" bud0:janus64Budget args:janus64Args stops:janus64Until cs:janus64Calls bud:janus64Budget :
+elab "janus64_run" bud0:janus64Budget args:janus64Args stops:janus64Until cs:janus64Calls js:janus64Join bud:janus64Budget :
     tactic => withMainContext do
   let cl ← parseCallsNamed cs
   let cfg ← Cfg.new (parseArgs args) (← parseUntil stops) (cl.map fun (n, e, _) => (n, e))
     ((parseBudget bud).orElse fun _ => parseBudget bud0)
-    (cl.filterMap fun (n, _, nm) => nm.map (n, ·))
+    (cl.filterMap fun (n, _, nm) => nm.map (n, ·)) (← parseJoin js)
   runJanus cfg false
 
 /-- One symbolic execution step. -/
