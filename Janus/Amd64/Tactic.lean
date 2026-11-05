@@ -1964,7 +1964,7 @@ def janus64dischBody : TacticM Unit := do
   let g ← getMainGoal
   let t ← instantiateMVars (← g.getType)
   -- `Outside a n [literal ranges]` is closed but has no `Decidable` instance
-  if t.isAppOfArity ``Janus.Outside 3 && !t.hasMVar then
+  if t.isAppOfArity ``Janus.Outside 3 && !t.hasFVar && !t.hasMVar then
     if ← Common.dischargeOutside g then return
   if !t.hasFVar && !t.hasMVar then
     -- A closed side condition is decided, never proved from (possibly contradictory) context.

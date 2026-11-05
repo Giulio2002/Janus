@@ -939,7 +939,7 @@ def janusdischBody : TacticM Unit := withoutRecover do
       if d.isImplementationDetail then pure acc else pure (acc.push m!"{d.userName} : {d.type}")
     trace[janus.disch] "goal {t}\n{MessageData.joinSep hs.toList "\n"}"
   -- `Outside a n [literal ranges]` is closed but has no `Decidable` instance
-  if t.isAppOfArity ``Janus.Outside 3 && !t.hasMVar then
+  if t.isAppOfArity ``Janus.Outside 3 && !t.hasFVar && !t.hasMVar then
     if ← Common.dischargeOutside g then return
   if !t.hasFVar && !t.hasMVar then
     -- literal comparisons: evaluated here (no auxiliary declaration per side condition)
