@@ -393,26 +393,20 @@ func extractAmd64Func(b *Binary, f Func) (Segment, []Unresolved, error) {
 
 // Thresholds for splitting the rendered program, as for arm64 words (see renderLean).
 const (
-	amd64InlineByteLimit  = 8192
+	amd64InlineByteLimit  = 5120 // inline: 6000 bytes elaborate, 6144 (3 segments) and 6911 do not (U-BIGEXTRACT); was 8192
 	amd64SegmentByteLimit = 4096
 )
 
 func writeAmd64Segment(sb *strings.Builder, s Segment, indent string) {
-	fmt.Fprintf(sb, "{ name := %s, base := 0x%x, bytes := [", leanString(s.Name), s.Base)
-	multi := len(s.Bytes) > bytesPerLine
-	for j, v := range s.Bytes {
-		if j > 0 {
-			sb.WriteString(",")
-			if !(multi && j%bytesPerLine == 0) {
-				sb.WriteString(" ")
-			}
-		}
-		if multi && j%bytesPerLine == 0 {
-			sb.WriteString("\n" + indent + "    ")
-		}
-		fmt.Fprintf(sb, "0x%02x", v)
+	writeAmd64SegmentExpr(sb, s, indent, "")
+}
+
+// writeAmd64SegmentExpr renders a code record whose bytes are the expression expr ("" renders the literal).
+func writeAmd64SegmentExpr(sb *strings.Builder, s Segment, indent, expr string) {
+	if expr == "" {
+		expr = byteLit(s.Bytes, indent)
 	}
-	sb.WriteString("] }")
+	fmt.Fprintf(sb, "{ name := %s, base := 0x%x, bytes := %s }", leanString(s.Name), s.Base, expr)
 }
 
 // renderLeanAmd64 produces Extracted.lean for an amd64 extraction (a `Janus.Amd64.Program`).
@@ -440,11 +434,14 @@ func renderLeanAmd64(x *Extraction) []byte {
 		sb.WriteString(" ]\n\n")
 	} else {
 		for i, s := range x.Segments {
-			if len(s.Bytes) > amd64SegmentByteLimit {
+			expr := writeListTree(&sb, fmt.Sprintf("seg%d_bytes", i), len(s.Bytes), func(lo, hi int) string {
+				return byteLit(s.Bytes[lo:hi], "  ")
+			})
+			if expr == "" && len(s.Bytes) > amd64SegmentByteLimit {
 				sb.WriteString("set_option maxRecDepth 100000 in\n")
 			}
 			fmt.Fprintf(&sb, "def seg%d : Amd64.Segment :=\n  ", i)
-			writeAmd64Segment(&sb, s, "  ")
+			writeAmd64SegmentExpr(&sb, s, "  ", expr)
 			sb.WriteString("\n\n")
 		}
 		sb.WriteString("def segments : List Amd64.Segment := [")
