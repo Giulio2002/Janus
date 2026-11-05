@@ -35,7 +35,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
   janus_intro hs
   simp only [outside_cons, outside_nil, and_true] at hpo
   janus_run [false_implies, implies_true, List.not_mem_nil, forall_const] calls [hc]
-  all_goals assumption
+  all_goals first | assumption | exact And.left (by assumption)
 /-! ## Non-vacuity -/
 
 namespace Witness

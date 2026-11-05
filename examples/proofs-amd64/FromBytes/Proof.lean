@@ -36,7 +36,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : Rt
   simp only [regSP, regG, stackguard0Offset, stackguard0] at hgl hgb hnw2 hgr hb ha hw hout hal hao hH ⊢
   simp only [outside_cons, outside_nil, and_true] at hao
   janus64_run [false_implies, implies_true, List.not_mem_nil, forall_const] calls [hc]
-  all_goals assumption
+  all_goals first | assumption | exact And.left (by assumption)
 
 /-! ## Non-vacuity -/
 
