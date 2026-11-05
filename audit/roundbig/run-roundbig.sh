@@ -15,10 +15,15 @@
 #   forgeName   a chunk renamed consistently (defs and uses): rejected the same way (the generated text is compared whole)
 #   trust       the defeq check Extracted.program =?= JanusTrusted.program covers every chunk (it unfolds them): the forged
 #               rows above fail BEFORE the kernel check as well as at the auditor when only the text check is bypassed
-# Also prints the elaboration/verify time of the control for two sizes (linear scaling: 1x and 2x the lines needed to
-# pass the threshold). Exits 1 if an attack verifies,
+# Speed (the round is part of the full gate): every row verifies against ONE cached workspace per architecture (the
+# private cache builds the trusted framework once and the big Extracted once; a row then only elaborates its small proof
+# module and runs the auditor, 1-3 s), the two architectures run in parallel, and the forge rows use `janus check`
+# (text comparison with the regenerated extraction) plus a verify that is refused before any elaboration. FRESH=1
+# restores `verify --fresh` for every row (framework and extraction rebuilt per row: ~150 s each, ~35 min in all);
+# BENCH=1 adds the scaling row (control verify time at 2x the lines). Exits 1 if an attack verifies,
 # a control stops verifying, or a forgery is accepted. Private temporary cache.
 set -u
+pids=()
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
@@ -51,8 +56,8 @@ build() { # ARCH LINES NAME
   gen "$2" "$T/src$3"
   (cd "$T/src$3" && CGO_ENABLED=0 GOOS=linux GOARCH="$1" go build -trimpath -buildvcs=false -o "$root/$W/bin$3" .) || exit 1
 }
-broken=()
-v() { "$J" verify --fresh --janus-root "$root" "$@" 2>&1; }
+FRESHFLAG=(); [ "${FRESH:-}" = 1 ] && FRESHFLAG=(--fresh)
+v() { "$J" verify "${FRESHFLAG[@]}" --janus-root "$root" "$@" 2>&1; }
 row() { # NAME expect(blocked|Verified) OUTPUT pattern...
   local name=$1 expect=$2 out=$3 verdict status="" pat; shift 3
   verdict="$(grep -m1 -E '^=== |^Error|^Rejected|^Invalid|^Verified' <<<"$out" | cut -c1-120)"
@@ -63,10 +68,11 @@ row() { # NAME expect(blocked|Verified) OUTPUT pattern...
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
   printf '  %-14s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
-  [ -n "$status" ] && broken+=("$name")
+  [ -n "$status" ] && echo "$name" >> "$BF"
   return 0
 }
-for isa in arm64 amd64; do
+run_isa() { # ISA: one architecture; its rows go to stdout, its broken rows to $BF
+  local isa=$1
   echo "== tree-shaped extraction ($isa)"
   LN=$(lines_for "$isa")
   build "$isa" "$LN" "$isa"
@@ -86,7 +92,7 @@ for isa in arm64 amd64; do
   # compiles in Lean (Greek capital epsilon is an identifier letter), so the AUDITOR's shadow rule must be what rejects it
   out="$(v --proof "$W/ChunkLookalike.$isa.lean" "$D" --theorem Proof.correctness)"
   row ChunkLookalike blocked "$out" 'The audit rejected the proof' 'shadows the Extracted namespace'
-  grep -qF 'Lean rejected the proof' <<<"$out" && { echo "  ChunkLookalike was rejected by Lean, not the auditor   <-- BROKEN"; broken+=("ChunkLookalike.reason"); }
+  grep -qF 'Lean rejected the proof' <<<"$out" && { echo "  ChunkLookalike was rejected by Lean, not the auditor   <-- BROKEN"; echo ChunkLookalike.reason >> "$BF"; }
   forge() { # NAME python-expression-on-text
     local name=$1 dir="$W/forge-$isa-$1"
     rm -rf "$dir"; cp -r "$D" "$dir"
@@ -114,17 +120,30 @@ PY
     local out; out="$("$J" check "$dir" 2>&1)"; local rc=$?
     local st=""; [ $rc -eq 1 ] && grep -q "differs from the regenerated extraction" <<<"$out" || st=BROKEN
     printf '  %-14s %-8s check rc=%s%s\n' "$name" "blocked" "$rc" "${st:+   <-- BROKEN}"
-    [ -n "$st" ] && broken+=("$name.$isa.check")
+    [ -n "$st" ] && echo "$name.$isa.check" >> "$BF"
     row "$name.verify" blocked "$(v --proof "$W/Control.$isa.lean" "$dir" --theorem Proof.correctness)"
   }
   for f in forgeByte forgeSwap forgeName; do forge $f; done
+}
+# the architectures in parallel (own output and broken-row file each; a failing setup step exits its subshell)
+for isa in arm64 amd64; do
+  ( BF="$T/broken.$isa"; run_isa "$isa" ) > "$T/log.$isa" 2>&1 &
+  pids+=($!)
 done
+setup_fail=0
+for i in 0 1; do wait "${pids[$i]}" || setup_fail=1; done
+for isa in arm64 amd64; do cat "$T/log.$isa"; done
+[ $setup_fail = 0 ] || { echo "round big: setup failed"; exit 1; }
+if [ "${BENCH:-}" = 1 ]; then
+BF="$T/broken.bench"
 LN1=$(lines_for arm64); LN2=$((LN1 * 2))
 echo "== linear scaling (arm64 control verify time, $LN1 vs $LN2 lines)"
 build arm64 "$LN2" big2
 "$J" extract "$W/binbig2" main.Big "$W/big2" >/dev/null 2>&1 || { echo "extract failed (big2)"; exit 1; }
 s=$(date +%s.%N); row control2 Verified "$(v --proof "$W/Control.arm64.lean" "$W/big2" --theorem Proof.correctness)"
 printf "  $LN2-line control verify time: %.1f s (words: %s)\n" "$(echo "$(date +%s.%N) - $s" | bc)" "$(grep -c '^def seg0_words_[0-9]* ' "$W/big2/Extracted.lean") leaves"
+fi
 echo
-if [ ${#broken[@]} -gt 0 ]; then echo "round big: BROKEN rows: ${broken[*]}"; exit 1; fi
+broken=$(cat "$T"/broken.* 2>/dev/null | tr '\n' ' ')
+if [ -n "$broken" ]; then echo "round big: BROKEN rows: $broken"; exit 1; fi
 echo "round big: all rows as expected"
