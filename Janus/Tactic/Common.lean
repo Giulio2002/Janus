@@ -1422,12 +1422,21 @@ def addReadBounds (g : MVarId) : MetaM MVarId := g.withContext do
         return ← addReadBoundsOf g d.type
   return g
 
+elab "janus_omega_focus" : tactic => do
+  let g ← getMainGoal
+  unless ← omegaFocused g do throwError "janus_omega_focus: no proof in the context of the goal's own variables"
+  replaceMainGoal []
+
 /-- `omega` for side conditions of the dischargers, in stages: the sparse attempts, `omega` in the context
 restricted to the hypotheses about the goal's free variables, `omega` on the full context (capped). -/
 def omegaStaged (g : MVarId) : TacticM Bool := do
   -- up to the cap the full context is cheap enough: plain `omega`, exactly what the side conditions did
-  -- before the cap existed (the sparse and focused attempts, each a context copy, only pay off above it)
+  -- before the cap existed (the sparse attempts, each a context copy, only pay off above it). The focused context
+  -- (the hypotheses about the goal's own variables) goes first: it is a strict subset, so it never costs more
+  -- splits, and with large-number facts in the full context (the 4-limb comparisons of a branch) a side condition
+  -- about two pointers took 38 s on seven disjunctions where the focused context closes it at once
   if (← g.withContext countDisj) ≤ janus.omega.cap.get (← getOptions) then
+    if ← omegaFocused g then return true
     let saved ← saveState
     try
       let gs ← Tactic.run g <| withoutRecover (omegaLogged "staged(full)")

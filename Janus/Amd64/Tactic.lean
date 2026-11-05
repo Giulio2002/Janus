@@ -1637,7 +1637,7 @@ where
 def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
   -- reducible transparency only in the closers: unfolding `Memory.accessible`/`readLE` of a
   -- symbolic memory to compare it with a hypothesis can take seconds
-  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | janus64_callpre | janus_omega_sparse | janus_omega_cap | janus64_disch)
+  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | janus64_callpre | janus_omega_sparse | janus_omega_focus | janus_omega_cap | janus64_disch)
   let left ← Common.provePreCore (cleanOutcome cfg) closer g
   unless left.isEmpty do
     let st ← cfg.status.get
