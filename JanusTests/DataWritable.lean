@@ -21,7 +21,8 @@ example (m : Memory) (a : Nat) (hd : tablep.DataLoaded m) (hw : m.accessible a 8
   have := h_ddisj0_0
   trivial
 
-/-- A read-only range: an early error that says the range is read-only. -/
+/- A read-only range: an early error that says the range is read-only. -/
+set_option hygiene false in
 example (m : Memory) (a : Nat) (hd : tablep.DataLoaded m) (hw : m.accessible a 8 false = true) : True := by
   run_tac do
     try
