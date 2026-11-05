@@ -970,6 +970,8 @@ def pinnedContracts : Array (String × String) := #[
   ("Janus.Contracts.AllocAmd64", "NewobjectContract64"),
   ("Janus.Contracts.Cmpstring", "CmpstringContract"),
   ("Janus.Contracts.CmpstringAmd64", "CmpstringContract64"),
+  ("Janus.Contracts.Errorf", "ErrorfLive"),
+  ("Janus.Contracts.ErrorfAmd64", "ErrorfLive"),
   ("Janus.Contracts.Hash", "Chash"),
   ("Janus.Contracts.Hash", "Fhash"),
   ("Janus.Contracts.Hash", "Interhash"),
@@ -1383,6 +1385,7 @@ def contractFunction? (c : Name) : Option (String × Bool) :=
   | "MakesliceContract" | "MakesliceLiveContract" => some ("runtime.makeslice", false)
   | "MallocgcContract" | "MallocgcLiveContract" => some ("runtime.mallocgc", false)
   | "GrowsliceContract" | "GrowsliceLiveContract" => some ("runtime.growslice", false)
+  | "ErrorfLive" => some ("fmt.errorf", false)
   | "WbContract" | "WbLiveContract" => some ("runtime.gcWriteBarrier", true)
   | _ => none
 

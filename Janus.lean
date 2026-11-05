@@ -181,8 +181,12 @@ import Janus.Contracts.LiveSat
 import Janus.Spec.Globals
 import Janus.Contracts.LiveSatAmd64
 import Janus.Spec.Pool
+import Janus.Spec.Errorf
 import Janus.Contracts.LiveCall
 import Janus.Contracts.Pool
 import Janus.Contracts.PoolAmd64
 import Janus.Contracts.PoolSat
 import Janus.Contracts.PoolSatAmd64
+import Janus.Contracts.Errorf
+import Janus.Contracts.ErrorfAmd64
+import Janus.Contracts.ErrorfSat

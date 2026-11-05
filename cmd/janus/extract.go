@@ -162,7 +162,8 @@ var (
 // states (Janus/Contracts/Iface.lean, IfaceAmd64.lean: the interface runtime of Go 1.26;
 // Janus/Contracts/Mem.lean, Hash.lean and their amd64 files: equality, hashing and typed memory;
 // Janus/Contracts/Map.lean, MapVar.lean, MapStr.lean and their amd64 files: the map runtime;
-// Janus/Contracts/Pool.lean, PoolAmd64.lean: sync.Pool's Get and Put; and
+// Janus/Contracts/Pool.lean, PoolAmd64.lean: sync.Pool's Get and Put;
+// Janus/Contracts/Errorf.lean, ErrorfAmd64.lean: fmt.errorf; and
 // rtmiscContractStubs below, added at init). When a
 // --contract pattern matches one, the extractor pins it like a stub (checkContractPin): the
 // pclntab names it in package runtime (sync for the pool, contractStubPackage), in the toolchain's file, and its normalized code is the
@@ -210,13 +211,22 @@ var runtimeContractStubs = map[string]bool{
 	// call (runtime_procPin, poolDequeue, poolChain, the allPools mutex, getSlow, pinSlow) are
 	// then not extracted.
 	"sync.(*Pool).Get": true, "sync.(*Pool).Put": true,
+	// fmt.Errorf's worker for one goroutine (Janus/Contracts/Errorf.lean, ErrorfAmd64.lean): fmt.Errorf
+	// itself is a small inlinable wrapper, so a call to it compiles to a call of fmt.errorf
+	// (fmt/errors.go), which is pinned to package fmt's code (contractStubPackage); the printer
+	// (newPrinter, doPrintf, the sync.Pool of pp values, getitab for the %w assertion) is then not extracted.
+	"fmt.errorf": true,
 }
 
 // contractStubPackage is the package a function of runtimeContractStubs must be in, by its
-// pclntab name: runtime, except for sync.(*Pool).Get and Put (package sync, sync/pool.go).
+// pclntab name: runtime, except for sync.(*Pool).Get and Put (package sync, sync/pool.go) and
+// fmt.errorf (package fmt, fmt/errors.go).
 func contractStubPackage(name string) string {
 	if strings.HasPrefix(name, "sync.") {
 		return "sync"
+	}
+	if strings.HasPrefix(name, "fmt.") {
+		return "fmt"
 	}
 	return "runtime"
 }
