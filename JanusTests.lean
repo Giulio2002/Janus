@@ -21,6 +21,7 @@ import JanusTests.Carry
 import JanusTests.CongrCost
 import JanusTests.Audit
 import JanusTests.BitVecLit
+import JanusTests.Errorf
 import JanusTests.AuditPerf
 import JanusTests.Float
 import JanusTests.Dynamic

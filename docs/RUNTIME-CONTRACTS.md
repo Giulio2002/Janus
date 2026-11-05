@@ -1411,6 +1411,55 @@ what it is given) that meets the contract for the toy bump-allocator runtime `to
 The example proofs' `Witness.nonvacuous` and `Witness.returns` show that every hypothesis of the
 guarantee holds together (one runtime serving all six contracts, a call state with an empty live
 set) and the guarantee is reached (`ScratchSum(3, 5) = 6`; `StackGrow(1) = 1`).
+
+### `fmt.Errorf` (`Janus/Contracts/Errorf.lean`, `ErrorfAmd64.lean`, `Janus/Spec/Errorf.lean`; witnesses `ErrorfSat.lean`, `ErrorfSatAmd64.lean`)
+
+`fmt.Errorf(format, a...)` is a small inlinable wrapper; a compiled call is a call of
+`fmt.errorf(format string, a []any) error` (checked on `GOARCH=arm64` and `amd64`, Go 1.26.10:
+`CALL fmt.errorf`). The worker takes a printer from a `sync.Pool`, runs the format interpreter and
+reflection, builds the text with `string(p.buf)` and allocates a `*fmt.wrapError`. A theorem leaves it
+out (`janus extract --contract fmt.errorf`; the extractor pins the function to package `fmt`'s code
+like the pool's methods, `cmd/janus/stubpins_gen.go`: only that function's own code is hashed, its
+callees are not followed) and takes `ErrorfLive` as a hypothesis (a `Summary` at the function's
+address, for any code there). Both ISAs, the shape of the live contracts (`R : RtInv`, a live set `L`).
+
+| Go source | Function | Contract | Result |
+| --- | --- | --- | --- |
+| `fmt.Errorf("%w: have %d, want %d bytes", ErrBad, n, 32)` | `fmt.errorf(format, a)` (arm64 `X0`,`X1`; `X2`,`X3`,`X4`; result `X0`/`X1`. amd64 `RAX`,`RBX`; `RCX`,`RDI`,`RSI`; result `RAX`/`RBX`) | `ErrorfLive` | `(iWrap, d)`: a fresh `*fmt.wrapError{msg, err}` |
+
+**The closed format set (v1).** `%w` first, then literal bytes and `%d` verbs (`Spec.Errorf.parseFmt`);
+the `[]any` holds exactly `1 + #%d` values: a **`*errors.errorString`** for the `%w` (type word
+`tErr`, non-nil data pointer to the string header `s`) and an `int` (type word `tInt`, data pointer to
+the 8-byte value) per `%d`. Every other call (another verb or flag, `%%`, a second `%w`, a missing or
+surplus operand, an operand of another type, a nil `%w`) is outside the contract: `ArgsOK` is part of
+the precondition, and `JanusTests/Errorf.lean` checks the rejected formats and the accepted ones
+against the real `fmt.Errorf`.
+
+**Result.** The error interface `(iWrap, d)`; `d` is a fresh 32-byte object (fresh for `L`, inside
+`R.rt`, outside the callee's window, added to `L`) with `msg` = `render segs (s field of the errorString,
+read from memory) (the %d operands, read from memory as two's complement)` and `err = (iErr, e)`,
+`e` the data word of the `%w` operand itself: `Unwrap()` returns exactly the operand, so
+`errors.Is(err, ErrBadBufferLength)` is provable for a sentinel global. Nothing is supplied as a
+caller hypothesis: the text comes from memory. The message bytes stay live (`range0 mp |msg|`; Go may
+point into read-only static data for a one-byte string). The budget drops by the two visible blocks
+(`32` and `roundupsize |msg|`); the printer's scratch buffers are runtime-internal (as for `sync.Pool`).
+Memory changes only in `R.rt` and the callee's stack window; the operands and the format are not written.
+
+**Parameters.** `tErr`, `iErr`, `tInt`, `iWrap` (addresses of `type:*errors.errorString`,
+`go:itab.*errors.errorString,error`, `type:int`, `go:itab.*fmt.wrapError,error` in the extraction) and
+the bound `B` on the message length are plain numbers the theorem fixes from the binary.
+
+**Audit.** `ErrorfLive` (both modules) is in the auditor's `pinnedContracts`, and a hypothesis of it at
+the address of another function is rejected (`contractFunction? "ErrorfLive" = "fmt.errorf"`, spec binding,
+docs/SOUNDNESS.md).
+
+**Satisfiability.** `errorfLive_satisfiable` (`ErrorfSat`, `ErrorfSatAmd64`): machine code that meets the
+contract for the toy runtime (bump-allocates the 32-byte object, stores the empty message, the `err`
+itab and the operand's data word, returns `(iWrap, d)`), and a call state satisfying the whole
+precondition. **Limit:** the witnessed instance is the format `%w` alone with `B = 0` (the errorString
+text is empty): a witness for a message with bytes or `%d` verbs needs a copy loop and a decimal
+conversion in the toy stub and is not built. The `%d` and text clauses of `ErrorfPost` are therefore
+checked against the real `fmt.Errorf` (`JanusTests/Errorf.lean`) but have no machine-code witness.
 | `DeferOrder(x)` | `panic(x)` with three open-coded defers: the deferred calls run last to first (both ISAs) |
 | `DeferMix(n)` | a loop's heap records and open-coded defers on one frame, in order, with `deferreturn` (both ISAs) |
 | `GoexitDefer(n)` | `runtime.Goexit()` runs the deferred calls and unwinds past the frame; `recover()` finds no panic (both ISAs) |
