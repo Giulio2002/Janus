@@ -189,5 +189,6 @@ import Janus.Contracts.PoolSat
 import Janus.Contracts.PoolSatAmd64
 import Janus.Contracts.Errorf
 import Janus.Contracts.ErrorfAmd64
+import Janus.Contracts.ErrorfMem
 import Janus.Contracts.ErrorfSat
 import Janus.Contracts.ErrorfSatAmd64

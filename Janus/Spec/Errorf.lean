@@ -76,6 +76,21 @@ theorem natBytes_lt {n : Nat} (h : n < 10) : natBytes n = [48 + n] := by
 theorem natBytes_ge {n : Nat} (h : 10 ≤ n) : natBytes n = natBytes (n / 10) ++ [48 + n % 10] := by
   rw [natBytes]; simp [Nat.not_lt.mpr h]
 
+theorem natBytes_length_pos (n : Nat) : 0 < (natBytes n).length := by
+  rw [natBytes]; split <;> simp
+
+theorem natBytes_lt256 (n : Nat) : ∀ b ∈ natBytes n, b < 256 := by
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+    rw [natBytes]
+    split
+    · intro b hb; simp at hb; omega
+    · intro b hb
+      simp only [List.mem_append, List.mem_singleton] at hb
+      rcases hb with hb | hb
+      · exact ih (n / 10) (by omega) b hb
+      · omega
+
 /-- The digit `k` places from the right of `n`, as a byte. -/
 def digitByte (n k : Nat) : Nat := 48 + n / 10 ^ k % 10
 
