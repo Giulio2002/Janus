@@ -99,6 +99,10 @@ That is the whole proof. Most straight-line functions need nothing more, or a fi
 | `janus_simp [lemmas]` | The post-processing simp set `janus_post` plus the state hypotheses and `lemmas`. Closes invariant side goals (`S'.regs 2 = i + 1`, …). |
 | `janus_arith` | The arithmetic left after execution. First `janus_carry` (below); if that does not apply, `omega` after adding `readLE m a n < 256^n` for every memory read and normalising carry terms. Does nothing if there is no goal. (`janus64_arith` on amd64.) |
 | `janus_carry` | Carry chains by reflection: proves `a = b`, `a ≤ b`, `a < b` (or a conjunction of them) between `Nat` terms built from limbs, `+`, `*`, `-`, literals, `/ k`, `% k` and `(decide (k ≤ a)).toNat`. See *Multi-limb arithmetic* under Techniques. |
+| `janus_carry_simp [at …]` | Opt-in (`Janus.Amd64.CarryNorm`). Rewrites the borrow chains `janus64_run` leaves for `SBB`/`CMP` (`(subFlags (ofNat 64 a) (ofNat 64 b) c).fst.toNat`, `(decide (a < b + c)).toNat`) into floors and remainders (`(a + 2^64 - b - c) % 2^64`, `1 - (a + (2^64 - b - c)) / 2^64`), the vocabulary of `janus_carry`. |
+| `janus_carry_nf [at …]` | Opt-in (`Janus.Tactic.CarryNf`). Rewrites each `Nat` relation `=`, `≤`, `<` with carry terms (in a hypothesis or goal, under `¬ ∧ ∨ if`) to the relation of the *carry normal forms* of its sides: a four-limb add/sub chain becomes `X + Y - 2^256 · D`, a handful of merged quotients that `omega` solves in seconds. Kernel-checked (`janus_carry` proves `a + N_a = P_a`). See *Relations between carry chains*. |
+| `janus_omega_values` | Opt-in (`Janus.Tactic.CarryNf`), after `janus_carry_nf`: adds `q ≤ hi` for every quotient of a 32-byte value (`janus_quotient_bounds`), clears the hypotheses that make `omega` split (`janus_clear_splitting`), then `omega` (`janus_omega_linear`). |
+| `janus_mem_abstract [n]` | Opt-in (`Janus.Tactic.MemAbstract`). For each store chain of at least `n` (default 2) stores in the goal: proves `hf_mem_i : MemFrame m₀ M ranges` (the ranges are those of the stores), rewrites the reads outside the ranges to `m₀`, and replaces the chain by a fresh atom when nothing reads its stored values any more. |
 | `janus_ring` | Polynomial identities over `Int` (`+`, `*`, `-`, `^` with a literal exponent) by a verified normaliser; on `Nat`, `janus_carry`. |
 | `janus_data hd` | From `hd : p.DataLoaded m`: readability of each `.rodata` object, and a rewrite rule that evaluates loads from it at literal addresses. |
 | `janus_dyn h₁ h₂ …` | From dynamic-call hypotheses (`ItabIs`, `FuncvalIs`, `ClosureCtx`): the itab's literal address and words, the funcval's code word, the captured variables, as equations the executors use (both ISAs). See [Dynamic calls](#dynamic-calls-hashwith-hashtwice-mapsum-deferadd). |
@@ -743,6 +747,72 @@ turns `IMULQ` into `Nat` multiplication.
 
 **`janus_ring`** proves polynomial identities over `Int` by the same normal form (and on `Nat`
 by `janus_carry`): `(a + b) * (a - b) = a ^ 2 - b ^ 2`.
+
+### Relations between carry chains (`janus_carry_simp`, `janus_carry_nf`)
+
+`janus_carry` proves *equations* of carry chains without hypotheses. A proof about a multi-limb routine with
+branches (holiman `AddMod`: reduce `x`, `y`, add, compare with `m`, subtract) instead needs `omega` to relate
+*hypotheses* (branch conditions such as `¬ (M ≤ Σ 2^(64 i) · limbᵢ)`) with the goal, and each limb is a nested
+`(… + c) % 2^64` of carries `(…) / 2^64`: about forty distinct quotients, each with a variable and a coefficient
+`2^64`, in an `omega` problem that takes minutes or never finishes (the failing attempts are the worst, because
+`omega` also splits every address-disjointness disjunction of the context).
+
+Opt-in steps (none is part of `janus_run`'s simp sets, so no existing goal changes) turn the chains into the
+value-level facts they encode:
+
+1. `janus_carry_simp at *` (amd64 `SBB`/`CMP` chains only): the borrow `(decide (a < b + c)).toNat` becomes
+   `1 - (a + (2^64 - b - c)) / 2^64` and the limb `(subFlags …).fst.toNat` becomes `(a % 2^64 + 2^64 - b % 2^64 - c) % 2^64`;
+   side conditions (`a < 2^64`, `c ≤ 1`) by `assumption`, memory-read and `toNat` ranges, `Nat.sub_le`.
+2. `janus_carry_nf at h₁ … ⊢` (or `at *`): each `a ≤ b` becomes `P_a + N_b ≤ P_b + N_a`, `P - N` the carry normal
+   form of a side (`Janus.Carry`: atoms, and quotient atoms merged and flattened, shown by `set_option
+   trace.janus.carry true`). A chain of four borrows is `(X + 2^256 - M) / 2^256`, the carry out of a sum
+   `(X + Y) / 2^256`. The four limbs `readLE m a 8 … readLE m (a+24) 8` of a 32-byte value are replaced by one atom
+   `readLE m a 32` (`l₀ := V - 2^64 l₁ - …`; its bound `hv : V < 256^32` and its top limb `hvt : V / 2^192 = l₃` are added to
+   the context by `janus_carry_values`), so a combination of values has no limb left. Where a quotient can be
+   negative (`⌊(X - M) / k⌋`) it is rendered shifted (`(X - M + t k) / k`, minus `t`). Every sum is rendered in the order of
+   its atoms' expressions, so one quotient is one `omega` atom in every hypothesis. The rewrite is proved, not
+   trusted: `a + N_a = P_a` and `b + N_b = P_b` by `janus_carry` (after unfolding the values by `Janus.Carry.readLE_32`), the
+   relation by the lemmas `Janus.Carry.nf_eq`, `nf_le`, `nf_lt`. A side without a normal form (an atom it cannot bound,
+   a product with a shifted quotient, a truncated subtraction of unknown order) leaves the relation as it was.
+3. `janus_omega_values` = `janus_quotient_bounds` (for each quotient of a value, `q ≤ hi` with `hi` the bound the
+   interval analysis of `janus_carry` finds from the ranges of the atoms, proved by `janus_carry`) then
+   `janus_omega_linear` (`janus_clear_splitting`: the hypotheses with `∨`, `¬ (a ∧ b)`, `↔` are cleared, then `omega`).
+   Both matter for `omega`: it knows a quotient only through `k · q ≤ a < k · q + k`, and with bounds on the quotient
+   itself the huge coefficients stop making it search (six quotients of `2^256`: over two minutes without the bounds,
+   two seconds with); and it splits on every disjunction after the linear facts fail, `2^n` for the thirteen address
+   facts of a pointer-heavy statement.
+
+The recipe for the closer of an `AddMod` fast path (spec `(X + Y) % M`; `Janus.Carry.mod_cases3` turns
+`S % M = E` into `S = E ∨ S = E + M ∨ S = E + 2 * M` and `E < M`):
+
+```
+simp (disch := omega) only [Fv256.F.dec_div] at *      -- carry flags to quotients
+janus_carry_simp at *                                   -- borrow chains to floors
+unfold Fv256.F.addmodSpec; rw [if_neg (by omega)]
+refine (Janus.Carry.mod_cases3 _ _ _ ?_ ?_).symm <;> janus_carry_nf at * <;> janus_omega_values
+```
+
+(`JanusTests/AddModCarry.lean`: the two goals of the fast path that took 6 minutes and more than 30 minutes with
+`omega` close in about 4 seconds each.) Do not run `janus_carry_nf` on the goal before `mod_cases3` (the modulus `M` is
+not a literal: the relation stays as it is, but the shape `S % M = E` is lost).
+
+### Memory chains (`janus_mem_abstract`)
+
+After `janus_run` the memory term is the chain of every store of the path. When the proof only needs "outside
+the stored ranges the memory is `m₀`" the chain is dead weight (80 K characters in the `AddMod` fast path).
+`janus_mem_abstract` (opt-in) adds `hf_mem0 : MemFrame m₀ M [(a₁, a₁ + k₁), …]` (proved by `janus_frame`'s peeling:
+each store lies in its own range), rewrites the reads and `accessible` queries outside the ranges to `m₀` (side
+condition by `omega`, `Outside` unfolded), and, if nothing reads a stored value any more, `generalize`s `M` to
+`mem0`, in the goal and in `hf_mem0`. If a stored value is still read it keeps the chain, keeps `hf_mem0` and
+says so (an info message): the chain is then not abstracted, because the stored values matter.
+
+### Warning: `‹T›` and `assumption` after `janus_run` (linter `janusAssumption`)
+
+`assumption` and `‹T›` unify the wanted type with every hypothesis at default transparency; in the context
+of a run a failed or late match costs seconds to minutes (it recurred in `Bytes`, `Exp` and `AddMod`). A
+linter (`Janus.Tactic.AssumptionLint`, on by default, `set_option linter.janusAssumption false` to disable)
+warns about every `‹…›` and `assumption` that follows a `janus_run`/`janus64_run` in the same command and
+suggests `janus_assumption`. It only reports: the proof elaborates as before.
 
 ### SIMD code (`A64Equal64`, `A64IndexByte`)
 

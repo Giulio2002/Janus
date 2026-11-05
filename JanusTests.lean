@@ -45,6 +45,10 @@ import JanusTests.ChunkIdentity
 import JanusTests.AssumptionReducible
 import JanusTests.JanusRfl
 import JanusTests.Join
+import JanusTests.AssumptionLint
+import JanusTests.MemAbstract
+import JanusTests.CarryNf
+import JanusTests.AddModCarry
 import JanusTests.ReadBounds
 import JanusTests.CallPre
 import JanusTests.CallPre64
