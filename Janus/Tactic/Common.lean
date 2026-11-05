@@ -1291,6 +1291,22 @@ def moveAccessible (g : MVarId) (d : LocalDecl) (up : Bool) : MetaM MVarId := g.
   g.assign (← mkEqMPR eqT g')
   return g'.mvarId!
 
+/-- Cheap syntactic test (no proof terms): does `ty`, unfolded up to `depth` definitions, mention `Memory.accessible`?
+Guards the named-predicate fallbacks, so that the many `Apart`/`Outside`/`RetAddr` hypotheses of a context are not
+unfolded and projected. -/
+partial def mentionsAccessible (ty : Expr) (depth : Nat) : MetaM Bool := do
+  let ty ← instantiateMVars ty
+  if (ty.find? fun x => x.isConstOf ``Janus.Arm64.Memory.accessible).isSome then return true
+  if depth == 0 || !ty.getAppFn.isConst then return false
+  let c := ty.getAppFn.constName!
+  if c == ``Eq || c == ``LE.le || c == ``LT.lt || c == ``Ne || c == ``Or || c == ``Not || c == ``Janus.MemFrame
+      || c == ``Janus.Apart || c == ``Janus.Outside || c == ``Janus.InRanges then return false
+  if ty.isAppOfArity ``And 2 then
+    return (← mentionsAccessible (ty.getArg! 0) depth) || (← mentionsAccessible (ty.getArg! 1) depth)
+  match ← unfoldDefinition? ty with
+  | some ty' => mentionsAccessible ty' (depth - 1)
+  | none => return false
+
 /-- The facts `m.accessible a n w = true` (and, with `arith`, the comparisons `a ≤ b`, `a < b` of naturals) among the
 conjuncts of the proposition `ty` (proved by `pf`): `ty` itself, or the conjunction it is, or the conjunction that its
 definition unfolds to (`depth` unfoldings), with the `And` projections as proofs. A named predicate such as the
@@ -1320,6 +1336,7 @@ def addNamedPredicateFacts (g : MVarId) (hs : Array LocalDecl) (arith : Bool) (p
     unless ty.getAppFn.isConst do continue
     unless ← isProp ty do continue
     if ty.isAppOfArity ``Eq 3 || ty.isAppOfArity ``And 2 || ty.isAppOfArity ``Janus.MemFrame 3 then continue
+    unless ← mentionsAccessible ty 2 do continue
     found := found ++ (← namedPredicateFacts d.toExpr ty 2 arith)
   if found.isEmpty then return none
   let mut g := g
@@ -2844,6 +2861,8 @@ def accessibleFromImplications (g : MVarId) (accSub : Name) : TacticM Bool := wi
   for d in ← accessibleOrder lhs do
     let ty ← instantiateMVars d.type
     unless ty.isForall do continue
+    -- syntactic filter: the hypothesis must mention an accessible range (no `whnf` of unrelated implications)
+    unless (ty.find? fun x => x.isConstOf ``Janus.Arm64.Memory.accessible).isSome do continue
     let saved ← saveState
     let ok ← try
         let (ms, _, concl) ← forallMetaTelescopeReducing ty
