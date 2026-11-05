@@ -1,6 +1,12 @@
 import Janus.Contracts.ErrorfSat
 import Janus.Contracts.ErrorfRealLoops
 import Janus.Contracts.ErrorfRealFmt
+import Janus.Contracts.ErrorfRealStageA
+import Janus.Contracts.ErrorfRealStageB
+import Janus.Contracts.ErrorfRealStageC
+import Janus.Contracts.ErrorfRealStageD
+import Janus.Contracts.ErrorfRealStageE
+import Janus.Contracts.ErrorfRealStageF
 
 /-!
 # The `fmt.errorf` live contract is satisfiable for the real format (arm64)
@@ -20,6 +26,7 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Errorf Jan
 open Janus.Contracts.AllocSat (toy A0 at0 link_at0 withCode)
 open Janus.Contracts.ErrorfRealCode (code)
 open Janus.Contracts.ErrorfSat (tErr iErr tInt iWrap)
+open Janus.Contracts.ErrorfRealStages
 
 set_option maxRecDepth 100000
 set_option maxHeartbeats 0
@@ -54,31 +61,136 @@ theorem real_impl (ok : Nat → List Nat → Prop) :
   have hQ2' : s.mem.readLE ((s.regs 2).toNat + 40) 8 + 8 ≤ 2 ^ 48 := by
     have := hD2R.1; simpa [operandD] using this
   have hscr : s.mem.accessible (s.sp.toNat - 4096) (4096 + 8 + 8 * 5) true = true := hacc
-  have hq1 : s.mem.readLE ((s.regs 2).toNat + 24) 8 < 2 ^ 64 := by
-    have := Memory.readLE_lt s.mem ((s.regs 2).toNat + 24) 8; simpa using this
-  have hv1 : s.mem.readLE (s.mem.readLE ((s.regs 2).toNat + 24) 8) 8 < 2 ^ 64 := by
-    have := Memory.readLE_lt s.mem (s.mem.readLE ((s.regs 2).toNat + 24) 8) 8; simpa using this
-  have hv2 : s.mem.readLE (s.mem.readLE ((s.regs 2).toNat + 40) 8) 8 < 2 ^ 64 := by
-    have := Memory.readLE_lt s.mem (s.mem.readLE ((s.regs 2).toNat + 40) 8) 8; simpa using this
-  have hlen1 := natBytes_length_le (toSigned (s.mem.readLE (s.mem.readLE ((s.regs 2).toNat + 24) 8) 8)).natAbs 19 (by omega)
-    (by have := natAbs_lt _ hv1; omega)
-  have hlenp1 := natBytes_length_pos (toSigned (s.mem.readLE (s.mem.readLE ((s.regs 2).toNat + 24) 8) 8)).natAbs
-  janus_run until [0x100030]
-  refine dig_n1 s h30b h30a (toSigned (s.mem.readLE (s.mem.readLE ((s.regs 2).toNat + 24) 8) 8)).natAbs _ _ _
-    (s.sp.toNat - 16) (by have := natAbs_lt _ hv1; omega) ?_ ?_ (by simp [setReg]) (by simp [setReg])
-    (by omega) (by omega) ?_ _ ?_
-  · simp only [setReg, if_true]; exact abs_bv _ hv1
-  · simp only [setReg]
-    rw [if_neg (by decide)]
-    exact bv_sub_lit _ 16 (by omega) (by omega)
-  · exact Memory.accessible_mono _ hscr (by omega) (by omega)
-  · intro c
-    generalize hm1 : putBytes s.mem (s.sp.toNat - 16 - (natBytes (toSigned (s.mem.readLE (s.mem.readLE ((s.regs 2).toNat + 24) 8) 8)).natAbs).length)
-      (natBytes (toSigned (s.mem.readLE (s.mem.readLE ((s.regs 2).toNat + 24) 8) 8)).natAbs) = m1
-    have hf1 : MemFrame s.mem m1 [(s.sp.toNat - 4096, s.sp.toNat - 8)] := by
-      rw [← hm1]
-      exact putBytes_frame _ _ _ (Or.inr ⟨(s.sp.toNat - 4096, s.sp.toNat - 8), by simp, by omega, by omega⟩)
-    janus_run until [0x100078]
+  generalize he : s.mem.readLE ((s.regs 2).toNat + 8) 8 = e at *
+  generalize htp : s.mem.readLE e 8 = tp at *
+  generalize htl : s.mem.readLE (e + 8) 8 = tl at *
+  generalize hq1 : s.mem.readLE ((s.regs 2).toNat + 24) 8 = q1 at *
+  generalize hq2 : s.mem.readLE ((s.regs 2).toNat + 40) 8 = q2 at *
+  generalize hv1 : s.mem.readLE q1 8 = v1 at *
+  generalize hv2 : s.mem.readLE q2 8 = v2 at *
+  have hmsg : msgOf s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat =
+      strBytes s.mem tp tl ++ ([58, 32, 104, 97, 118, 101, 32] ++ decBytes (toSigned v1) ++
+        [44, 32, 119, 97, 110, 116, 32] ++ decBytes (toSigned v2) ++ [32, 98, 121, 116, 101, 115]) := by
+    unfold msgOf
+    rw [hsegs]
+    simp [render, renderRest, nDec, ints, Errorf.intOf, errTxt, operandD, he, htp, htl, hq1, hq2, hv1, hv2, List.range_succ]
+  -- numbers
+  have hv1' : v1 < 2 ^ 64 := by rw [← hv1]; have := Memory.readLE_lt s.mem q1 8; simpa using this
+  have hv2' : v2 < 2 ^ 64 := by rw [← hv2]; have := Memory.readLE_lt s.mem q2 8; simpa using this
+  have hn1 : sgn v1 ≤ 1 := by unfold sgn; split <;> omega
+  have hn2 : sgn v2 ≤ 1 := by unfold sgn; split <;> omega
+  have hl1 := natBytes_length_le (absn v1) 19 (by omega) (by have := natAbs_lt _ hv1'; unfold absn; omega)
+  have hl2 := natBytes_length_le (absn v2) 19 (by omega) (by have := natAbs_lt _ hv2'; unfold absn; omega)
+  have hl1p := natBytes_length_pos (absn v1)
+  have hl2p := natBytes_length_pos (absn v2)
+  have hd1 := decBytes_eq v1
+  have hd2 := decBytes_eq v2
+  have hTlen : (strBytes s.mem tp tl).length = tl := by simp [strBytes]
+  have hD1len : (decBytes (toSigned v1)).length = (natBytes (absn v1)).length + sgn v1 := by
+    rw [hd1]; unfold sgn at *; split <;> simp_all <;> omega
+  have hD2len : (decBytes (toSigned v2)).length = (natBytes (absn v2)).length + sgn v2 := by
+    rw [hd2]; unfold sgn at *; split <;> simp_all <;> omega
+  have hLm : (msgOf s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat).length =
+      tl + ((natBytes (absn v1)).length + sgn v1) + ((natBytes (absn v2)).length + sgn v2) + 20 := by
+    rw [hmsg]; simp only [List.length_append, hTlen, hD1len, hD2len, List.length_cons, List.length_nil]; omega
+  generalize hl1g : (natBytes (absn v1)).length = l1 at *
+  generalize hl2g : (natBytes (absn v2)).length = l2 at *
+  generalize hn1g : sgn v1 = n1 at *
+  generalize hn2g : sgn v2 = n2 at *
+  have hcost' : 2 * (tl + (l1 + n1) + (l2 + n2) + 20) + 48 ≤ b := by
+    unfold errorfCost at hcost
+    rw [hLm, if_neg (by omega)] at hcost
+    simp only [wrapBytes] at hcost
+    omega
+  have hinvT : toyInv tys0 b L (s.regs 28).toNat (view (toyRt tys0) L s.mem) := hinv
+  obtain ⟨p, hpm, h1, h2, hendA, hfr, hlf, hap, hz, hacc', hinv'⟩ :=
+    toy_alloc tysOK0 (A := atot (tl + (l1 + n1) + (l2 + n2) + 20)) (K := 2 * (tl + (l1 + n1) + (l2 + n2) + 20) + 48)
+      (by unfold atot; omega) (by unfold atot; omega) (by unfold atot; omega) hcost' hinvT
+  have hWs' : ∀ a n, (a = s.sp.toNat - 4096 ∧ n = 4088) → Outside a n (toyRt tys0) := by
+    intro a n ⟨ha, hn⟩
+    have h := hWs (s.sp.toNat - 4096, s.sp.toNat - 8) (by simp [calleeStack])
+    subst ha hn
+    have h' : Outside (s.sp.toNat - 4096) (s.sp.toNat - 8 - (s.sp.toNat - 4096)) (toyRt tys0) := h
+    rwa [show s.sp.toNat - 8 - (s.sp.toNat - 4096) = 4088 by omega] at h'
+  have hWo := hWs' _ _ ⟨rfl, rfl⟩
+  simp only [toyRt, tys0, outside_cons, outside_nil, outside_append, List.map, and_true, HEAP, HEND, HSIZE, BUMP, WBUF,
+    tyA, tyB, tyC] at hWo
+  have hscrB : s.sp.toNat ≤ 4194304 ∨ 4194312 + 4096 ≤ s.sp.toNat := by omega
+  have hscrH : s.sp.toNat ≤ 268435456 ∨ 536870912 + 4096 ≤ s.sp.toNat := by omega
+  have hacB : s.mem.accessible 4194304 8 true = true := bump_acc hinv
+  have hH : s.mem.accessible 268435456 268435456 true = true := by
+    obtain ⟨p', -, -, -, -, -, -, hac, -, -, -⟩ := hinvT
+    rw [view_accessible] at hac; exact hac
+  refine stageA s h30b h30a hpc e tp tl q1 q2 v1 v2 hS48 hS48' he hE16 hE16' htp htl hq1 hQ1 hQ1' hv1 hq2 hQ2 hQ2' hv2
+    hst1 (by omega) hscr _ ?_
+  intro R1 F1 m1 hP1 h9 h12 h13 hm1
+  rw [hl1g] at h13 hm1
+  rw [hn1g] at h12
+  have hm1acc : ∀ a n w, m1.accessible a n w = s.mem.accessible a n w := by
+    intro a n w; rw [hm1, putBytes_accessible]
+  refine stageB s h30b h30a e tp tl v2 n1 (s.sp.toNat - 16 - l1) R1 F1 m1 hP1 h9 hv2' h12 hn1 h13 hst1 (by omega)
+    (by omega) (by omega) (by rw [hm1acc]; exact hscr) _ ?_
+  intro R2 F2 m2 hP2 h25 h26 h12b h13b hm2
+  rw [hl2g] at h13b hm2
+  rw [hn2g] at h12b
+  have hm2acc : ∀ a n w, m2.accessible a n w = s.mem.accessible a n w := by
+    intro a n w; rw [hm2, putBytes_accessible]; simp only [Janus.Arm64.Memory.accessible_writeLE]; exact hm1acc a n w
+  have hTmem : (tp, tl) ∈ errorfReads s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat := by
+    unfold errorfReads
+    simp [operandD, he, htp, htl]
+  have hT4 := hsafe _ hTmem
+  have hLp : ∀ r ∈ L, HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ p := by
+    obtain ⟨p', hp', -, -, -, hL, -⟩ := hinvT
+    have hp'p : p' = p := by
+      rw [← hp', readLE_view (inRanges_bump tys0) (outside_live hL (by simp only [BUMP, HEAP]; omega))]; exact hpm
+    intro r hr
+    have := hL r hr
+    omega
+  have hLm : atot (tl + (l1 + n1) + (l2 + n2) + 20) ≥ 2 * (tl + (l1 + n1) + (l2 + n2) + 20) + 48 := by
+    unfold atot; omega
+  have hendA' : p + atot (tl + (l1 + n1) + (l2 + n2) + 20) ≤ 536870912 := by
+    have := hendA
+    simp only [HEND, HEAP, HSIZE] at this
+    exact this
+  have hTloc : tl = 0 ∨ tp + tl ≤ p ∨ 536870912 ≤ tp := by
+    rcases hT4 with h | h | h
+    · left; simpa using h
+    · right
+      have h' : Outside tp tl (toyRt tys0) := h
+      simp only [toyRt, tys0, outside_cons, outside_nil, outside_append, List.map, and_true, HEAP, HEND, HSIZE, BUMP, WBUF,
+        tyA, tyB, tyC] at h'
+      have : 268435456 ≤ p := by simpa [HEAP] using h1
+      omega
+    · right; left
+      obtain ⟨r, hr, hr1, hr2⟩ := h
+      have := hLp r hr
+      omega
+  have hpB : ∀ x, x < 268435456 → s.mem.readLE 4194304 8 = p := fun _ _ => hpm
+  have hp2eq : m2.readLE 4194304 8 = p := by
+    rw [hm2, readLE_putBytes_out _ _ _ _ _ (by omega)]
+    rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega), hm1,
+      readLE_putBytes_out _ _ _ _ _ (by omega)]
+    exact hpm
+  refine stageC s h30b h30a e tp tl n2 (s.sp.toNat - 48 - l2) (s.sp.toNat - 16 - (s.sp.toNat - 16 - l1 - n1))
+    (s.sp.toNat - 16 - l1 - n1) p R2 F2 m2 hP2 h12b hn2 h13b h25 h26 hst1 (by omega) (by omega) (by omega) (by omega)
+    (by omega) (by omega) (by rw [hm2acc]; exact hscr) hscrB hscrH (by rw [hm2acc]; exact hacB) (by rw [hm2acc]; exact hH)
+    hp2eq (by simpa [HEAP] using h1) ?_ ?_ ?_ ?_ ?_ _ ?_
+  · have eL : (tl + (s.sp.toNat - 16 - (s.sp.toNat - 16 - l1 - n1)) + (s.sp.toNat - 48 - (s.sp.toNat - 48 - l2 - n2)) + 20) =
+        tl + (l1 + n1) + (l2 + n2) + 20 := by omega
+    rw [eL]; exact hendA'
+  · omega
+  · rcases hTloc with h | h | h
+    · omega
+    · omega
+    · omega
+  · have := hTxt.1; omega
+  · by_cases hz : tl = 0
+    · exact Or.inl hz
+    · exact Or.inr (by rw [hm2acc]; exact hTxt.2 (by omega))
+  · intro R3 F3 m3 hP3 h25' h26' h21 h22 h11 h1r hm3
+    have eL : (tl + (s.sp.toNat - 16 - (s.sp.toNat - 16 - l1 - n1)) + (s.sp.toNat - 48 - (s.sp.toNat - 48 - l2 - n2)) + 20) =
+        tl + (l1 + n1) + (l2 + n2) + 20 := by omega
+    rw [eL] at hm3
     trace_state
     sorry
 

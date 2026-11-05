@@ -20,7 +20,7 @@ theorem stageB (s : State) (h30b : (s.regs 30).toNat < 2 ^ 48) (h30a : (s.regs 3
     (hP : Pers s R e tp tl) (h9 : R 9 = BitVec.ofNat 64 v2) (hv2 : v2 < 2 ^ 64)
     (h12 : R 12 = BitVec.ofNat 64 n1) (hn1 : n1 ≤ 1) (h13 : R 13 = BitVec.ofNat 64 x13v)
     (hsp : 4096 ≤ s.sp.toNat) (hsp' : s.sp.toNat + 48 ≤ 2 ^ 48)
-    (hx1 : s.sp.toNat - 4096 + 1 ≤ x13v) (hx2 : x13v + 20 ≤ s.sp.toNat)
+    (hx1 : s.sp.toNat - 4096 + 1 ≤ x13v) (hx2 : x13v ≤ s.sp.toNat - 16)
     (hscr : m.accessible (s.sp.toNat - 4096) (4096 + 8 + 8 * 5) true = true)
     (Q : State → Prop)
     (htail : ∀ (R' : Nat → W64) (F' : Flags) (m' : Memory), Pers s R' e tp tl →

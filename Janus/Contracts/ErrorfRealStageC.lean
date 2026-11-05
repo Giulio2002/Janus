@@ -24,7 +24,7 @@ theorem stageC (s : State) (h30b : (s.regs 30).toNat < 2 ^ 48) (h30a : (s.regs 3
     (hP : Pers s R e tp tl) (h12 : R 12 = BitVec.ofNat 64 n2) (hn2 : n2 ≤ 1)
     (h13 : R 13 = BitVec.ofNat 64 x13v2) (h25 : R 25 = BitVec.ofNat 64 len1) (h26 : R 26 = BitVec.ofNat 64 st1)
     (hsp : 4096 ≤ s.sp.toNat) (hsp' : s.sp.toNat + 48 ≤ 2 ^ 48)
-    (hx1 : s.sp.toNat - 4096 + 1 ≤ x13v2) (hx2 : x13v2 + 20 ≤ s.sp.toNat - 48) (hn : n2 ≤ x13v2)
+    (hx1 : s.sp.toNat - 4096 + 1 ≤ x13v2) (hx2 : x13v2 ≤ s.sp.toNat - 48) (hn : n2 ≤ x13v2)
     (hlen1 : len1 ≤ 20) (htl : tl < 2 ^ 32)
     (hscr : m.accessible (s.sp.toNat - 4096) (4096 + 8 + 8 * 5) true = true)
     (hscrB : s.sp.toNat ≤ 4194304 ∨ 4194312 + 4096 ≤ s.sp.toNat)
@@ -33,22 +33,17 @@ theorem stageC (s : State) (h30b : (s.regs 30).toNat < 2 ^ 48) (h30a : (s.regs 3
     (hp : m.readLE 4194304 8 = p) (hp1 : 268435456 ≤ p)
     (hp2 : p + atot (tl + len1 + (s.sp.toNat - 48 - (x13v2 - n2)) + 20) ≤ 536870912)
     (hp3 : p + 32 ≤ 536870912)
-    (hdisj : tp + tl ≤ p + 32 ∨ p + 32 + tl ≤ tp) (htp : tp + tl < 2 ^ 48)
+    (hdisj : tp + tl ≤ p + 32 ∨ p + 32 + tl ≤ tp) (htp : tp + tl ≤ 2 ^ 48)
     (hsrc : tl = 0 ∨ m.accessible tp tl false = true)
     (Q : State → Prop)
     (htail : ∀ (R' : Nat → W64) (F' : Flags) (m' : Memory), Pers s R' e tp tl →
       R' 25 = BitVec.ofNat 64 len1 → R' 26 = BitVec.ofNat 64 st1 →
       R' 21 = BitVec.ofNat 64 (s.sp.toNat - 48 - (x13v2 - n2)) → R' 22 = BitVec.ofNat 64 (x13v2 - n2) →
       R' 11 = BitVec.ofNat 64 (p + 32 + tl) → R' 1 = BitVec.ofNat 64 p →
-      m' = putBytes
-        ((((((m.writeLE (x13v2 - 1) 1 (48 - 3 * n2)).writeLE 4194304 8
-          (p + atot (tl + len1 + (s.sp.toNat - 48 - (x13v2 - n2)) + 20))).writeLE p 8 (p + 32)).writeLE (p + 8) 8
-          (tl + len1 + (s.sp.toNat - 48 - (x13v2 - n2)) + 20)).writeLE (p + 16) 8 8738).writeLE (p + 24) 8 e)
-        (p + 32)
-        (strBytes ((((((m.writeLE (x13v2 - 1) 1 (48 - 3 * n2)).writeLE 4194304 8
-          (p + atot (tl + len1 + (s.sp.toNat - 48 - (x13v2 - n2)) + 20))).writeLE p 8 (p + 32)).writeLE (p + 8) 8
-          (tl + len1 + (s.sp.toNat - 48 - (x13v2 - n2)) + 20)).writeLE (p + 16) 8 8738).writeLE (p + 24) 8 e)
-          tp tl) →
+      m' = putBytes (allocMem m x13v2 n2 p (atot (tl + len1 + (s.sp.toNat - 48 - (x13v2 - n2)) + 20))
+          (tl + len1 + (s.sp.toNat - 48 - (x13v2 - n2)) + 20) e) (p + 32)
+        (strBytes (allocMem m x13v2 n2 p (atot (tl + len1 + (s.sp.toNat - 48 - (x13v2 - n2)) + 20))
+          (tl + len1 + (s.sp.toNat - 48 - (x13v2 - n2)) + 20) e) tp tl) →
       ReachesRet (withCode code) (s.regs 30) { s with regs := R', flags := F', mem := m', pc := 0x100118#64 } Q) :
     ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x100090#64 } Q := by
   obtain ⟨hP5, hP6, hP7, hP15, hP18, hP28, hP29, hP30⟩ := hP

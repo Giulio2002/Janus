@@ -19,7 +19,7 @@ theorem stageD (s : State) (h30b : (s.regs 30).toNat < 2 ^ 48) (h30a : (s.regs 3
     (e tp tl len1 st1 len2 st2 dst1 : Nat) (R : Nat → W64) (F : Flags) (m : Memory)
     (hP : Pers s R e tp tl) (h11 : R 11 = BitVec.ofNat 64 dst1) (h25 : R 25 = BitVec.ofNat 64 len1)
     (h26 : R 26 = BitVec.ofNat 64 st1) (h21 : R 21 = BitVec.ofNat 64 len2) (h22 : R 22 = BitVec.ofNat 64 st2)
-    (hd : dst1 + 7 + len1 < 2 ^ 48) (hs : st1 + len1 < 2 ^ 48) (hlen1 : len1 < 2 ^ 32)
+    (hd : dst1 + 7 + len1 ≤ 2 ^ 48) (hs : st1 + len1 ≤ 2 ^ 48) (hlen1 : len1 < 2 ^ 32)
     (hdl : dst1 + 7 ≤ 2 ^ 48)
     (hlit : m.accessible dst1 7 true = true)
     (hdis : st1 + len1 ≤ dst1 + 7 ∨ dst1 + 7 + len1 ≤ st1)

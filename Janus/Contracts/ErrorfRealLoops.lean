@@ -162,7 +162,7 @@ theorem dig_n2 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
 theorem cpy_c1 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30).toNat % 4 = 0) :
     ∀ (cnt : Nat) (R : Nat → W64) (m : Memory) (F : Flags) (src dst : Nat),
       cnt < 2 ^ 48 → R 12 = BitVec.ofNat 64 cnt → R 10 = BitVec.ofNat 64 src → R 11 = BitVec.ofNat 64 dst →
-      R 30 = s.regs 30 → src + cnt < 2 ^ 48 → dst + cnt < 2 ^ 48 →
+      R 30 = s.regs 30 → src + cnt ≤ 2 ^ 48 → dst + cnt ≤ 2 ^ 48 →
       (src + cnt ≤ dst ∨ dst + cnt ≤ src) →
       (cnt = 0 ∨ m.accessible src cnt false = true) → (cnt = 0 ∨ m.accessible dst cnt true = true) →
       ∀ Q : State → Prop,
@@ -217,7 +217,7 @@ theorem cpy_c1 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
 theorem cpy_c2 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30).toNat % 4 = 0) :
     ∀ (cnt : Nat) (R : Nat → W64) (m : Memory) (F : Flags) (src dst : Nat),
       cnt < 2 ^ 48 → R 12 = BitVec.ofNat 64 cnt → R 10 = BitVec.ofNat 64 src → R 11 = BitVec.ofNat 64 dst →
-      R 30 = s.regs 30 → src + cnt < 2 ^ 48 → dst + cnt < 2 ^ 48 →
+      R 30 = s.regs 30 → src + cnt ≤ 2 ^ 48 → dst + cnt ≤ 2 ^ 48 →
       (src + cnt ≤ dst ∨ dst + cnt ≤ src) →
       (cnt = 0 ∨ m.accessible src cnt false = true) → (cnt = 0 ∨ m.accessible dst cnt true = true) →
       ∀ Q : State → Prop,
@@ -272,7 +272,7 @@ theorem cpy_c2 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
 theorem cpy_c3 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30).toNat % 4 = 0) :
     ∀ (cnt : Nat) (R : Nat → W64) (m : Memory) (F : Flags) (src dst : Nat),
       cnt < 2 ^ 48 → R 12 = BitVec.ofNat 64 cnt → R 10 = BitVec.ofNat 64 src → R 11 = BitVec.ofNat 64 dst →
-      R 30 = s.regs 30 → src + cnt < 2 ^ 48 → dst + cnt < 2 ^ 48 →
+      R 30 = s.regs 30 → src + cnt ≤ 2 ^ 48 → dst + cnt ≤ 2 ^ 48 →
       (src + cnt ≤ dst ∨ dst + cnt ≤ src) →
       (cnt = 0 ∨ m.accessible src cnt false = true) → (cnt = 0 ∨ m.accessible dst cnt true = true) →
       ∀ Q : State → Prop,
