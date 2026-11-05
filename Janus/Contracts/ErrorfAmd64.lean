@@ -21,11 +21,12 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Spe
 
 /-- **`fmt.errorf(format, a)`** (amd64), as `Errorf.ErrorfLive`. -/
 def ErrorfLive (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat) (R : RtInv)
-    (tErr iErr tInt iWrap B : Nat) : Prop :=
+    (tErr iErr tInt iWrap Fl Fm B : Nat) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => CallOK64 s stack 5 ∧ StackRoom64 s stack 5 ∧
-      ArgsOK (Env.mk tErr iErr tInt iWrap) B s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat (s.regs 7).toNat (s.regs 6).toNat ∧
+      ArgsOK (Env.mk tErr iErr tInt iWrap) Fl Fm B s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat (s.regs 7).toNat (s.regs 6).toNat ∧
       ReadsOutside (errorfReads s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) (liveWin64 s stack 5) ∧
+      ReadsSafe R L (errorfReads s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) ∧
       LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat, (s.regs 7).toNat, (s.regs 6).toNat] L b
         (errorfCost s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) (s.regs 14).toNat s.mem
         (liveWin64 s stack 5))

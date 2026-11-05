@@ -16,7 +16,7 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Spe
   Janus.Contracts.Errorf Janus.Contracts.ErrorfAmd64 Janus.Contracts.Toy Janus.Contracts.LiveSat
   Janus.Contracts.LiveSatAmd64
 open Janus.Contracts.ErrorfSat (tErr iErr tInt iWrap wr4 wr4_frame wr4_live wr4_view wr4_acc wr4_r0 wr4_r1 wr4_r2 wr4_r3
-  eFP eSP eE eTxt ewmem ewframe ewargs ewinv ewcost okE)
+  eFP eSP eE eTxt ewmem ewframe ewargs ewsafe ewinv ewcost okE)
 open Janus.Contracts.PoolSatAmd64 (KeepsABI pool_ret)
 open Janus.Contracts.AllocSatAmd64 (toy A0 at0 link_at0 withCode)
 
@@ -71,10 +71,10 @@ theorem errFinal_keeps (s : State) : KeepsABI s (errFinal s) := by
 
 set_option maxRecDepth 20000 in
 theorem errorf_impl (ok : Nat → List Nat → Prop) :
-    ErrorfLive (toy.link (at0 code)) A0 4096 (toyR tys0 ok) tErr iErr tInt iWrap 0 := by
+    ErrorfLive (toy.link (at0 code)) A0 4096 (toyR tys0 ok) tErr iErr tInt iWrap 2 0x7725 0 := by
   rw [link_at0]
-  intro L b s hpc ⟨⟨hra, hal, hst, h8, hacc⟩, hguard, hargs, hreads, hok, hinv, hcost, hLs, hWs⟩
-  obtain ⟨hsome, hsl, hsc, hF, hSl, hT0, hD0, hE, hTxt, hints, hlen, hB⟩ := hargs
+  intro L b s hpc ⟨⟨hra, hal, hst, h8, hacc⟩, hguard, hargs, hreads, hsafe, hok, hinv, hcost, hLs, hWs⟩
+  obtain ⟨hFl, hFm, hsome, hsl, hsc, hF, hSl, hT0, hD0, hE, hTxt, hints, hlen, hB⟩ := hargs
   have hlen0 : (msgOf s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat).length = 0 := by omega
   have hcost32 : errorfCost s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat = 32 := by
     simp [errorfCost, hlen0, wrapBytes]
@@ -207,17 +207,18 @@ theorem ew64reads : ReadsOutside (errorfReads ewmem eFP 2 eSP) (liveWin64 ewstat
   rcases hr with rfl | rfl | rfl | rfl <;>
     simp [liveWin64, calleeStack64, ewstate64, LiveSatAmd64.wst, LiveSat.wsp, eFP, eSP, eE, eTxt, CB, outside_cons, outside_nil]
 
-theorem errorfLive_satisfiable : ∃ (R : RtInv) (tErr iErr tInt iWrap B : Nat) (impl : List Janus.Amd64.Segment),
-    ErrorfLive (toy.link impl) A0 4096 R tErr iErr tInt iWrap B ∧
+theorem errorfLive_satisfiable : ∃ (R : RtInv) (tErr iErr tInt iWrap Fl Fm B : Nat) (impl : List Janus.Amd64.Segment),
+    ErrorfLive (toy.link impl) A0 4096 R tErr iErr tInt iWrap Fl Fm B ∧
     ∃ (s : State) (L : List (Nat × Nat)) (b : Nat), s.rip = BitVec.ofNat 64 A0 ∧
       CallOK64 s 4096 5 ∧ StackRoom64 s 4096 5 ∧
-      ArgsOK (Env.mk tErr iErr tInt iWrap) B s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat
+      ArgsOK (Env.mk tErr iErr tInt iWrap) Fl Fm B s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat
         (s.regs 7).toNat (s.regs 6).toNat ∧
       ReadsOutside (errorfReads s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) (liveWin64 s 4096 5) ∧
+      ReadsSafe R L (errorfReads s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) ∧
       LiveAt R A0 [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat, (s.regs 7).toNat, (s.regs 6).toNat] L b
         (errorfCost s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) (s.regs 14).toNat s.mem
         (liveWin64 s 4096 5) :=
-  ⟨toyR tys0 okE, tErr, iErr, tInt, iWrap, 0, at0 code, errorf_impl okE, ewstate64, [], 0x400, rfl, ew64call, ew64guard,
-    ewargs, ew64reads, ⟨⟨rfl, by decide⟩, ewinv (ewstate64.regs 14).toNat, ewcost, by simp, wwin64 [eFP, 2, eSP, 1, 1] 5 (by omega)⟩⟩
+  ⟨toyR tys0 okE, tErr, iErr, tInt, iWrap, 2, 0x7725, 0, at0 code, errorf_impl okE, ewstate64, [], 0x400, rfl, ew64call, ew64guard,
+    ewargs, ew64reads, ewsafe, ⟨⟨rfl, by decide⟩, ewinv (ewstate64.regs 14).toNat, ewcost, by simp, wwin64 [eFP, 2, eSP, 1, 1] 5 (by omega)⟩⟩
 
 end Janus.Contracts.ErrorfSatAmd64

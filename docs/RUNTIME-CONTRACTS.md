@@ -1447,7 +1447,11 @@ Memory changes only in `R.rt` and the callee's stack window; the operands and th
 
 **Parameters.** `tErr`, `iErr`, `tInt`, `iWrap` (addresses of `type:*errors.errorString`,
 `go:itab.*errors.errorString,error`, `type:int`, `go:itab.*fmt.wrapError,error` in the extraction) and
-the bound `B` on the message length are plain numbers the theorem fixes from the binary.
+`Fl`/`Fm` (the format's length and its bytes as a little-endian number: the contract is stated for the one
+format the program passes) and the bound `B` on the message length are plain numbers the theorem fixes from the
+binary. The precondition also has `ReadsSafe`: everything the call reads lies outside `R.rt` (static data, the
+stack) or inside a live object of `L` (a sentinel or dynamic string the program holds, listed in `L`), which is
+what lets an implementation copy the operands into a fresh block.
 
 **Audit.** `ErrorfLive` (both modules) is in the auditor's `pinnedContracts`, and a hypothesis of it at
 the address of another function is rejected (`contractFunction? "ErrorfLive" = "fmt.errorf"`, spec binding,

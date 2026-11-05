@@ -37,8 +37,8 @@ about: `ArgsOK` is part of the precondition. The text must not exceed `B` bytes.
   ErrBadBufferLength)` is provable for a sentinel global.
 
 **Parameters.** `tErr`, `iErr`, `tInt`, `iWrap` (the fields of `Env`) are addresses of the
-program's type descriptors and itabs (symbols of the extraction), and `B` bounds the message
-length. They are plain numbers: a theorem fixes them from the binary, like the type word `T` of
+program's type descriptors and itabs (symbols of the extraction), and `Fl`, `Fm` (the format's length and its bytes as a little-endian number: the contract is stated for
+one format, the one the program passes) and `B` (a bound on the message length). They are plain numbers: a theorem fixes them from the binary, like the type word `T` of
 the `sync.Pool` contracts.
 
 **Allocation.** `d` is a fresh heap object (apart from the live set `L`, inside the runtime-owned
@@ -92,8 +92,8 @@ def msgOf (m : Memory) (fp fl sp : Nat) : List Nat :=
 
 /-- **The calls the contract covers**: a format of the closed set, the right operands, all of it
 readable, a message of at most `B` bytes. `(fp, fl)` is the format, `(sp, sl, sc)` the `[]any`. -/
-def ArgsOK (E : Env) (B : Nat) (m : Memory) (fp fl sp sl sc : Nat) : Prop :=
-  (parseFmt (strBytes m fp fl)).isSome ∧ sl = 1 + nDec (segsOf m fp fl) ∧ sl ≤ sc ∧
+def ArgsOK (E : Env) (Fl Fm B : Nat) (m : Memory) (fp fl sp sl sc : Nat) : Prop :=
+  fl = Fl ∧ m.readLE fp Fl = Fm ∧ (parseFmt (strBytes m fp fl)).isSome ∧ sl = 1 + nDec (segsOf m fp fl) ∧ sl ≤ sc ∧
     Readable m fp fl ∧ Readable m sp (16 * sl) ∧
     operandT m sp 0 = E.tErr ∧ operandD m sp 0 ≠ 0 ∧ Readable m (operandD m sp 0) 16 ∧
     Readable m (m.readLE (operandD m sp 0) 8) (m.readLE (operandD m sp 0 + 8) 8) ∧
@@ -107,6 +107,13 @@ def errorfReads (m : Memory) (fp fl sp : Nat) : List (Nat × Nat) :=
   [(fp, fl), (sp, 16 * (1 + nDec (segsOf m fp fl))), (operandD m sp 0, 16),
     (m.readLE (operandD m sp 0) 8, m.readLE (operandD m sp 0 + 8) 8)] ++
     (List.range (nDec (segsOf m fp fl))).map fun j => (operandD m sp (j + 1), 8)
+
+/-- Everything the call reads is the caller's own data: outside the runtime-owned ranges (static data,
+the stack) or inside a live object of `L` (a sentinel the program holds, a dynamic string). A real
+call always satisfies it (the printer reads its operands, never runtime-private memory), and it is
+what lets a stub copy the operands into a fresh block. -/
+def ReadsSafe (R : RtInv) (L rs : List (Nat × Nat)) : Prop :=
+  ∀ r ∈ rs, r.2 = 0 ∨ Outside r.1 r.2 R.rt ∨ InRanges r.1 r.2 L
 
 /-- The budget the call spends: the `wrapError` block and the message block. -/
 def errorfCost (m : Memory) (fp fl sp : Nat) : Nat :=
@@ -130,11 +137,12 @@ def ErrorfPost (E : Env) (R : RtInv) (m0 : Memory) (fp fl sp : Nat) (win L : Lis
 /-- **`fmt.errorf(format, a)`** (arm64; `X0`,`X1` the format, `X2`,`X3`,`X4` the `[]any`; result
 `X0` the itab word, `X1` the data word), for the formats of the closed set. -/
 def ErrorfLive (p : Program) (addr : Nat) (stack : Nat) (R : RtInv)
-    (tErr iErr tInt iWrap B : Nat) : Prop :=
+    (tErr iErr tInt iWrap Fl Fm B : Nat) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => CallOK s stack 5 ∧ StackRoom s stack 5 ∧
-      ArgsOK (Env.mk tErr iErr tInt iWrap) B s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat (s.regs 3).toNat (s.regs 4).toNat ∧
+      ArgsOK (Env.mk tErr iErr tInt iWrap) Fl Fm B s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat (s.regs 3).toNat (s.regs 4).toNat ∧
       ReadsOutside (errorfReads s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat) (calleeStack s stack 5) ∧
+      ReadsSafe R L (errorfReads s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat) ∧
       LiveAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat, (s.regs 3).toNat, (s.regs 4).toNat] L b
         (errorfCost s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat) (s.regs 28).toNat s.mem
         (calleeStack s stack 5))

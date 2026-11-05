@@ -119,10 +119,10 @@ theorem wr4_r3 (m : Memory) (d v0 v1 v2 v3 : Nat) : (wr4 m d v0 v1 v2 v3).readLE
 
 set_option maxRecDepth 20000 in
 theorem errorf_impl (ok : Nat → List Nat → Prop) :
-    ErrorfLive (toy.link (at0 code)) A0 4096 (toyR tys0 ok) tErr iErr tInt iWrap 0 := by
+    ErrorfLive (toy.link (at0 code)) A0 4096 (toyR tys0 ok) tErr iErr tInt iWrap 2 0x7725 0 := by
   rw [link_at0]
-  intro L b s hpc ⟨⟨h30a, h30b, hsp16, hst1, hst2, hst3, hacc⟩, hguard, hargs, hreads, hok, hinv, hcost, hLs, hWs⟩
-  obtain ⟨hsome, hsl, hsc, hF, hSl, hT0, hD0, hE, hTxt, hints, hlen, hB⟩ := hargs
+  intro L b s hpc ⟨⟨h30a, h30b, hsp16, hst1, hst2, hst3, hacc⟩, hguard, hargs, hreads, hsafe, hok, hinv, hcost, hLs, hWs⟩
+  obtain ⟨hFl, hFm, hsome, hsl, hsc, hF, hSl, hT0, hD0, hE, hTxt, hints, hlen, hB⟩ := hargs
   have hlen0 : (msgOf s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat).length = 0 := by omega
   have hcost32 : errorfCost s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat = 32 := by
     simp [errorfCost, hlen0, wrapBytes]
@@ -231,9 +231,9 @@ theorem ewframe : MemFrame wmem ewmem [(CB, CB + 0x100)] := by
     (by simp [eSP, CB]) (by simp [eSP, CB])).writeLE eTxt hr (a := eE) (k := 8) (by simp [eE, CB]) (by simp [eE, CB]))
 
 set_option maxRecDepth 100000 in
-theorem ewargs : ArgsOK (Env.mk tErr iErr tInt iWrap) 0 ewmem eFP 2 eSP 1 1 := by
+theorem ewargs : ArgsOK (Env.mk tErr iErr tInt iWrap) 2 0x7725 0 ewmem eFP 2 eSP 1 1 := by
   have h0 : nDec (segsOf ewmem eFP 2) = 0 := by decide
-  refine ⟨by decide, by decide, by decide, by unfold Readable; decide, by unfold Readable; decide, by decide,
+  refine ⟨by decide, by decide, by decide, by decide, by decide, by unfold Readable; decide, by unfold Readable; decide, by decide,
     by decide, by unfold Readable; decide, by unfold Readable; decide, fun j hj => ?_, by decide, by decide⟩
   rw [h0] at hj; omega
 
@@ -289,17 +289,32 @@ set_option maxRecDepth 100000 in
 theorem ewcost : errorfCost ewmem eFP 2 eSP ≤ 0x400 := by
   unfold errorfCost; decide
 
-theorem errorfLive_satisfiable : ∃ (R : RtInv) (tErr iErr tInt iWrap B : Nat) (impl : List Segment),
-    ErrorfLive (toy.link impl) A0 4096 R tErr iErr tInt iWrap B ∧
+set_option maxRecDepth 100000 in
+theorem ewsafe : ReadsSafe (toyR tys0 okE) [] (errorfReads ewmem eFP 2 eSP) := by
+  have : errorfReads ewmem eFP 2 eSP = [(eFP, 2), (eSP, 16), (eE, 16), (eTxt, 0)] := by decide
+  rw [this]
+  intro r hr
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at hr
+  rcases hr with rfl | rfl | rfl | rfl
+  all_goals first
+    | exact Or.inl rfl
+    | exact Or.inr (Or.inl (by
+        simp only [toyR, toyRt, tys0, outside_cons, outside_nil, outside_append, List.map, and_true, HEAP, HEND, HSIZE,
+          BUMP, WBUF, tyA, tyB, tyC, eFP, eSP, eE, eTxt, CB]
+        omega))
+
+theorem errorfLive_satisfiable : ∃ (R : RtInv) (tErr iErr tInt iWrap Fl Fm B : Nat) (impl : List Segment),
+    ErrorfLive (toy.link impl) A0 4096 R tErr iErr tInt iWrap Fl Fm B ∧
     ∃ (s : State) (L : List (Nat × Nat)) (b : Nat), s.pc = BitVec.ofNat 64 A0 ∧
       CallOK s 4096 5 ∧ StackRoom s 4096 5 ∧
-      ArgsOK (Env.mk tErr iErr tInt iWrap) B s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat
+      ArgsOK (Env.mk tErr iErr tInt iWrap) Fl Fm B s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat
         (s.regs 3).toNat (s.regs 4).toNat ∧
       ReadsOutside (errorfReads s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat) (calleeStack s 4096 5) ∧
+      ReadsSafe R L (errorfReads s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat) ∧
       LiveAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat, (s.regs 3).toNat, (s.regs 4).toNat] L b
         (errorfCost s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat) (s.regs 28).toNat s.mem
         (calleeStack s 4096 5) :=
-  ⟨toyR tys0 okE, tErr, iErr, tInt, iWrap, 0, at0 code, errorf_impl okE, ewstate, [], 0x400, rfl, ewcall, ewguard,
-    ewargs, ewreads, ⟨⟨rfl, by decide⟩, ewinv (ewstate.regs 28).toNat, ewcost, by simp, ewwin⟩⟩
+  ⟨toyR tys0 okE, tErr, iErr, tInt, iWrap, 2, 0x7725, 0, at0 code, errorf_impl okE, ewstate, [], 0x400, rfl, ewcall, ewguard,
+    ewargs, ewreads, ewsafe, ⟨⟨rfl, by decide⟩, ewinv (ewstate.regs 28).toNat, ewcost, by simp, ewwin⟩⟩
 
 end Janus.Contracts.ErrorfSat
