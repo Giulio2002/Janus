@@ -257,3 +257,32 @@ Symptom: `rw [readLE_x …]` finds no occurrence, a `simp only [h]` argument is 
 `MemFrame` term mismatches by the values written. Fix: do not rewrite the stored side by hand;
 close the value equality with `omega` after `simp only`. To keep the old single wide read, lower
 `set_option janus.readOverlap.maxWidth` below the read width.
+## 16. BitOps lemmas (XOR / OR of limbs), both ISAs
+
+Go compiles an equality of `uint256` values as the XOR of the limbs, OR-ed together, and a signed comparison as the sign
+bit of a XOR, so branch conditions arrive as `(BitVec.ofNat 64 a ^^^ BitVec.ofNat 64 b).toNat = 0`,
+`((x₀ ^^^ y₀) ||| (x₁ ^^^ y₁)).toNat = 0` or `2 ^ 63 ≤ (x ^^^ y).toNat`, which `omega` cannot read. `Janus.Tactic.BitOps`
+(in `import Janus`) has the shared lemmas, so a consumer no longer needs a private copy:
+
+| lemma | statement |
+|---|---|
+| `bv_xor_toNat_eq_zero` | `(x ^^^ y).toNat = 0 ↔ x.toNat = y.toNat` (any width) |
+| `bv_or_toNat_eq_zero` | `(x ||| y).toNat = 0 ↔ x.toNat = 0 ∧ y.toNat = 0` (any width) |
+| `bv_xor_toNat_lt_top` | `(x ^^^ y).toNat < 2 ^ 63 ↔ (x.toNat < 2 ^ 63 ↔ y.toNat < 2 ^ 63)` (64-bit) |
+| `bv_xor_toNat_top_le` | `2 ^ 63 ≤ (x ^^^ y).toNat ↔ ¬ (x.toNat < 2 ^ 63 ↔ y.toNat < 2 ^ 63)` (64-bit) |
+| `BitVec.xor_eq_zero_iff`, `BitVec.or_eq_zero_iff` (core) | the bit-vector equations |
+
+They are plain theorems and are deliberately NOT in the `janus_exec`/`janus_post` (`janus64_*`) simp sets: in the sets
+they turn the branch condition into a conjunction of limb equations that the executor uses as rewrite rules, so the zero
+limbs are substituted in the goal and existing closers (amd64 `Slt`/`Sgt`: `Spec.slt 0 …`) no longer match. Use them
+where you want them:
+
+```lean
+janus64_run [Janus.Tactic.bv_or_toNat_eq_zero, Janus.Tactic.bv_xor_toNat_eq_zero]   -- replaces a private OR/XOR-is-zero lemma
+simp only [Janus.Tactic.bv_xor_toNat_eq_zero] at hbr
+rw [Janus.Tactic.bv_xor_toNat_lt_top] at h
+```
+
+Ordering: the sign rules mention the literal `2 ^ 63`. Apply them (`rw`, or a `simp only` that does not also contain
+`Nat.reducePow`) before `Nat.reducePow` turns `2 ^ 63` into `9223372036854775808`, otherwise they no longer match. All the
+rules match `(x ^^^ y).toNat`, so apply them before `BitVec.toNat_xor` rewrites the term to a `Nat` XOR.
