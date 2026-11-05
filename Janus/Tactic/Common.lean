@@ -1039,6 +1039,17 @@ def namePost (g : MVarId) (hpost : FVarId) (name : Name) : MetaM (FVarId × MVar
   let (h, g) ← (← g.assert name ty (mkFVar hpost)).intro1P
   return (h, g)
 
+/-- A fresh name for the regions equation of a callee summary (`hrg1`, `hrg2`, … in order of
+the calls), or `hS_regions` for `calls [hS := S]`. -/
+def regionsName (g : MVarId) (hname : Option Name) : MetaM Name := g.withContext do
+  match hname with
+  | some n => return Name.mkSimple (n.toString ++ "_regions")
+  | none =>
+    let lctx ← getLCtx
+    let mut i := 1
+    while (lctx.findFromUserName? (Name.mkSimple s!"hrg{i}")).isSome do i := i + 1
+    return Name.mkSimple s!"hrg{i}"
+
 /-! ## Restored registers -/
 
 /-- For a register-file chain `setR (… (setR (x.regs) r₁ v₁) …) rₖ vₖ` (with `setR` the ISA's

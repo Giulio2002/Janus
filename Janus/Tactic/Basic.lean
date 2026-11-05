@@ -1,4 +1,5 @@
 import Janus.GoABI
+import Janus.RunRegions
 import Janus.Tactic.Attr
 import Janus.Tactic.KernelSafe
 
@@ -404,6 +405,51 @@ theorem Summary.mono {p : Program} {entry : Nat} {pre pre' : State → Prop}
   intro s hpc hp
   obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc (hpre s hp)
   exact ⟨k, s', hst, hr, hpost s s' hp hq⟩
+
+/-! ### Runs keep the memory regions
+
+Every run of the program, a callee's included, keeps `mem.regions` (`Program.Steps.regions`), so a
+summary can be used with the equation `s'.mem.regions = s.mem.regions` for free (the callee's
+postcondition says nothing about the regions, only about bytes: `MemFrame`). `janus_run`/
+`calls [S]` adds it as a hypothesis after each callee summary (`hrg…`). -/
+
+/-- `ReachesRet` keeps the regions. -/
+theorem ReachesRet.regions {p : Program} {ret : W64} {s : State} {Q : State → Prop}
+    (h : ReachesRet p ret s Q) :
+    ReachesRet p ret s (fun s' => Q s' ∧ s'.mem.regions = s.mem.regions) := by
+  obtain ⟨k, s', hst, hr, hq⟩ := h
+  exact ⟨k, s', hst, hr, hq, hst.regions⟩
+
+/-- `Reaches` keeps the regions: the state the run ends in has the regions of `s`. -/
+theorem Reaches.regions {p : Program} {s : State} {Q : Outcome → Prop} (h : Reaches p s Q) :
+    Reaches p s (fun o => Q o ∧ o.state.mem.regions = s.mem.regions) := by
+  obtain ⟨n, o, hr, hq⟩ := h
+  exact ⟨n, o, hr, hq, Program.run_regions hr⟩
+
+/-- A callee summary keeps the regions: its postcondition, and `s'.mem.regions = s.mem.regions`. -/
+theorem Summary.regions {p : Program} {entry : Nat} {pre : State → Prop}
+    {post : State → State → Prop} (hsum : Summary p entry pre post) :
+    Summary p entry pre (fun s s' => post s s' ∧ s'.mem.regions = s.mem.regions) := by
+  intro s hpc hpre
+  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc hpre
+  exact ⟨k, s', hst, hr, hq, hst.regions⟩
+
+/-- `Reaches.call` with the regions of the callee's return state: the continuation also gets
+`s'.mem.regions = s.mem.regions` (what `janus_run` uses at a `calls` step). -/
+theorem Reaches.call_regions {p : Program} {entry : Nat} {pre : State → Prop}
+    {post : State → State → Prop} {s : State} {Q : Outcome → Prop}
+    (hsum : Summary p entry pre post) (hpc : s.pc = BitVec.ofNat 64 entry) (hpre : pre s)
+    (h : ∀ s', s'.pc = s.regs GoABI.regLR → post s s' → s'.mem.regions = s.mem.regions →
+      Reaches p s' Q) : Reaches p s Q :=
+  Reaches.call hsum.regions hpc hpre fun s' hr hq => h s' hr hq.1 hq.2
+
+/-- `ReachesRet.call` with the regions of the callee's return state. -/
+theorem ReachesRet.call_regions {p : Program} {entry : Nat} {pre : State → Prop}
+    {post : State → State → Prop} {s : State} {ret : W64} {Q : State → Prop}
+    (hsum : Summary p entry pre post) (hpc : s.pc = BitVec.ofNat 64 entry) (hpre : pre s)
+    (h : ∀ s', s'.pc = s.regs GoABI.regLR → post s s' → s'.mem.regions = s.mem.regions →
+      ReachesRet p ret s' Q) : ReachesRet p ret s Q :=
+  ReachesRet.call hsum.regions hpc hpre fun s' hr hq => h s' hr hq.1 hq.2
 
 /-! ## Register file normal form -/
 

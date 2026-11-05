@@ -1,4 +1,5 @@
 import Janus.Amd64
+import Janus.Contracts.Stack
 
 /-!
 # amd64 decoder and executor tests
@@ -294,6 +295,42 @@ example (hg : Summary (callp64) 0x1006 (fun _ => True)
   · simpa [setRegF] using hfr 5 (by decide) (by decide)
   · simpa [setRegF] using hfr 14 (by decide) (by decide)
   · exact (congrFun hx 15).trans h_x15
+
+/-! ## The regions after a callee summary (U-REGIONS)
+
+A callee's run keeps `mem.regions` (`Amd64.Program.Steps.regions`), but its summary's postcondition
+only speaks about bytes (`MemFrame`). `calls [S]` adds `hrg1 : m.regions = s.mem.regions` after the
+first summary (`hrg2`, …), `calls [hS := S]` adds `hS_regions`: what `rtView_eq_of_frame` needs to
+carry a runtime-readiness predicate over the call. -/
+
+def g_framed64 : Prop :=
+  Summary callp64 0x1006 (fun _ => True)
+    (fun s s' => ∃ m, Janus.MemFrame s.mem m [((s.regs 4).toNat - 64, (s.regs 4).toNat - 32)] ∧ s'.mem = m ∧
+      s'.rip = BitVec.ofNat 64 (s.mem.readLE (s.regs 4).toNat 8) ∧ s'.regs 4 = s.regs 4 + 8#64 ∧
+      s'.regs 0 = s.regs 0 + 1#64 ∧ s'.flags = s.flags ∧ s'.df = s.df ∧ s'.xmm = s.xmm ∧
+      (∀ i, i ≠ 0 → i ≠ 4 → s'.regs i = s.regs i))
+
+example (hg : g_framed64) (x : BitVec 64) :
+    Ensures callp64 0x1000 [x] (fun s => StackWritable s 8 8) (fun _ _ => True) := by
+  intro ret hret s hs ⟨hle, hnw, hacc⟩
+  janus64_intro hs
+  simp only [regSP] at hacc hle hnw
+  janus64_run until [0x1005] calls [hg]
+  have key := Janus.Contracts.Stack.rtView_eq_of_frame (rt := []) ‹Janus.MemFrame _ _ _› (by simpa using hrg1)
+    (fun a ⟨r, hr, _⟩ => by simp at hr)
+  janus64_run
+  all_goals simp_all [setRegF]
+
+example (hg : g_framed64) (x : BitVec 64) :
+    Ensures callp64 0x1000 [x] (fun s => StackWritable s 8 8) (fun _ _ => True) := by
+  intro ret hret s hs ⟨hle, hnw, hacc⟩
+  janus64_intro hs
+  simp only [regSP] at hacc hle hnw
+  janus64_run until [0x1005] calls [hS := hg]
+  have key := Janus.Contracts.Stack.rtView_eq_of_frame (rt := []) ‹Janus.MemFrame _ _ _› (by simpa using hS_regions)
+    (fun a ⟨r, hr, _⟩ => by simp at hr)
+  janus64_run
+  all_goals simp_all [setRegF]
 
 /-! ## amd64: carries times large literals; `decide` carries from case splits
 
