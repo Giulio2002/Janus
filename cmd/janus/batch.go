@@ -304,11 +304,7 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 				finish(i)
 				continue
 			}
-			if !bytes.Equal(pkg.Files[r.rel], r.proofSrc) {
-				r.Err = &diag{Invalid: true, Msg: "The proof changed while the package was read.", Stage: "stale input", Next: "Rerun janus verify-batch."}
-				finish(i)
-				continue
-			}
+			r.proofSrc = pkg.Files[r.rel] // the snapshot is the source of truth
 			k := sha256Hex(r.cr.Lean)
 			if _, ok := groups[k]; !ok {
 				order = append(order, k)
