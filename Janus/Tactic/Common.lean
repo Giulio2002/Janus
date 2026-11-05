@@ -1139,7 +1139,9 @@ that could not be proved. -/
 partial def provePreCore (clean : MVarId → TacticM (List MVarId)) (closer : TSyntax `tactic)
     (g : MVarId) (depth : Nat := 4) : TacticM (Array Expr) := g.withContext do
   if ← g.isAssigned then return #[]
-  let g := (← normNatConsts g).1
+  -- (named numeric constants: only when a stuck step is repeated; scanning every hypothesis for every part of every
+  -- precondition is not free)
+  let g ← if ← slowOn then pure (← normNatConsts g).1 else pure g
   let t ← whnfR (← instantiateMVars (← g.getType)).headBeta
   let g ← g.replaceTargetDefEq t
   if t.isAppOfArity ``And 2 then

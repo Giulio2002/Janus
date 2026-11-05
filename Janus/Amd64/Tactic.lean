@@ -1998,6 +1998,9 @@ def janus64dischBody : TacticM Unit := do
 more with them replaced by their literals (checked only on failure: scanning every side condition costs more than it
 saves). -/
 elab_rules : tactic | `(tactic| janus64_disch) => do
+  -- the fast path is the bare discharger (no state saved per call: it is asked thousands of times, and many
+  -- of its attempts are expected to fail)
+  unless (← Common.slowOn) do return ← janus64dischBody
   let g0 ← getMainGoal
   let saved ← saveState
   try janus64dischBody
