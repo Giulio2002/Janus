@@ -151,4 +151,9 @@ theorem strBytes_writeLE_out (m : Memory) (a k v p n : Nat) (h : p + n ≤ a ∨
   rw [Janus.Arm64.Memory.bytes_writeLE (m := m)]
   rw [if_neg (by omega)]
 
+@[simp] theorem putBytes_regions (m : Memory) (a : Nat) (bs : List Nat) : (putBytes m a bs).regions = m.regions := by
+  induction bs generalizing m a with
+  | nil => rfl
+  | cons b bs ih => rw [putBytes_cons, ih]; simp
+
 end Janus.Contracts.ErrorfMem

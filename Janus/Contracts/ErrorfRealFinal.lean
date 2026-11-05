@@ -178,4 +178,47 @@ theorem final_eq (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) (hsp
   rw [e1, ← putBytes_append, e2, ← putBytes_append, e3, ← putBytes_append, e4, ← putBytes_append,
     e5, ← putBytes_append]
 
+/-- The live set after the call: the caller's `L`, the `wrapError` object and the message bytes. -/
+def liveAfter (L : List (Nat × Nat)) (p Lm : Nat) : List (Nat × Nat) := L ++ ((p, p + 32) :: range0 (p + 32) Lm)
+
+theorem final_view (rt L : List (Nat × Nat)) (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat)
+    (hsp : 4096 ≤ sp0) (hl1 : l1 ≤ 19) (hl2 : l2 ≤ 19) (hn1 : n1 ≤ 1) (hn2 : n2 ≤ 1)
+    (hlen1 : (natBytes a1).length = l1) (hlen2 : (natBytes a2).length = l2)
+    (hp : 268435456 ≤ p) (hpA : p + A ≤ 536870912) (hA : 2 * Lm + 48 ≤ A)
+    (hLm : Lm = tl + (l1 + n1) + (l2 + n2) + 20)
+    (hscrB : sp0 ≤ 4194304 ∨ 4194312 + 4096 ≤ sp0) (hscrH : sp0 ≤ 268435456 ∨ 536870912 + 4096 ≤ sp0)
+    (hT : TextOK sp0 p tp tl) (hrt : ∀ a, inRs rt a = true → a < sp0 - 4096 ∨ sp0 - 8 ≤ a) :
+    view rt (liveAfter L p Lm) (finalMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl) =
+      view rt (liveAfter L p Lm) (m0.writeLE 4194304 8 (p + A)) := by
+  rw [final_eq m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl hsp hl1 hl2 hn1 hn2 hlen1 hlen2 hp hpA hA hLm hscrB hscrH hT]
+  unfold view
+  congr 1
+  · funext a
+    by_cases h : (inRs rt a && !inRs (liveAfter L p Lm) a) = true
+    · rw [if_pos h, if_pos h]
+      have hr : inRs rt a = true := by simp only [Bool.and_eq_true] at h; exact h.1
+      have hl : inRs (liveAfter L p Lm) a = false := by simp only [Bool.and_eq_true, Bool.not_eq_true'] at h; exact h.2
+      have hw := hrt a hr
+      have hobj : ¬ (p ≤ a ∧ a < p + 32) := fun hh =>
+        absurd hl (by rw [Bool.not_eq_false]; exact inRs_of_inRanges (a := p) (n := 32) ⟨(p, p + 32), by simp [liveAfter], Nat.le_refl _, Nat.le_refl _⟩ hh.1 (by omega))
+      have hmsg : ¬ (p + 32 ≤ a ∧ a < p + 32 + Lm) := fun hh =>
+        absurd hl (by
+          rw [Bool.not_eq_false]
+          exact inRs_of_inRanges (a := p + 32) (n := Lm) ⟨(p + 32, p + 32 + Lm), by simp [liveAfter, range0]; omega, Nat.le_refl _, Nat.le_refl _⟩ hh.1 hh.2)
+      unfold midMem allocMem scratchMem
+      have hLm' : (msgList (strBytes m0 tp tl) n1 n2 a1 a2).length = Lm := by
+        unfold msgList
+        simp only [List.length_append, List.length_cons, List.length_nil, hlen1, hlen2]
+        have : (strBytes m0 tp tl).length = tl := by simp [strBytes]
+        rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn1 with rfl | rfl <;>
+          rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn2 with rfl | rfl <;> simp <;> omega
+      rw [putBytes_bytes_out _ _ _ _ (by rw [hLm']; omega)]
+      by_cases hB : 4194304 ≤ a ∧ a < 4194312
+      · have hB' : 4194304 ≤ a ∧ a < 4194304 + 8 := hB
+        simp (disch := omega) only [Janus.Arm64.Memory.bytes_writeLE_outside, putBytes_bytes_out, hlen1, hlen2]
+        rw [Janus.Arm64.Memory.bytes_writeLE (m := _), Janus.Arm64.Memory.bytes_writeLE (m := m0), if_pos hB', if_pos hB']
+      · simp (disch := omega) only [Janus.Arm64.Memory.bytes_writeLE_outside, putBytes_bytes_out, hlen1, hlen2]
+    · rw [if_neg h, if_neg h]
+  · simp [midMem, allocMem, scratchMem]
+
 end Janus.Contracts.ErrorfRealFinal
