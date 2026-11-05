@@ -41,7 +41,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : Rt
   simp only [regSP, regG, stackguard0Offset, stackguard0] at hgl hgb hnw2 hgr hb ha hw hout hal hao hbo hH ⊢
   simp only [outside_cons, outside_nil, and_true] at hao hbo
   janus64_run [false_implies, implies_true, List.not_mem_nil, forall_const] calls [hc]
-  all_goals assumption
+  all_goals first | assumption | exact And.left (by assumption)
 
 /-! ## Non-vacuity -/
 
@@ -63,7 +63,7 @@ theorem model : RtContract64 (Extracted.program.link implAt) cAddr rtW 4096 H0 (
   janus64_run
   apply rtPost_const <;> (try rfl) <;> (try simp [retAddrOf]) <;> (try simp [setRegF])
   simp only [concatstringSpec] at ha ⊢
-  simp [ha, strBytes]
+  simp [ha, strBytes, CatStrAt]
 
 def ret : Nat := wret
 theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
