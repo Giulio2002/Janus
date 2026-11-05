@@ -62,7 +62,8 @@ row ctl4 Verified 'Role: main theorem'
 row ctl5 Verified 'Role: main theorem'
 row ctl8 Verified 'Role: main theorem'
 row ctl9 Verified 'Role: main theorem'
-row ctl10 Verified 'Role: main theorem'
+# round 15c: ctl10 (the contract about ANOTHER variable's runtime code) is rejected: it says nothing about the runtime the statement quantifies
+row ctl10 blocked 'about the runtime implementation `impl2`' 'but the statement runs `Extracted.program.link impl`'
 row Shadow.ctl7 Verified 'Role: main theorem'
 # round 15c: ctl11 states the growslice spec at the address of runtime.newobject (the only contract NewPair has): the spec of another
 # function, so it is no control any more; the growslice live contract is a verified control in audit/roundspecbind (g2)
