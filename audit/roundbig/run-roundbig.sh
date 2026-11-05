@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Regression rows for tree-shaped Extracted.lean files (a code segment, data object or global of more than 4096
-# elements is written as a tree of generated `def seg<i>_<words|bytes>_<k>` chunk definitions joined by `++`).
+# Regression rows for tree-shaped Extracted.lean files (a code segment, data object or global of more than treeListElems
+# (cmd/janus/extract.go, 16384 at the time of writing; the round reads it from there) elements is written as a tree of generated `def seg<i>_<words|bytes>_<k>` chunk definitions joined by `++`).
 # The chunks are new generated constants in the trusted `Extracted` / `JanusTrusted` modules, so:
 #   control     a statement about the extracted code verifies (the chunks are read through Extracted.program only)
 #   ChunkNew    a proof module declaring a new name under Extracted (a chunk the generator never emitted) is blocked
@@ -15,7 +15,8 @@
 #   forgeName   a chunk renamed consistently (defs and uses): rejected the same way (the generated text is compared whole)
 #   trust       the defeq check Extracted.program =?= JanusTrusted.program covers every chunk (it unfolds them): the forged
 #               rows above fail BEFORE the kernel check as well as at the auditor when only the text check is bypassed
-# Also prints the elaboration/verify time of the control for two sizes (linear scaling). Exits 1 if an attack verifies,
+# Also prints the elaboration/verify time of the control for two sizes (linear scaling: 1x and 2x the lines needed to
+# pass the threshold). Exits 1 if an attack verifies,
 # a control stops verifying, or a forgery is accepted. Private temporary cache.
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -31,7 +32,14 @@ W=$R/work; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-roundbig.XXXXXX")" || exit 1
 trap 'rm -rf "$T"' EXIT
 mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"
-# a Go program with one long straight-line function (more than 4096 words / bytes of code)
+# The generated function must exceed the tree threshold (treeListElems, read from the generator) in the code list of
+# BOTH architectures: one source line compiles to about 3.3 arm64 words (4961 words for 1500 lines) and about 20 amd64
+# code bytes (31024 bytes for 1500 lines); the line counts below assume 3 words / 16 bytes per line (conservative), with
+# 20% headroom. Each build is checked against the threshold after extraction.
+TL=$(sed -n 's/^[[:space:]]*treeListElems[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' cmd/janus/extract.go | head -1)
+[ -n "$TL" ] || { echo "cannot read treeListElems from cmd/janus/extract.go"; exit 1; }
+lines_for() { case $1 in arm64) echo $(( (TL * 12 / 10) / 3 + 1 )) ;; amd64) echo $(( (TL * 12 / 10) / 16 + 1 )) ;; esac; }
+# a Go program with one long straight-line function (more than treeListElems words / bytes of code)
 gen() { # LINES DIR
   mkdir -p "$2"
   { echo 'module example.com/big'; echo 'go 1.21'; } > "$2/go.mod"
@@ -60,11 +68,12 @@ row() { # NAME expect(blocked|Verified) OUTPUT pattern...
 }
 for isa in arm64 amd64; do
   echo "== tree-shaped extraction ($isa)"
-  build "$isa" 1500 "$isa"
+  LN=$(lines_for "$isa")
+  build "$isa" "$LN" "$isa"
   D="$W/$isa"
   "$J" extract "$W/bin$isa" main.Big "$D" >/dev/null 2>&1 || { echo "extract failed"; exit 1; }
   kind=words; [ "$isa" = amd64 ] && kind=bytes
-  grep -q "^def seg0_${kind}_0 : List Nat" "$D/Extracted.lean" || { echo "no chunk definitions generated ($isa)"; exit 1; }
+  grep -q "^def seg0_${kind}_0 : List Nat" "$D/Extracted.lean" || { echo "no chunk definitions generated ($isa, $LN lines, threshold $TL)"; exit 1; }
   grep -q "^def seg0_${kind} : List Nat" "$D/Extracted.lean" || { echo "no chunk root generated ($isa)"; exit 1; }
   c0="seg0_${kind}_0"
   for a in ChunkNew ChunkDup ChunkEqn ChunkLookalike Control; do sed "s/seg0_CHUNK/seg0_${kind}/g" "$R/attacks/$a.lean" > "$W/$a.$isa.lean"; done
@@ -110,11 +119,12 @@ PY
   }
   for f in forgeByte forgeSwap forgeName; do forge $f; done
 done
-echo "== linear scaling (arm64 control verify time, 1500 vs 3000 lines)"
-build arm64 3000 big2
+LN1=$(lines_for arm64); LN2=$((LN1 * 2))
+echo "== linear scaling (arm64 control verify time, $LN1 vs $LN2 lines)"
+build arm64 "$LN2" big2
 "$J" extract "$W/binbig2" main.Big "$W/big2" >/dev/null 2>&1 || { echo "extract failed (big2)"; exit 1; }
 s=$(date +%s.%N); row control2 Verified "$(v --proof "$W/Control.arm64.lean" "$W/big2" --theorem Proof.correctness)"
-printf '  3000-line control verify time: %.1f s (words: %s)\n' "$(echo "$(date +%s.%N) - $s" | bc)" "$(grep -c '^def seg0_words_[0-9]* ' "$W/big2/Extracted.lean") leaves"
+printf "  $LN2-line control verify time: %.1f s (words: %s)\n" "$(echo "$(date +%s.%N) - $s" | bc)" "$(grep -c '^def seg0_words_[0-9]* ' "$W/big2/Extracted.lean") leaves"
 echo
 if [ ${#broken[@]} -gt 0 ]; then echo "round big: BROKEN rows: ${broken[*]}"; exit 1; fi
 echo "round big: all rows as expected"
