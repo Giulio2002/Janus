@@ -22,6 +22,8 @@ package main
 //	asl        v1/asl/<key>                        dir, <key>.lock (exclusive while built),
 //	                                               <key>.use (shared while in use)
 //	trusted    v1/trusted/<xx>/<key>               dir (written once, by an atomic rename)
+//	modstore   v1/modstore/<xx>/<key>              dir (written once, by an atomic rename; modstore.go)
+//	oleans     v1/oleans/<xx>/<key>.{olean,json}   files (provenance.go's own-compile store)
 //	result     v1/result/<xx>/<key>.json           file (written by an atomic rename)
 //	replay     v1/replay/{<xx>,early/<xx>}/<key>   marker file (HMAC-authenticated)
 //	           v1/replay/framework/<xx>/<key>       framework verdict, <key>.use (shared while in use)
@@ -88,7 +90,7 @@ const gcAutoInterval = time.Minute
 var cacheStatFS = statFS
 
 // gcKinds are the evictable entry kinds, in display order, with their LRU weights.
-var gcKinds = []string{"consumer", "framework", "asl", "trusted", "result", "replay", "tmp", "run"}
+var gcKinds = []string{"consumer", "framework", "asl", "trusted", "modstore", "oleans", "result", "replay", "tmp", "run"}
 
 var gcWeight = map[string]float64{"asl": 4, "framework": 2}
 
@@ -253,7 +255,7 @@ func scanCache(root string) *gcScan {
 		case "asl":
 			ents, _ := os.ReadDir(p)
 			s.scanLocked("asl", p, ents, nil)
-		case "trusted", "result":
+		case "trusted", "result", "modstore", "oleans":
 			shards, _ := os.ReadDir(p)
 			for _, sh := range shards {
 				sd := filepath.Join(p, sh.Name())

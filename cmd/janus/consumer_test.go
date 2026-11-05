@@ -485,8 +485,9 @@ func TestConsumerVerify(t *testing.T) {
 			t.Errorf("replay %v lacks %s", r.KernelReplay.Modules, m)
 		}
 	}
-	if !strings.Contains(strings.Join(r.Consumer.Rebuilt, " "), "ConsumerExample.Spec") {
-		t.Errorf("first build of a new package rebuilt %v", r.Consumer.Rebuilt)
+	// (or took it from the module store when another test's identical package built it first)
+	if !strings.Contains(strings.Join(append(append([]string{}, r.Consumer.Rebuilt...), r.Consumer.FromStore...), " "), "ConsumerExample.Spec") {
+		t.Errorf("first build of a new package rebuilt %v (from the store %v)", r.Consumer.Rebuilt, r.Consumer.FromStore)
 	}
 
 	// Another extraction: the shared module comes from the sibling workspace.
