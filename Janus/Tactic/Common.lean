@@ -1353,6 +1353,33 @@ def omegaFocused (g : MVarId) : TacticM Bool := g.withContext do
     return false
 
 
+/-- The reads `m.readLE a n` of `src` (literal `n`), with their bounds `m.readLE a n < 256 ^ n`
+(`Memory.readLE_lt`, a proved lemma) added as hypotheses of `g`: `omega` treats a read as an unbounded
+natural, so e.g. the condition `(2^64 - x + y) % 2^64 ≠ 0` of a `cmp` on two limbs could not be refuted
+from `y ≤ x`, and an address loaded from memory could not be shown below `2^64`. At most 8 reads. -/
+def addReadBoundsOf (g : MVarId) (src : Expr) : MetaM MVarId := g.withContext do
+  let src ← instantiateMVars src
+  let acc ← IO.mkRef (#[] : Array Expr)
+  src.forEachWhere (fun t => t.isAppOfArity ``Janus.Arm64.Memory.readLE 3 && !t.hasLooseBVars)
+    (fun t => acc.modify fun a => if a.contains t then a else a.push t)
+  let reads := (← acc.get).extract 0 8
+  let mut g := g
+  for t in reads do
+    unless ((t.getArg! 2).nat?.isSome || (t.getArg! 2).rawNatLit?.isSome) do continue
+    let pf := mkApp3 (mkConst ``Janus.Arm64.Memory.readLE_lt) (t.getArg! 0) (t.getArg! 1) (t.getArg! 2)
+    g ← g.assert `hrb (← inferType pf) pf
+    let (_, g') ← g.intro1
+    g := g'
+  return g
+
+/-- `addReadBoundsOf` for the reads of the branch condition `hbr` (the last one) of the goal. -/
+def addReadBounds (g : MVarId) : MetaM MVarId := g.withContext do
+  for d in (← getLCtx).decls.toList.reverse do
+    if let some d := d then
+      if !d.isImplementationDetail && d.userName.eraseMacroScopes == `hbr then
+        return ← addReadBoundsOf g d.type
+  return g
+
 /-- `omega` for side conditions of the dischargers, in stages: the sparse attempts, `omega` in the context
 restricted to the hypotheses about the goal's free variables, `omega` on the full context (capped). -/
 def omegaStaged (g : MVarId) : TacticM Bool := do
@@ -1376,34 +1403,10 @@ def omegaStaged (g : MVarId) : TacticM Bool := do
 
 elab "janus_omega_staged" : tactic => do
   let g ← getMainGoal
+  let g ← addReadBoundsOf g (← g.getType)
+  replaceMainGoal [g]
   unless ← omegaStaged g do throwError "janus_omega_staged: omega failed in every stage"
   replaceMainGoal []
-
-/-- The reads `m.readLE a n` (literal `n`) of the branch condition `hbr` of the goal, with their bounds
-`m.readLE a n < 256 ^ n` (`Memory.readLE_lt`) added as hypotheses: `omega` treats a read as an unbounded
-natural, so a condition on `(2^64 - x + y) % 2^64` (a flag of `cmp` on two limbs) could not be refuted
-from `y ≤ x` without them. At most 8 reads; proofs are the lemma applied, nothing is trusted. -/
-def addReadBounds (g : MVarId) : MetaM MVarId := g.withContext do
-  let mut hbr? : Option Expr := none
-  for d in (← getLCtx).decls.toList.reverse do
-    if let some d := d then
-      if !d.isImplementationDetail && d.userName.eraseMacroScopes == `hbr then
-        hbr? := some (← instantiateMVars d.type); break
-  let some hbr := hbr? | return g
-  let acc ← IO.mkRef (#[] : Array Expr)
-  hbr.forEachWhere (fun t => t.isAppOfArity ``Janus.Arm64.Memory.readLE 3 && !t.hasLooseBVars)
-    (fun t => acc.modify fun a => if a.contains t then a else a.push t)
-  let reads := (← acc.get).extract 0 8
-  let mut g := g
-  for t in reads do
-    let some n := (t.getArg! 2).nat? <|> (t.getArg! 2).rawNatLit? | continue
-    let pf := mkApp3 (mkConst ``Janus.Arm64.Memory.readLE_lt) (t.getArg! 0) (t.getArg! 1) (t.getArg! 2)
-    let ty ← inferType pf
-    g ← g.assert `hrb ty pf
-    let (_, g') ← g.intro1
-    g := g'
-    let _ := n
-  return g
 
 /-- `omega` for pruning a branch (the goal is `False`, the branch condition the last `hbr`): first on the
 hypotheses about the atoms of the branch condition alone (their `Disjoint`/`Apart` facts about other pointers
