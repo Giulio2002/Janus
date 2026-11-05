@@ -39,5 +39,6 @@ import JanusTests.AddrSub
 import JanusTests.JanusExact
 import JanusTests.AddrRefute
 import JanusTests.FrameClear
+import JanusTests.ChunkIdentity
 import JanusTests.CallPre
 import JanusTests.CallPre64
