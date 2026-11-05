@@ -4,6 +4,8 @@ import Janus.Amd64.Decode
 import Janus.Amd64.Exec
 import Janus.Amd64.Program
 import Janus.Amd64.Run
+import Janus.Amd64.RegionsPres
+import Janus.Amd64.RunRegions
 import Janus.Amd64.GoABI
 import Janus.Amd64.Disasm
 import Janus.Amd64.Tactic

@@ -19,7 +19,11 @@ import Janus.Tactic.ReadOverlap
   inaccessible, in the order the summary's `∧`/`∃` structure gives, which can change with the engine).
   `calls [hS := S]` also keeps the whole postcondition as `hS : post s s'` (exactly as stated in
   `Summary`, with `s'` substituted if the post is `s' = e`), at each call of `S`: destructure it with
-  `obtain ⟨k, h₁, …⟩ := hS` by the names you choose. Nothing else changes.
+  `obtain ⟨k, h₁, …⟩ := hS` by the names you choose.
+  Each `calls` step also adds the callee's regions fact `hrg<n> : s'.mem.regions = s.mem.regions` (`hS_regions`
+  for `hS := S`; the run keeps `mem.regions`, `Program.Steps.regions`; it is simplified, so it is dropped when it
+  is trivial and reads `m.regions = s.mem.regions` for a callee known by a `MemFrame` to `m`): what
+  `rtView_eq_of_frame` needs to carry `H … (rtView rt s.mem)` past a callee. Nothing else changes.
 * `janus_step [lemmas]` performs exactly one step on the main goal.
 * `janus_intro hs` turns a `CallSetup` hypothesis into `h_pc : s.pc = …`, `h_lr : s.regs 30 = …`
   and `h_x<i> : s.regs i = argᵢ`.
