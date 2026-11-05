@@ -546,6 +546,9 @@ partial def accessibleSearch (cur : MVarId) (visited : Array Expr) (fuel : Nat) 
     return false
 
 def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withContext do
+  if !(← Common.slowOn) then
+    -- the fast path: the goal's memory reduced through stores and callee frames, then the hypotheses about it
+    return ← accessibleFromHyps (← Common.reduceAccessible g)
   let saved ← saveState
   if ← accessibleSearch g #[] 16 then return true
   saved.restore
@@ -679,12 +682,6 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
       | none => pure g''
     let g'' ← Common.destructPost g'' fv[0]! fv[1]! fv[2]!
     let g'' ← normFrames cfg g'' before
-    -- the facts a named predicate of the postcondition states (the range of a new array is accessible and
-    -- below `2^48`): hypotheses for the discharger and `omega`
-    let g'' ← g''.withContext do
-      let all : Array LocalDecl := (← getLCtx).decls.toArray.filterMap id
-      let hs := all.filter fun d => !before.contains d.fvarId
-      return (← Common.addNamedPredicateFacts g'' hs true "h_post").getD g''
     let g'' ← if mvs.isEmpty then pure g'' else Common.addApartFacts g'' before
     out := out ++ [g'']
   return out
@@ -715,7 +712,7 @@ where
 
 /-- Perform one step on `g` (a `Reaches`/`ReachesRet` goal). `none`: stopped at an `until`
 address. -/
-def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List MVarId)) :=
+def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List MVarId)) :=
   g.withContext do
   setGoals [g]
   cfg.status.modify fun st =>
@@ -854,6 +851,17 @@ where
     cfg.facts.modify (·.insert c f)
     return f
 
+/-- One step. When the fast dischargers failed and the step is repeated (`Common.retrySlow`), the facts that the named
+predicates of the context state (the writable range and the bound of a new array: a callee's postcondition) are first
+added as hypotheses, so that the accessibility discharger and the address (wrap) side conditions see them. -/
+def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List MVarId)) := do
+  if ← Common.slowOn then
+    let g ← g.withContext do
+      let all : Array LocalDecl := (← getLCtx).decls.toArray.filterMap id
+      return (← Common.addNamedPredicateFacts g all true "h_post").getD g
+    stepGoalCore cfg g allowStop
+  else stepGoalCore cfg g allowStop
+
 /-- Turn `Returns`/`Panics`/`GrowsStack` goals into `Reaches`. -/
 def prepGoal (g : MVarId) : MetaM MVarId := do
   let t ← instantiateMVars (← g.getType)
@@ -889,6 +897,9 @@ def goalPC (g : MVarId) : MetaM (Option Nat) := do
 def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg.budget do
   let g ← getMainGoal
   let g ← prepGoal g
+  -- the named data constants (`Extracted.dataAddr.«…»`) of the range and accessibility facts, once per run, as
+  -- numerals: every later `Outside`/`Apart`/accessibility discharge compares numerals with numerals
+  let g ← Common.addNumeralCopies g
   let mut todo : List (MVarId × Bool) := [(g, true)]
   let mut finished : List MVarId := []
   let mut steps := 0
@@ -908,7 +919,7 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
       finished := finished ++ [g]; continue
     cfg.status.modify fun st => { st with steps }
     let t0 ← IO.monoMsNow
-    let res ← Common.guardStep tacName cfg.status cfg.budget (stepGoal cfg g first)
+    let res ← Common.guardStep tacName cfg.status cfg.budget (Common.retrySlow cfg.cache (cfg.facts.set {}) (stepGoal cfg g first))
     trace[janus] "step total: {(← IO.monoMsNow) - t0} ms"
     match res with
     | none => finished := finished ++ [g]
@@ -996,6 +1007,7 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
   try janusdischBody
   catch e =>
     saved.restore
+    unless (← Common.slowOn) do throw e
     let (g1, changed) ← Common.normNatConsts g0
     unless changed do throw e
     replaceMainGoal [g1]
@@ -1228,7 +1240,7 @@ elab "janus_data " h:ident ws:janusDataWith : tactic => withMainContext do
           let goalTy ← mkEq (mkAppN (mkConst ``Memory.accessible)
             #[m, lhs0.getArg! 1, lhs0.getArg! 2, mkConst ``Bool.true]) (mkConst ``Bool.true)
           let mv ← mkFreshExprSyntheticOpaqueMVar goalTy
-          if ← dischargeAccessible mv.mvarId! then pure (some (← instantiateMVars mv)) else pure none
+          if ← Common.withSlow (dischargeAccessible mv.mvarId!) then pure (some (← instantiateMVars mv)) else pure none
         let some hwE := hwE? | do
           if star then return g
           throwError "janus_data: {hwE0} is about the memory {lhs0.getArg! 0}, but {hE} is about {m}, and no \

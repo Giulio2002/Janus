@@ -1044,7 +1044,7 @@ def unfoldNatConsts (e : Expr) : MetaM (Option Expr) := do
 
 /-- `g` with the named numeric constants of its target and hypotheses replaced by literals (a new goal, `defeq`), and
 whether anything changed. -/
-def normNatConsts (g : MVarId) : MetaM (MVarId × Bool) := g.withContext do
+def normNatConsts (g : MVarId) (narrow : Bool := false) : MetaM (MVarId × Bool) := g.withContext do
   let mut g := g
   let mut changed := false
   for d in (← g.getDecl).lctx do
@@ -1052,6 +1052,11 @@ def normNatConsts (g : MVarId) : MetaM (MVarId × Bool) := g.withContext do
     let ty ← instantiateMVars d.type
     -- only small side-condition-sized facts (a memory chain is never an address fact)
     if ty.approxDepth.toNat > 30 then continue
+    -- `narrow`: only the range facts (`Outside`, `Apart`) that frame rules and disjointness goals are matched against
+    if narrow && !(ty.isAppOfArity ``Janus.Outside 3 || ty.isAppOfArity ``Janus.Apart 4 ||
+        (match ty.eq? with
+          | some (_, l, _) => l.isAppOfArity ``Janus.Arm64.Memory.accessible 4
+          | none => false)) then continue
     if let some ty' ← unfoldNatConsts ty then
       g ← g.replaceLocalDeclDefEq d.fvarId ty'
       changed := true
@@ -1060,6 +1065,65 @@ def normNatConsts (g : MVarId) : MetaM (MVarId × Bool) := g.withContext do
     g ← g.replaceTargetDefEq t'
     changed := true
   return (g, changed)
+
+/-! ## Fast path first, search only when stuck
+
+Many side-condition attempts of a run are expected to fail (branch pruning, aliasing checks). The machinery that
+proves more (the `MemFrame` search of the accessibility discharger, conditional hypotheses, named-predicate
+unfolding, the named-constant retry, the implication goals of a summary precondition) therefore runs ONLY when a
+step would otherwise be stuck: `retrySlow` repeats the failed step once with `slowDisch` set (and the step caches
+cleared). A proof that never gets stuck pays nothing. -/
+
+/-- Internal: set while a stuck step is repeated with the slow dischargers (an option, so that it belongs to the
+elaboration task that set it: proofs are elaborated concurrently). -/
+register_option janus.slowDisch : Bool := {
+  defValue := false
+  descr := "internal: the slow dischargers are enabled (a stuck step is being repeated)"
+}
+
+/-- Are the slow dischargers enabled? -/
+def slowOn : CoreM Bool := return janus.slowDisch.get (← getOptions)
+
+/-- Run `k` with the slow dischargers enabled. -/
+def withSlow (k : TacticM α) : TacticM α :=
+  withOptions (fun o => o.setBool `janus.slowDisch true) k
+
+/-- Run `k`; if it fails (not by interrupt or heartbeat limit), restore the metavariable context and the goals,
+clear the step caches and run it again with the slow dischargers enabled. -/
+def retrySlow (cache : IO.Ref StepCache) (reset : IO Unit) (k : TacticM α) : TacticM α := do
+  if ← slowOn then return ← k
+  let mctx ← getMCtx
+  let goals ← getGoals
+  try k catch e =>
+    if e.isInterrupt || e.isRuntime then throw e
+    -- (`try … catch` in `TacticM` backtracks the environment too: whatever the run cached while it held
+    -- auxiliary lemmas of the failed attempt must be recomputed)
+    setMCtx mctx
+    setGoals goals
+    reset
+    cache.set {}
+    withSlow k
+
+/-- For the range and accessibility hypotheses of `g` that mention named numeric constants: a copy `h_num<i>` with the
+constants replaced by their literals (the originals are left alone: a consumer's own proof steps, such as
+`simp [iterSize]`, still see the form they wrote). Done once per run. -/
+def addNumeralCopies (g : MVarId) : MetaM MVarId := g.withContext do
+  let mut g := g
+  let mut i := 0
+  for d in (← g.getDecl).lctx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    if ty.approxDepth.toNat > 30 then continue
+    unless ty.isAppOfArity ``Janus.Outside 3 || ty.isAppOfArity ``Janus.Apart 4 ||
+        (match ty.eq? with
+          | some (_, l, _) => l.isAppOfArity ``Janus.Arm64.Memory.accessible 4
+          | none => false) do continue
+    if let some ty' ← unfoldNatConsts ty then
+      g ← g.withContext do
+        let (_, g') ← (← g.assert (Name.mkSimple s!"h_num{i}") ty' d.toExpr).intro1P
+        return g'
+      i := i + 1
+  return g
 
 /-! ## Callee preconditions -/
 
@@ -1088,7 +1152,7 @@ partial def provePreCore (clean : MVarId → TacticM (List MVarId)) (closer : TS
   let t ← instantiateMVars (← g.getType)
   if t.isAppOfArity ``And 2 then return ← provePreCore clean closer g depth
   -- `p → q` (`0 < n → m.accessible …`): assume `p`, prove `q` (the closers see the context)
-  if t.isForall && !t.bindingBody!.hasLooseBVars then
+  if t.isForall && !t.bindingBody!.hasLooseBVars && (← slowOn) then
     let (_, g') ← g.intro1P
     return ← provePreCore clean closer g' depth
   let saved ← saveState
@@ -1366,7 +1430,7 @@ def addNamedPredicateFacts (g : MVarId) (hs : Array LocalDecl) (arith : Bool) (p
 /-- `addNamedPredicateFacts` for the whole context (accessibility facts only). -/
 def addDerivedAccessible (g : MVarId) : MetaM (Option MVarId) := g.withContext do
   let hs : Array LocalDecl := (← getLCtx).decls.toArray.filterMap id
-  addNamedPredicateFacts g hs false "h_acc"
+  addNamedPredicateFacts g hs true "h_acc"
 
 /-! ## Sparse omega
 
