@@ -115,9 +115,12 @@ what lets a stub copy the operands into a fresh block. -/
 def ReadsSafe (R : RtInv) (L rs : List (Nat × Nat)) : Prop :=
   ∀ r ∈ rs, r.2 = 0 ∨ Outside r.1 r.2 R.rt ∨ InRanges r.1 r.2 L
 
-/-- The budget the call spends: the `wrapError` block and the message block. -/
+/-- The budget the call spends: the `wrapError` block and the message block. The message block is
+bounded by `2·|msg| + 16` (a size class is at most the size plus one eighth, plus the 8-byte minimum; a
+large block is rounded to pages, less than twice the size): an upper bound of `roundupsize |msg|`, so the
+budget the contract hands back is never more than the runtime has. -/
 def errorfCost (m : Memory) (fp fl sp : Nat) : Nat :=
-  wrapBytes + (if (msgOf m fp fl sp).length = 0 then 0 else roundupsize (msgOf m fp fl sp).length true)
+  wrapBytes + (if (msgOf m fp fl sp).length = 0 then 0 else 2 * (msgOf m fp fl sp).length + 16)
 
 /-- What the call leaves, as a statement about the call's memory `m0` and arguments, the live set
 `L`, the window `win`, the new memory `m` and the result words `(iw, d)`. -/
