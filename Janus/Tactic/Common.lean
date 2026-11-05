@@ -1003,6 +1003,60 @@ to the goal{indentExpr tgt}"
     out := out ++ [mv]
   return out
 
+/-! ## Named numeric constants (`Extracted.dataAddr.«…»`, `abbrev u8T := …`)
+
+The generated `Extracted.lean` names addresses and sizes (`def dataAddr.«type:uint8#…» : Nat := 0xcbb20`), and a proof
+abbreviates them. They are definitionally the literals, but `omega`, the `Outside`/`Apart` dischargers and the
+read-over-write matcher compare atoms syntactically: `Outside u8T 256 rt` did not cover the access at `834336`. In a
+side-condition goal (a throwaway goal; the proof's own context is untouched) every constant of type `Nat` whose
+definition is a numeral, or another such constant, is replaced by its literal; the change is a `defeq` step (no proof term). -/
+
+initialize natConstCache : IO.Ref (Std.HashMap Name (Option Nat)) ← IO.mkRef {}
+
+partial def natConstValue? (n : Name) (fuel : Nat := 8) : MetaM (Option Nat) := do
+  if let some r := (← natConstCache.get).get? n then return r
+  let env ← getEnv
+  let r : Option Nat ← match env.find? n with
+    | some (.defnInfo di) =>
+      if di.levelParams.isEmpty && di.type.isConstOf ``Nat && fuel > 0 then
+        let v := di.value
+        match v.nat? with
+        | some k => pure (some k)
+        | none => if let .const m [] := v then natConstValue? m (fuel - 1) else pure none
+      else pure none
+    | _ => pure none
+  natConstCache.modify (·.insert n r)
+  return r
+
+/-- Replace the named numeric constants in `e` by their literals. -/
+def unfoldNatConsts (e : Expr) : MetaM (Option Expr) := do
+  let some _ := e.find? (fun x => x.isConst && !x.constName!.isAnonymous) | return none
+  let mut changed := false
+  let mut vals : Std.HashMap Name Nat := {}
+  for c in e.getUsedConstants do
+    if let some v ← natConstValue? c then
+      -- numerals themselves are not constants; skip the structural ones (`OfNat.ofNat` is not of type Nat)
+      vals := vals.insert c v; changed := true
+  unless changed do return none
+  return some (e.replace fun x => match x with
+    | .const n [] => (vals.get? n).map mkNatLit
+    | _ => none)
+
+/-- `g` with the named numeric constants of its target and hypotheses replaced by literals (a new goal, `defeq`). -/
+def normNatConsts (g : MVarId) : MetaM MVarId := g.withContext do
+  let mut g := g
+  for d in (← g.getDecl).lctx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    -- only small side-condition-sized facts (a memory chain is never an address fact)
+    if ty.approxDepth.toNat > 30 then continue
+    if let some ty' ← unfoldNatConsts ty then
+      g ← g.replaceLocalDeclDefEq d.fvarId ty'
+  let t ← instantiateMVars (← g.getType)
+  if let some t' ← unfoldNatConsts t then
+    g ← g.replaceTargetDefEq t'
+  return g
+
 /-! ## Callee preconditions -/
 
 /-- Heads that are not unfolded when proving a precondition. -/
@@ -1017,6 +1071,7 @@ that could not be proved. -/
 partial def provePreCore (clean : MVarId → TacticM (List MVarId)) (closer : TSyntax `tactic)
     (g : MVarId) (depth : Nat := 4) : TacticM (Array Expr) := g.withContext do
   if ← g.isAssigned then return #[]
+  let g ← normNatConsts g
   let t ← whnfR (← instantiateMVars (← g.getType)).headBeta
   let g ← g.replaceTargetDefEq t
   if t.isAppOfArity ``And 2 then
@@ -2742,6 +2797,7 @@ def pickMerged (spec : MergeSpec) (pcOf : MVarId → MetaM (Option Nat))
         continue
     rest := rest.push (h, fh)
   return (g, f0) :: rest.toList
+
 
 
 /-! ## No proof-free (`rfl`) rewrites in the executor's simp sets

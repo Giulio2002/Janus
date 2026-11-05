@@ -187,6 +187,19 @@ theorem store_tbl_frame (ret : Nat) (hret : RetAddr storeTbl ret) (s S : State) 
   janus_data hd [hw]
   janus_run
 
+/-- The table address as a named constant (as `Extracted.dataAddr.«…»` is): side conditions that mention it are matched
+against the literal address of the access. -/
+def tblA : Nat := 0x40100
+abbrev tblB : Nat := tblA
+
+theorem store_tbl_named (ret : Nat) (hret : RetAddr storeTbl ret) (s S : State) (p v : W64) (R : List (Nat × Nat))
+    (hfr : MemFrame s.mem S.mem R) (hd : storeTbl.DataLoaded s.mem) (hout : Outside tblB 8 R)
+    (hw : S.mem.accessible p.toNat 8 true = true) (hp : p.toNat + 8 ≤ 2 ^ 48)
+    (hpc : S.pc = 0x40000#64) (h0 : S.regs 0 = p) (h1 : S.regs 1 = v) (h30 : S.regs 30 = BitVec.ofNat 64 ret) :
+    Reaches (storeTbl.withExit ret) S (IsReturn fun s' => (s'.regs 0).toNat = 7) := by
+  janus_data hd [hw]
+  janus_run
+
 /-! ## The diagnostic names the failed obligation and prints the exact side goal
 
 The step's own discharger (with the `MemFrame` links) is run on the goal it could not prove; the message prints that

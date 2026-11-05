@@ -103,6 +103,20 @@ theorem store_tbl_frame (ret : Nat) (hret : RetAddr storeTbl ret) (s S : Janus.A
   janus64_data hd [hw]
   janus64_run
 
+/-- The table address as a named constant (as `Extracted.dataAddr.«…»` is). -/
+def tblA : Nat := 0x40100
+abbrev tblB : Nat := tblA
+
+theorem store_tbl_named (ret : Nat) (hret : RetAddr storeTbl ret) (s S : Janus.Amd64.State) (p : Nat)
+    (R : List (Nat × Nat)) (hfr : MemFrame s.mem S.mem R) (hd : storeTbl.DataLoaded s.mem) (hout : Outside tblB 8 R)
+    (hw : S.mem.accessible p 8 true = true) (hp : p + 8 ≤ 2 ^ 48) (hpc : S.rip = 0x40000#64)
+    (h7 : S.regs 7 = BitVec.ofNat 64 p) (h2 : S.regs 2 = 0x40100#64)
+    (hsp : (S.regs 4).toNat + 8 ≤ 2 ^ 48) (hsa : S.mem.accessible (S.regs 4).toNat 8 false = true)
+    (hrd : S.mem.readLE (S.regs 4).toNat 8 = ret) (hdis : p + 8 ≤ (S.regs 4).toNat ∨ (S.regs 4).toNat + 8 ≤ p) :
+    Reaches (storeTbl.withExit ret) S (IsReturn fun s' => (s'.regs 0).toNat = 7) := by
+  janus64_data hd [hw]
+  janus64_run
+
 /-! ## A new array: the accessible range inside a named predicate
 
 `f: call g; mov [rax], dl; ret`: `g` returns a fresh writable array, stated by a named predicate `NewArr` (as the

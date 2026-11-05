@@ -922,6 +922,8 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
 
 elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
   let g ← getMainGoal
+  let g ← Common.normNatConsts g
+  replaceMainGoal [g]
   let t ← instantiateMVars (← g.getType)
   if (← isTracingEnabledFor `janus.disch) then
     let hs ← g.withContext do (← getLCtx).foldlM (init := #[]) fun acc d =>

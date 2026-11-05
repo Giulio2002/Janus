@@ -1951,6 +1951,8 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
 
 elab_rules : tactic | `(tactic| janus64_disch) => do
   let g ← getMainGoal
+  let g ← Common.normNatConsts g
+  replaceMainGoal [g]
   let t ← instantiateMVars (← g.getType)
   -- `Outside a n [literal ranges]` is closed but has no `Decidable` instance
   if t.isAppOfArity ``Janus.Outside 3 && !t.hasMVar then
