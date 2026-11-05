@@ -1164,6 +1164,16 @@ elab "janus_data " h:ident ws:janusDataWith : tactic => withMainContext do
           throwError "janus_data: {hw} is not `m.accessible a n true = true`"
         unless lhs.isAppOfArity ``Memory.accessible 4 do
           throwError "janus_data: {hw} is not `m.accessible a n true = true`"
+        -- the flag must be `true` (writable) and the memory the one `hd` is about: a read-only `Buffer`
+        -- hypothesis (`accessible … false = true`) or another memory used to be accepted here, and only the kernel
+        -- rejected the proof built from it (U-DATAWRITE)
+        let some (_, _, rhs) := hwTy.eq? | throwError "not an equation"
+        unless (lhs.getArg! 3).isConstOf ``Bool.true do
+          throwError "janus_data: {hw} is `{hwTy}`, a hypothesis about READ-ONLY memory (flag `false`): a writable range `m.accessible a n true = true` is required (read-only data may overlap a read-only buffer)"
+        unless rhs.isConstOf ``Bool.true do
+          throwError "janus_data: {hw} is `{hwTy}`: the right side must be `true`"
+        unless ← isDefEq (lhs.getArg! 0) m do
+          throwError "janus_data: {hw} is about the memory {lhs.getArg! 0}, but the data hypothesis is about {m}"
         let a := lhs.getArg! 1
         let n := lhs.getArg! 2
         let mut g := g
