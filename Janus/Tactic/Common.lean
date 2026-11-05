@@ -211,6 +211,43 @@ namespace Janus.Tactic.Common
 
 open Lean Meta Elab Tactic
 
+register_option janus.omega.log : Nat := {
+  defValue := 0
+  descr := "janus_run/janus64_run: with a value `ms` > 0, a line on stderr for every internal `omega` call that took at \
+    least `ms` milliseconds: the call site, the number of disjunctive hypotheses, whether it closed the goal, the goal \
+    (to find the calls that dominate a slow run: `set_option janus.omega.log 500`)"
+}
+
+/-- `omega` on the main goal. With `janus.omega.log ms`, calls of at least `ms` milliseconds are reported (see there). -/
+def omegaLogged (site : String) : TacticM Unit := do
+  let thr := janus.omega.log.get (← getOptions)
+  if thr == 0 then evalTactic (← `(tactic| omega)) else
+  let g ← getMainGoal
+  let t0 ← IO.monoMsNow
+  let report (ok : Bool) : TacticM Unit := do
+    let ms := (← IO.monoMsNow) - t0
+    if ms ≥ thr then
+      let mut n := 0
+      for d in ← g.withContext getLCtx do
+        if d.isImplementationDetail then continue
+        let ty ← instantiateMVars d.type
+        if ← g.withContext (isProp ty) then
+          unless ty.isForall do
+            let cnt ← IO.mkRef 0
+            ty.forEach fun e => do if e.isAppOfArity ``Or 2 then cnt.modify (· + 1)
+            n := n + (← cnt.get)
+      let gt ← g.withContext do ppExpr (← instantiateMVars (← g.getType))
+      let s := toString gt
+      -- stderr: an info message would be dropped with the state when the caller backtracks (a failed call is the
+      -- one worth seeing)
+      IO.eprintln s!"janus.omega.log [{site}] {ms} ms, {n} disjunctions, {if ok then "closed" else "failed"}: {s.take 400}"
+  try
+    evalTactic (← `(tactic| omega))
+    report true
+  catch e =>
+    report false
+    throw e
+
 register_option janus.aliasInfo : Bool := {
   defValue := true
   descr := "janus_run/janus64_run: report reads over stores whose aliasing is unknown when \
@@ -463,7 +500,7 @@ def omegaProves (p : Expr) : TacticM Bool := do
   let saved ← saveState
   try
     let g ← mkFreshExprMVar p
-    let gs ← Tactic.run g.mvarId! (evalTactic (← `(tactic| omega)))
+    let gs ← Tactic.run g.mvarId! (omegaLogged "omegaProves")
     saved.restore
     return gs.isEmpty
   catch _ => saved.restore; return false
@@ -1231,16 +1268,21 @@ def omegaSparse (g : MVarId) : TacticM Bool := g.withContext do
   if ors.size < 6 then return false
   if ← tryOmega #[] then return true
   let rel := ors.filter fun (_, as) => as.any goalAtoms.contains
-  -- every failed attempt costs an `omega` call, so the number of attempts is bounded: with many
-  -- relevant disjunctions the single and pair splits are skipped (the connected set below, or
-  -- the caller's full `omega`, handles them)
-  if rel.size ≤ 5 then
-    for (h, _) in rel do
-      if ← tryOmega #[h] then return true
-  if rel.size ≤ 4 then
-    for i in [0:rel.size] do
-      for j in [i+1:rel.size] do
-        if ← tryOmega #[rel[i]!.1, rel[j]!.1] then return true
+  -- the disjunctions that share the most atoms with the goal first: for the side condition `a + 32 ≤ x ∨ x + 32 ≤ a`
+  -- the fact about `x` (two shared atoms) comes before the facts that only mention the stack pointer, so the one
+  -- split that decides the goal is among the first attempts, however many other disjunctions are relevant
+  let ranked := (rel.qsort fun (_, a) (_, b) =>
+      (a.filter goalAtoms.contains).size > (b.filter goalAtoms.contains).size).map (·.1)
+  -- every failed attempt costs an `omega` call, so the number of attempts is bounded: the best five single
+  -- splits and the pairs among the best four (the connected set below, or the caller's full `omega`, handle
+  -- the rest). Measured on `DivModB` (amd64): a side condition with seven disjunctions in the context took 38 s in the
+  -- caller's full `omega`; the single split on the fact about the buffer's pointer closes it in well under a second.
+  for h in ranked.extract 0 5 do
+    if ← tryOmega #[h] then return true
+  let top := ranked.extract 0 4
+  for i in [0:top.size] do
+    for j in [i+1:top.size] do
+      if ← tryOmega #[top[i]!, top[j]!] then return true
   -- all disjunctions connected to the goal through shared atoms (transitively): the others are
   -- cleared. `omega` splits on these itself.
   let mut seen := goalAtoms
@@ -1310,14 +1352,14 @@ def omegaCapped : TacticM Unit := do
     let ok ← tryCatchRuntimeEx
       (withTheReader Core.Context (fun c => { c with maxHeartbeats := b * 1000 }) <|
         withCurrHeartbeats do
-          evalTactic (← `(tactic| omega))
+          omegaLogged "cap(budgeted)"
           pure true)
       (fun _ => pure false)
     unless ok do
       saved.restore
       throwError "janus_omega_cap: {n} disjunctive hypotheses (more than janus.omega.cap = {cap}): `omega` \
         did not close the goal within janus.omega.budget = {b}"
-  else evalTactic (← `(tactic| omega))
+  else omegaLogged "cap"
 
 elab "janus_omega_cap" : tactic => omegaCapped
 
@@ -1342,7 +1384,7 @@ def omegaFocused (g : MVarId) : TacticM Bool := g.withContext do
   let m ← mkFreshExprMVarAt lctx' (← getLocalInstances) t
   let saved ← saveState
   try
-    let gs ← Tactic.run m.mvarId! (evalTactic (← `(tactic| omega)))
+    let gs ← Tactic.run m.mvarId! (omegaLogged "focused")
     if gs.isEmpty then
       g.assign m
       return true
@@ -1388,7 +1430,7 @@ def omegaStaged (g : MVarId) : TacticM Bool := do
   if (← g.withContext countDisj) ≤ janus.omega.cap.get (← getOptions) then
     let saved ← saveState
     try
-      let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic| omega)))
+      let gs ← Tactic.run g <| withoutRecover (omegaLogged "staged(full)")
       if gs.isEmpty then return true
       saved.restore; return false
     catch _ => saved.restore; return false
@@ -1431,7 +1473,7 @@ elab "janus_omega_prune" : tactic => do
     return atoms
   -- up to the cap: `omega` on the full context (the behaviour before the cap existed)
   if (← g.withContext countDisj) ≤ janus.omega.cap.get (← getOptions) then
-    evalTactic (← `(tactic| omega))
+    omegaLogged "prune(full)"
     return
   if !seed.isEmpty then
     let focused ← g.withContext do
@@ -1443,7 +1485,7 @@ elab "janus_omega_prune" : tactic => do
         unless (arithAtoms ty).all seed.contains do toClear := toClear.push d.fvarId
       fastClear g toClear
     try
-      let gs ← Tactic.run focused <| withoutRecover (evalTactic (← `(tactic| omega)))
+      let gs ← Tactic.run focused <| withoutRecover (omegaLogged "prune(focused)")
       if gs.isEmpty then replaceMainGoal []; return
     catch _ => pure ()
     saved.restore
@@ -1563,7 +1605,7 @@ where
     -- calls are large, and `omega` splits on every disjunction in them), then with all
     try
       let g' ← clearIrrelevant g
-      let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic| omega)))
+      let gs ← Tactic.run g' <| withoutRecover (omegaLogged "clearIrrelevant")
       if gs.isEmpty then return true
       saved.restore
     catch _ => saved.restore
