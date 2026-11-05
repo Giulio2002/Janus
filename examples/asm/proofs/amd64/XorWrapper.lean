@@ -109,7 +109,6 @@ theorem correctness (ptr len cap : BitVec 64) :
   simp only [regSP] at hacc hle hnw
   simp only [Janus.Spec.Disjoint] at hd hdt
   janus64_run calls [xor_summary]
-  refine ⟨rfl, ?_⟩
   simp (disch := omega) only [xorWords_writeLE]
 
 end Proof
