@@ -221,4 +221,129 @@ theorem final_view (rt L : List (Nat × Nat)) (m0 : Memory) (sp0 l1 n1 l2 n2 a1 
     · rw [if_neg h, if_neg h]
   · simp [midMem, allocMem, scratchMem]
 
+theorem final_fields (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) (hsp : 4096 ≤ sp0)
+    (hl1 : l1 ≤ 19) (hl2 : l2 ≤ 19) (hn1 : n1 ≤ 1) (hn2 : n2 ≤ 1)
+    (hlen1 : (natBytes a1).length = l1) (hlen2 : (natBytes a2).length = l2)
+    (hp : 268435456 ≤ p) (hpA : p + A ≤ 536870912) (hA : 2 * Lm + 48 ≤ A) (hLm : Lm = tl + (l1 + n1) + (l2 + n2) + 20)
+    (hscrB : sp0 ≤ 4194304 ∨ 4194312 + 4096 ≤ sp0) (hscrH : sp0 ≤ 268435456 ∨ 536870912 + 4096 ≤ sp0)
+    (hT : TextOK sp0 p tp tl) (he : e < 2 ^ 64) :
+    (finalMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl).readLE p 8 = p + 32 ∧
+    (finalMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl).readLE (p + 8) 8 = Lm ∧
+    (finalMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl).readLE (p + 16) 8 = 8738 ∧
+    (finalMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl).readLE (p + 24) 8 = e := by
+  have hLm' : (msgList (strBytes m0 tp tl) n1 n2 a1 a2).length = Lm := by
+    unfold msgList
+    simp only [List.length_append, List.length_cons, List.length_nil, hlen1, hlen2]
+    have : (strBytes m0 tp tl).length = tl := by simp [strBytes]
+    rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn1 with rfl | rfl <;>
+      rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn2 with rfl | rfl <;> simp <;> omega
+  have hF := final_eq m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl hsp hl1 hl2 hn1 hn2 hlen1 hlen2 hp hpA hA hLm hscrB hscrH hT
+  have hmod : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
+  refine ⟨?_, ?_, ?_, ?_⟩ <;> rw [hF] <;>
+    rw [readLE_putBytes_out _ _ _ _ _ (by rw [hLm']; omega)] <;> unfold midMem allocMem <;>
+    simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint, Janus.Arm64.Memory.readLE_writeLE_self, hmod]
+  all_goals first | omega | skip
+
+theorem lit_lt256 (l : List Nat) (h : ∀ b ∈ l, b < 256) : ∀ b ∈ l, b < 256 := h
+
+theorem msgList_lt256 (T : List Nat) (hT : ∀ b ∈ T, b < 256) (n1 n2 a1 a2 : Nat) : ∀ b ∈ msgList T n1 n2 a1 a2, b < 256 := by
+  have h1 := natBytes_lt256 a1
+  have h2 := natBytes_lt256 a2
+  have hI1 : ∀ c ∈ (if n1 = 1 then [45] else ([] : List Nat)) ++ natBytes a1, c < 256 := by
+    intro c hc
+    rcases List.mem_append.mp hc with hc | hc
+    · split at hc
+      · simp at hc; omega
+      · simp at hc
+    · exact h1 c hc
+  have hI2 : ∀ c ∈ (if n2 = 1 then [45] else ([] : List Nat)) ++ natBytes a2, c < 256 := by
+    intro c hc
+    rcases List.mem_append.mp hc with hc | hc
+    · split at hc
+      · simp at hc; omega
+      · simp at hc
+    · exact h2 c hc
+  have hL1 : ∀ c ∈ ([58, 32, 104, 97, 118, 101, 32] : List Nat), c < 256 := by decide
+  have hL2 : ∀ c ∈ ([44, 32, 119, 97, 110, 116, 32] : List Nat), c < 256 := by decide
+  have hL3 : ∀ c ∈ ([32, 98, 121, 116, 101, 115] : List Nat), c < 256 := by decide
+  intro b hb
+  unfold msgList at hb
+  rcases List.mem_append.mp hb with hb | hb
+  · rcases List.mem_append.mp hb with hb | hb
+    · rcases List.mem_append.mp hb with hb | hb
+      · rcases List.mem_append.mp hb with hb | hb
+        · rcases List.mem_append.mp hb with hb | hb
+          · exact hT b hb
+          · exact hL1 b hb
+        · exact hI1 b hb
+      · exact hL2 b hb
+    · exact hI2 b hb
+  · exact hL3 b hb
+
+theorem strBytes_lt256 (m : Memory) (p n : Nat) : ∀ b ∈ strBytes m p n, b < 256 := by
+  intro b hb
+  simp only [strBytes, List.mem_map, List.mem_range] at hb
+  obtain ⟨i, -, rfl⟩ := hb
+  have := (m.bytes (p + i)).isLt
+  omega
+
+theorem final_msg (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) (hsp : 4096 ≤ sp0)
+    (hl1 : l1 ≤ 19) (hl2 : l2 ≤ 19) (hn1 : n1 ≤ 1) (hn2 : n2 ≤ 1)
+    (hlen1 : (natBytes a1).length = l1) (hlen2 : (natBytes a2).length = l2)
+    (hp : 268435456 ≤ p) (hpA : p + A ≤ 536870912) (hA : 2 * Lm + 48 ≤ A) (hLm : Lm = tl + (l1 + n1) + (l2 + n2) + 20)
+    (hscrB : sp0 ≤ 4194304 ∨ 4194312 + 4096 ≤ sp0) (hscrH : sp0 ≤ 268435456 ∨ 536870912 + 4096 ≤ sp0)
+    (hT : TextOK sp0 p tp tl) :
+    strBytes (finalMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl) (p + 32) Lm =
+      msgList (strBytes m0 tp tl) n1 n2 a1 a2 := by
+  have hLm' : (msgList (strBytes m0 tp tl) n1 n2 a1 a2).length = Lm := by
+    unfold msgList
+    simp only [List.length_append, List.length_cons, List.length_nil, hlen1, hlen2]
+    have : (strBytes m0 tp tl).length = tl := by simp [strBytes]
+    rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn1 with rfl | rfl <;>
+      rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn2 with rfl | rfl <;> simp <;> omega
+  rw [final_eq m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl hsp hl1 hl2 hn1 hn2 hlen1 hlen2 hp hpA hA hLm hscrB hscrH hT]
+  have := strBytes_putBytes (midMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e) (p + 32)
+    (msgList (strBytes m0 tp tl) n1 n2 a1 a2) (msgList_lt256 _ (strBytes_lt256 m0 tp tl) n1 n2 a1 a2)
+  rw [hLm'] at this
+  exact this
+
+theorem final_frame (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) (hsp : 4096 ≤ sp0)
+    (hl1 : l1 ≤ 19) (hl2 : l2 ≤ 19) (hn1 : n1 ≤ 1) (hn2 : n2 ≤ 1)
+    (hlen1 : (natBytes a1).length = l1) (hlen2 : (natBytes a2).length = l2)
+    (hp : 268435456 ≤ p) (hpA : p + A ≤ 536870912) (hA : 2 * Lm + 48 ≤ A) (hLm : Lm = tl + (l1 + n1) + (l2 + n2) + 20)
+    (hscrB : sp0 ≤ 4194304 ∨ 4194312 + 4096 ≤ sp0) (hscrH : sp0 ≤ 268435456 ∨ 536870912 + 4096 ≤ sp0)
+    (hT : TextOK sp0 p tp tl) :
+    MemFrame m0 (finalMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl)
+      [(sp0 - 4096, sp0 - 8), (4194304, 4194312), (p, p + A)] := by
+  have hLm' : (msgList (strBytes m0 tp tl) n1 n2 a1 a2).length = Lm := by
+    unfold msgList
+    simp only [List.length_append, List.length_cons, List.length_nil, hlen1, hlen2]
+    have : (strBytes m0 tp tl).length = tl := by simp [strBytes]
+    rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn1 with rfl | rfl <;>
+      rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn2 with rfl | rfl <;> simp <;> omega
+  rw [final_eq m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl hsp hl1 hl2 hn1 hn2 hlen1 hlen2 hp hpA hA hLm hscrB hscrH hT]
+  have hl1p : 1 ≤ l1 := by rw [← hlen1]; exact natBytes_length_pos a1
+  have hl2p : 1 ≤ l2 := by rw [← hlen2]; exact natBytes_length_pos a2
+  have hs : ∀ a n, Outside a n [(sp0 - 4096, sp0 - 8), (4194304, 4194312), (p, p + A)] →
+      Outside a n [(sp0 - 4096, sp0 - 8), (4194304, 4194312), (p, p + A)] ∧
+      Outside a n [(sp0 - 4096, sp0 - 8), (4194304, 4194312), (p, p + A)] := fun a n h => ⟨h, h⟩
+  have f0 : MemFrame m0 m0 [(sp0 - 4096, sp0 - 8), (4194304, 4194312), (p, p + A)] := MemFrame.refl _ _
+  have f1 := f0.trans (putBytes_frame m0 (rs := [(sp0 - 4096, sp0 - 8), (4194304, 4194312), (p, p + A)]) (sp0 - 16 - l1) (natBytes a1)
+    (Or.inr ⟨(sp0 - 4096, sp0 - 8), by simp, by omega, by omega⟩)) hs
+  have f2 := f1.writeLE_inRanges (a := sp0 - 16 - l1 - 1) (k := 1) (48 - 3 * n1) ⟨(sp0 - 4096, sp0 - 8), by simp, by omega, by omega⟩
+  have f3 := f2.trans (putBytes_frame _ (rs := [(sp0 - 4096, sp0 - 8), (4194304, 4194312), (p, p + A)]) (sp0 - 48 - l2) (natBytes a2)
+    (Or.inr ⟨(sp0 - 4096, sp0 - 8), by simp, by omega, by omega⟩)) hs
+  have f4 := f3.writeLE_inRanges (a := sp0 - 48 - l2 - 1) (k := 1) (48 - 3 * n2) ⟨(sp0 - 4096, sp0 - 8), by simp, by omega, by omega⟩
+  have f5 := f4.writeLE_inRanges (a := 4194304) (k := 8) (p + A) ⟨(4194304, 4194312), by simp, by omega, by omega⟩
+  have f6 := f5.writeLE_inRanges (a := p) (k := 8) (p + 32) ⟨(p, p + A), by simp, by omega, by omega⟩
+  have f7 := f6.writeLE_inRanges (a := p + 8) (k := 8) Lm ⟨(p, p + A), by simp, by omega, by omega⟩
+  have f8 := f7.writeLE_inRanges (a := p + 16) (k := 8) 8738 ⟨(p, p + A), by simp, by omega, by omega⟩
+  have f9 := f8.writeLE_inRanges (a := p + 24) (k := 8) e ⟨(p, p + A), by simp, by omega, by omega⟩
+  unfold midMem allocMem scratchMem
+  exact f9.trans (putBytes_frame _ (rs := [(sp0 - 4096, sp0 - 8), (4194304, 4194312), (p, p + A)]) (p + 32)
+    (msgList (strBytes m0 tp tl) n1 n2 a1 a2) (by
+      by_cases h : msgList (strBytes m0 tp tl) n1 n2 a1 a2 = []
+      · exact Or.inl h
+      · exact Or.inr ⟨(p, p + A), by simp, by omega, by rw [hLm']; omega⟩)) hs
+
 end Janus.Contracts.ErrorfRealFinal
