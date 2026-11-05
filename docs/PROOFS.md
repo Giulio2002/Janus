@@ -101,6 +101,7 @@ That is the whole proof. Most straight-line functions need nothing more, or a fi
 | `janus_carry` | Carry chains by reflection: proves `a = b`, `a ≤ b`, `a < b` (or a conjunction of them) between `Nat` terms built from limbs, `+`, `*`, `-`, literals, `/ k`, `% k` and `(decide (k ≤ a)).toNat`. See *Multi-limb arithmetic* under Techniques. |
 | `janus_ring` | Polynomial identities over `Int` (`+`, `*`, `-`, `^` with a literal exponent) by a verified normaliser; on `Nat`, `janus_carry`. |
 | `janus_data hd` | From `hd : p.DataLoaded m`: readability of each `.rodata` object, and a rewrite rule that evaluates loads from it at literal addresses. |
+| `janus_data hd [hw₁, …]`, `janus_data hd [*]` | As `janus_data hd`, and for each writable range `hwᵢ : m.accessible a n true = true` (or, with `[*]`, every such hypothesis of the context about `m`) the fact that it is disjoint from every `.rodata` object. |
 | `janus_dyn h₁ h₂ …` | From dynamic-call hypotheses (`ItabIs`, `FuncvalIs`, `ClosureCtx`): the itab's literal address and words, the funcval's code word, the captured variables, as equations the executors use (both ISAs). See [Dynamic calls](#dynamic-calls-hashwith-hashtwice-mapsum-deferadd). |
 | `janus_cases h` | From `h : k < N` (`N` a literal): `N` goals with `k` replaced by `0, …, N-1`. For table lookups at a symbolic index. |
 | `janus_frame` | Proves `MemFrame m₀ m rs` (the memory part of a callee summary, see Calls): peels the stores of `m`, goes through the `MemFrame` hypotheses of called summaries, side conditions by `omega`. |
@@ -169,8 +170,11 @@ is dropped immediately: preconditions like `y ≠ 0` or `i < len` prune the pani
   the proof), and anything else closed by `decide +kernel`; a closed goal that is false is
   never proved from the hypotheses;
 * `m.accessible a n w = true` from a hypothesis `m.accessible b k w' = true` about the same
-  memory (after stripping writes, callee frames `MemFrame`, and anything tagged `janus_acc`),
-  with `b ≤ a`, `a + n ≤ b + k` by `omega`;
+  memory (after stripping writes), or about a memory related to it by `MemFrame` hypotheses (the search
+  follows the links in both directions: a fact about the memory before a call proves an access after
+  it, and the other way round), or one stated inside a named predicate of the context (the postcondition
+  of a callee summary such as a new array, unfolded up to two levels), with `b ≤ a`, `a + n ≤ b + k`
+  by `omega`; a stuck access names the failed obligation and prints the exact goal that was tried;
 * `Outside a n rs` (the side condition of a `MemFrame` read) by unfolding the ranges and `omega`;
 * linear address facts (`x + 8 + 8 ≤ z ∨ z + 8 ≤ x + 8`, `x + 8 = x + 8`) by literal arithmetic and
   at most one case split on an aliasing hypothesis (`Common.addrDisch`);

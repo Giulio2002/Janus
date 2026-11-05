@@ -479,6 +479,89 @@ def isRetPC (pc ret : Expr) : MetaM Bool := do
     withReducible (isDefEq r ret)
   | _ => return false
 
+theorem accessible_sub {m : Memory} {a n b k : Nat} {w w' : Bool}
+    (h : m.accessible b k w' = true) (hw : (w = false ∨ w' = true)) (h1 : b ≤ a)
+    (h2 : a + n ≤ b + k) : m.accessible a n w = true :=
+  Memory.accessible_sub m h hw h1 h2
+
+/-- `janus_data`'s rewrite rule for a memory `m2` related to the one of `hd : p.DataLoaded m` by a `MemFrame`: a read of
+the data outside the frame's ranges `rs` agrees there too. -/
+theorem readLE_dataReadD_frame {p : Program} {m m2 : Memory} {rs : List (Nat × Nat)} (h : p.DataLoaded m)
+    (hf : Janus.MemFrame m m2 rs) (a n : Nat) (hv : (dataRead p a n).isSome = true) (ho : Janus.Outside a n rs) :
+    m2.readLE a n = dataReadD p a n :=
+  (hf.readLE a n ho).trans (readLE_dataReadD h a n hv)
+
+theorem readLE_dataReadD_frame' {p : Program} {m m2 : Memory} {rs : List (Nat × Nat)} (h : p.DataLoaded m)
+    (hf : Janus.MemFrame m2 m rs) (a n : Nat) (hv : (dataRead p a n).isSome = true) (ho : Janus.Outside a n rs) :
+    m2.readLE a n = dataReadD p a n :=
+  ((hf.readLE a n ho).symm).trans (readLE_dataReadD h a n hv)
+
+
+/-- Prove `m.accessible a n w = true` from a hypothesis about the SAME memory term (stores stripped by
+`accessible_writeLE`; no `MemFrame` step). -/
+def accessibleFromHyps (g : MVarId) : TacticM Bool := withoutRecover <| g.withContext do
+  -- strip writes: `accessible_writeLE`
+  let gs ← withoutRecover (Common.simpNoRfl g (← `(tactic| simp only [janus_acc, State.mem])))
+  let some g := gs.head? | return true
+  let t ← instantiateMVars (← g.getType)
+  let some (_, lhs, _) := t.eq? | return false
+  unless lhs.isAppOfArity ``Memory.accessible 4 do return false
+  let m := lhs.getArg! 0
+  for d in ← Common.accessibleOrder lhs do
+    let ty ← instantiateMVars d.type
+    let some (_, l, _) := ty.eq? | continue
+    unless l.isAppOfArity ``Memory.accessible 4 do continue
+    unless ← isDefEq (l.getArg! 0) m do continue
+    let saved ← saveState
+    let ok ← try
+        let gs ← Tactic.run g <| withoutRecover do
+          let lemE := mkAppN (mkConst ``accessible_sub)
+            #[m, lhs.getArg! 1, lhs.getArg! 2, l.getArg! 1, l.getArg! 2, lhs.getArg! 3, l.getArg! 3,
+              d.toExpr]
+          let gs ← (← getMainGoal).apply lemE
+          setGoals gs
+          evalTactic (← `(tactic| all_goals first | decide | janus_omega | simp))
+        pure gs.isEmpty
+      catch _ => pure false
+    if ok then return true
+    saved.restore
+  return false
+
+/-- Prove `m.accessible a n w = true` from the accessibility hypotheses of the context. The goal is
+tried against the hypotheses about its own memory first, and then, one `MemFrame` step at a time (a
+callee frame, `MemFrame`), in both directions, against the hypotheses about each related memory: a fact
+stated about the memory after a call (`S.mem`) and one stated about the memory before it (`s.mem`)
+both discharge a store after the call. (The memory was rewritten to the earliest one at once, and the
+facts about the later memories were never looked at.) -/
+partial def accessibleSearch (cur : MVarId) (visited : Array Expr) (fuel : Nat) : TacticM Bool := withoutRecover <| cur.withContext do
+    if fuel == 0 then return false
+    let cur ← Common.stripWritesProof cur
+    let saved ← saveState
+    if ← accessibleFromHyps cur then return true
+    saved.restore
+    if ← Common.accessibleFromImplications cur ``accessible_sub then return true
+    saved.restore
+    let some (_, lhs, _) := (← instantiateMVars (← cur.getType)).eq? | return false
+    let visited := visited.push (lhs.getArg! 0)
+    for (d, up, m') in ← Common.accessibleFrameLinks cur do
+      if visited.contains (Common.stripWrites m') then continue
+      let saved ← saveState
+      let g' ← Common.moveAccessible cur d up
+      if ← accessibleSearch g' visited (fuel - 1) then return true
+      saved.restore
+    return false
+
+def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withContext do
+  if !(← Common.slowOn) then
+    -- the fast path: the goal's memory reduced through stores and callee frames, then the hypotheses about it
+    return ← accessibleFromHyps (← Common.reduceAccessible g)
+  let saved ← saveState
+  if ← accessibleSearch g #[] 16 then return true
+  saved.restore
+  -- the accessible ranges that named predicates (a runtime summary's postcondition) state
+  let some g' ← Common.addDerivedAccessible g | return false
+  accessibleSearch g' #[] 16
+
 structure StepResult where
   goals : List MVarId
   /-- goals that are finished with symbolic execution (outcome reached) -/
@@ -522,7 +605,7 @@ partial def afterExec (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := do
         {← g.withContext Common.branchConds}"
     | _ =>
       let st ← cfg.status.get
-      throwError (← g.withContext (Common.explainStuck tacName st accessFns r))
+      throwError (← g.withContext (Common.explainStuck tacName st accessFns r (some dischargeAccessible)))
   | .reaches _ s _ | .reachesRet _ _ s _ =>
     let s ← instantiateMVars s
     if s.isAppOfArity ``ite 5 then
@@ -638,7 +721,7 @@ where
 
 /-- Perform one step on `g` (a `Reaches`/`ReachesRet` goal). `none`: stopped at an `until`
 address. -/
-def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List MVarId)) :=
+def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List MVarId)) :=
   g.withContext do
   setGoals [g]
   cfg.status.modify fun st =>
@@ -777,6 +860,17 @@ where
     cfg.facts.modify (·.insert c f)
     return f
 
+/-- One step. When the fast dischargers failed and the step is repeated (`Common.retrySlow`), the facts that the named
+predicates of the context state (the writable range and the bound of a new array: a callee's postcondition) are first
+added as hypotheses, so that the accessibility discharger and the address (wrap) side conditions see them. -/
+def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List MVarId)) := do
+  if ← Common.slowOn then
+    let g ← g.withContext do
+      let all : Array LocalDecl := (← getLCtx).decls.toArray.filterMap id
+      return (← Common.addNamedPredicateFacts g all true "h_post").getD g
+    stepGoalCore cfg g allowStop
+  else stepGoalCore cfg g allowStop
+
 /-- Turn `Returns`/`Panics`/`GrowsStack` goals into `Reaches`. -/
 def prepGoal (g : MVarId) : MetaM MVarId := do
   let t ← instantiateMVars (← g.getType)
@@ -812,6 +906,9 @@ def goalPC (g : MVarId) : MetaM (Option Nat) := do
 def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg.budget do
   let g ← getMainGoal
   let g ← prepGoal g
+  -- the named data constants (`Extracted.dataAddr.«…»`) of the range and accessibility facts, once per run, as
+  -- numerals: every later `Outside`/`Apart`/accessibility discharge compares numerals with numerals
+  let g ← Common.addNumeralCopies g
   let mut todo : List (MVarId × Bool) := [(g, true)]
   let mut finished : List MVarId := []
   let mut steps := 0
@@ -833,7 +930,7 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
       finished := finished ++ [g]; continue
     cfg.status.modify fun st => { st with steps }
     let t0 ← IO.monoMsNow
-    let res ← Common.guardStep tacName cfg.status cfg.budget (stepGoal cfg g first)
+    let res ← Common.guardStep tacName cfg.status cfg.budget (Common.retrySlow cfg.cache (cfg.facts.set {}) (stepGoal cfg g first))
     trace[janus] "step total: {(← IO.monoMsNow) - t0} ms"
     match res with
     | none => finished := finished ++ [g]
@@ -845,49 +942,16 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
 
 /-! ## Discharger -/
 
-theorem accessible_sub {m : Memory} {a n b k : Nat} {w w' : Bool}
-    (h : m.accessible b k w' = true) (hw : (w = false ∨ w' = true)) (h1 : b ≤ a)
-    (h2 : a + n ≤ b + k) : m.accessible a n w = true :=
-  Memory.accessible_sub m h hw h1 h2
-
-/-- Prove `m.accessible a n w = true` from a hypothesis about the same memory. -/
-def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withContext do
-  -- through stores and callee frames (`MemFrame`)
-  let g ← Common.reduceAccessible g
-  -- strip writes: `accessible_writeLE`
-  let gs ← withoutRecover (Common.simpNoRfl g (← `(tactic| simp only [janus_acc, State.mem])))
-  let some g := gs.head? | return true
-  let t ← instantiateMVars (← g.getType)
-  let some (_, lhs, _) := t.eq? | return false
-  unless lhs.isAppOfArity ``Memory.accessible 4 do return false
-  let m := lhs.getArg! 0
-  for d in ← Common.accessibleOrder lhs do
-    let ty ← instantiateMVars d.type
-    let some (_, l, _) := ty.eq? | continue
-    unless l.isAppOfArity ``Memory.accessible 4 do continue
-    unless ← isDefEq (l.getArg! 0) m do continue
-    let saved ← saveState
-    let ok ← try
-        let gs ← Tactic.run g <| withoutRecover do
-          let lemE := mkAppN (mkConst ``accessible_sub)
-            #[m, lhs.getArg! 1, lhs.getArg! 2, l.getArg! 1, l.getArg! 2, lhs.getArg! 3, l.getArg! 3,
-              d.toExpr]
-          let gs ← (← getMainGoal).apply lemE
-          setGoals gs
-          evalTactic (← `(tactic| all_goals first | decide | janus_omega | simp))
-        pure gs.isEmpty
-      catch _ => pure false
-    if ok then return true
-    saved.restore
-  return false
-
-elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
+def janusdischBody : TacticM Unit := withoutRecover do
   let g ← getMainGoal
   let t ← instantiateMVars (← g.getType)
   if (← isTracingEnabledFor `janus.disch) then
     let hs ← g.withContext do (← getLCtx).foldlM (init := #[]) fun acc d =>
       if d.isImplementationDetail then pure acc else pure (acc.push m!"{d.userName} : {d.type}")
     trace[janus.disch] "goal {t}\n{MessageData.joinSep hs.toList "\n"}"
+  -- `Outside a n [literal ranges]` is closed but has no `Decidable` instance
+  if t.isAppOfArity ``Janus.Outside 3 && !t.hasFVar && !t.hasMVar then
+    if ← Common.dischargeOutside g then return
   if !t.hasFVar && !t.hasMVar then
     -- literal comparisons: evaluated here (no auxiliary declaration per side condition)
     match ← Common.closeByEval? g with
@@ -944,6 +1008,24 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
       | janus_omega
       | (simp -failIfUnchanged (disch := janus_omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
           Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; janus_omega)))
+
+/-- `janus_disch`: the discharger; if it fails and the goal mentions named numeric constants (`Extracted.dataAddr.«…»`), once
+more with them replaced by their literals (checked only on failure: scanning every side condition costs more than it
+saves). -/
+elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
+  -- the fast path is the bare discharger (no state saved per call: it is asked thousands of times, and many
+  -- of its attempts are expected to fail)
+  unless (← Common.slowOn) do return ← janusdischBody
+  let g0 ← getMainGoal
+  let saved ← saveState
+  try janusdischBody
+  catch e =>
+    saved.restore
+    unless (← Common.slowOn) do throw e
+    let (g1, changed) ← Common.normNatConsts g0
+    unless changed do throw e
+    replaceMainGoal [g1]
+    janusdischBody
 
 /-! ## Arithmetic -/
 
@@ -1128,10 +1210,10 @@ elab "janus_step" args:janusArgs cs:janusCalls bud:janusBudget : tactic => withM
 /-- From `h : p.DataLoaded m`, add `h_data<k> : m.accessible base len false = true` for every data
 segment `k` of `p` (literal bounds), and `h_rodata : ∀ a n, (dataRead p a n).isSome = true →
 m.readLE a n = dataReadD p a n`, which `janus_run` uses to evaluate loads from the data. 
-`janus_data hd [hw₁, …]` additionally, for each `hwᵢ : m.accessible a n true = true` (a
+`janus_data hd [hw₁, …]` (or `janus_data hd [*]`: every writable range `m.accessible a n true = true` of the context) additionally, for each `hwᵢ : m.accessible a n true = true` (a
 writable range of the same memory), `h_ddisj<i>_<k> : a + n ≤ base ∨ base + len ≤ a` for every data
 object `k`: read-only data is disjoint from writable memory (`disjoint_of_dataLoaded`). -/
-syntax janusDataWith := (" [" ident,* "]")?
+syntax janusDataWith := (" [" ("*" <|> ident,*) "]")?
 
 elab "janus_data " h:ident ws:janusDataWith : tactic => withMainContext do
   let hE ← elabTerm h none
@@ -1155,15 +1237,41 @@ elab "janus_data " h:ident ws:janusDataWith : tactic => withMainContext do
       let (_, g') ← (← g.assert (Name.mkSimple s!"h_data{i}") accTy pf).intro1P
       return g'
   do
-    let hws : Array (TSyntax `ident) := (Common.collectIdents ws.raw).map (⟨·⟩)
-    for hw in hws, j in [0:hws.size] do
+    -- `[*]`: every writable range (`m.accessible a n true = true`) of the same memory in the context
+    let star := ws.raw.find? (fun st => st.isAtom && st.getAtomVal == "*") |>.isSome
+    let hws : Array (TSyntax `ident) := if star then #[] else (Common.collectIdents ws.raw).map (⟨·⟩)
+    let autoE : Array Expr ← if !star then pure #[] else g.withContext do
+      let mut out := #[]
+      for d in ← getLCtx do
+        if d.isImplementationDetail || d.userName.hasMacroScopes then continue
+        let dty ← instantiateMVars d.type
+        let some (_, l, r) := dty.eq? | continue
+        unless l.isAppOfArity ``Memory.accessible 4 && (l.getArg! 3).isConstOf ``Bool.true &&
+          r.isConstOf ``Bool.true do continue
+        out := out.push d.toExpr
+      pure out
+    let n := if star then autoE.size else hws.size
+    for j in [0:n] do
       g ← g.withContext do
-        let hwE ← Term.elabTerm hw none
+        let hwE0 ← if star then pure autoE[j]! else Term.elabTerm hws[j]! none
+        let hwTy0 ← instantiateMVars (← inferType hwE0)
+        let some (_, lhs0, _) := hwTy0.eq? |
+          throwError "janus_data: {hwE0} is not `m.accessible a n true = true`"
+        unless lhs0.isAppOfArity ``Memory.accessible 4 do
+          throwError "janus_data: {hwE0} is not `m.accessible a n true = true`"
+        -- a writable range of a memory related to the one of `hd` by `MemFrame` hypotheses is transported
+        -- (`MemFrame.accessible`: the accessibility of every range is the same in both)
+        let hwE? : Option Expr ← if ← withReducible (isDefEq (lhs0.getArg! 0) m) then pure (some hwE0) else do
+          let goalTy ← mkEq (mkAppN (mkConst ``Memory.accessible)
+            #[m, lhs0.getArg! 1, lhs0.getArg! 2, mkConst ``Bool.true]) (mkConst ``Bool.true)
+          let mv ← mkFreshExprSyntheticOpaqueMVar goalTy
+          if ← Common.withSlow (dischargeAccessible mv.mvarId!) then pure (some (← instantiateMVars mv)) else pure none
+        let some hwE := hwE? | do
+          if star then return g
+          throwError "janus_data: {hwE0} is about the memory {lhs0.getArg! 0}, but {hE} is about {m}, and no \
+            `MemFrame` hypothesis relates them: state the writable range about {m}, or relate the two memories"
         let hwTy ← instantiateMVars (← inferType hwE)
-        let some (_, lhs, _) := hwTy.eq? |
-          throwError "janus_data: {hw} is not `m.accessible a n true = true`"
-        unless lhs.isAppOfArity ``Memory.accessible 4 do
-          throwError "janus_data: {hw} is not `m.accessible a n true = true`"
+        let some (_, lhs, _) := hwTy.eq? | return g
         let a := lhs.getArg! 1
         let n := lhs.getArg! 2
         let mut g := g
@@ -1193,6 +1301,28 @@ elab "janus_data " h:ident ws:janusDataWith : tactic => withMainContext do
     let pf := mkAppN (mkConst ``readLE_dataReadD) #[p, m, hE]
     let (_, g') ← (← g.assert `h_rodata (← inferType pf) pf).intro1P
     return g'
+  g ← g.withContext do
+    -- the same rule for the memories related to `m` by `MemFrame` hypotheses (one hop), conditional on the read
+    -- being outside the frame's ranges
+    let mut g := g
+    let mut fi := 0
+    for d in ← getLCtx do
+      if d.isImplementationDetail then continue
+      let dty ← instantiateMVars d.type
+      unless dty.isAppOfArity ``Janus.MemFrame 3 do continue
+      let x := dty.getArg! 0
+      let y := dty.getArg! 1
+      let rs := dty.getArg! 2
+      let lemma? ← if ← withReducible (isDefEq x m) then
+          pure (some (``readLE_dataReadD_frame, y))
+        else if ← withReducible (isDefEq y m) then pure (some (``readLE_dataReadD_frame', x))
+        else pure none
+      let some (nm, m2) := lemma? | continue
+      let pf := mkAppN (mkConst nm) #[p, m, m2, rs, hE, d.toExpr]
+      let (_, g') ← (← g.assert (Name.mkSimple s!"h_rodata_f{fi}") (← inferType pf) pf).intro1P
+      g := g'
+      fi := fi + 1
+    return g
   replaceMainGoal [g]
 
 /-- `janus_cases h` with `h : k < N` (or `k ≤ N`), `N` a literal: one goal per value of `k`,

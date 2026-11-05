@@ -49,4 +49,6 @@ import JanusTests.JanusRfl
 import JanusTests.Join
 import JanusTests.ReadBounds
 import JanusTests.CallPre
+import JanusTests.AccSub
+import JanusTests.AccSub64
 import JanusTests.CallPre64
