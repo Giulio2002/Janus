@@ -1193,3 +1193,36 @@ whole store chain before it fails (35-95 s per attempt, FV-B's DivMod wrapper: `
 `with_reducible rfl`, and, only when the goal contains no `writeLE`, the ordinary `rfl` (so it proves what `rfl` proves on goals
 without stores, and only the reducible equalities on goals with stores; use `simp`/`rw` with the memory lemmas for the rest). Put it
 where a plain `rfl` was an alternative of a `first`.
+
+## `join [pc, …]`: one continuation for the paths of a diamond
+
+A straight-line function with `k` conditional diamonds that reconverge (a carry-dependent increment, a conditional subtract) gives
+`2^k` paths for `janus_run`/`janus64_run`, each carrying every store so far; the code after each reconvergence point is executed on
+every path. `janus_run … join [pc, …]` (and `janus64_run … join [pc, …]`, after `calls [...]` and before `(budget := N)`) merges the paths
+that arrive at one of the listed addresses into one goal, so the code after it runs once.
+
+The registers and flags the paths gave different values are generalised to fresh variables `jv₀ …` (at most 16), and the merged goal
+keeps what distinguished the paths as one hypothesis,
+
+```
+hjoin : (P₁ ∧ jv₀ = a₀ ∧ …) ∨ (P₂ ∧ jv₀ = b₀ ∧ …)
+```
+
+with `Pᵢ` the branch conditions only path `i` had (`rcases hjoin with ⟨⟨hx, -⟩, rfl, -⟩ | ⟨⟨hx, -⟩, rfl, -⟩`). Each path proves its instance
+of the merged goal with its own values and its own disjunct: the proof is an ordinary term the kernel checks, nothing new is trusted.
+Differences in the **memory** are never generalised (a store on one path only, a different address): such paths are not merged and
+continue separately (sound, just without the saving). The same state with different branch conditions merges with `hjoin : P₁ ∨ P₂`.
+
+Without `join`, nothing changes. `janus.merge` (global, every pc, drops the branch conditions) is a different, older mechanism: after it
+the continuation does not know which arm it is on, which is why it cannot be used when the registers it generalises (a carry bit)
+are needed later. Choose the `pc`s from the `[janus] merged …`/`not merged: …` lines of `set_option trace.janus true`. Tests:
+`JanusTests/Join.lean`.
+
+### Branch pruning and read bounds
+
+`omega` sees `m.readLE a 8` as an unbounded natural, so the flag condition of `cmp x, y; ja` on two limbs
+(`(2^64 - y + x) % 2^64 ≠ 0`) was not refutable from `x ≤ y`: the "impossible" branch stayed alive and the run went on
+into the slow path (the AddMod fast path with the guard `x[3] ≤ m[3]` in the precondition did not finish in 15 minutes
+even for its first diamond). `janus_omega_prune` now adds `m.readLE a n < 256^n` (`Memory.readLE_lt`, a proved lemma) for the
+reads of the branch condition (at most 8), so such branches are pruned. AddModFast: not finished after 50 min before,
+about 4 minutes now. See `JanusTests/Join.lean` (`pruneLimb`).
