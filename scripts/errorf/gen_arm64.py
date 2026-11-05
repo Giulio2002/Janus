@@ -5,11 +5,12 @@ fragment: `def code : List Nat` and the word offsets of its labels. Run from the
 import subprocess, sys, tempfile
 IERR = 0x2222; IWRAP = 0x4444
 def number(v, ends, lbl, outlen, outstart):
-    return [f"asr x10, {v}, #63", "eor x11, " + v + ", x10", "sub x11, x11, x10", f"lsr x12, {v}, #63",
+    return [f"cmp {v}, #0", f"cneg x11, {v}, lt", "cset x12, lt",
             f"sub x13, sp, #{ends}",
             f"{lbl}d:", "udiv x14, x11, x15", "msub x16, x14, x15, x11", "add x16, x16, #48",
             "strb w16, [x13, #-1]!", "mov x11, x14", f"cbnz x11, {lbl}d",
-            f"{lbl}s:", f"cbz x12, {lbl}p", "mov w16, #45", "strb w16, [x13, #-1]!", f"{lbl}p:",
+            f"{lbl}s:", "add x17, x12, x12, lsl #1", "mov x16, #48", "sub x16, x16, x17", "strb w16, [x13, #-1]",
+            "sub x13, x13, x12",
             f"sub x17, sp, #{ends}", f"sub {outlen}, x17, x13", f"mov {outstart}, x13"]
 def lit(bs):
     return [x for c in bs for x in (f"mov w16, #{c}", "strb w16, [x11], #1")]

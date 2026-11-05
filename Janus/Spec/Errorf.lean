@@ -91,6 +91,23 @@ theorem natBytes_lt256 (n : Nat) : ∀ b ∈ natBytes n, b < 256 := by
       · exact ih (n / 10) (by omega) b hb
       · omega
 
+theorem natBytes_length_le (n : Nat) : ∀ k, 1 ≤ k → n < 10 ^ k → (natBytes n).length ≤ k := by
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+    intro k hk1 hk
+    by_cases h : n < 10
+    · rw [natBytes_lt h]; simpa using hk1
+    · rw [natBytes_ge (by omega)]
+      cases k with
+      | zero => omega
+      | succ k =>
+        have hk2 : 1 ≤ k := by
+          rcases Nat.eq_zero_or_pos k with rfl | hp
+          · simp at hk; omega
+          · exact hp
+        have := ih (n / 10) (by omega) k hk2 (by rw [Nat.pow_succ] at hk; omega)
+        simp; omega
+
 /-- The digit `k` places from the right of `n`, as a byte. -/
 def digitByte (n k : Nat) : Nat := 48 + n / 10 ^ k % 10
 

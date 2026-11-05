@@ -20,22 +20,22 @@ open Janus.Contracts.ErrorfRealCode (code)
 set_option maxRecDepth 100000
 
 theorem dig_n1 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30).toNat % 4 = 0) :
-    ∀ (t : Nat) (R : Nat → W64) (m : Memory) (endp : Nat),
+    ∀ (t : Nat) (R : Nat → W64) (m : Memory) (F : Flags) (endp : Nat),
       t < 2 ^ 64 → R 11 = BitVec.ofNat 64 t → R 13 = BitVec.ofNat 64 endp → R 15 = 10#64 → R 30 = s.regs 30 →
       (natBytes t).length ≤ endp → endp < 2 ^ 48 →
       m.accessible (endp - (natBytes t).length) (natBytes t).length true = true →
       ∀ Q : State → Prop,
         (∀ c : W64, ReachesRet (withCode code) (s.regs 30)
           { s with regs := setReg (setReg (setReg (setReg R 11 0#64) 13 (BitVec.ofNat 64 (endp - (natBytes t).length))) 14 0#64) 16 c,
-                   mem := putBytes m (endp - (natBytes t).length) (natBytes t), pc := 0x10004c#64 } Q) →
-        ReachesRet (withCode code) (s.regs 30) { s with regs := R, mem := m, pc := 0x100034#64 } Q := by
+                   flags := F, mem := putBytes m (endp - (natBytes t).length) (natBytes t), pc := 0x100048#64 } Q) →
+        ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x100030#64 } Q := by
   intro t
   induction t using Nat.strongRecOn with
   | _ t ih =>
-  intro R m endp ht h11 h13 h15 h30R hle hend hacc Q htail
+  intro R m F endp ht h11 h13 h15 h30R hle hend hacc Q htail
   have hpos := natBytes_length_pos t
   have h1e : 1 ≤ endp := by omega
-  janus_run [h11, h13, h15, h30R] until [0x100034, 0x10004c]
+  janus_run [h11, h13, h15, h30R] until [0x100030, 0x100048]
   · -- exit: t < 10
     have ht10 : t < 10 := by omega
     have hq : t / 10 = 0 := by omega
@@ -69,7 +69,7 @@ theorem dig_n1 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       simp only [BitVec.toNat_sub, BitVec.toNat_ofNat]
       omega
     rw [hdig, hsub]
-    refine ih (t / 10) hq _ _ (endp - 1) (by omega) (by simp [setReg]) (by simp [setReg]) (by simp [setReg, h15]) (by simp [setReg, h30R])
+    refine ih (t / 10) hq _ _ _ (endp - 1) (by omega) (by simp [setReg]) (by simp [setReg]) (by simp [setReg, h15]) (by simp [setReg, h30R])
       (by omega) (by omega) ?_ Q ?_
     · simp only [Janus.Arm64.Memory.accessible_writeLE]
       exact Memory.accessible_mono _ hacc (by omega) (by omega)
@@ -90,19 +90,19 @@ theorem dig_n1 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
         rw [e2]
 
 theorem dig_n2 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30).toNat % 4 = 0) :
-    ∀ (t : Nat) (R : Nat → W64) (m : Memory) (endp : Nat),
+    ∀ (t : Nat) (R : Nat → W64) (m : Memory) (F : Flags) (endp : Nat),
       t < 2 ^ 64 → R 11 = BitVec.ofNat 64 t → R 13 = BitVec.ofNat 64 endp → R 15 = 10#64 → R 30 = s.regs 30 →
       (natBytes t).length ≤ endp → endp < 2 ^ 48 →
       m.accessible (endp - (natBytes t).length) (natBytes t).length true = true →
       ∀ Q : State → Prop,
         (∀ c : W64, ReachesRet (withCode code) (s.regs 30)
           { s with regs := setReg (setReg (setReg (setReg R 11 0#64) 13 (BitVec.ofNat 64 (endp - (natBytes t).length))) 14 0#64) 16 c,
-                   mem := putBytes m (endp - (natBytes t).length) (natBytes t), pc := 0x100090#64 } Q) →
-        ReachesRet (withCode code) (s.regs 30) { s with regs := R, mem := m, pc := 0x100078#64 } Q := by
+                   flags := F, mem := putBytes m (endp - (natBytes t).length) (natBytes t), pc := 0x100090#64 } Q) →
+        ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x100078#64 } Q := by
   intro t
   induction t using Nat.strongRecOn with
   | _ t ih =>
-  intro R m endp ht h11 h13 h15 h30R hle hend hacc Q htail
+  intro R m F endp ht h11 h13 h15 h30R hle hend hacc Q htail
   have hpos := natBytes_length_pos t
   have h1e : 1 ≤ endp := by omega
   janus_run [h11, h13, h15, h30R] until [0x100078, 0x100090]
@@ -139,7 +139,7 @@ theorem dig_n2 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       simp only [BitVec.toNat_sub, BitVec.toNat_ofNat]
       omega
     rw [hdig, hsub]
-    refine ih (t / 10) hq _ _ (endp - 1) (by omega) (by simp [setReg]) (by simp [setReg]) (by simp [setReg, h15]) (by simp [setReg, h30R])
+    refine ih (t / 10) hq _ _ _ (endp - 1) (by omega) (by simp [setReg]) (by simp [setReg]) (by simp [setReg, h15]) (by simp [setReg, h30R])
       (by omega) (by omega) ?_ Q ?_
     · simp only [Janus.Arm64.Memory.accessible_writeLE]
       exact Memory.accessible_mono _ hacc (by omega) (by omega)
@@ -160,7 +160,7 @@ theorem dig_n2 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
         rw [e2]
 
 theorem cpy_c1 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30).toNat % 4 = 0) :
-    ∀ (cnt : Nat) (R : Nat → W64) (m : Memory) (src dst : Nat),
+    ∀ (cnt : Nat) (R : Nat → W64) (m : Memory) (F : Flags) (src dst : Nat),
       cnt < 2 ^ 48 → R 12 = BitVec.ofNat 64 cnt → R 10 = BitVec.ofNat 64 src → R 11 = BitVec.ofNat 64 dst →
       R 30 = s.regs 30 → src + cnt < 2 ^ 48 → dst + cnt < 2 ^ 48 →
       (src + cnt ≤ dst ∨ dst + cnt ≤ src) →
@@ -168,13 +168,13 @@ theorem cpy_c1 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       ∀ Q : State → Prop,
         (∀ c : W64, ReachesRet (withCode code) (s.regs 30)
           { s with regs := setReg (setReg (setReg (setReg R 10 (BitVec.ofNat 64 (src + cnt))) 11 (BitVec.ofNat 64 (dst + cnt))) 12 0#64) 16 c,
-                   mem := putBytes m dst (strBytes m src cnt), pc := 0x100108#64 } Q) →
-        ReachesRet (withCode code) (s.regs 30) { s with regs := R, mem := m, pc := 0x1000f4#64 } Q := by
+                   flags := F, mem := putBytes m dst (strBytes m src cnt), pc := 0x100110#64 } Q) →
+        ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x1000fc#64 } Q := by
   intro cnt
   induction cnt with
   | zero =>
-    intro R m src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
-    janus_run [h12, h10, h11, h30R] until [0x1000f4, 0x100108]
+    intro R m F src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
+    janus_run [h12, h10, h11, h30R] until [0x1000fc, 0x100110]
     have := htail (R 16)
     refine Eq.mpr (congrArg (fun st => ReachesRet (withCode code) (s.regs 30) st Q) ?_) this
     congr 1
@@ -182,17 +182,17 @@ theorem cpy_c1 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       simp only [setReg, h10, h11, h12, Nat.add_zero]
       by_cases e16 : i = 16 <;> by_cases e12 : i = 12 <;> by_cases e11 : i = 11 <;> by_cases e10 : i = 10 <;> simp_all
   | succ cnt ih =>
-    intro R m src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
+    intro R m F src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
     have hsa' : m.accessible src (cnt + 1) false = true := by
       rcases hsa with h | h; omega; exact h
     have hda' : m.accessible dst (cnt + 1) true = true := by
       rcases hda with h | h; omega; exact h
-    janus_run [h12, h10, h11, h30R] until [0x1000f4, 0x100108]
+    janus_run [h12, h10, h11, h30R] until [0x1000fc, 0x100110]
     have hb : m.readLE src 1 % 18446744073709551616 = (m.bytes src).toNat := by
       rw [Memory.readLE_one]; exact Nat.mod_eq_of_lt (by have := (m.bytes src).isLt; omega)
     rw [hb]
     have hdis' : src + 1 + cnt ≤ dst + 1 ∨ dst + 1 + cnt ≤ src + 1 := by omega
-    refine ih _ _ (src + 1) (dst + 1) (by omega) ?_ ?_ ?_ (by simp [setReg, h30R]) (by omega) (by omega) hdis' ?_ ?_ Q ?_
+    refine ih _ _ _ (src + 1) (dst + 1) (by omega) ?_ ?_ ?_ (by simp [setReg, h30R]) (by omega) (by omega) hdis' ?_ ?_ Q ?_
     · simp [setReg]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_sub, BitVec.toNat_ofNat]; omega
     · simp [setReg]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_add, BitVec.toNat_ofNat, h10]
     · simp [setReg]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_add, BitVec.toNat_ofNat, h11]
@@ -215,7 +215,7 @@ theorem cpy_c1 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
         rw [e, strBytes_succ, putBytes_cons]
 
 theorem cpy_c2 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30).toNat % 4 = 0) :
-    ∀ (cnt : Nat) (R : Nat → W64) (m : Memory) (src dst : Nat),
+    ∀ (cnt : Nat) (R : Nat → W64) (m : Memory) (F : Flags) (src dst : Nat),
       cnt < 2 ^ 48 → R 12 = BitVec.ofNat 64 cnt → R 10 = BitVec.ofNat 64 src → R 11 = BitVec.ofNat 64 dst →
       R 30 = s.regs 30 → src + cnt < 2 ^ 48 → dst + cnt < 2 ^ 48 →
       (src + cnt ≤ dst ∨ dst + cnt ≤ src) →
@@ -223,13 +223,13 @@ theorem cpy_c2 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       ∀ Q : State → Prop,
         (∀ c : W64, ReachesRet (withCode code) (s.regs 30)
           { s with regs := setReg (setReg (setReg (setReg R 10 (BitVec.ofNat 64 (src + cnt))) 11 (BitVec.ofNat 64 (dst + cnt))) 12 0#64) 16 c,
-                   mem := putBytes m dst (strBytes m src cnt), pc := 0x10015c#64 } Q) →
-        ReachesRet (withCode code) (s.regs 30) { s with regs := R, mem := m, pc := 0x100148#64 } Q := by
+                   flags := F, mem := putBytes m dst (strBytes m src cnt), pc := 0x100164#64 } Q) →
+        ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x100150#64 } Q := by
   intro cnt
   induction cnt with
   | zero =>
-    intro R m src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
-    janus_run [h12, h10, h11, h30R] until [0x100148, 0x10015c]
+    intro R m F src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
+    janus_run [h12, h10, h11, h30R] until [0x100150, 0x100164]
     have := htail (R 16)
     refine Eq.mpr (congrArg (fun st => ReachesRet (withCode code) (s.regs 30) st Q) ?_) this
     congr 1
@@ -237,17 +237,17 @@ theorem cpy_c2 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       simp only [setReg, h10, h11, h12, Nat.add_zero]
       by_cases e16 : i = 16 <;> by_cases e12 : i = 12 <;> by_cases e11 : i = 11 <;> by_cases e10 : i = 10 <;> simp_all
   | succ cnt ih =>
-    intro R m src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
+    intro R m F src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
     have hsa' : m.accessible src (cnt + 1) false = true := by
       rcases hsa with h | h; omega; exact h
     have hda' : m.accessible dst (cnt + 1) true = true := by
       rcases hda with h | h; omega; exact h
-    janus_run [h12, h10, h11, h30R] until [0x100148, 0x10015c]
+    janus_run [h12, h10, h11, h30R] until [0x100150, 0x100164]
     have hb : m.readLE src 1 % 18446744073709551616 = (m.bytes src).toNat := by
       rw [Memory.readLE_one]; exact Nat.mod_eq_of_lt (by have := (m.bytes src).isLt; omega)
     rw [hb]
     have hdis' : src + 1 + cnt ≤ dst + 1 ∨ dst + 1 + cnt ≤ src + 1 := by omega
-    refine ih _ _ (src + 1) (dst + 1) (by omega) ?_ ?_ ?_ (by simp [setReg, h30R]) (by omega) (by omega) hdis' ?_ ?_ Q ?_
+    refine ih _ _ _ (src + 1) (dst + 1) (by omega) ?_ ?_ ?_ (by simp [setReg, h30R]) (by omega) (by omega) hdis' ?_ ?_ Q ?_
     · simp [setReg]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_sub, BitVec.toNat_ofNat]; omega
     · simp [setReg]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_add, BitVec.toNat_ofNat, h10]
     · simp [setReg]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_add, BitVec.toNat_ofNat, h11]
@@ -270,7 +270,7 @@ theorem cpy_c2 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
         rw [e, strBytes_succ, putBytes_cons]
 
 theorem cpy_c3 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30).toNat % 4 = 0) :
-    ∀ (cnt : Nat) (R : Nat → W64) (m : Memory) (src dst : Nat),
+    ∀ (cnt : Nat) (R : Nat → W64) (m : Memory) (F : Flags) (src dst : Nat),
       cnt < 2 ^ 48 → R 12 = BitVec.ofNat 64 cnt → R 10 = BitVec.ofNat 64 src → R 11 = BitVec.ofNat 64 dst →
       R 30 = s.regs 30 → src + cnt < 2 ^ 48 → dst + cnt < 2 ^ 48 →
       (src + cnt ≤ dst ∨ dst + cnt ≤ src) →
@@ -278,13 +278,13 @@ theorem cpy_c3 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       ∀ Q : State → Prop,
         (∀ c : W64, ReachesRet (withCode code) (s.regs 30)
           { s with regs := setReg (setReg (setReg (setReg R 10 (BitVec.ofNat 64 (src + cnt))) 11 (BitVec.ofNat 64 (dst + cnt))) 12 0#64) 16 c,
-                   mem := putBytes m dst (strBytes m src cnt), pc := 0x1001b0#64 } Q) →
-        ReachesRet (withCode code) (s.regs 30) { s with regs := R, mem := m, pc := 0x10019c#64 } Q := by
+                   flags := F, mem := putBytes m dst (strBytes m src cnt), pc := 0x1001b8#64 } Q) →
+        ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x1001a4#64 } Q := by
   intro cnt
   induction cnt with
   | zero =>
-    intro R m src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
-    janus_run [h12, h10, h11, h30R] until [0x10019c, 0x1001b0]
+    intro R m F src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
+    janus_run [h12, h10, h11, h30R] until [0x1001a4, 0x1001b8]
     have := htail (R 16)
     refine Eq.mpr (congrArg (fun st => ReachesRet (withCode code) (s.regs 30) st Q) ?_) this
     congr 1
@@ -292,17 +292,17 @@ theorem cpy_c3 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       simp only [setReg, h10, h11, h12, Nat.add_zero]
       by_cases e16 : i = 16 <;> by_cases e12 : i = 12 <;> by_cases e11 : i = 11 <;> by_cases e10 : i = 10 <;> simp_all
   | succ cnt ih =>
-    intro R m src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
+    intro R m F src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
     have hsa' : m.accessible src (cnt + 1) false = true := by
       rcases hsa with h | h; omega; exact h
     have hda' : m.accessible dst (cnt + 1) true = true := by
       rcases hda with h | h; omega; exact h
-    janus_run [h12, h10, h11, h30R] until [0x10019c, 0x1001b0]
+    janus_run [h12, h10, h11, h30R] until [0x1001a4, 0x1001b8]
     have hb : m.readLE src 1 % 18446744073709551616 = (m.bytes src).toNat := by
       rw [Memory.readLE_one]; exact Nat.mod_eq_of_lt (by have := (m.bytes src).isLt; omega)
     rw [hb]
     have hdis' : src + 1 + cnt ≤ dst + 1 ∨ dst + 1 + cnt ≤ src + 1 := by omega
-    refine ih _ _ (src + 1) (dst + 1) (by omega) ?_ ?_ ?_ (by simp [setReg, h30R]) (by omega) (by omega) hdis' ?_ ?_ Q ?_
+    refine ih _ _ _ (src + 1) (dst + 1) (by omega) ?_ ?_ ?_ (by simp [setReg, h30R]) (by omega) (by omega) hdis' ?_ ?_ Q ?_
     · simp [setReg]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_sub, BitVec.toNat_ofNat]; omega
     · simp [setReg]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_add, BitVec.toNat_ofNat, h10]
     · simp [setReg]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_add, BitVec.toNat_ofNat, h11]
