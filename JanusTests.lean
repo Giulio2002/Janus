@@ -37,6 +37,7 @@ import JanusTests.KernelSafeMemory
 import JanusTests.OmegaCap
 import JanusTests.LiveForallFocus
 import JanusTests.ConjApartAll
+import JanusTests.DischargeOrder
 import JanusTests.AddrSub
 import JanusTests.JanusExact
 import JanusTests.AddrRefute
