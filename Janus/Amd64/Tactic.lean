@@ -1,5 +1,6 @@
 import Lean
 import Janus.Amd64.GoABI
+import Janus.Amd64.RunRegions
 import Janus.Tactic.KernelSafe
 import Janus.Amd64.TacticAttr
 import Janus.Amd64.Disasm
@@ -461,6 +462,51 @@ theorem Summary.mono {p : Program} {entry : Nat} {pre pre' : State → Prop}
   intro s hpc hp
   obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc (hpre s hp)
   exact ⟨k, s', hst, hr, hpost s s' hp hq⟩
+
+/-! ### Runs keep the memory regions
+
+Every run of the program, a callee's included, keeps `mem.regions` (`Program.Steps.regions`), so a
+summary can be used with the equation `s'.mem.regions = s.mem.regions` for free (the callee's
+postcondition says nothing about the regions, only about bytes). `janus64_run`/`calls [S]` adds it
+as a hypothesis after each callee summary (`hrg…`). -/
+
+/-- `ReachesRet` keeps the regions. -/
+theorem ReachesRet.regions {p : Program} {ret : W64} {s : State} {Q : State → Prop}
+    (h : ReachesRet p ret s Q) :
+    ReachesRet p ret s (fun s' => Q s' ∧ s'.mem.regions = s.mem.regions) := by
+  obtain ⟨k, s', hst, hr, hq⟩ := h
+  exact ⟨k, s', hst, hr, hq, hst.regions⟩
+
+/-- `Reaches` keeps the regions: the state the run ends in has the regions of `s`. -/
+theorem Reaches.regions {p : Program} {s : State} {Q : Outcome → Prop} (h : Reaches p s Q) :
+    Reaches p s (fun o => Q o ∧ o.state.mem.regions = s.mem.regions) := by
+  obtain ⟨n, o, hr, hq⟩ := h
+  exact ⟨n, o, hr, hq, Program.run_regions hr⟩
+
+/-- A callee summary keeps the regions: its postcondition, and `s'.mem.regions = s.mem.regions`. -/
+theorem Summary.regions {p : Program} {entry : Nat} {pre : State → Prop}
+    {post : State → State → Prop} (hsum : Summary p entry pre post) :
+    Summary p entry pre (fun s s' => post s s' ∧ s'.mem.regions = s.mem.regions) := by
+  intro s hpc hpre
+  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc hpre
+  exact ⟨k, s', hst, hr, hq, hst.regions⟩
+
+/-- `Reaches.call` with the regions of the callee's return state: the continuation also gets
+`s'.mem.regions = s.mem.regions` (what `janus64_run` uses at a `calls` step). -/
+theorem Reaches.call_regions {p : Program} {entry : Nat} {pre : State → Prop}
+    {post : State → State → Prop} {s : State} {Q : Outcome → Prop}
+    (hsum : Summary p entry pre post) (hpc : s.rip = BitVec.ofNat 64 entry) (hpre : pre s)
+    (h : ∀ s', s'.rip = retAddrOf s → post s s' → s'.mem.regions = s.mem.regions →
+      Reaches p s' Q) : Reaches p s Q :=
+  Reaches.call hsum.regions hpc hpre fun s' hr hq => h s' hr hq.1 hq.2
+
+/-- `ReachesRet.call` with the regions of the callee's return state. -/
+theorem ReachesRet.call_regions {p : Program} {entry : Nat} {pre : State → Prop}
+    {post : State → State → Prop} {s : State} {ret : W64} {Q : State → Prop}
+    (hsum : Summary p entry pre post) (hpc : s.rip = BitVec.ofNat 64 entry) (hpre : pre s)
+    (h : ∀ s', s'.rip = retAddrOf s → post s s' → s'.mem.regions = s.mem.regions →
+      ReachesRet p ret s' Q) : ReachesRet p ret s Q :=
+  ReachesRet.call hsum.regions hpc hpre fun s' hr hq => h s' hr hq.1 hq.2
 
 /-! ## Read-only data (`janus64_data`)
 
@@ -1351,13 +1397,15 @@ structure Cfg where
   callNames : Array (Nat × Name) := #[]
   /-- Heartbeat budget of the run, in thousands (`janus64_run (budget := N)`). -/
   budget : Option Nat := none
+  /-- `join [pc, …]`: merge the paths that reach one of these addresses (`Common.tryMergeRel`). -/
+  joins : List Nat := []
   status : IO.Ref Status
   cache : IO.Ref StepCache
   facts : IO.Ref (Std.HashMap Nat FetchFact)
 
 def Cfg.new (args : Array Term := #[]) (stops : List Nat := []) (calls : Array (Nat × Expr) := #[])
-    (budget : Option Nat := none) (callNames : Array (Nat × Name) := #[]) : IO Cfg := do
-  return { args, stops, calls, callNames, budget, status := ← IO.mkRef {}, cache := ← IO.mkRef {},
+    (budget : Option Nat := none) (callNames : Array (Nat × Name) := #[]) (joins : List Nat := []) : IO Cfg := do
+  return { args, stops, calls, callNames, budget, joins, status := ← IO.mkRef {}, cache := ← IO.mkRef {},
            facts := ← IO.mkRef {} }
 
 /-- Build the `set` simp context (plus state hypotheses and user arguments) for the current
@@ -1689,11 +1737,12 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
   let hpc ← mkExpectedTypeHint hpc
     (← mkEq (← mkAppM ``State.rip #[s]) (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) entry))
   let hpreM ← mkFreshExprSyntheticOpaqueMVar (mkApp pre s).headBeta
+  let regs := Common.janus.callRegions.get (← getOptions)
   let lem ← match ← goalKind g with
     | .reachesRet _ ret _ Q =>
-      pure <| mkAppN (mkConst ``ReachesRet.call) #[p, entry, pre, post, s, ret, Q, hsum, hpc, hpreM]
+      pure <| mkAppN (mkConst (if regs then ``ReachesRet.call_regions else ``ReachesRet.call)) #[p, entry, pre, post, s, ret, Q, hsum, hpc, hpreM]
     | .reaches _ _ Q =>
-      pure <| mkAppN (mkConst ``Reaches.call) #[p, entry, pre, post, s, Q, hsum, hpc, hpreM]
+      pure <| mkAppN (mkConst (if regs then ``Reaches.call_regions else ``Reaches.call)) #[p, entry, pre, post, s, Q, hsum, hpc, hpreM]
     | _ => throwError "{tacName}: unexpected goal at a call"
   let gs ← Common.applyFast g lem
   Common.setPhase cfg.status s!"proving the precondition of the summary of {callee}"
@@ -1709,6 +1758,8 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
     if ← g'.isAssigned then continue
     let mut before ← g'.withContext do return (← getLCtx).getFVarIds
     let (fv, g'') ← g'.introNP 3
+    -- the callee's run keeps the regions of the call state (`Program.Steps.regions`): `hrg…`
+    let g'' ← if regs then pure (← g''.intro (← Common.regionsName g'' hname)).2 else pure g''
     -- `calls [hS := S]`: the whole postcondition as `hS`, left alone by the steps below
     let g'' ← match hname with
       | some n => do
@@ -1939,7 +1990,9 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
   let mut steps := 0
   let merge := Common.janus.merge.get (← getOptions)
   while !todo.isEmpty do
-    if merge then todo ← Common.pickMerged { memTypes := [``Janus.Arm64.Memory, ``Memory], regChains := [(``setRegF, ``State.regs)], restore := [``reduceSetRegFRestore] } goalPC todo
+    let spec : Common.MergeSpec := { memTypes := [``Janus.Arm64.Memory, ``Memory], regChains := [(``setRegF, ``State.regs)], restore := [``reduceSetRegFRestore] }
+    if !cfg.joins.isEmpty then todo ← Common.pickMerged spec goalPC todo (some cfg.joins)
+    else if merge then todo ← Common.pickMerged spec goalPC todo
     let (g, first) :: rest := todo | break
     todo := rest
     if ← g.isAssigned then continue
@@ -1986,7 +2039,7 @@ def janus64dischBody : TacticM Unit := do
     if ← Common.dischargeLiveForall g then return
   if let some (_, lhs, _) := t.eq? then
     if lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then
-      if ← dischargeAccessible g then return
+      if ← Common.withJoinSplit g dischargeAccessible then return
       throwError "janus64_disch: cannot prove{indentExpr t}"
   match ← Janus.Carry.dischCarry g with
   | some true => return
@@ -2019,6 +2072,7 @@ syntax janus64Until := (" until " "[" term,* "]")?
 syntax janus64Call := (atomic(ident " := "))? term
 syntax janus64Calls := (" calls " "[" janus64Call,* "]")?
 syntax janus64Budget := (" (" &"budget" " := " num ")")?
+syntax janus64Join := (" join " "[" term,* "]")?
 
 def parseArgs (stx : Syntax) : Array Term :=
   if stx[0].isNone then #[] else stx[0][1].getSepArgs.map (⟨·⟩)
@@ -2080,18 +2134,28 @@ def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) :=
 def parseCallNames (stx : Syntax) : TacticM (Array (Nat × Name)) :=
   return (← parseCallsNamed stx).filterMap fun (n, _, nm) => nm.map (n, ·)
 
+/-- `join [pc, …]`: the addresses where paths are merged (see `Common.tryMergeRel`). -/
+def parseJoin (stx : Syntax) : TacticM (List Nat) := do
+  if stx[0].isNone then return []
+  (stx[0][2].getSepArgs.toList).mapM fun t => do
+    let e ← Term.elabTerm t (some (mkConst ``Nat))
+    Term.synthesizeSyntheticMVarsNoPostponing
+    let e ← instantiateMVars e
+    let some n ← evalNat e | throwError "janus64_run join: not a numeral: {t}"
+    return n
+
 def parseBudget (stx : Syntax) : Option Nat :=
   if stx[0].isNone then none else stx[0][3].isNatLit?
 
 /-- Symbolically execute until every branch reaches an outcome: the return address, a stub, the
 end of a callee (`ReachesRet`), or an `until` address. `calls [h, …]` uses callee summaries
 instead of executing the callees; `(budget := N)` limits the run to `N` thousand heartbeats. -/
-elab "janus64_run" bud0:janus64Budget args:janus64Args stops:janus64Until cs:janus64Calls bud:janus64Budget :
+elab "janus64_run" bud0:janus64Budget args:janus64Args stops:janus64Until cs:janus64Calls js:janus64Join bud:janus64Budget :
     tactic => withMainContext do
   let cl ← parseCallsNamed cs
   let cfg ← Cfg.new (parseArgs args) (← parseUntil stops) (cl.map fun (n, e, _) => (n, e))
     ((parseBudget bud).orElse fun _ => parseBudget bud0)
-    (cl.filterMap fun (n, _, nm) => nm.map (n, ·))
+    (cl.filterMap fun (n, _, nm) => nm.map (n, ·)) (← parseJoin js)
   runJanus cfg false
 
 /-- One symbolic execution step. -/

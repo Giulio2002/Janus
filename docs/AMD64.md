@@ -586,7 +586,9 @@ It has the same interface as the arm64 automation (`docs/PROOFS.md`, *Tactics*):
 pushed, `retAddrOf s` (the word at `[RSP]` on entry), satisfying `post s`. Prove it with
 `janus64_run` on the `ReachesRet` goal (also with `calls [...]` for its own callees), and use it
 with `janus64_run calls [h, …]` (`calls [hS := h]` also keeps the callee's whole postcondition as the named
-hypothesis `hS`, for stable destructuring): at the callee's entry (after the `CALL` instruction) the
+hypothesis `hS`, for stable destructuring; with `set_option janus.callRegions true` (default off) each call step also adds `hrg<n> : s'.mem.regions = s.mem.regions`,
+`hS_regions` for the named form, because a run keeps the memory regions, `Program.Steps.regions`, which
+`rtView_eq_of_frame` needs next to the callee's `MemFrame`): at the callee's entry (after the `CALL` instruction) the
 precondition is proved for the current state and the postcondition is destructured
 (existentials, conjunctions, `s' = …` substituted). A leaf callee:
 

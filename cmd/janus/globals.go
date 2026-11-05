@@ -314,21 +314,15 @@ func extractGlobals(b *Binary, sym string, maxFunctions int, contracts, globals 
 }
 
 func writeGlobalSegment(sb *strings.Builder, g GlobalSeg, indent string) {
-	fmt.Fprintf(sb, "{ name := %s, base := 0x%x, size := %d, init := [", leanString(g.Name), g.Base, g.Size)
-	multi := len(g.Bytes) > bytesPerLine
-	for j, v := range g.Bytes {
-		if j > 0 {
-			sb.WriteString(",")
-			if !(multi && j%bytesPerLine == 0) {
-				sb.WriteString(" ")
-			}
-		}
-		if multi && j%bytesPerLine == 0 {
-			sb.WriteString("\n" + indent + "    ")
-		}
-		fmt.Fprintf(sb, "0x%02x", v)
+	writeGlobalSegmentExpr(sb, g, indent, "")
+}
+
+// writeGlobalSegmentExpr renders a global record whose init bytes are the expression expr ("" renders the literal).
+func writeGlobalSegmentExpr(sb *strings.Builder, g GlobalSeg, indent, expr string) {
+	if expr == "" {
+		expr = byteLit(g.Bytes, indent)
 	}
-	sb.WriteString("] }")
+	fmt.Fprintf(sb, "{ name := %s, base := 0x%x, size := %d, init := %s }", leanString(g.Name), g.Base, g.Size, expr)
 }
 
 // writeGlobals renders `def globals` (only when --global named symbols), inline when small,
@@ -351,11 +345,14 @@ func writeGlobals(sb *strings.Builder, gs []GlobalSeg) {
 		return
 	}
 	for i, g := range gs {
-		if len(g.Bytes) > segmentWordLimit {
+		expr := writeListTree(sb, fmt.Sprintf("global%d_init", i), len(g.Bytes), func(lo, hi int) string {
+			return byteLit(g.Bytes[lo:hi], "  ")
+		})
+		if expr == "" && len(g.Bytes) > segmentWordLimit {
 			sb.WriteString("set_option maxRecDepth 100000 in\n")
 		}
 		fmt.Fprintf(sb, "def global%d : GlobalSegment :=\n  ", i)
-		writeGlobalSegment(sb, g, "  ")
+		writeGlobalSegmentExpr(sb, g, "  ", expr)
 		sb.WriteString("\n\n")
 	}
 	sb.WriteString("def globals : List GlobalSegment := [")

@@ -551,10 +551,52 @@ const (
 
 const bytesPerLine = 16
 
-func writeDataSegment(sb *strings.Builder, d DataSeg, indent string) {
-	fmt.Fprintf(sb, "{ name := %s, base := 0x%x, bytes := [", leanString(d.Name), d.Base)
-	multi := len(d.Bytes) > bytesPerLine
-	for j, v := range d.Bytes {
+// A list literal of more than treeListElems elements is not written as one literal: a single `def` with ~30000
+// elements exceeds the default heartbeats of its elaboration (`abstract nested proofs`) however high maxRecDepth is
+// raised (smaller lists keep the earlier shape, so existing extractions are unchanged). Such a list is a tree of definitions: leaves of treeLeafElems elements, joined by `++`
+// (at most treeFanout operands per node, so the nesting stays shallow), so the elaboration and the kernel check
+// are linear in the program. The auditor's identity checks are unaffected: `Extracted.program` is the same value,
+// and `janus check` regenerates the whole file.
+const (
+	treeListElems = 16384 // a single literal with maxRecDepth raised elaborates up to ~24000 elements and not at 32000
+	treeLeafElems = 1024
+	treeFanout    = 16
+)
+
+// writeListTree writes the definitions of a `List Nat` of n elements that is too long for one literal
+// (n > treeListElems) and returns the name of its root definition; "" when the list fits in a literal. lit(lo, hi)
+// renders the literal of elements lo..hi-1.
+func writeListTree(sb *strings.Builder, name string, n int, lit func(lo, hi int) string) string {
+	if n <= treeListElems {
+		return ""
+	}
+	var names []string
+	for lo, k := 0, 0; lo < n; lo, k = lo+treeLeafElems, k+1 {
+		hi := min(lo+treeLeafElems, n)
+		leaf := fmt.Sprintf("%s_%d", name, k)
+		fmt.Fprintf(sb, "def %s : List Nat :=\n  %s\n\n", leaf, lit(lo, hi))
+		names = append(names, leaf)
+	}
+	for level := 0; len(names) > treeFanout; level++ {
+		var next []string
+		for lo, k := 0, 0; lo < len(names); lo, k = lo+treeFanout, k+1 {
+			hi := min(lo+treeFanout, len(names))
+			node := fmt.Sprintf("%s_n%d_%d", name, level, k)
+			fmt.Fprintf(sb, "def %s : List Nat :=\n  %s\n\n", node, strings.Join(names[lo:hi], " ++ "))
+			next = append(next, node)
+		}
+		names = next
+	}
+	fmt.Fprintf(sb, "def %s : List Nat :=\n  %s\n\n", name, strings.Join(names, " ++ "))
+	return name
+}
+
+// byteLit renders the list literal of bytes (16 per line when long), as inside the data and code records.
+func byteLit(bs []byte, indent string) string {
+	var sb strings.Builder
+	sb.WriteString("[")
+	multi := len(bs) > bytesPerLine
+	for j, v := range bs {
 		if j > 0 {
 			sb.WriteString(",")
 			if !(multi && j%bytesPerLine == 0) {
@@ -564,15 +606,18 @@ func writeDataSegment(sb *strings.Builder, d DataSeg, indent string) {
 		if multi && j%bytesPerLine == 0 {
 			sb.WriteString("\n" + indent + "    ")
 		}
-		fmt.Fprintf(sb, "0x%02x", v)
+		fmt.Fprintf(&sb, "0x%02x", v)
 	}
-	sb.WriteString("] }")
+	sb.WriteString("]")
+	return sb.String()
 }
 
-func writeSegment(sb *strings.Builder, s Segment, indent string) {
-	fmt.Fprintf(sb, "{ name := %s, base := 0x%x, words := [", leanString(s.Name), s.Base)
-	multi := len(s.Words) > wordsPerLine
-	for j, w := range s.Words {
+// wordLit renders the list literal of instruction words (8 per line when long).
+func wordLit(ws []uint32, indent string) string {
+	var sb strings.Builder
+	sb.WriteString("[")
+	multi := len(ws) > wordsPerLine
+	for j, w := range ws {
 		if j > 0 {
 			sb.WriteString(",")
 			if !(multi && j%wordsPerLine == 0) {
@@ -582,9 +627,34 @@ func writeSegment(sb *strings.Builder, s Segment, indent string) {
 		if multi && j%wordsPerLine == 0 {
 			sb.WriteString("\n" + indent + "    ")
 		}
-		fmt.Fprintf(sb, "0x%08x", w)
+		fmt.Fprintf(&sb, "0x%08x", w)
 	}
-	sb.WriteString("] }")
+	sb.WriteString("]")
+	return sb.String()
+}
+
+func writeDataSegment(sb *strings.Builder, d DataSeg, indent string) {
+	writeDataSegmentExpr(sb, d, indent, "")
+}
+
+// writeDataSegmentExpr renders a data record whose bytes are the expression expr ("" renders the literal).
+func writeDataSegmentExpr(sb *strings.Builder, d DataSeg, indent, expr string) {
+	if expr == "" {
+		expr = byteLit(d.Bytes, indent)
+	}
+	fmt.Fprintf(sb, "{ name := %s, base := 0x%x, bytes := %s }", leanString(d.Name), d.Base, expr)
+}
+
+func writeSegment(sb *strings.Builder, s Segment, indent string) {
+	writeSegmentExpr(sb, s, indent, "")
+}
+
+// writeSegmentExpr renders a code record whose words are the expression expr ("" renders the literal).
+func writeSegmentExpr(sb *strings.Builder, s Segment, indent, expr string) {
+	if expr == "" {
+		expr = wordLit(s.Words, indent)
+	}
+	fmt.Fprintf(sb, "{ name := %s, base := 0x%x, words := %s }", leanString(s.Name), s.Base, expr)
 }
 
 // renderLean produces Extracted.lean. The output is a pure function of the extraction, so
@@ -612,11 +682,14 @@ func renderLean(x *Extraction) []byte {
 		sb.WriteString(" ]\n\n")
 	} else {
 		for i, s := range x.Segments {
-			if len(s.Words) > segmentWordLimit {
+			expr := writeListTree(&sb, fmt.Sprintf("seg%d_words", i), len(s.Words), func(lo, hi int) string {
+				return wordLit(s.Words[lo:hi], "  ")
+			})
+			if expr == "" && len(s.Words) > segmentWordLimit {
 				sb.WriteString("set_option maxRecDepth 100000 in\n")
 			}
 			fmt.Fprintf(&sb, "def seg%d : Segment :=\n  ", i)
-			writeSegment(&sb, s, "  ")
+			writeSegmentExpr(&sb, s, "  ", expr)
 			sb.WriteString("\n\n")
 		}
 		sb.WriteString("def segments : List Segment := [")
@@ -713,11 +786,14 @@ func writeData(sb *strings.Builder, data []DataSeg) {
 		return
 	}
 	for i, d := range data {
-		if len(d.Bytes) > segmentWordLimit {
+		expr := writeListTree(sb, fmt.Sprintf("data%d_bytes", i), len(d.Bytes), func(lo, hi int) string {
+			return byteLit(d.Bytes[lo:hi], "  ")
+		})
+		if expr == "" && len(d.Bytes) > segmentWordLimit {
 			sb.WriteString("set_option maxRecDepth 100000 in\n")
 		}
 		fmt.Fprintf(sb, "def data%d : DataSegment :=\n  ", i)
-		writeDataSegment(sb, d, "  ")
+		writeDataSegmentExpr(sb, d, "  ", expr)
 		sb.WriteString("\n\n")
 	}
 	sb.WriteString("def data : List DataSegment := [")

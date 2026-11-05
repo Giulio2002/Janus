@@ -1224,6 +1224,22 @@ def namePost (g : MVarId) (hpost : FVarId) (name : Name) : MetaM (FVarId × MVar
   let (h, g) ← (← g.assert name ty (mkFVar hpost)).intro1P
   return (h, g)
 
+register_option janus.callRegions : Bool := {
+  defValue := false
+  descr := "(opt-in) after a `calls` step, add the callee's regions fact `hrg<n> : s'.mem.regions = s.mem.regions`"
+}
+
+/-- A fresh name for the regions equation of a callee summary (`hrg1`, `hrg2`, … in order of
+the calls), or `hS_regions` for `calls [hS := S]`. -/
+def regionsName (g : MVarId) (hname : Option Name) : MetaM Name := g.withContext do
+  match hname with
+  | some n => return Name.mkSimple (n.toString ++ "_regions")
+  | none =>
+    let lctx ← getLCtx
+    let mut i := 1
+    while (lctx.findFromUserName? (Name.mkSimple s!"hrg{i}")).isSome do i := i + 1
+    return Name.mkSimple s!"hrg{i}"
+
 /-! ## Restored registers -/
 
 /-- For a register-file chain `setR (… (setR (x.regs) r₁ v₁) …) rₖ vₖ` (with `setR` the ISA's
@@ -1434,6 +1450,43 @@ def addDerivedAccessible (g : MVarId) : MetaM (Option MVarId) := g.withContext d
   let hs : Array LocalDecl := (← getLCtx).decls.toArray.filterMap id
   addNamedPredicateFacts g hs true "h_acc"
 
+/-- Destruct the conjunctions among the fields `fs` of a case split. -/
+partial def casesAnds (g : MVarId) (fs : Array FVarId) : MetaM MVarId := do
+  let mut g := g
+  let mut todo := fs.toList
+  while true do
+    match todo with
+    | [] => break
+    | f :: rest =>
+      todo := rest
+      let ty ← g.withContext do whnfR (← instantiateMVars (← f.getType))
+      if ty.isAppOfArity ``And 2 then
+        let sub ← g.cases f
+        let some s := sub[0]? | continue
+        g := s.mvarId
+        todo := (s.fields.filterMap fun e => if e.isFVar then some e.fvarId! else none).toList ++ todo
+  return g
+
+/-- Run `k` on the goal; if it fails and the context has a join hypothesis `hjoin` (see
+`tryMergeRel`), split it: in each disjunct the generalised variables are replaced by their
+values and `k` is run again. Proves the goal only if `k` proves every disjunct. -/
+partial def withJoinSplit (g : MVarId) (k : MVarId → TacticM Bool) : TacticM Bool := do
+  let saved ← saveState
+  if ← k g then return true
+  saved.restore
+  let some d ← g.withContext do
+      (← getLCtx).findDeclRevM? fun d => do
+        if d.isImplementationDetail || d.userName.eraseMacroScopes != `hjoin then return none
+        return if (← whnfR (← instantiateMVars d.type)).isAppOfArity ``Or 2 then some d else none
+    | return false
+  let subs ← try g.cases d.fvarId catch _ => return false
+  for s in subs do
+    let g1 ← try casesAnds s.mvarId (s.fields.filterMap fun e => if e.isFVar then some e.fvarId! else none) catch _ => return false
+    let gs ← try Tactic.run g1 (evalTactic (← `(tactic| subst_vars; try simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat]))) catch _ => return false
+    let some g2 := gs.head? | return false
+    unless ← withJoinSplit g2 k do return false
+  return true
+
 /-! ## Sparse omega
 
 `omega` case-splits on every disjunctive hypothesis of the context (the aliasing preconditions
@@ -1599,6 +1652,33 @@ def omegaFocused (g : MVarId) : TacticM Bool := g.withContext do
     return false
 
 
+/-- The reads `m.readLE a n` of `src` (literal `n`), with their bounds `m.readLE a n < 256 ^ n`
+(`Memory.readLE_lt`, a proved lemma) added as hypotheses of `g`: `omega` treats a read as an unbounded
+natural, so e.g. the condition `(2^64 - x + y) % 2^64 ≠ 0` of a `cmp` on two limbs could not be refuted
+from `y ≤ x`, and an address loaded from memory could not be shown below `2^64`. At most 8 reads. -/
+def addReadBoundsOf (g : MVarId) (src : Expr) : MetaM MVarId := g.withContext do
+  let src ← instantiateMVars src
+  let acc ← IO.mkRef (#[] : Array Expr)
+  src.forEachWhere (fun t => t.isAppOfArity ``Janus.Arm64.Memory.readLE 3 && !t.hasLooseBVars)
+    (fun t => acc.modify fun a => if a.contains t then a else a.push t)
+  let reads := (← acc.get).extract 0 8
+  let mut g := g
+  for t in reads do
+    unless ((t.getArg! 2).nat?.isSome || (t.getArg! 2).rawNatLit?.isSome) do continue
+    let pf := mkApp3 (mkConst ``Janus.Arm64.Memory.readLE_lt) (t.getArg! 0) (t.getArg! 1) (t.getArg! 2)
+    g ← g.assert `hrb (← inferType pf) pf
+    let (_, g') ← g.intro1
+    g := g'
+  return g
+
+/-- `addReadBoundsOf` for the reads of the branch condition `hbr` (the last one) of the goal. -/
+def addReadBounds (g : MVarId) : MetaM MVarId := g.withContext do
+  for d in (← getLCtx).decls.toList.reverse do
+    if let some d := d then
+      if !d.isImplementationDetail && d.userName.eraseMacroScopes == `hbr then
+        return ← addReadBoundsOf g d.type
+  return g
+
 /-- `omega` for side conditions of the dischargers, in stages: the sparse attempts, `omega` in the context
 restricted to the hypotheses about the goal's free variables, `omega` on the full context (capped). -/
 def omegaStaged (g : MVarId) : TacticM Bool := do
@@ -1622,6 +1702,8 @@ def omegaStaged (g : MVarId) : TacticM Bool := do
 
 elab "janus_omega_staged" : tactic => do
   let g ← getMainGoal
+  let g ← addReadBoundsOf g (← g.getType)
+  replaceMainGoal [g]
   unless ← omegaStaged g do throwError "janus_omega_staged: omega failed in every stage"
   replaceMainGoal []
 
@@ -1632,6 +1714,8 @@ are not handed to `omega`), then the sparse attempts, then `omega` on the full c
 `n` disjunctive facts in the context the full one costs about `2^n`. -/
 elab "janus_omega_prune" : tactic => do
   let g ← getMainGoal
+  let g ← addReadBounds g
+  replaceMainGoal [g]
   let saved ← saveState
   let seed ← g.withContext do
     let mut atoms : Array Expr := #[]
@@ -1730,6 +1814,34 @@ def dischargeApart (g : MVarId) : TacticM Bool := g.withContext do
       catch _ => saved.restore
   return false
 
+/-- The components of the conjunctions among the hypotheses, as hypotheses of their own (in the goal `g` only; the
+proof terms are projections): a live call's postcondition states `ApartAll buf n L ∧ Apart buf n obj k` as one
+conjunction after `simp` (the live set of a second call is `L ++ [obj] ++ …`), and neither the `ApartAll`/`Outside`
+search of `closePart` nor `omega` look inside it. Only the atoms `Apart`, `ApartAll`, `Outside`, `InRanges` are
+exposed, and only conjunctions that contain one of them. -/
+partial def exposeConj (g : MVarId) : MetaM MVarId := g.withContext do
+  let isAtom (t : Expr) : Bool :=
+    t.isAppOfArity ``Janus.Apart 4 || t.isAppOfArity `Janus.Contracts.ApartAll 3 ||
+      t.isAppOfArity ``Janus.Outside 3 || t.isAppOfArity ``Janus.InRanges 3
+  let rec hasAtom (t : Expr) (fuel : Nat) : Bool :=
+    isAtom t || (fuel > 0 && t.isAppOfArity ``And 2 && (hasAtom (t.getArg! 0) (fuel - 1) || hasAtom (t.getArg! 1) (fuel - 1)))
+  let rec comps (e t : Expr) (fuel : Nat) (acc : Array (Expr × Expr)) : MetaM (Array (Expr × Expr)) := do
+    if t.isAppOfArity ``And 2 && fuel > 0 then
+      let acc ← comps (← mkAppM ``And.left #[e]) (t.getArg! 0) (fuel - 1) acc
+      comps (← mkAppM ``And.right #[e]) (t.getArg! 1) (fuel - 1) acc
+    else if isAtom t then return acc.push (e, t)
+    else return acc
+  let mut found : Array (Expr × Expr) := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    if ty.isAppOfArity ``And 2 && hasAtom ty 4 then found ← comps d.toExpr ty 4 found
+  let mut g := g
+  for (e, t) in found do
+    let (_, g') ← (← g.assert `h_conj t e).intro1P
+    g := g'
+  return g
+
 /-- A side condition `Outside a n rs` (of a `MemFrame` read rule): unfold the literal list and
 prove each range condition by `omega`. -/
 def dischargeOutside (g : MVarId) : TacticM Bool := do
@@ -1750,7 +1862,9 @@ where
   /-- One conjunct: arithmetic by `omega`, or `Outside a n rs` for a list `rs` that is not a
   literal (a variable such as the runtime-owned ranges of a contract) from a hypothesis
   `Outside b k rs` with `[a, a+n) ⊆ [b, b+k)` (`Outside.of_sub`). -/
-  closePart (g : MVarId) : TacticM Bool := g.withContext do
+  closePart (g : MVarId) : TacticM Bool := do
+    let g ← exposeConj g
+    g.withContext do
     let t ← instantiateMVars (← g.getType)
     if t.isAppOfArity ``Janus.Outside 3 then
       let rs := t.getArg! 2
@@ -2012,9 +2126,25 @@ def dischargeLiveForall (g : MVarId) : TacticM Bool := do
       -- keep it only if it is about the same list
       let (_, g4) ← (← g3.assert `h_live aty app).intro1P
       g3 := g4
+    -- first `omega` in the context restricted to the hypotheses about the goal's atoms (`r` and the
+    -- window addresses): the instantiated facts are all there, while the context after several
+    -- calls holds a dozen unrelated disjunctions (`Disjoint`/`Apart` facts of other pointers) that a
+    -- full-context `omega` splits (2^n cases of ~0.3 s each: minutes, or an unbounded search when the
+    -- goal is not provable from the instantiated facts); the full context is the fallback
+    let saved2 ← saveState
+    try
+      let gs ← Tactic.run g3 <| withoutRecover do
+        evalTactic (← `(tactic|
+          (try simp only [Janus.Apart, Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true] at *)))
+        let g' ← clearIrrelevant (← getMainGoal)
+        replaceMainGoal [g']
+        evalTactic (← `(tactic| omega))
+      if gs.isEmpty then return true
+    catch _ => pure ()
+    saved2.restore
     let gs ← Tactic.run g3 <| withoutRecover (evalTactic (← `(tactic|
       (try simp only [Janus.Apart, Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true] at *
-       omega))))
+       janus_omega_cap))))
     if gs.isEmpty then return true
     saved.restore; return false
   catch _ => saved.restore; return false
@@ -2155,6 +2285,22 @@ elab "janus_rfl_proj" : tactic => do
   unless isProj do throwError "janus_rfl_proj: the left side is not a projection"
   evalTactic (← `(tactic| rfl))
 
+/-- Does `e` contain a store (`Arm64.Memory.writeLE`, the memory of both ISAs) or a memory-region update? -/
+def hasStore (e : Expr) : Bool :=
+  (e.find? fun x => x.isAppOfArity ``Janus.Arm64.Memory.writeLE 4).isSome
+
+/-- `janus_rfl`: `rfl` that cannot stall on a store chain. It tries `with_reducible rfl`; only when the goal mentions no
+`writeLE` does it fall back to the full `rfl` (default transparency). A plain `rfl` on `readLE (writeLE (… s.mem …) …) n = v`
+unfolds both sides through the whole chain before failing: 35-95 s per attempt in FV-B's DivMod wrapper, where it was an
+alternative in `first | rfl | … `. It proves exactly what `rfl` proves on goals without stores, and on goals with stores only what
+`with_reducible rfl` proves (use `simp`/`rw` with the memory lemmas for the rest). -/
+elab "janus_rfl" : tactic => do
+  let g ← getMainGoal
+  let t ← instantiateMVars (← g.getType)
+  try evalTactic (← `(tactic| with_reducible rfl))
+  catch e =>
+    if hasStore t then throw e
+    else evalTactic (← `(tactic| rfl))
 
 /-- `janus_eval% t`: the closed natural number `t` (e.g. `segAddr Extracted.program "f" + 8`),
 evaluated at elaboration time and inserted as a numeral. For arguments that must be literals
@@ -2813,12 +2959,93 @@ def restoreRegs (spec : MergeSpec) (e : Expr) : MetaM Simp.Result := do
   let (r, _) ← simp e ctx #[sp] none
   return r
 
+/-- `P₁ ∧ … ∧ Pₖ ∧ True` for the hypotheses `fs` of `side`, as a type and a proof from them. -/
+def conjOfHyps (side : MVarId) (fs : Array FVarId) : MetaM (Expr × Expr) := side.withContext do
+  let mut ty := mkConst ``True
+  let mut pf := mkConst ``True.intro
+  for f in fs.reverse do
+    let t ← instantiateMVars (← f.getType)
+    pf := mkApp4 (mkConst ``And.intro) t ty (mkFVar f) pf
+    ty := mkApp2 (mkConst ``And) t ty
+  return (ty, pf)
+
+/-- `lhs₀ = rhs₀ ∧ … ∧ True` (`tys`: the types of the sides) and, when each `lhsᵢ` and `rhsᵢ` are the same term, its proof by `Eq.refl`. -/
+def eqConj (tys lhs rhs : Array Expr) (refl : Bool) : MetaM (Expr × Expr) := do
+  let mut ty := mkConst ``True
+  let mut pf := mkConst ``True.intro
+  for i in [0:lhs.size] do
+    let k := lhs.size - 1 - i
+    let lvl ← Meta.getLevel tys[k]!
+    let e := mkApp3 (mkConst ``Eq [lvl]) tys[k]! lhs[k]! rhs[k]!
+    if refl then pf := mkApp4 (mkConst ``And.intro) e ty (mkApp2 (mkConst ``Eq.refl [lvl]) tys[k]! rhs[k]!) pf
+    ty := mkApp2 (mkConst ``And) e ty
+  return (ty, pf)
+
+/-- The relational merge (`join [pc, …]`): like `tryMerge`, but the merged goal keeps what distinguished the two paths. It is
+`∀ jv…, hjoin → template`, with `hjoin : (P_g ∧ jv₀ = a₀ ∧ …) ∨ (P_h ∧ jv₀ = b₀ ∧ …)`: `P_g`/`P_h` are the branch conditions only the
+first / only the second path had, and `aᵢ`/`bᵢ` the values the two paths gave the generalised subterms. Each path proves its
+instance by instantiating the `jv`s with its own values and passing its disjunct, built from its own branch hypotheses and
+`Eq.refl`s, so the proof is an ordinary term the kernel checks and nothing new is trusted. The memory is never generalised
+(differing memories make the paths unmergeable, see `antiUnify`). -/
+def tryMergeRel (spec : MergeSpec) (g h : MVarId) (tg th tmpl : Expr)
+    (vars : Array (FVarId × Expr × Expr × Expr)) (dropG dropH : Array FVarId) (saved : Meta.SavedState) :
+    MetaM (Option MVarId) := do
+  -- the context both paths share, from dummy goals (so that `g` and `h` themselves stay unassigned)
+  let gd ← g.withContext (mkFreshExprSyntheticOpaqueMVar tg)
+  let hd ← h.withContext (mkFreshExprSyntheticOpaqueMVar th)
+  let gd' ← fastClear gd.mvarId! dropG
+  let hd' ← fastClear hd.mvarId! dropH
+  if (← gd'.getDecl).lctx.getFVarIds != (← hd'.getDecl).lctx.getFVarIds then saved.restore; return none
+  let fvs := vars.map (mkFVar ·.1)
+  let (ptyG, ppfG) ← conjOfHyps g dropG
+  let (ptyH, ppfH) ← conjOfHyps h dropH
+  let jvs := vars.map (mkFVar ·.1)
+  let tys := vars.map (·.2.1)
+  let (eqTyG, _) ← eqConj tys jvs (vars.map (·.2.2.1)) false
+  let (eqTyH, _) ← eqConj tys jvs (vars.map (·.2.2.2)) false
+  let sideG := mkApp2 (mkConst ``And) ptyG eqTyG
+  let sideH := mkApp2 (mkConst ``And) ptyH eqTyH
+  let hjoin := mkApp2 (mkConst ``Or) sideG sideH
+  let body := (Expr.forallE `hjoin hjoin tmpl .default).abstract fvs
+  let mut ty := body
+  for i in [0:vars.size] do
+    let j := vars.size - 1 - i
+    ty := .forallE (Name.mkSimple s!"jv{j}") ((vars[j]!.2.1).abstractRange j fvs) ty .default
+  let ok ← gd'.withContext do try Meta.check ty; pure true catch _ => pure false
+  unless ok do saved.restore; return none
+  let m ← gd'.withContext (mkFreshExprSyntheticOpaqueMVar ty (← gd'.getTag))
+  let inst (side : MVarId) (left : Bool) (vals : Array Expr) (target ppf : Expr) : MetaM Bool := side.withContext do
+    let inst1 (e : Expr) : Expr := (e.abstract fvs).instantiateRev vals
+    let r ← restoreRegs spec (inst1 tmpl)
+    unless r.expr == target do
+      unless ← withReducible (isDefEq r.expr target) do return false
+    let (eqTy, eqPf) ← eqConj tys vals vals true
+    let (pty, _) := if left then (ptyG, ppfG) else (ptyH, ppfH)
+    let side1 := mkApp4 (mkConst ``And.intro) pty eqTy ppf eqPf
+    let A := inst1 sideG
+    let B := inst1 sideH
+    let disj := if left then mkApp3 (mkConst ``Or.inl) A B side1 else mkApp3 (mkConst ``Or.inr) A B side1
+    let pf := mkApp (mkAppN m vals) disj
+    match r.proof? with
+    | none => side.assign pf
+    | some eq => side.assign (← mkEqMP eq pf)
+    return true
+  unless ← inst g true (vars.map (·.2.2.1)) tg ppfG do
+    trace[janus] "not merged: the merged goal does not instantiate to the first one"
+    saved.restore; return none
+  unless ← inst h false (vars.map (·.2.2.2)) th ppfH do
+    trace[janus] "not merged: the merged goal does not instantiate to the second one"
+    saved.restore; return none
+  let names := (List.range vars.size).map (fun j => Name.mkSimple s!"jv{j}") ++ [`hjoin]
+  let (_, g'') ← m.mvarId!.introN (vars.size + 1) names
+  return some g''
+
 /-- Merge `h` into `g` (same pc): `some g'` (the goal that remains; both `g` and `h` are
 assigned through it) if their contexts differ only in branch hypotheses and their targets differ
 in at most `maxVars` non-memory subterms (registers, flags), which the merged goal quantifies
 over (`∀ jv…`; e.g. a scratch register or the flags that the two sides of a diamond left
 differently, and that the code after the join overwrites). -/
-def tryMerge (spec : MergeSpec) (g h : MVarId) (maxVars : Nat := 8) : MetaM (Option MVarId) := do
+def tryMerge (spec : MergeSpec) (g h : MVarId) (maxVars : Nat := 8) (rel : Bool := false) : MetaM (Option MVarId) := do
   let (hbG, restG) := splitBranchHyps (← g.getDecl).lctx
   let (hbH, restH) := splitBranchHyps (← h.getDecl).lctx
   unless restG == restH do
@@ -2836,6 +3063,7 @@ def tryMerge (spec : MergeSpec) (g h : MVarId) (maxVars : Nat := 8) : MetaM (Opt
   let dropG := hbG.filter (!hbH.contains ·)
   let dropH := hbH.filter (!hbG.contains ·)
   let saved ← saveState
+  if rel then return ← tryMergeRel spec g h tg th tmpl vars dropG dropH saved
   let g' ← fastClear g dropG
   let h' ← fastClear h dropH
   let idsG := (← g'.getDecl).lctx.getFVarIds
@@ -2877,7 +3105,7 @@ def tryMerge (spec : MergeSpec) (g h : MVarId) (maxVars : Nat := 8) : MetaM (Opt
 without a literal pc, e.g. outcomes, first), after merging into it every other pending goal
 at the same pc that `tryMerge` accepts. -/
 def pickMerged (spec : MergeSpec) (pcOf : MVarId → MetaM (Option Nat))
-    (todo : List (MVarId × Bool)) :
+    (todo : List (MVarId × Bool)) (joins : Option (List Nat) := none) :
     MetaM (List (MVarId × Bool)) := do
   let mut pend : Array (MVarId × Bool × Option Nat) := #[]
   for (g, f) in todo do
@@ -2894,8 +3122,10 @@ def pickMerged (spec : MergeSpec) (pcOf : MVarId → MetaM (Option Nat))
   for i in [0:pend.size] do
     if i == best then continue
     let (h, fh, pch) := pend[i]!
-    if pc0.isSome && pch == pc0 then
-      if let some g' ← tryMerge spec g h then
+    if pc0.isSome && pch == pc0 && (joins.all fun l => l.contains pc0.get!) then
+      if let some g' ← (match joins with
+          | some _ => tryMerge spec g h (maxVars := 16) (rel := true)
+          | none => tryMerge spec g h) then
         trace[janus] "merged two paths at pc {hex pc0.get!}"
         g := g'
         continue
