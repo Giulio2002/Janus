@@ -281,6 +281,18 @@ theorem msgList_lt256 (T : List Nat) (hT : ∀ b ∈ T, b < 256) (n1 n2 a1 a2 : 
     · exact hI2 b hb
   · exact hL3 b hb
 
+theorem msgList_length (T : List Nat) (tl l1 l2 n1 n2 a1 a2 : Nat) (hT : T.length = tl)
+    (hn1 : n1 ≤ 1) (hn2 : n2 ≤ 1) (hlen1 : (natBytes a1).length = l1) (hlen2 : (natBytes a2).length = l2) :
+    (msgList T n1 n2 a1 a2).length = tl + (l1 + n1) + (l2 + n2) + 20 := by
+  unfold msgList
+  simp only [List.length_append, List.length_cons, List.length_nil, hlen1, hlen2, hT]
+  rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn1 with rfl | rfl <;>
+    rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn2 with rfl | rfl <;> simp <;> omega
+
+theorem finalMem_accessible (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl a k : Nat) (w : Bool) :
+    (finalMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl).accessible a k w = m0.accessible a k w := by
+  simp [finalMem, midMem, scratchMem, putBytes_accessible]
+
 theorem strBytes_lt256 (m : Memory) (p n : Nat) : ∀ b ∈ strBytes m p n, b < 256 := by
   intro b hb
   simp only [strBytes, List.mem_map, List.mem_range] at hb

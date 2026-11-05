@@ -15,9 +15,6 @@ open Janus.Contracts.ErrorfRealCode (code)
 set_option maxRecDepth 100000
 set_option maxHeartbeats 0
 
-/-- The total advance of the bump pointer for a message of `Lm` bytes. -/
-def atot (Lm : Nat) : Nat := (Lm + Lm + 63) / 16 * 16
-
 /-- From the exit of the decimal loop of number 2 to the exit of the text copy. -/
 theorem stageC (s : State) (h30b : (s.regs 30).toNat < 2 ^ 48) (h30a : (s.regs 30).toNat % 4 = 0)
     (e tp tl n2 x13v2 len1 st1 p : Nat) (R : Nat → W64) (F : Flags) (m : Memory)
