@@ -25,6 +25,26 @@ open Lean Meta Elab Tactic
 /-- The head constant of a type (looking through `mdata`). -/
 private def headConst? (e : Expr) : Option Name := e.consumeMData.getAppFn.constName?
 
+/-- The reducible passes of `janusAssumption` only: same-head hypotheses, then all, each at reducible transparency. -/
+def janusAssumptionReducible (g : MVarId) : MetaM Bool := g.withContext do
+  g.checkNotAssigned `janus_assumption_reducible
+  let target ← instantiateMVars (← g.getType)
+  let hd := headConst? target
+  let decls := (← getLCtx).decls.toList.filterMap id |>.filter (fun d => !d.isImplementationDetail) |>.reverse
+  for pass in [0:2] do
+    for d in decls do
+      if pass == 0 then
+        match hd with
+        | some h =>
+          unless headConst? (← instantiateMVars d.type) == some h do continue
+        | none => continue
+      let saved ← saveState
+      if ← withReducible (isDefEq target d.type) then
+        g.assign d.toExpr
+        return true
+      saved.restore
+  return false
+
 def janusAssumption (g : MVarId) : MetaM Bool := g.withContext do
   g.checkNotAssigned `janus_assumption
   let target ← instantiateMVars (← g.getType)
@@ -56,5 +76,17 @@ elab "janus_assumption" : tactic => withMainContext do
     replaceMainGoal []
   else
     throwError "janus_assumption: no hypothesis matches{indentExpr (← g.getType)}"
+
+/-- `janus_assumption_reducible`: `assumption` at reducible transparency only (the two passes of `janus_assumption`, without the
+final ordinary `assumption`). It proves less than `assumption`, but when no hypothesis matches it FAILS FAST: the ordinary
+`assumption` that `janus_assumption` falls back on unifies the goal with every hypothesis at default transparency, which
+for a goal mentioning an unknown value and hypotheses about `readLE` of a long chain of stores costs 60-120 s per failed lookup.
+Use it as an alternative in `first | … | …`. -/
+elab "janus_assumption_reducible" : tactic => withMainContext do
+  let g ← getMainGoal
+  if ← janusAssumptionReducible g then
+    replaceMainGoal []
+  else
+    throwError "janus_assumption_reducible: no hypothesis matches at reducible transparency{indentExpr (← g.getType)}"
 
 end Janus.Tactic

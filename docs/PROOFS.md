@@ -1173,3 +1173,15 @@ reported with the same location prefix (`janus_run: failed at pc … while …`)
   `applyFast`, callee preconditions and postconditions, `MemFrame`/`janus_frame`, `janus_cases`)
   is in `Janus/Tactic/Common.lean` and shared by both executors; the disassemblers are
   `Janus/Tactic/Disasm.lean` and `Janus/Amd64/Disasm.lean`.
+
+## Matching hypotheses about memory after stores: `janus_assumption`, `janus_assumption_reducible`
+
+`assumption`, `‹T›` and `exact h` unify the goal with each hypothesis at default transparency. After `janus_run` a context holds
+hypotheses such as `readLE (writeLE (… (writeLE s.mem a v) …) b) n = rhs`, and comparing one of them with a pattern like `?x % 16 = 0`
+or `?x = 0` makes Lean unfold `readLE` through the whole chain of stores: 60-120 s per failed attempt (FV-A, amd64 `Bytes`: 16 calls,
+1316 s of a 24-minute file). Use instead
+
+* `janus_assumption` for `‹T›` (`(show T by janus_assumption)`): same-head hypotheses at reducible transparency first, then all, then
+  the ordinary `assumption` as a fallback, so it proves exactly what `assumption` proves, but a hit is fast. amd64 `Bytes`: 24m06 → 13m18.
+* `janus_assumption_reducible` as an alternative in `first | … | …`: the reducible passes only, no fallback, so a lookup without a match
+  fails at once. It does not find a hypothesis that matches only after unfolding a definition. amd64 `Bytes` with both: 2m13.
