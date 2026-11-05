@@ -196,7 +196,7 @@ namespace Witness
 
 /-- The runtime's area: `g` at `G`, its `m` at `M`, the `p` at `P`, the buffer `[NX, EN)`. -/
 def G : Nat := 0x40000
-def M : Nat := 0x40100
+def M : Nat := 0x40100  -- addr-ok: a chosen scratch window, not a binary address
 def P : Nat := 0x41000
 def NX : Nat := 0x48000
 def EN : Nat := 0x49000

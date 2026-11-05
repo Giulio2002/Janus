@@ -1,6 +1,6 @@
 import Extracted
 
-/-! Round 15c on amd64: the same spec-binding rows. `h1` verifies, the others are rejected. -/
+/-! Spec binding on amd64: the same spec-binding rows. `h1` verifies, the others are rejected. -/
 
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Contracts
 

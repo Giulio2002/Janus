@@ -63,7 +63,7 @@
 #               and cgo item, longest first (scripts/lib/pool.sh), results streamed as they finish
 #   gotest      scripts/gotest-shards.sh: `go test -timeout 7000s ./cmd/...` in balanced shards, every test once
 #   rounds      audit/run-rounds.sh (all audit rounds, themselves parallel lanes)
-#   axiom       scripts/ci-axiom-guard.sh
+#   axiom       scripts/ci-axiom-guard.sh, then scripts/lint-example-addresses.sh (no hard-coded binary addresses in the example proofs)
 #   x86         scripts/x86formal.sh prove
 #   asl-build   scripts/asl.sh build (JanusASL, ArmASL and janus-asl-check, once: lakes that build in one package race)
 #   sail-build  scripts/oracle-sail.sh build (the Sail C oracle used by rtasl-fsqrt)
@@ -474,7 +474,7 @@ add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed
 JANUS_POOL_DIR="$out/verify"; export JANUS_POOL_DIR
 addc gotest "JANUS_REQUIRE_FIXTURE=1 JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
 addc rounds "${rounds_lanes_n:+export JANUS_ROUNDS_LANES=$rounds_lanes_n; }audit/run-rounds.sh $rounds"
-add axiom "scripts/ci-axiom-guard.sh"
+add axiom "scripts/ci-axiom-guard.sh && scripts/lint-example-addresses.sh"
 # (self-test hook, scripts/lib/test-gatelanes.sh: one extra lane running JANUS_GATE_TEST_LANE in the lake tree)
 [ -z "${JANUS_GATE_TEST_LANE:-}" ] || add testlane "$(laneenv "$tree") cd '$tree' && $JANUS_GATE_TEST_LANE"
 addc x86 "$(laneenv "$tree_x86") cd '$tree_x86' && scripts/x86formal.sh prove"

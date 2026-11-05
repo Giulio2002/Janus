@@ -47,7 +47,7 @@ A concrete call `c_repret_umax(3, 5)`: the return address `0x1000` (outside the 
 namespace Witness
 
 def ret : Nat := 0x1000
-def wsp : Nat := 0x20008
+def wsp : Nat := 0x20008  -- addr-ok: a chosen stack window, not a binary address
 
 /-- The stack window `[wsp - 64, wsp + 64)` (writable); the return address at `[wsp]`. -/
 def smem : Janus.Arm64.Memory :=

@@ -29,6 +29,11 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Spe
 
 namespace Proof
 
+/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "rodN" : term => `(janus_eval% Extracted.dataAddr.«type:uint64#703ad2db»)
+local macro "retN" : term => `(janus_eval% (Extracted.entry + 37))
+
+
 /-- The element type: the RIP-relative `LEAQ` at `Word+0x13` (`type:uint64`). -/
 def elemType : Nat := ripTarget Extracted.program (Extracted.entry + 0x13)
 
@@ -66,14 +71,14 @@ theorem correctness (impl : List Janus.Amd64.Segment) (C : CheckptrModel) (hl : 
     have hpb := hseg.readLE 8 8 (by decide +kernel)
     have hsz := hseg.readLE 0 8 (by decide +kernel)
     have hlen : (Extracted.program.data[0]'(by decide)).bytes.length = 256 := by decide +kernel
-    have hbase : (Extracted.program.data[0]'(by decide)).base = 4732224 := rfl
+    have hbase : (Extracted.program.data[0]'(by decide)).base = (rodN) := rfl
     have hpb0 : Janus.Tactic.leOfBytes (((Extracted.program.data[0]'(by decide)).bytes.drop 8).take 8) = 0 := by decide +kernel
     have hsz8 : Janus.Tactic.leOfBytes (((Extracted.program.data[0]'(by decide)).bytes.drop 0).take 8) = 8 := by decide +kernel
     rw [hlen, hbase] at hacc0 hdj1
     rw [hbase, hpb0] at hpb
     rw [hbase, hsz8] at hsz
     have hag : Agrees s.mem (((Arm64.Memory.writeLE s.mem (BitVec.toNat (s.regs 4) - 8) 8 (BitVec.toNat (s.regs 5))).writeLE
-        (BitVec.toNat (s.regs 4) + 8) 8 p.toNat).writeLE (BitVec.toNat (s.regs 4) - 40) 8 4701989)
+        (BitVec.toNat (s.regs 4) + 8) 8 p.toNat).writeLE (BitVec.toNat (s.regs 4) - 40) 8 (retN))
         (C.priv ++ [((s.regs 14).toNat, (s.regs 14).toNat + 16)]) := by
       apply Agrees.of_window (lo := (s.regs 4).toNat - (C.depth + 40)) (hi := (s.regs 4).toNat + 16)
       · janus_frame
@@ -82,12 +87,12 @@ theorem correctness (impl : List Janus.Amd64.Segment) (C : CheckptrModel) (hl : 
     simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, typPtrBytes, typSize,
       Nat.reduceMod, Nat.reducePow, Arm64.Memory.accessible_writeLE, h_a0]
     have e1 : (((Arm64.Memory.writeLE s.mem (BitVec.toNat (s.regs 4) - 8) 8 (BitVec.toNat (s.regs 5))).writeLE
-        (BitVec.toNat (s.regs 4) + 8) 8 p.toNat).writeLE (BitVec.toNat (s.regs 4) - 40) 8 4701989).readLE
-        (4732224 + 8) 8 = 0 := by
+        (BitVec.toNat (s.regs 4) + 8) 8 p.toNat).writeLE (BitVec.toNat (s.regs 4) - 40) 8 (retN)).readLE
+        ((rodN) + 8) 8 = 0 := by
       simp (disch := omega) only [Arm64.Memory.readLE_writeLE_of_disjoint]; exact hpb
     have e2 : (((Arm64.Memory.writeLE s.mem (BitVec.toNat (s.regs 4) - 8) 8 (BitVec.toNat (s.regs 5))).writeLE
-        (BitVec.toNat (s.regs 4) + 8) 8 p.toNat).writeLE (BitVec.toNat (s.regs 4) - 40) 8 4701989).readLE
-        4732224 8 = 8 := by
+        (BitVec.toNat (s.regs 4) + 8) 8 p.toNat).writeLE (BitVec.toNat (s.regs 4) - 40) 8 (retN)).readLE
+        (rodN) 8 = 8 := by
       simp (disch := omega) only [Arm64.Memory.readLE_writeLE_of_disjoint]; simpa using hsz
     refine ⟨by decide, Arm64.Memory.accessible_mono _ hacc0 (by omega) (by omega), fun h => absurd e1 h, ?_⟩
     rw [e2]

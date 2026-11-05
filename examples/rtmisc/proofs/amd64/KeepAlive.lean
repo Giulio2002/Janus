@@ -35,6 +35,10 @@ def cgoAddr : Nat :=
     (Extracted.entry + 0x18 + 7 + disp + 2 ^ 64 - (if disp ≥ 2 ^ 31 then 2 ^ 32 else 0)) % 2 ^ 64
   | none => 0
 
+
+/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "cgoN" : term => `(janus_eval% cgoAddr)
+
 theorem correctness : KeepAliveContract64 Extracted.program Extracted.entry cgoAddr := by
   intro s hpc ⟨hpre, hcgo, hdis⟩
   obtain ⟨-, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx, hdf, hra, hout⟩ := hpre
@@ -53,13 +57,13 @@ goroutine at `0x50000` whose `stackguard0` is 0, and `runtime.cgoAlwaysFalse` a 
 
 namespace Witness
 
-theorem cgoAddr_eq : cgoAddr = 5526629 := by decide
+theorem cgoAddr_eq : cgoAddr = (cgoN) := by decide
 
 def wsp : Nat := 0x20000
 def wg : Nat := 0x50000
 
 def smem : Janus.Arm64.Memory :=
-  ⟨fun _ => 0, [⟨wsp - 512, 0x300, true⟩, ⟨wg, 0x100, false⟩, ⟨5526629, 8, false⟩]⟩
+  ⟨fun _ => 0, [⟨wsp - 512, 0x300, true⟩, ⟨wg, 0x100, false⟩, ⟨(cgoN), 8, false⟩]⟩
 
 def s0 : State :=
   { regs := fun i => if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,

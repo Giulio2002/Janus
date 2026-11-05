@@ -1279,7 +1279,7 @@ def isFrameworkConstArg (env : Environment) (isSpec : Bool) (a : Expr) : Bool :=
     | _ => false
 
 
-/-! ### Round 15c: which runtime function a spec describes
+/-! ### Spec binding: which runtime function a spec describes
 
 The auditor checks that a spec argument is one of the framework's named constants (above), but not that it
 describes the function the contract is stated AT: `RtContract … (contractAddr "runtime.newobject") … growsliceSpec`
@@ -1525,7 +1525,7 @@ partial def linkVars (e : Expr) (acc : Array FVarId := #[]) : Array FVarId :=
 
 
 /-- The variables `impl` of `Extracted.program.link impl` in the statement outside its runtime-contract hypotheses
-(round 15c: the implementation the statement runs; a contract must be about the same one). -/
+(spec binding: the implementation the statement runs; a contract must be about the same one). -/
 partial def runVars (env : Environment) (e : Expr) (acc : Array FVarId := #[]) : Array FVarId :=
   match e with
   | .app .. =>
@@ -1666,7 +1666,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
       -- Round 14 (rt-auditv2, F5): only a WITNESS exhibits contracts under an `∃` (its claim); in a main theorem
       -- an `∃`-bound contract in the conclusion (a precondition `∃ H, Contract … [] 4096 H`) is checked like any other
       concl.foldl (fun acc t => contractApps env t acc (claims := !main)) #[]
-    -- Round 15c: the implementation variables the statement itself runs (`Extracted.program.link impl`)
+    -- Spec binding: the implementation variables the statement itself runs (`Extracted.program.link impl`)
     let mut stmtImpls : Array FVarId := runVars env body
     for (_, t) in premises do stmtImpls := runVars env t stmtImpls
     for x in xs do
@@ -1679,17 +1679,17 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
       let args := app.getAppArgs
       if args.size < doms.size then
         return some s!"applies the runtime contract {c} partially (round 10 V1)"
-      -- Round 15c: the spec (and live data) a contract carries must describe the function it is stated at
+      -- Spec binding: the spec (and live data) a contract carries must describe the function it is stated at
       if let some (prog, fn) := contractAddrOf? app then
         unless prog.isConstOf `Extracted.program do
-          return some s!"assumes the runtime contract {c} at the address of `{fn}` in the program `{(← Meta.ppExpr prog).pretty 10000}`, which is not `Extracted.program`: a contract is stated at the extraction's own contract address (round 15c)"
+          return some s!"assumes the runtime contract {c} at the address of `{fn}` in the program `{(← Meta.ppExpr prog).pretty 10000}`, which is not `Extracted.program`: a contract is stated at the extraction's own contract address (spec binding)"
         let mut specSeen := false
         for i in [0:doms.size] do
           if doms[i]!.consumeMData.isConstOf `Janus.Contracts.RtSpec then
             if let some (lbl, names) := specInfo? args[i]! then
               specSeen := true
               unless names.contains fn do
-                return some s!"assumes the runtime contract {c} at the address of `{fn}` with the spec `{lbl}`, which describes {" / ".intercalate names}: the spec of another runtime function makes the contract one that no implementation of `{fn}` meets, labelled as `{fn}`'s (round 15c)"
+                return some s!"assumes the runtime contract {c} at the address of `{fn}` with the spec `{lbl}`, which describes {" / ".intercalate names}: the spec of another runtime function makes the contract one that no implementation of `{fn}` meets, labelled as `{fn}`'s (spec binding)"
         for i in [0:doms.size] do
           if doms[i]!.consumeMData.isConstOf `Janus.Contracts.LiveSpec then
             if let some (live, owner) := liveInfo? args[i]! then
@@ -1700,11 +1700,11 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
                   if let some (lbl, _) := specInfo? args[j]! then
                     if lbl == owner then okPair := true
               unless okPair do
-                return some s!"assumes the runtime contract {c} with the live data `{live}`, which belong to the spec `{owner}`, not to the spec of this contract: a spec and live data of different runtime functions describe no real call (round 15c)"
+                return some s!"assumes the runtime contract {c} with the live data `{live}`, which belong to the spec `{owner}`, not to the spec of this contract: a spec and live data of different runtime functions describe no real call (spec binding)"
         if !specSeen then
           if let some (want, isPrefix) := contractFunction? c then
             unless (if isPrefix then fn.startsWith want else fn == want) do
-              return some s!"assumes the runtime contract {c}, the contract of `{want}`, at the address of `{fn}` (round 15c)"
+              return some s!"assumes the runtime contract {c}, the contract of `{want}`, at the address of `{fn}` (spec binding)"
       for i in [0:doms.size] do
         let a := args[i]!.consumeMData
         if let some isSpec := frameworkConstParamType doms[i]! then
@@ -1735,9 +1735,9 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
           if noCode then continue
           unless ok do
             return some s!"assumes the runtime contract {c} about the program `{(← Meta.ppExpr a).pretty 10000}`, which is not `Extracted.program.link impl` (or `Extracted.program.ofImpl impl`) for a variable `impl` of the statement (round 10 V1, round 15)"
-          -- Round 15c: the contract is about the implementation the statement runs, not another variable's
+          -- Spec binding: the contract is about the implementation the statement runs, not another variable's
           if main && !stmtImpls.isEmpty && !stmtImpls.contains (a.getArg! 1).consumeMData.fvarId! then
-            return some s!"assumes the runtime contract {c} about the runtime implementation `{(← Meta.ppExpr (a.getArg! 1)).pretty 10000}`, but the statement runs `Extracted.program.link {(← Meta.ppExpr (Expr.fvar stmtImpls[0]!)).pretty 10000}`: a contract about another implementation variable says nothing about the runtime the theorem quantifies (round 15c)"
+            return some s!"assumes the runtime contract {c} about the runtime implementation `{(← Meta.ppExpr (a.getArg! 1)).pretty 10000}`, but the statement runs `Extracted.program.link {(← Meta.ppExpr (Expr.fvar stmtImpls[0]!)).pretty 10000}`: a contract about another implementation variable says nothing about the runtime the theorem quantifies (spec binding)"
           rtVars := rtVars.insert (a.getArg! 1).consumeMData.fvarId!
         | none => pure ()
     -- Round 14 (V2): a main theorem never chooses the implementation of the runtime

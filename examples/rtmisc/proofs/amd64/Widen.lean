@@ -27,6 +27,13 @@ NaN for a NaN.
 namespace Proof
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Float
 
+/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "headN" : term => `(janus_eval% (segAddr Extracted.program "runtime.f32to64" + 199))
+local macro "headM" : term => `(janus_eval% (segAddr Extracted.program "runtime.f32to64" + 34))
+local macro "packN" : term => `(janus_eval% (segAddr Extracted.program "runtime.fpack64"))
+local macro "retN" : term => `(janus_eval% (Extracted.entry + 19))
+
+
 /-- `runtime.fpack64` on an exact normal value (`2^52 ≤ mant < 2^53` in `RBX`,
 `-1022 ≤ exp ≤ 1023` in `RCX`, nothing truncated in `RDI`): it returns
 `sign | (exp + 1023) << 52 | mant & (2^52 - 1)` in `RAX`. -/
@@ -73,13 +80,13 @@ theorem normal_bits (b : BitVec 64) (F E : Nat) (hF : F < 2 ^ 23) (hE : E < 256)
   exact or_pack64 _ _ (b.toNat % 2 ^ 32 / 2 ^ 31) (by omega) (by omega)
 
 /-- The loop head `CMPL SI, $0x800000` of the subnormal normalisation in `funpack32`. -/
-abbrev head : Nat := 0x45b267
+abbrev head : Nat := (headN)
 
 /-- The memory at the loop head: the frames of `Widen` and `f32to64` (saved `RBP`s, the return
 address into `Widen`). -/
 def M (s : State) : Arm64.Memory :=
   ((Arm64.Memory.writeLE s.mem (BitVec.toNat (s.regs 4) - 8) 8 (BitVec.toNat (s.regs 5))).writeLE
-    (BitVec.toNat (s.regs 4) - 32) 8 4702291).writeLE (BitVec.toNat (s.regs 4) - 40) 8 (BitVec.toNat (s.regs 4) - 8)
+    (BitVec.toNat (s.regs 4) - 32) 8 (retN)).writeLE (BitVec.toNat (s.regs 4) - 40) 8 (BitVec.toNat (s.regs 4) - 8)
 
 /-- The result word of the subnormal case (after `j` normalisation steps), as a natural number. -/
 theorem sub_bits (b : BitVec 64) (m j : Nat) (hm : m < 2 ^ 32) (hj : j ≤ 23) :
@@ -185,7 +192,7 @@ theorem correctness (b : BitVec 64) :
   have hnw2 := hg.noWrap
   have hgr := hg.readable
   simp only [regSP, regG, stackguard0Offset, stackguard0, Janus.Spec.Disjoint] at hacc hle hnw hgl hgb hnw2 hgr hgd
-  janus64_run until [0x45b1c2]
+  janus64_run until [(headM)]
   have hDX : BitVec.setWidth 64 (BitVec.setWidth 32 (BitVec.setWidth 8 (BitVec.setWidth 64
       (BitVec.setWidth 32 (BitVec.setWidth 64 (BitVec.setWidth 32 b)) >>> 23)))) =
       BitVec.ofNat 64 (b.toNat / 2 ^ 23 % 256) := by
@@ -214,7 +221,7 @@ theorem correctness (b : BitVec 64) :
     rw [BitVec.toNat_or, BitVec.toNat_setWidth, BitVec.toNat_ofNat, BitVec.toNat_ofNat,
       Nat.mod_eq_of_lt (show F < 2 ^ 64 by omega), Nat.mod_eq_of_lt (show F < 2 ^ 32 by omega)]
     exact hFor
-  janus64_run until [0x45b267, 0x45ac00]
+  janus64_run until [(headN), (packN)]
   · -- +0 / -0
     janus64_run
     have hF0 : F = 0 := by have := congrArg BitVec.toNat hbr; simp at this; omega

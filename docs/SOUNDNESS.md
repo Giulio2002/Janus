@@ -2511,7 +2511,7 @@ options, `moreLeanArgs`, an external `srcDir`) is refused ("olean provenance") u
 `--allow-unchecked-provenance` is given; the report then says `oleanProvenance: "unchecked"` and the verdict
 block "Olean provenance: NOT CHECKED". Reports of a checked run say `"checked"`.
 
-## Round 15c: a contract's spec describes the function it is stated at
+## Spec binding (roundspecbind): a contract's spec describes the function it is stated at
 
 The auditor used to check only that the spec argument of a contract hypothesis is one of the framework's named
 constants (`isFrameworkConstArg`), not that it describes the function the contract is stated AT:

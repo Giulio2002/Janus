@@ -36,8 +36,8 @@ set_option maxRecDepth 200000 in
 set_option maxHeartbeats 40000000 in
 theorem fb_inner (impl : List Amd64.Segment) (ret : W64) (SMv a i Y D : Nat) (M0 : Memory)
     (hi9 : 9 ≤ i) (hi20 : i ≤ 20) (hY : Y < 1000000000) (hD : D < 2 ^ 64)
-    (hlit : (4927680#64 : BitVec 64) = BitVec.ofNat 64 SMv)
-    (hSMb : 4927680 ≤ SMv ∧ SMv ≤ 4927680) (hab : a + 20 ≤ 2 ^ 48)
+    (hlit : (4927680#64 : BitVec 64) = BitVec.ofNat 64 SMv)  -- addr-ok: print binary pinned by PrintCode (Program.Equiv fails if the layout moves)
+    (hSMb : 4927680 ≤ SMv ∧ SMv ≤ 4927680) (hab : a + 20 ≤ 2 ^ 48)  -- addr-ok: print binary pinned by PrintCode (Program.Equiv fails if the layout moves)
     (hap : a + 20 ≤ SMv ∨ SMv + 200 ≤ a)
     (hacc : M0.accessible a 20 true = true) (hsma : M0.accessible SMv 200 false = true)
     (h_sm : ∀ j, j < 200 → M0.readLE (SMv + j) 1 = smallsByte j) :

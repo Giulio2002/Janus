@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round 15c: spec binding (docs/SOUNDNESS.md "Round 15c"). The spec (and live data) of a runtime-contract
+# Spec binding (docs/SOUNDNESS.md "Spec binding"). The spec (and live data) of a runtime-contract
 # hypothesis must describe the runtime function the contract is stated at (`contractAddr "runtime.f"`), a live
 # contract's spec and live data must belong together, and the contract must be about the implementation the
 # statement runs. Rows from round 15b (OfImplMore.lean: q1-q4, p1, s15) and SpecBind.lean / SpecBind64.lean.

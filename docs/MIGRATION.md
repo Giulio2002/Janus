@@ -184,3 +184,76 @@ rw [BitVec.toNat_ofNat]  →  simp only [BitVec.toNat_ofNat]
 
 All in-repo examples were re-verified under these sets (the wave-2 gate); the ones that needed
 edits (`SwapBig` amd64: `all_goals try simp only …`) show the pattern.
+
+# Breaking changes for consumers (batch 15)
+
+The batch-15 executors close more goals by themselves and normalise a few terms further. Proofs
+that matched the old goal shape need the small edits below (all example proofs were updated; the
+`git log` of `examples/` shows each edit). None of them weakens a theorem: the new shapes are
+strictly more reduced.
+
+## 15.1 The `x15` zero conjunct is closed by the executor (amd64)
+
+`janus64_intro` now states `h_x15 : s.xmm 15 = 0` with the literal exactly as the elaborator writes
+it. A callee precondition (or a statement) that asks for `xmm 15 = 0` therefore matches
+syntactically, and `toNat` of the literal reduces in the simp sets (`bv_toNat_lit`). The
+conjunct `0#128 = OfNat.ofNat 0` that used to survive `janus64_run` (and that proofs closed with
+`rfl`) is gone, so an anonymous constructor with a leading `rfl` has one component too many:
+
+```lean
+-- before                                     -- after
+refine ⟨rfl, ?_, ?_⟩                          refine ⟨?_, ?_⟩
+refine ⟨⟨?_, rfl⟩, ?_⟩                        refine ⟨?_, ?_⟩
+exact ⟨rfl, by rw [hw]⟩                       exact (by rw [hw])
+```
+
+Symptom: `Insufficient number of fields for ⟨...⟩ constructor: Constructor Eq.refl does not have
+explicit fields`, or `No goals to be solved` on the line after. Fix: delete the `rfl` component.
+
+## 15.2 Same-base `256 ^ (a - b)` shifts are evaluated
+
+When both addresses have the same base (`x - 64` and `x - 72`), the executor (simproc
+`reducePowSameBaseSub`) replaces the shift exponent by its literal value. A half of a 16-byte
+read used to appear as `/ 256 ^ 0 % 2^64` (low) and `/ 256 ^ 8 % 2^64` (high); now:
+
+```lean
+-- before
+m.readLE a 16 / 256 ^ 0 % 18446744073709551616 = m.readLE a 8
+-- after (the power is evaluated; the high half also loses its redundant modulus)
+m.readLE a 16 / 1 % 18446744073709551616 = m.readLE a 8
+m.readLE a 16 / 18446744073709551616 = m.readLE (a + 8) 8
+```
+
+Fix: state the `half` lemmas of your proof in the evaluated form (see
+`examples/proofs-amd64/SwapBig/Proof.lean`: `half0'`, `half8'`), or put both forms in the
+`simp only` / `first` list. Hand-written `have h : x - 16 - (y + 40) = 8` rewrites for these shifts
+are no longer needed (`rw` reports "did not find an occurrence"); delete them.
+
+## 15.3 Reads over earlier stores are forwarded byte-exactly (amd64 + arm64)
+
+A read that is contained in, overlaps, or contains an earlier store of the same base is rewritten
+(`Janus.Tactic.ReadOverlap`, up to `janus.readOverlap.maxWidth` = 16 bytes) into the old bytes plus
+the stored bytes. A 10-byte read (`FLD tbyte`) or a 16-byte read of a stack temporary is therefore no
+longer a single `readLE _ _ 10` / `readLE _ _ 16` in the goal:
+
+```lean
+-- before: one 10-byte read, rewritten by hand
+rw [readLE_ten, readLE_ten, readLE_ten t.mem, readLE_ten t.mem]
+-- after: the executor already split the stored side; split what is left and normalise
+rw [readLE_ten, readLE_ten]
+janus64_simp
+simp only [Nat.div_one, readLE_two_of_eight]
+```
+
+```lean
+-- before (arm64): the stored value was `readLE (store chain) 16`, rewritten with `hlo`/`hhi`
+simp only [WPost, hlo, hhi]; exact (hf.writeLE_both _ _ _).writeLE_both _ _ _
+-- after: the value is the expanded expression; prove it equal to the spec value
+refine frame_store (frame_store hf ?_) ?_      -- frame_store: same store, equal values
+all_goals simp only [lo, hi, pair, BitVec.toNat_add, ...]; omega
+```
+
+Symptom: `rw [readLE_x …]` finds no occurrence, a `simp only [h]` argument is reported unused, or a
+`MemFrame` term mismatches by the values written. Fix: do not rewrite the stored side by hand;
+close the value equality with `omega` after `simp only`. To keep the old single wide read, lower
+`set_option janus.readOverlap.maxWidth` below the read width.

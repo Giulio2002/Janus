@@ -1,7 +1,7 @@
 import Extracted
 
 /-!
-# Round 15c (spec binding): the spec (and live data) of a runtime-contract hypothesis must describe the function it is
+# Spec binding (spec binding): the spec (and live data) of a runtime-contract hypothesis must describe the function it is
 stated at, and the contract must be about the implementation the statement runs. Controls `g*`/`n1` verify, attacks are rejected.
 Every statement is vacuous on purpose (`fun _ => False` precondition): only the shape of the hypotheses is under test.
 -/

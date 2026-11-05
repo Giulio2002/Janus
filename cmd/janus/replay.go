@@ -82,7 +82,7 @@ func pinLib(dir string, keep func(mod string) bool) (pins, error) {
 			}
 			return err
 		}
-		if d.IsDir() || !isModuleData(d.Name()) {
+		if !isModuleData(d.Name()) {
 			return nil
 		}
 		rel, _ := filepath.Rel(dir, path)
@@ -90,9 +90,13 @@ func pinLib(dir string, keep func(mod string) bool) (pins, error) {
 		if keep != nil && !keep(moduleOfRel(rel)) {
 			return nil
 		}
+		// Fail closed on anything that is not a plain file (a symlink, fifo, device, or a directory
+		// where a module-data file is expected): its bytes are not what the path names, so a pin could
+		// not stand for them (RT15C).
 		if !d.Type().IsRegular() {
-			p[rel] = "not-a-regular-file"
-			return nil
+			return &diag{Invalid: true, Stage: "framework integrity",
+				Msg:  fmt.Sprintf("the module-data entry %s under %s is not a regular file (a symbolic link, device, pipe or directory).", rel, displayPath(dir)),
+				Next: "Compiled modules must be plain files; remove the link, or let janus compile the modules itself (the default)."}
 		}
 		files = append(files, rel)
 		return nil
@@ -328,7 +332,7 @@ func planReplayPinned(resolved map[string]string, graph map[string][]string, too
 		fmt.Fprintf(h, "janus-replay-v2\n%q\n%q\n", toolchainVersion, m)
 		for _, ext := range []string{"", ".server", ".private"} {
 			f := olean + ext
-			if sum, ok := known[f]; ok {
+			if sum, ok := known[f]; ok && isHexDigest(sum) {
 				fmt.Fprintf(h, "part %q %s\n", ext, sum)
 			} else if sum, err := fileSha256Hex(f); err == nil {
 				fmt.Fprintf(h, "part %q %s\n", ext, sum)
@@ -611,4 +615,17 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// isHexDigest: a SHA-256 in lower-case hex (a pin that is anything else is never put into a key).
+func isHexDigest(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }

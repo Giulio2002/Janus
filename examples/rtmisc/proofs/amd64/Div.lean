@@ -30,6 +30,10 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Flo
 
 namespace Proof
 
+/-- Addresses evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "oneN" : term => `(janus_eval% Extracted.dataAddr.«$f64.3ff0000000000000»)
+
+
 abbrev cdivAddr : Nat := segAddr Extracted.program "runtime.complex128div"
 
 /-- `runtime.inf`: the word the `MOVSD runtime.inf(%rip), %xmm2` at `complex128div+0xe5` reads
@@ -160,16 +164,16 @@ structure Env (S : State) : Prop where
   ral : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47
   sp : (S.regs 4).toNat + 8 ≤ 2 ^ 48
   inf : RuntimeInf S.mem infAddr
-  one : S.mem.accessible 4825504 8 false = true ∧ S.mem.readLE 4825504 8 = 4607182418800017408
+  one : S.mem.accessible (oneN) 8 false = true ∧ S.mem.readLE (oneN) 8 = 4607182418800017408
 
 /-- The constant `1.0` (`$f64.3ff0000000000000`, the program's read-only data) in memory. -/
 theorem one_loaded {m : Janus.Arm64.Memory} (hd : Extracted.program.DataLoaded m) :
-    m.accessible 4825504 8 false = true ∧ m.readLE 4825504 8 = 4607182418800017408 := by
+    m.accessible (oneN) 8 false = true ∧ m.readLE (oneN) 8 = 4607182418800017408 := by
   have hseg : SegLoaded m (Extracted.program.data[0]'(by decide)) := hd _ (List.getElem_mem _)
   have hacc := hseg.accessible
   have hrd := hseg.readLE 0 8 (by decide +kernel)
   have hlen : (Extracted.program.data[0]'(by decide)).bytes.length = 8 := by decide +kernel
-  have hbase : (Extracted.program.data[0]'(by decide)).base = 4825504 := rfl
+  have hbase : (Extracted.program.data[0]'(by decide)).base = (oneN) := rfl
   have hv : Janus.Tactic.leOfBytes (((Extracted.program.data[0]'(by decide)).bytes.drop 0).take 8) =
       4607182418800017408 := by decide +kernel
   rw [hlen, hbase] at hacc
@@ -709,7 +713,7 @@ theorem correctness :
   have hseg : SegLoaded s.mem (Extracted.program.data[0]'(by decide)) := hdl _ (List.getElem_mem _)
   have hdj := hseg.disjoint_of_writable hacc
   have hlen : (Extracted.program.data[0]'(by decide)).bytes.length = 8 := by decide +kernel
-  have hbase : (Extracted.program.data[0]'(by decide)).base = 4825504 := rfl
+  have hbase : (Extracted.program.data[0]'(by decide)).base = (oneN) := rfl
   rw [hlen, hbase] at hdj
   simp only [regSP, regG, stackguard0Offset, stackguard0, Janus.Spec.Disjoint] at hacc hle hnw hgl hgb hnw2 hgr hgd hid hdj
   have hm' : s.mxcsr.toNat / 64 = 126 := hm

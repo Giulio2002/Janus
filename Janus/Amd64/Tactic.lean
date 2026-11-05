@@ -1161,6 +1161,11 @@ deriving instance ToExpr for StubKind
 
 syntax "janus64_disch" : tactic
 
+/-- `janus64_callpre`: close the `DataLoaded` and `RetAddr` parts (and the closed-definition arithmetic) of the
+precondition of an internal callee's summary (`Janus.Contracts.CallPreAmd64`; without that module it fails and the
+closers go on). -/
+syntax "janus64_callpre" : tactic
+
 initialize registerTraceClass `janus64
 
 /-- The name of the tactic, in messages. -/
@@ -1584,7 +1589,7 @@ where
 def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
   -- reducible transparency only in the closers: unfolding `Memory.accessible`/`readLE` of a
   -- symbolic memory to compare it with a hypothesis can take seconds
-  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | janus_omega_sparse | janus_omega_cap | janus64_disch)
+  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | janus64_callpre | janus_omega_sparse | janus_omega_cap | janus64_disch)
   let left ← Common.provePreCore (cleanOutcome cfg) closer g
   unless left.isEmpty do
     let st ← cfg.status.get

@@ -71,6 +71,7 @@ def bufType : Nat :=
 
 /-- The type descriptor's address, evaluated from the extraction (never copied). -/
 local macro "typN" : term => `(janus_eval% ptrType)
+local macro "poolN" : term => `(janus_eval% poolAddr)
 local macro "bufN" : term => `(janus_eval% bufType)
 
 /-- The shape of a pooled `*scratch`: 32 writable bytes at a non-nil, 8-aligned address, owning
@@ -188,8 +189,8 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : PoolShape)
   simp only [outside_cons, outside_nil, and_true] at hgo'
   have key1 : ∀ S : State, MemFrame s.mem S.mem [(s.sp.toNat - 4144, s.sp.toNat + 24)] →
       S.regs 28 = s.regs 28 → S.sp.toNat + 48 = s.sp.toNat → (S.regs 30).toNat % 4 = 0 →
-      (S.regs 30).toNat < 2 ^ 48 → (S.regs 0).toNat = 1547776 →
-      CallOK S 4096 1 ∧ StackRoom S 4096 1 ∧ S.mem.readLE (1547776 + newOffset) 8 = 0 ∧
+      (S.regs 30).toNat < 2 ^ 48 → (S.regs 0).toNat = (poolN) →
+      CallOK S 4096 1 ∧ StackRoom S 4096 1 ∧ S.mem.readLE ((poolN) + newOffset) 8 = 0 ∧
       LiveAt R (Extracted.program.contractAddr "sync.(*Pool).Get") [(S.regs 0).toNat] L bud 0
         (S.regs 28).toNat S.mem (calleeStack S 4096 1) := by
     intro S hf hg hsp h30a h30b h0
@@ -596,7 +597,7 @@ theorem inv0 : R.inv 0x400 [] (s0.regs 28).toNat (view R.rt [] s0.mem) := by
 theorem s0_sp : s0.sp.toNat = sp0 := by simp [s0, sp0]
 theorem s0_g : (s0.regs 28).toNat = g0 := by simp [s0, g0]
 
-theorem hP' : P = 1547776 := by unfold P; decide
+theorem hP' : P = (poolN) := by unfold P; decide
 theorem hb' : bT = (bufN) := by unfold bT; decide
 
 set_option maxRecDepth 100000 in
