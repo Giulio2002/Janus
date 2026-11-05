@@ -574,7 +574,7 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
   let hpc ← mkExpectedTypeHint hpc
     (← mkEq (← mkAppM ``State.pc #[s]) (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) entry))
   let hpreM ← mkFreshExprSyntheticOpaqueMVar (mkApp pre s).headBeta
-  let regs := Common.callRegions.get (← getOptions)
+  let regs := Common.janus.callRegions.get (← getOptions)
   let lem ← match ← goalKind g with
     | .reachesRet _ ret _ Q =>
       pure <| mkAppN (mkConst (if regs then ``ReachesRet.call_regions else ``ReachesRet.call)) #[p, entry, pre, post, s, ret, Q, hsum, hpc, hpreM]
