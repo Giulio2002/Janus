@@ -1447,6 +1447,34 @@ def dischargeApart (g : MVarId) : TacticM Bool := g.withContext do
       catch _ => saved.restore
   return false
 
+/-- The components of the conjunctions among the hypotheses, as hypotheses of their own (in the goal `g` only; the
+proof terms are projections): a live call's postcondition states `ApartAll buf n L ∧ Apart buf n obj k` as one
+conjunction after `simp` (the live set of a second call is `L ++ [obj] ++ …`), and neither the `ApartAll`/`Outside`
+search of `closePart` nor `omega` look inside it. Only the atoms `Apart`, `ApartAll`, `Outside`, `InRanges` are
+exposed, and only conjunctions that contain one of them. -/
+partial def exposeConj (g : MVarId) : MetaM MVarId := g.withContext do
+  let isAtom (t : Expr) : Bool :=
+    t.isAppOfArity ``Janus.Apart 4 || t.isAppOfArity `Janus.Contracts.ApartAll 3 ||
+      t.isAppOfArity ``Janus.Outside 3 || t.isAppOfArity ``Janus.InRanges 3
+  let rec hasAtom (t : Expr) (fuel : Nat) : Bool :=
+    isAtom t || (fuel > 0 && t.isAppOfArity ``And 2 && (hasAtom (t.getArg! 0) (fuel - 1) || hasAtom (t.getArg! 1) (fuel - 1)))
+  let rec comps (e t : Expr) (fuel : Nat) (acc : Array (Expr × Expr)) : MetaM (Array (Expr × Expr)) := do
+    if t.isAppOfArity ``And 2 && fuel > 0 then
+      let acc ← comps (← mkAppM ``And.left #[e]) (t.getArg! 0) (fuel - 1) acc
+      comps (← mkAppM ``And.right #[e]) (t.getArg! 1) (fuel - 1) acc
+    else if isAtom t then return acc.push (e, t)
+    else return acc
+  let mut found : Array (Expr × Expr) := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    if ty.isAppOfArity ``And 2 && hasAtom ty 4 then found ← comps d.toExpr ty 4 found
+  let mut g := g
+  for (e, t) in found do
+    let (_, g') ← (← g.assert `h_conj t e).intro1P
+    g := g'
+  return g
+
 /-- A side condition `Outside a n rs` (of a `MemFrame` read rule): unfold the literal list and
 prove each range condition by `omega`. -/
 def dischargeOutside (g : MVarId) : TacticM Bool := do
@@ -1467,7 +1495,9 @@ where
   /-- One conjunct: arithmetic by `omega`, or `Outside a n rs` for a list `rs` that is not a
   literal (a variable such as the runtime-owned ranges of a contract) from a hypothesis
   `Outside b k rs` with `[a, a+n) ⊆ [b, b+k)` (`Outside.of_sub`). -/
-  closePart (g : MVarId) : TacticM Bool := g.withContext do
+  closePart (g : MVarId) : TacticM Bool := do
+    let g ← exposeConj g
+    g.withContext do
     let t ← instantiateMVars (← g.getType)
     if t.isAppOfArity ``Janus.Outside 3 then
       let rs := t.getArg! 2
