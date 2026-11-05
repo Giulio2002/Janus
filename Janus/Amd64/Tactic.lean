@@ -1,5 +1,6 @@
 import Lean
 import Janus.Amd64.GoABI
+import Janus.Amd64.RunRegions
 import Janus.Tactic.KernelSafe
 import Janus.Amd64.TacticAttr
 import Janus.Amd64.Disasm
@@ -461,6 +462,51 @@ theorem Summary.mono {p : Program} {entry : Nat} {pre pre' : State → Prop}
   intro s hpc hp
   obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc (hpre s hp)
   exact ⟨k, s', hst, hr, hpost s s' hp hq⟩
+
+/-! ### Runs keep the memory regions
+
+Every run of the program, a callee's included, keeps `mem.regions` (`Program.Steps.regions`), so a
+summary can be used with the equation `s'.mem.regions = s.mem.regions` for free (the callee's
+postcondition says nothing about the regions, only about bytes). `janus64_run`/`calls [S]` adds it
+as a hypothesis after each callee summary (`hrg…`). -/
+
+/-- `ReachesRet` keeps the regions. -/
+theorem ReachesRet.regions {p : Program} {ret : W64} {s : State} {Q : State → Prop}
+    (h : ReachesRet p ret s Q) :
+    ReachesRet p ret s (fun s' => Q s' ∧ s'.mem.regions = s.mem.regions) := by
+  obtain ⟨k, s', hst, hr, hq⟩ := h
+  exact ⟨k, s', hst, hr, hq, hst.regions⟩
+
+/-- `Reaches` keeps the regions: the state the run ends in has the regions of `s`. -/
+theorem Reaches.regions {p : Program} {s : State} {Q : Outcome → Prop} (h : Reaches p s Q) :
+    Reaches p s (fun o => Q o ∧ o.state.mem.regions = s.mem.regions) := by
+  obtain ⟨n, o, hr, hq⟩ := h
+  exact ⟨n, o, hr, hq, Program.run_regions hr⟩
+
+/-- A callee summary keeps the regions: its postcondition, and `s'.mem.regions = s.mem.regions`. -/
+theorem Summary.regions {p : Program} {entry : Nat} {pre : State → Prop}
+    {post : State → State → Prop} (hsum : Summary p entry pre post) :
+    Summary p entry pre (fun s s' => post s s' ∧ s'.mem.regions = s.mem.regions) := by
+  intro s hpc hpre
+  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc hpre
+  exact ⟨k, s', hst, hr, hq, hst.regions⟩
+
+/-- `Reaches.call` with the regions of the callee's return state: the continuation also gets
+`s'.mem.regions = s.mem.regions` (what `janus64_run` uses at a `calls` step). -/
+theorem Reaches.call_regions {p : Program} {entry : Nat} {pre : State → Prop}
+    {post : State → State → Prop} {s : State} {Q : Outcome → Prop}
+    (hsum : Summary p entry pre post) (hpc : s.rip = BitVec.ofNat 64 entry) (hpre : pre s)
+    (h : ∀ s', s'.rip = retAddrOf s → post s s' → s'.mem.regions = s.mem.regions →
+      Reaches p s' Q) : Reaches p s Q :=
+  Reaches.call hsum.regions hpc hpre fun s' hr hq => h s' hr hq.1 hq.2
+
+/-- `ReachesRet.call` with the regions of the callee's return state. -/
+theorem ReachesRet.call_regions {p : Program} {entry : Nat} {pre : State → Prop}
+    {post : State → State → Prop} {s : State} {ret : W64} {Q : State → Prop}
+    (hsum : Summary p entry pre post) (hpc : s.rip = BitVec.ofNat 64 entry) (hpre : pre s)
+    (h : ∀ s', s'.rip = retAddrOf s → post s s' → s'.mem.regions = s.mem.regions →
+      ReachesRet p ret s' Q) : ReachesRet p ret s Q :=
+  ReachesRet.call hsum.regions hpc hpre fun s' hr hq => h s' hr hq.1 hq.2
 
 /-! ## Read-only data (`janus64_data`)
 
@@ -1608,11 +1654,12 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
   let hpc ← mkExpectedTypeHint hpc
     (← mkEq (← mkAppM ``State.rip #[s]) (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) entry))
   let hpreM ← mkFreshExprSyntheticOpaqueMVar (mkApp pre s).headBeta
+  let regs := Common.janus.callRegions.get (← getOptions)
   let lem ← match ← goalKind g with
     | .reachesRet _ ret _ Q =>
-      pure <| mkAppN (mkConst ``ReachesRet.call) #[p, entry, pre, post, s, ret, Q, hsum, hpc, hpreM]
+      pure <| mkAppN (mkConst (if regs then ``ReachesRet.call_regions else ``ReachesRet.call)) #[p, entry, pre, post, s, ret, Q, hsum, hpc, hpreM]
     | .reaches _ _ Q =>
-      pure <| mkAppN (mkConst ``Reaches.call) #[p, entry, pre, post, s, Q, hsum, hpc, hpreM]
+      pure <| mkAppN (mkConst (if regs then ``Reaches.call_regions else ``Reaches.call)) #[p, entry, pre, post, s, Q, hsum, hpc, hpreM]
     | _ => throwError "{tacName}: unexpected goal at a call"
   let gs ← Common.applyFast g lem
   Common.setPhase cfg.status s!"proving the precondition of the summary of {callee}"
@@ -1628,6 +1675,8 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
     if ← g'.isAssigned then continue
     let mut before ← g'.withContext do return (← getLCtx).getFVarIds
     let (fv, g'') ← g'.introNP 3
+    -- the callee's run keeps the regions of the call state (`Program.Steps.regions`): `hrg…`
+    let g'' ← if regs then pure (← g''.intro (← Common.regionsName g'' hname)).2 else pure g''
     -- `calls [hS := S]`: the whole postcondition as `hS`, left alone by the steps below
     let g'' ← match hname with
       | some n => do

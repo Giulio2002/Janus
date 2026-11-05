@@ -923,6 +923,60 @@ theorem call_spec_named (x : W64) :
   all_goals
     refine ⟨⟨?_, ?_, ?_⟩, by omega⟩ <;> simp_all [setReg]
 
+/-! ### The regions after a callee summary (U-REGIONS)
+
+A callee's run keeps `mem.regions` (`Program.Steps.regions`), but its summary's postcondition only
+speaks about bytes (`MemFrame`). `calls [S]` therefore adds `hrg1 : m.regions = s.mem.regions` after
+the first summary (`hrg2`, …), `calls [hS := S]` adds `hS_regions`, which is what
+`rtView_eq_of_frame` needs to carry a runtime-readiness predicate over the call. -/
+
+/-- A callee that may change bytes but is only known by a `MemFrame` (the memory part of its
+postcondition). -/
+def g_framed : Prop :=
+  Summary callp 0x50014 (fun s => (s.regs 30).toNat % 4 = 0 ∧ (s.regs 30).toNat < 2 ^ 56)
+    (fun s s' => ∃ m, MemFrame s.mem m [(s.sp.toNat - 64, s.sp.toNat - 32)] ∧
+      s' = { s with mem := m, regs := setReg s.regs 0 (s.regs 0 + 1#64), pc := s.regs 30 })
+
+set_option janus.callRegions true in
+theorem call_regions_named (hg : g_framed) (x : W64) :
+    Ensures callp 0x50000 [x] (fun s => StackOK s 16 0) (fun _ _ => True) := by
+  intro ret hret s hs ⟨hal, hb, ha, hw⟩
+  janus_intro hs
+  janus_run until [0x50008] calls [hS := hg]
+  obtain ⟨m, hf, hs'⟩ := hS
+  -- `hS` is a copy of the post: its witness is the one of `hf`, so identify it with the callee's
+  have hm := congrArg State.mem hs'
+  simp only at hm
+  subst hm
+  -- the regions of the callee's return memory are those of the call state, so the runtime's
+  -- view is unchanged by the callee's byte changes
+  have key := Janus.Contracts.Stack.rtView_eq_of_frame (rt := []) hf (by simpa using hS_regions)
+    (fun a ⟨r, hr, _⟩ => by simp at hr)
+  janus_run calls [hg]
+  all_goals (try trivial)
+
+set_option janus.callRegions true in
+/-- The unnamed form: `hrg1` after the first call, `hrg2` after the second. -/
+theorem call_regions_unnamed (hg : g_framed) (x : W64) :
+    Ensures callp 0x50000 [x] (fun s => StackOK s 16 0) (fun _ _ => True) := by
+  intro ret hret s hs ⟨hal, hb, ha, hw⟩
+  janus_intro hs
+  janus_run until [0x50008] calls [hg]
+  have key := Janus.Contracts.Stack.rtView_eq_of_frame (rt := []) ‹MemFrame _ _ _› (by simpa using hrg1)
+    (fun a ⟨r, hr, _⟩ => by simp at hr)
+  janus_run until [0x5000c] calls [hg]
+  have k2 := hrg2
+  janus_run
+
+/-- Default (off): no `hrg` hypothesis; the explicit lemma `Summary.regions` gives the same fact. -/
+theorem call_regions_off (hg : g_framed) (x : W64) :
+    Ensures callp 0x50000 [x] (fun s => StackOK s 16 0) (fun _ _ => True) := by
+  intro ret hret s hs ⟨hal, hb, ha, hw⟩
+  janus_intro hs
+  janus_run until [0x50008] calls [hg]
+  fail_if_success (have := hrg1)
+  janus_run calls [hg]
+
 /-- Without the summary, the callee is simply executed inline. -/
 theorem call_spec_inline (x : W64) :
     Ensures callp 0x50000 [x] (fun s => StackOK s 16 0)

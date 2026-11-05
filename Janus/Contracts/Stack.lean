@@ -1,5 +1,7 @@
 import Janus.Spec.Stack
 import Janus.Contracts.Alloc
+import Janus.RunRegions
+import Janus.Amd64.RunRegions
 
 /-!
 # The stack-growth contract and the grown run (arm64)
@@ -101,6 +103,21 @@ theorem rtView_eq_of_frame {rt rs : List (Nat × Nat)} {m m' : Memory} (hf : Mem
     simp only [Memory.readLE, Nat.mul_zero, Nat.add_zero] at this
     exact BitVec.eq_of_toNat_eq this
   · rfl
+
+/-- `rtView_eq_of_frame` across ordinary steps of any program (a callee's `Summary` run, linked
+runtime code included): the run keeps the regions (`Program.Steps.regions`), so only the
+`MemFrame` of the changed ranges is needed. -/
+theorem rtView_eq_of_steps {p : Janus.Program} {s s' : Janus.Arm64.State} {k : Nat}
+    {rt rs : List (Nat × Nat)} (hst : Janus.Program.Steps p s k s') (hf : MemFrame s.mem s'.mem rs)
+    (hout : ∀ a, InRanges a 1 rt → Outside a 1 rs) : rtView rt s'.mem = rtView rt s.mem :=
+  rtView_eq_of_frame hf hst.regions hout
+
+/-- `rtView_eq_of_steps` for amd64 runs. -/
+theorem rtView_eq_of_steps64 {p : Janus.Amd64.Program} {s s' : Janus.Amd64.State} {k : Nat}
+    {rt rs : List (Nat × Nat)} (hst : Janus.Amd64.Program.Steps p s k s')
+    (hf : MemFrame s.mem s'.mem rs) (hout : ∀ a, InRanges a 1 rt → Outside a 1 rs) :
+    rtView rt s'.mem = rtView rt s.mem :=
+  rtView_eq_of_frame hf hst.regions hout
 
 /-- The precondition of the `morestack` call in a function's prologue (arm64), at the state
 `s_m` reached by the prologue's `BL runtime.morestack_noctxt`:
