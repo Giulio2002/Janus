@@ -1872,6 +1872,22 @@ elab "janus_rfl_proj" : tactic => do
   unless isProj do throwError "janus_rfl_proj: the left side is not a projection"
   evalTactic (← `(tactic| rfl))
 
+/-- Does `e` contain a store (`Arm64.Memory.writeLE`, the memory of both ISAs) or a memory-region update? -/
+def hasStore (e : Expr) : Bool :=
+  (e.find? fun x => x.isAppOfArity ``Janus.Arm64.Memory.writeLE 4).isSome
+
+/-- `janus_rfl`: `rfl` that cannot stall on a store chain. It tries `with_reducible rfl`; only when the goal mentions no
+`writeLE` does it fall back to the full `rfl` (default transparency). A plain `rfl` on `readLE (writeLE (… s.mem …) …) n = v`
+unfolds both sides through the whole chain before failing: 35-95 s per attempt in FV-B's DivMod wrapper, where it was an
+alternative in `first | rfl | … `. It proves exactly what `rfl` proves on goals without stores, and on goals with stores only what
+`with_reducible rfl` proves (use `simp`/`rw` with the memory lemmas for the rest). -/
+elab "janus_rfl" : tactic => do
+  let g ← getMainGoal
+  let t ← instantiateMVars (← g.getType)
+  try evalTactic (← `(tactic| with_reducible rfl))
+  catch e =>
+    if hasStore t then throw e
+    else evalTactic (← `(tactic| rfl))
 
 /-- `janus_eval% t`: the closed natural number `t` (e.g. `segAddr Extracted.program "f" + 8`),
 evaluated at elaboration time and inserted as a numeral. For arguments that must be literals

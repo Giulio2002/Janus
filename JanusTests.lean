@@ -43,5 +43,6 @@ import JanusTests.BitOps
 import JanusTests.NatNorm
 import JanusTests.ChunkIdentity
 import JanusTests.AssumptionReducible
+import JanusTests.JanusRfl
 import JanusTests.CallPre
 import JanusTests.CallPre64
