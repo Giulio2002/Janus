@@ -2771,4 +2771,47 @@ def simpNoRfl (g : MVarId) (stx : TSyntax `tactic) : TacticM (List MVarId) := g.
   | (none, _) => return []
   | (some (_, g'), _) => return [g']
 
+/-- `m.accessible a n w = true` from a hypothesis `p₁ → … → pₖ → C` of the context whose conclusion `C` states (as a
+conjunct) an accessible range of the same memory: `accSub` (`accessible_sub`) is applied to that range, and the
+premises `pᵢ` (propositions only; no dependent binder) and the arithmetic are proved from the context by
+`assumption`, `omega` or `decide`. A conditional fact (`C < l + 8 → 0 < l → m.accessible P l false = true`) is used
+once its conditions hold on the current path. -/
+def accessibleFromImplications (g : MVarId) (accSub : Name) : TacticM Bool := withoutRecover <| g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  let some (_, lhs, _) := t.eq? | return false
+  unless lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do return false
+  let m := lhs.getArg! 0
+  for d in ← accessibleOrder lhs do
+    let ty ← instantiateMVars d.type
+    unless ty.isForall do continue
+    let saved ← saveState
+    let ok ← try
+        let (ms, _, concl) ← forallMetaTelescopeReducing ty
+        let allProps ← ms.allM fun x => do isProp (← inferType x)
+        unless allProps do throwError "dependent"
+        let facts ← namedPredicateFacts (mkAppN d.toExpr ms) concl 0 false
+        let mut closed := false
+        for (fpf, fty) in facts do
+          let some (_, l, _) := fty.eq? | continue
+          let saved2 ← saveState
+          let attempt ← try
+              unless ← isDefEq (l.getArg! 0) m do throwError "memory"
+              let lemE := mkAppN (mkConst accSub)
+                #[m, lhs.getArg! 1, lhs.getArg! 2, l.getArg! 1, l.getArg! 2, lhs.getArg! 3, l.getArg! 3, fpf]
+              let gs ← g.apply lemE
+              let goals := gs ++ (ms.map (·.mvarId!)).toList
+              for g' in goals do
+                if ← g'.isAssigned then continue
+                let rest ← withoutRecover <| Tactic.run g' (evalTactic (← `(tactic| first | decide | assumption | janus_omega)))
+                unless rest.isEmpty do throwError "side goal"
+              pure true
+            catch _ => pure false
+          if attempt then closed := true; break
+          saved2.restore
+        pure closed
+      catch _ => pure false
+    if ok then return true
+    saved.restore
+  return false
+
 end Janus.Tactic.Common

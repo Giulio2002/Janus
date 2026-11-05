@@ -478,6 +478,19 @@ theorem accessible_sub {m : Memory} {a n b k : Nat} {w w' : Bool}
     (h2 : a + n ≤ b + k) : m.accessible a n w = true :=
   Memory.accessible_sub m h hw h1 h2
 
+/-- `janus_data`'s rewrite rule for a memory `m2` related to the one of `hd : p.DataLoaded m` by a `MemFrame`: a read of
+the data outside the frame's ranges `rs` agrees there too. -/
+theorem readLE_dataReadD_frame {p : Program} {m m2 : Memory} {rs : List (Nat × Nat)} (h : p.DataLoaded m)
+    (hf : Janus.MemFrame m m2 rs) (a n : Nat) (hv : (dataRead p a n).isSome = true) (ho : Janus.Outside a n rs) :
+    m2.readLE a n = dataReadD p a n :=
+  (hf.readLE a n ho).trans (readLE_dataReadD h a n hv)
+
+theorem readLE_dataReadD_frame' {p : Program} {m m2 : Memory} {rs : List (Nat × Nat)} (h : p.DataLoaded m)
+    (hf : Janus.MemFrame m2 m rs) (a n : Nat) (hv : (dataRead p a n).isSome = true) (ho : Janus.Outside a n rs) :
+    m2.readLE a n = dataReadD p a n :=
+  ((hf.readLE a n ho).symm).trans (readLE_dataReadD h a n hv)
+
+
 /-- Prove `m.accessible a n w = true` from a hypothesis about the SAME memory term (stores stripped by
 `accessible_writeLE`; no `MemFrame` step). -/
 def accessibleFromHyps (g : MVarId) : TacticM Bool := withoutRecover <| g.withContext do
@@ -519,6 +532,8 @@ partial def accessibleSearch (cur : MVarId) (visited : Array Expr) (fuel : Nat) 
     let cur ← Common.stripWritesProof cur
     let saved ← saveState
     if ← accessibleFromHyps cur then return true
+    saved.restore
+    if ← Common.accessibleFromImplications cur ``accessible_sub then return true
     saved.restore
     let some (_, lhs, _) := (← instantiateMVars (← cur.getType)).eq? | return false
     let visited := visited.push (lhs.getArg! 0)
@@ -912,6 +927,9 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
     let hs ← g.withContext do (← getLCtx).foldlM (init := #[]) fun acc d =>
       if d.isImplementationDetail then pure acc else pure (acc.push m!"{d.userName} : {d.type}")
     trace[janus.disch] "goal {t}\n{MessageData.joinSep hs.toList "\n"}"
+  -- `Outside a n [literal ranges]` is closed but has no `Decidable` instance
+  if t.isAppOfArity ``Janus.Outside 3 && !t.hasMVar then
+    if ← Common.dischargeOutside g then return
   if !t.hasFVar && !t.hasMVar then
     -- literal comparisons: evaluated here (no auxiliary declaration per side condition)
     match ← Common.closeByEval? g with
@@ -1179,18 +1197,30 @@ elab "janus_data " h:ident ws:janusDataWith : tactic => withMainContext do
         let some (_, l, r) := dty.eq? | continue
         unless l.isAppOfArity ``Memory.accessible 4 && (l.getArg! 3).isConstOf ``Bool.true &&
           r.isConstOf ``Bool.true do continue
-        unless ← withReducible (isDefEq (l.getArg! 0) m) do continue
         out := out.push d.toExpr
       pure out
     let n := if star then autoE.size else hws.size
     for j in [0:n] do
       g ← g.withContext do
-        let hwE ← if star then pure autoE[j]! else Term.elabTerm hws[j]! none
+        let hwE0 ← if star then pure autoE[j]! else Term.elabTerm hws[j]! none
+        let hwTy0 ← instantiateMVars (← inferType hwE0)
+        let some (_, lhs0, _) := hwTy0.eq? |
+          throwError "janus_data: {hwE0} is not `m.accessible a n true = true`"
+        unless lhs0.isAppOfArity ``Memory.accessible 4 do
+          throwError "janus_data: {hwE0} is not `m.accessible a n true = true`"
+        -- a writable range of a memory related to the one of `hd` by `MemFrame` hypotheses is transported
+        -- (`MemFrame.accessible`: the accessibility of every range is the same in both)
+        let hwE? : Option Expr ← if ← withReducible (isDefEq (lhs0.getArg! 0) m) then pure (some hwE0) else do
+          let goalTy ← mkEq (mkAppN (mkConst ``Memory.accessible)
+            #[m, lhs0.getArg! 1, lhs0.getArg! 2, mkConst ``Bool.true]) (mkConst ``Bool.true)
+          let mv ← mkFreshExprSyntheticOpaqueMVar goalTy
+          if ← dischargeAccessible mv.mvarId! then pure (some (← instantiateMVars mv)) else pure none
+        let some hwE := hwE? | do
+          if star then return g
+          throwError "janus_data: {hwE0} is about the memory {lhs0.getArg! 0}, but {hE} is about {m}, and no \
+            `MemFrame` hypothesis relates them: state the writable range about {m}, or relate the two memories"
         let hwTy ← instantiateMVars (← inferType hwE)
-        let some (_, lhs, _) := hwTy.eq? |
-          throwError "janus_data: {hwE} is not `m.accessible a n true = true`"
-        unless lhs.isAppOfArity ``Memory.accessible 4 do
-          throwError "janus_data: {hwE} is not `m.accessible a n true = true`"
+        let some (_, lhs, _) := hwTy.eq? | return g
         let a := lhs.getArg! 1
         let n := lhs.getArg! 2
         let mut g := g
@@ -1220,6 +1250,28 @@ elab "janus_data " h:ident ws:janusDataWith : tactic => withMainContext do
     let pf := mkAppN (mkConst ``readLE_dataReadD) #[p, m, hE]
     let (_, g') ← (← g.assert `h_rodata (← inferType pf) pf).intro1P
     return g'
+  g ← g.withContext do
+    -- the same rule for the memories related to `m` by `MemFrame` hypotheses (one hop), conditional on the read
+    -- being outside the frame's ranges
+    let mut g := g
+    let mut fi := 0
+    for d in ← getLCtx do
+      if d.isImplementationDetail then continue
+      let dty ← instantiateMVars d.type
+      unless dty.isAppOfArity ``Janus.MemFrame 3 do continue
+      let x := dty.getArg! 0
+      let y := dty.getArg! 1
+      let rs := dty.getArg! 2
+      let lemma? ← if ← withReducible (isDefEq x m) then
+          pure (some (``readLE_dataReadD_frame, y))
+        else if ← withReducible (isDefEq y m) then pure (some (``readLE_dataReadD_frame', x))
+        else pure none
+      let some (nm, m2) := lemma? | continue
+      let pf := mkAppN (mkConst nm) #[p, m, m2, rs, hE, d.toExpr]
+      let (_, g') ← (← g.assert (Name.mkSimple s!"h_rodata_f{fi}") (← inferType pf) pf).intro1P
+      g := g'
+      fi := fi + 1
+    return g
   replaceMainGoal [g]
 
 /-- `janus_cases h` with `h : k < N` (or `k ≤ N`), `N` a literal: one goal per value of `k`,

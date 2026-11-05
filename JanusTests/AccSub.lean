@@ -40,6 +40,15 @@ theorem store_earlier (rs : List (Nat × Nat)) (ret : Nat) (hret : RetAddr store
     Reaches (storeA.withExit ret) S (IsReturn fun _ => True) := by
   janus_run
 
+/-- (a), the fact is a conditional one: `l + 8 ≤ C → 0 < l → S.mem.accessible P C true = true`, used once its
+conditions hold on the path. -/
+theorem store_conditional (ret : Nat) (hret : RetAddr storeA ret) (S : State)
+    (P l C : Nat) (v : W64) (hacc : l + 8 ≤ C → 0 < l → S.mem.accessible P C true = true)
+    (hl : l + 8 ≤ C) (hpos : 0 < l) (hP : P + C ≤ 2 ^ 48) (hpc : S.pc = 0x10000#64) (h0 : S.regs 0 = BitVec.ofNat 64 P)
+    (h1 : S.regs 1 = v) (h2 : S.regs 2 = BitVec.ofNat 64 l) (h30 : S.regs 30 = BitVec.ofNat 64 ret) :
+    Reaches (storeA.withExit ret) S (IsReturn fun _ => True) := by
+  janus_run
+
 /-- `sub sp, sp, #0x90; str x1, [sp, #0x70]; add sp, sp, #0x90; ret` -/
 def spill : Program where
   segments := [{ name := "spill", base := 0x20000, words := [0xd10243ff, 0xf9003be1, 0x910243ff, 0xd65f03c0] }]
@@ -166,6 +175,16 @@ theorem store_tbl (p v : W64) :
   intro ret hret s hs ⟨hd, hw, hp⟩
   janus_intro hs
   janus_data hd [*]
+  janus_run
+
+/-- `janus_data hd [hw]` with `hd` about the memory before a call and `hw` about the memory after it: the writable
+range is transported along `hfr` (the two memories are related by a `MemFrame`). -/
+theorem store_tbl_frame (ret : Nat) (hret : RetAddr storeTbl ret) (s S : State) (p v : W64)
+    (hfr : MemFrame s.mem S.mem [(0x1000, 0x2000)]) (hd : storeTbl.DataLoaded s.mem)
+    (hw : S.mem.accessible p.toNat 8 true = true) (hp : p.toNat + 8 ≤ 2 ^ 48)
+    (hpc : S.pc = 0x40000#64) (h0 : S.regs 0 = p) (h1 : S.regs 1 = v) (h30 : S.regs 30 = BitVec.ofNat 64 ret) :
+    Reaches (storeTbl.withExit ret) S (IsReturn fun s' => (s'.regs 0).toNat = 7) := by
+  janus_data hd [hw]
   janus_run
 
 /-! ## The diagnostic names the failed obligation and prints the exact side goal

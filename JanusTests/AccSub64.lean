@@ -40,6 +40,16 @@ theorem store_earlier (rs : List (Nat × Nat)) (ret : Nat) (hret : RetAddr store
     Reaches (storeA.withExit ret) S (IsReturn fun _ => True) := by
   janus64_run
 
+/-- (a), the fact is a conditional one: `l + 8 ≤ C → 0 < l → S.mem.accessible P C true = true`. -/
+theorem store_conditional (ret : Nat) (hret : RetAddr storeA ret) (S : Janus.Amd64.State)
+    (P l C : Nat) (hacc : l + 8 ≤ C → 0 < l → S.mem.accessible P C true = true)
+    (hl : l + 8 ≤ C) (hpos : 0 < l) (hP : P + C ≤ 2 ^ 48) (hpc : S.rip = 0x10000#64)
+    (h7 : S.regs 7 = BitVec.ofNat 64 P) (h6 : S.regs 6 = BitVec.ofNat 64 l)
+    (hsp : (S.regs 4).toNat + 8 ≤ 2 ^ 48) (hsa : S.mem.accessible (S.regs 4).toNat 8 false = true)
+    (hrd : S.mem.readLE (S.regs 4).toNat 8 = ret) (hdis : P + C ≤ (S.regs 4).toNat ∨ (S.regs 4).toNat + 8 ≤ P) :
+    Reaches (storeA.withExit ret) S (IsReturn fun _ => True) := by
+  janus64_run
+
 /-- `sub rsp, 0x90; mov [rsp+0x70], rdx; add rsp, 0x90; ret` -/
 def spill : Janus.Amd64.Program where
   segments := [{ name := "spill", base := 0x20000, bytes := [0x48, 0x81, 0xec, 0x90, 0x00, 0x00, 0x00, 0x48, 0x89, 0x54, 0x24, 0x70, 0x48, 0x81, 0xc4, 0x90, 0x00, 0x00, 0x00, 0xc3] }]
@@ -69,6 +79,28 @@ theorem guard_ult (rs : List (Nat × Nat)) (ret : Nat) (hret : RetAddr guarded r
     (hrd : S.mem.readLE (S.regs 4).toNat 8 = ret)
     (hdis : P + (S.regs 2).toNat ≤ (S.regs 4).toNat ∨ (S.regs 4).toNat + 8 ≤ P) :
     Reaches (guarded.withExit ret) S (IsReturn fun _ => True) := by
+  janus64_run
+
+/-! ## `janus64_data hd [hw]` with `hd` and `hw` about memories related by a `MemFrame`
+
+`mov [rdi], rsi; mov rax, [rdx]; ret` with the table word at `0x40100`: the writable range of the store is stated
+about the memory after a call (`S.mem`), `hd` about the memory before it; the range is transported along `hfr`, and the
+read of the table (`S.mem.readLE`) follows from `hd` through the frame (the table is outside the frame's ranges). -/
+
+def storeTbl : Janus.Amd64.Program where
+  segments := [{ name := "storeTbl", base := 0x40000, bytes := [0x48, 0x89, 0x37, 0x48, 0x8b, 0x02, 0xc3] }]
+  stubs := []
+  exitAddr := 0
+  data := [{ name := ".rodata", base := 0x40100, bytes := [7, 0, 0, 0, 0, 0, 0, 0] }]
+
+theorem store_tbl_frame (ret : Nat) (hret : RetAddr storeTbl ret) (s S : Janus.Amd64.State) (p : Nat)
+    (hfr : MemFrame s.mem S.mem [(0x1000, 0x2000)]) (hd : storeTbl.DataLoaded s.mem)
+    (hw : S.mem.accessible p 8 true = true) (hp : p + 8 ≤ 2 ^ 48) (hpc : S.rip = 0x40000#64)
+    (h7 : S.regs 7 = BitVec.ofNat 64 p) (h2 : S.regs 2 = 0x40100#64)
+    (hsp : (S.regs 4).toNat + 8 ≤ 2 ^ 48) (hsa : S.mem.accessible (S.regs 4).toNat 8 false = true)
+    (hrd : S.mem.readLE (S.regs 4).toNat 8 = ret) (hdis : p + 8 ≤ (S.regs 4).toNat ∨ (S.regs 4).toNat + 8 ≤ p) :
+    Reaches (storeTbl.withExit ret) S (IsReturn fun s' => (s'.regs 0).toNat = 7) := by
+  janus64_data hd [hw]
   janus64_run
 
 /-! ## A new array: the accessible range inside a named predicate
