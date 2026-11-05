@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -102,6 +103,14 @@ func collectDataSyms(x *Extraction) []DataSym {
 	refsOnly = false
 	for _, d := range x.Data {
 		add(d.Base)
+	}
+	// the runtime data objects a contract's statement names (staticuint64s for slicebytetostring)
+	for _, d := range x.ContractData {
+		k := key{d.Name, d.Addr}
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, d)
+		}
 	}
 	// The words of a referenced interface variable's link-time image (an `error` sentinel): its
 	// type/itab word and its data pointer.
@@ -303,4 +312,47 @@ func (b *Binary) linkWords(d DataSym) []DataSym {
 		{Name: d.Name + "→type", Addr: w0, Section: d.Section, Kind: "link", Type: true},
 		{Name: d.Name + "→data", Addr: w1, Section: d.Section, Kind: "link", Type: true},
 	}
+}
+
+// contractDataSyms maps a contract function to the runtime data object its Janus/Contracts statement names. The
+// object's address is a parameter of the contract (`slicebytetostringSpec st`): `n = 1` returns
+// `&runtime.staticuint64s[*ptr]`, an object of the binary, not runtime-allocated. The extractor checks the symbol
+// (present, 2048 bytes, in a read-only section, contents `staticuint64s[i] = i`) and names its address in
+// Extracted.lean; the auditor accepts no other argument for the spec.
+var contractDataSyms = map[string]string{"runtime.slicebytetostring": "runtime.staticuint64s"}
+
+// staticuint64sTable is the contents of runtime.staticuint64s: the little-endian words 0, 1, …, 255.
+func staticuint64sTable() []byte {
+	t := make([]byte, 256*8)
+	for i := 0; i < 256; i++ {
+		binary.LittleEndian.PutUint64(t[8*i:], uint64(i))
+	}
+	return t
+}
+
+// checkContractData finds the data symbol sym a contract for fn names and checks it is the Go runtime's.
+func (b *Binary) checkContractData(fn, sym string) (DataSym, error) {
+	bad := func(why string) (DataSym, error) {
+		return DataSym{}, &diag{
+			Msg:   fmt.Sprintf("--contract names %s, whose framework contract takes the address of %s, but %s", fn, sym, why),
+			Stage: "code extraction",
+			Next:  "Build with a Go toolchain whose runtime has this table (Go 1.26) and without stripping the symbol table (no -ldflags=-s).",
+		}
+	}
+	s, ok := b.dataSymbol(sym)
+	if !ok {
+		return bad("the binary has no such data symbol")
+	}
+	if s.Size != 256*8 {
+		return bad(fmt.Sprintf("the symbol at 0x%x has size %d, not 2048", s.Addr, s.Size))
+	}
+	sec, ok := b.sectionOf(s.Addr)
+	if !ok || sec.Writable {
+		return bad(fmt.Sprintf("the symbol at 0x%x is not in a read-only section", s.Addr))
+	}
+	bs, ok := b.readAt(s.Addr, s.Size)
+	if !ok || !bytes.Equal(bs, staticuint64sTable()) {
+		return bad(fmt.Sprintf("the 2048 bytes at 0x%x are not the table 0, 1, …, 255", s.Addr))
+	}
+	return DataSym{Name: s.Name, Addr: s.Addr, Size: s.Size, Section: sec.Name, Kind: "sym"}, nil
 }

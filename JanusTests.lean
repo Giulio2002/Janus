@@ -51,3 +51,4 @@ import JanusTests.ReadBounds
 import JanusTests.CallPre
 import JanusTests.CallPre64
 import JanusTests.DataWritable
+import JanusTests.StrAt

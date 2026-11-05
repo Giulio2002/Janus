@@ -24,7 +24,7 @@ set_option maxRecDepth 20000 in
 set_option maxHeartbeats 4000000 in
 theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (p n c : BitVec 64)
     (hc : RtContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring")
-      rt 4096 H slicebytetostringSpec) :
+      rt 4096 H (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s»)) :
     Ensures (Extracted.program.link impl) Extracted.entry [p, n, c] (Pre rt H p n)
       (fun s s' => StrOut s'.mem (s'.regs 0).toNat (s'.regs 3).toNat (strBytes s.mem p.toNat n.toNat)) := by
   intro ret hret s hs ⟨hsg, ⟨hb, ha, hw⟩, hout, hal, ⟨ha1, ha2⟩, hao, hH⟩
@@ -50,7 +50,7 @@ def implAt : List Amd64.Segment := [{ name := "model", base := cAddr, bytes := c
 def linked : Amd64.Program := { Extracted.program with segments := Extracted.program.segments ++ implAt }
 theorem linked_eq : Extracted.program.link implAt = linked := rfl
 
-theorem model : RtContract64 (Extracted.program.link implAt) cAddr rtW 4096 H0 slicebytetostringSpec := by
+theorem model : RtContract64 (Extracted.program.link implAt) cAddr rtW 4096 H0 (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s») := by
   rw [linked_eq]
   rintro s hpc ⟨⟨hra, hal, hsb, hsa, hacc⟩, -, -, -, hH⟩
   have ha := ready_of rfl hH
@@ -58,7 +58,7 @@ theorem model : RtContract64 (Extracted.program.link implAt) cAddr rtW 4096 H0 s
   janus64_run
   apply rtPost_const <;> (try rfl) <;> (try simp [retAddrOf]) <;> (try simp [setRegF])
   simp only [slicebytetostringSpec] at ha ⊢
-  simp [ha, strBytes]
+  simp [ha, strBytes, StrAt]
 
 def ret : Nat := wret
 theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
@@ -84,7 +84,7 @@ theorem pre : Pre rtW H0 0 0 s0 := by
 
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
     RtContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring")
-      rt 4096 H slicebytetostringSpec ∧ RetAddr (Extracted.program.link impl) ret ∧
+      rt 4096 H (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s») ∧ RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0] s ∧ Pre rt H 0 0 s :=
   ⟨implAt, rtW, H0, ret, s0, model, hret, setup, pre⟩
 

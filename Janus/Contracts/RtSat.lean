@@ -27,7 +27,7 @@ theorem rt_satisfiable :
   (∀ k, k ≤ 7 → Sat.Satisfiable (concatbyteSpec k)) ∧
   Sat.Satisfiable concatstringsSpec ∧
   Sat.Satisfiable concatbytesSpec ∧
-  Sat.Satisfiable slicebytetostringSpec ∧
+  (∀ st, Sat.Satisfiable (slicebytetostringSpec st)) ∧
   Sat.Satisfiable slicebytetostringtmpSpec ∧
   Sat.Satisfiable stringtoslicebyteSpec ∧
   Sat.Satisfiable stringtosliceruneSpec ∧
@@ -57,7 +57,7 @@ theorem rt64_satisfiable :
   (∀ k, k ≤ 7 → SatAmd64.Satisfiable (concatbyteSpec k)) ∧
   SatAmd64.Satisfiable concatstringsSpec ∧
   SatAmd64.Satisfiable concatbytesSpec ∧
-  SatAmd64.Satisfiable slicebytetostringSpec ∧
+  (∀ st, SatAmd64.Satisfiable (slicebytetostringSpec st)) ∧
   SatAmd64.Satisfiable slicebytetostringtmpSpec ∧
   SatAmd64.Satisfiable stringtoslicebyteSpec ∧
   SatAmd64.Satisfiable stringtosliceruneSpec ∧

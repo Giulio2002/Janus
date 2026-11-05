@@ -1242,7 +1242,7 @@ built from imported parts too, and describes an impossible function or format. A
 `def`/`abbrev` alias is not accepted either (only the constant itself, which a `notation` or
 `local notation` expands to at parse time). -/
 def frameworkSpecs : List Name :=
-  [`concatstringsSpec, `concatbytesSpec, `slicebytetostringSpec, `slicebytetostringtmpSpec,
+  [`concatstringsSpec, `concatbytesSpec, `slicebytetostringtmpSpec,
    `stringtoslicebyteSpec, `stringtosliceruneSpec, `slicerunetostringSpec, `intstringSpec,
    `decoderuneSpec, `countrunesSpec, `gostringSpec, `gostringnSpec, `gobytesSpec, `growsliceSpec,
    `growsliceNoAliasSpec, `growsliceBufSpec, `growsliceBufNoAliasSpec, `makeslicecopySpec,
@@ -1254,6 +1254,27 @@ def frameworkSpecs : List Name :=
 
 def frameworkSpecsNat : List Name :=
   [`concatstringSpec, `concatbyteSpec].map (`Janus.Contracts ++ ·)
+
+/-- The address of `runtime.staticuint64s` that `janus extract` names for a `--contract runtime.slicebytetostring`
+(`Extracted.dataAddr.«runtime.staticuint64s»`; the extractor checks the object's size and contents, `janus check`
+regenerates `Extracted.lean` from the binary). The only argument `slicebytetostringSpec` accepts: another number
+(`0`, a variable, an address the statement picks) would say that a one-byte result lives somewhere the runtime never
+puts it, and the contract would be one no implementation meets (or, for an address the statement can choose, one
+that lets the proof place the result anywhere). -/
+def staticuint64sConst : Name := .str `Extracted.dataAddr "runtime.staticuint64s"
+
+/-- Is `k` exactly `Extracted.dataAddr.«runtime.staticuint64s»` (imported from the `Extracted` module)? -/
+def isStaticAddr (env : Environment) (k : Expr) : Bool :=
+  match k.consumeMData with
+  | .const c _ =>
+      c == staticuint64sConst &&
+      match env.getModuleIdxFor? c with
+      | some idx => env.header.moduleNames[idx.toNat]? == some `Extracted
+      | none => false
+  | _ => false
+
+/-- The specs that take the address of `runtime.staticuint64s` (see `isStaticAddr`). -/
+def frameworkSpecsStatic : List Name := [`slicebytetostringSpec].map (`Janus.Contracts ++ ·)
 
 def frameworkFmts : List Name := [`Janus.Float.binary32, `Janus.Float.binary64]
 
@@ -1272,7 +1293,8 @@ def isFrameworkConstArg (env : Environment) (isSpec : Bool) (a : Expr) : Bool :=
     match a with
     | .const c _ => frameworkSpecs.contains c && imported c
     | .app (.const c _) k =>
-        frameworkSpecsNat.contains c && imported c && (k.nat?.isSome || k.rawNatLit?.isSome)
+        (frameworkSpecsNat.contains c && imported c && (k.nat?.isSome || k.rawNatLit?.isSome)) ||
+        (frameworkSpecsStatic.contains c && imported c && isStaticAddr env k)
     | _ => false
   else match a with
     | .const c _ => frameworkFmts.contains c && imported c
@@ -1330,6 +1352,16 @@ def specInfo? (a : Expr) : Option (String × List String) :=
     | some "concatstringSpec", some n => some (s!"concatstringSpec {n}", [s!"runtime.concatstring{n}"])
     | some "concatbyteSpec", some n => some (s!"concatbyteSpec {n}", [s!"runtime.concatbyte{n}"])
     | _, _ => none
+  | _ => none
+
+/-- `slicebytetostringSpec st` (`st` any term): the printed form and the function; the argument itself is
+checked by `isFrameworkConstArg`. -/
+def specStaticInfo? (a : Expr) : Option (String × List String) :=
+  match a.consumeMData with
+  | .app (.const c _) _ =>
+    match contractsShort? c with
+    | some "slicebytetostringSpec" => some ("slicebytetostringSpec", ["runtime.slicebytetostring"])
+    | _ => none
   | _ => none
 
 /-- A live-data argument (`growsliceLive`): its short name and the spec it belongs to. -/
@@ -1686,7 +1718,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
         let mut specSeen := false
         for i in [0:doms.size] do
           if doms[i]!.consumeMData.isConstOf `Janus.Contracts.RtSpec then
-            if let some (lbl, names) := specInfo? args[i]! then
+            if let some (lbl, names) := (specInfo? args[i]! <|> specStaticInfo? args[i]!) then
               specSeen := true
               unless names.contains fn do
                 return some s!"assumes the runtime contract {c} at the address of `{fn}` with the spec `{lbl}`, which describes {" / ".intercalate names}: the spec of another runtime function makes the contract one that no implementation of `{fn}` meets, labelled as `{fn}`'s (spec binding)"
@@ -1697,7 +1729,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
               let mut okPair := false
               for j in [0:doms.size] do
                 if doms[j]!.consumeMData.isConstOf `Janus.Contracts.RtSpec then
-                  if let some (lbl, _) := specInfo? args[j]! then
+                  if let some (lbl, _) := (specInfo? args[j]! <|> specStaticInfo? args[j]!) then
                     if lbl == owner then okPair := true
               unless okPair do
                 return some s!"assumes the runtime contract {c} with the live data `{live}`, which belong to the spec `{owner}`, not to the spec of this contract: a spec and live data of different runtime functions describe no real call (spec binding)"

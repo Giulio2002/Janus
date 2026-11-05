@@ -37,4 +37,37 @@ example (m m' : Memory) (a : Nat) (hd : tablep.DataLoaded m) (hw : m'.accessible
   fail_if_success janus_data hd [hw]
   trivial
 
+/-! ### amd64 (`janus64_data`) -/
+
+def tablep64 : Janus.Amd64.Program where
+  segments := []
+  stubs := []
+  exitAddr := 0
+  data := [{ name := ".rodata", base := 0x40100, bytes := [1, 0, 0, 0, 0, 0, 0, 0] }]
+
+open Janus.Amd64.Tactic in
+/-- A writable range: accepted. -/
+example (m : Memory) (a : Nat) (hd : tablep64.DataLoaded m) (hw : m.accessible a 8 true = true) : True := by
+  janus64_data hd [hw]
+  have := h_ddisj0_0
+  trivial
+
+/- A read-only range: an early error that says the range is read-only. -/
+set_option hygiene false in
+open Janus.Amd64.Tactic in
+example (m : Memory) (a : Nat) (hd : tablep64.DataLoaded m) (hw : m.accessible a 8 false = true) : True := by
+  run_tac do
+    try
+      Lean.Elab.Tactic.evalTactic (← `(tactic| janus64_data hd [hw]))
+      Lean.throwError "accepted a read-only range"
+    catch e =>
+      unless (← e.toMessageData.toString).contains "READ-ONLY" do throw e
+  trivial
+
+open Janus.Amd64.Tactic in
+/-- Another memory: an error. -/
+example (m m' : Memory) (a : Nat) (hd : tablep64.DataLoaded m) (hw : m'.accessible a 8 true = true) : True := by
+  fail_if_success janus64_data hd [hw]
+  trivial
+
 end JanusTests.DataWritable

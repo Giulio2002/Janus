@@ -60,6 +60,9 @@ type Extraction struct {
 	Bin       *Binary
 	Entry     Func
 	Contracts []Contract // discovery order
+	// ContractData are the runtime data objects a contract's statement names (contractDataSyms), checked at
+	// extraction and named in Extracted.lean (`dataAddr.«runtime.staticuint64s»`).
+	ContractData []DataSym
 	// ContractPatterns are the --contract patterns, as given (recorded in identity.json so
 	// that check regenerates the same extraction).
 	ContractPatterns []string
@@ -499,6 +502,13 @@ func (x *Extraction) contractTarget(m *contractMatcher, seen map[uint64]bool, g 
 				return true, err
 			}
 			c.Pinned = true
+		}
+		if sym := contractDataSyms[g.Name]; sym != "" {
+			ds, err := x.Bin.checkContractData(g.Name, sym)
+			if err != nil {
+				return true, err
+			}
+			x.ContractData = append(x.ContractData, ds)
 		}
 		x.Contracts = append(x.Contracts, c)
 	}
