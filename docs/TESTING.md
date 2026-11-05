@@ -263,6 +263,33 @@ re-record on a green full gate and say why in the commit message.
 has one JSON object per prebuild step, stage, pool, lane and item (start/end epoch seconds, wall, status);
 `python3 -I scripts/gate-report.py <timeline>` prints the stages, pool utilisation, lanes and critical path.
 
+## Merge check (`scripts/check-merge.sh`) and where its time goes (2026-11-05)
+
+`scripts/check-merge.sh [-j N]` runs the checks of an integration merge (lake build with JanusTests and the auditor, axiom
+guard and address lint, go vet/build, `go test ./cmd/...`, every audit round, the example sweep with cgo) as ONE
+`scripts/gate.sh --only verify,gotest,rounds,axiom,govet`: the same lanes with the same checks, started by the dependency graph
+instead of one after the other. It is a partial gate (no ISA-model lanes) and does not replace the full gate before a push.
+Smoke run on this checkout (`-j 2`, filters on every lane, host load 21): PASS in 11m16s, critical path = the cold embedded
+fixture (501 s of kernel replay), `rounds` (r12 + rbig) 164 s, `gotest` 35 s, `verify` 3 s, 18% slot utilisation.
+
+Where the time of a sequential merge check goes (sources: `integ15/check-b..d.log`, `artifacts/verify-all-examples.times`,
+`cmd/janus/order_test.go` `testDurations`, one measured trivial verify; all at host load 20-25, where the 2026-10-30 profile
+found gate items 3-5x slower than standalone):
+
+| phase | work | with 2 slots | what dominates |
+|---|---|---|---|
+| lake build (Janus, JanusTests, auditor) | 85 s warm, ~10 min cold | same | the framework CP |
+| audit rounds (r8..r15, rbig, rfw, rds) | 2 lanes x 2 rows: 1249 s wall (check-d), of which rbig was 0 s (broken) and, before this change, 1994 s | 21 min + rbig 168 s | r8 456-710 s, r10 367-482, r9 327-335 |
+| `go test ./cmd/...` | 9744 s of measured test time, of which about 4200 s are nightly-only (RTMatrix x10 = 2400, real-framework forgery x4 = 1500, ...) | ~46 min + fixture | whole-framework kernel replays (~210 s idle each): CacheGCConcurrentVerify 941, MatchesSingleProcess 887, R1ForgedFrameworkLemma 856 |
+| example sweep (475 items) | 21869 s of item time; 110 items over 60 s = 17097 s (78%), 365 small items = 4771 s (trivial verify 4.5 s warm) | ~3 h | print 5158 s (8 items), cgo 6560 s (64 items), arm64/amd64 7411 s (344 items) |
+
+What is NOT a duplicate (checked): the print examples seed their lemma modules from the newest sibling workspace
+(`openWorkspace`, `newestSibling`), so only the per-example `Main*` proofs and the example module are rebuilt; the audit rounds share
+one verdict store; `--fresh` rows with `--janus-root` build no framework (the rbig round paid its time in the big `Extracted`, now
+cached per architecture). What was a duplicate: the rbig round (above). What the sequential script lost: the overlap of the phases
+(go test, rounds and examples are independent once the framework is built) and the sharding of `go test`. What remains is real
+proof elaboration and kernel replay, which only more slots or faster engines (speed batches) reduce; the pool's `-j` is the knob.
+
 ## Red team of the caches (`cmd/janus/*_rt_test.go`, `scripts/lib/test-rt-incr.sh`)
 
 An authorized audit of the result cache, the incremental records, the framework verdict store and the build-cache
