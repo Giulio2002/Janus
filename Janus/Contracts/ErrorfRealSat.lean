@@ -7,6 +7,7 @@ import Janus.Contracts.ErrorfRealStageC
 import Janus.Contracts.ErrorfRealStageD
 import Janus.Contracts.ErrorfRealStageE
 import Janus.Contracts.ErrorfRealStageF
+import Janus.Contracts.ErrorfRealFinal
 
 /-!
 # The `fmt.errorf` live contract is satisfiable for the real format (arm64)
@@ -26,7 +27,7 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Errorf Jan
 open Janus.Contracts.AllocSat (toy A0 at0 link_at0 withCode)
 open Janus.Contracts.ErrorfRealCode (code)
 open Janus.Contracts.ErrorfSat (tErr iErr tInt iWrap)
-open Janus.Contracts.ErrorfRealStages
+open Janus.Contracts.ErrorfRealStages Janus.Contracts.ErrorfRealFinal
 
 set_option maxRecDepth 100000
 set_option maxHeartbeats 0
@@ -232,6 +233,10 @@ theorem real_impl (ok : Nat → List Nat → Prop) :
           (s.sp.toNat - 48 - (s.sp.toNat - 48 - l2 - n2))) R5 F5 m5 hP5 h11e h1e (by omega) ?_ _ ?_
         · rw [hm5acc]; exact hHacc _ _ (by omega) (by omega)
         · intro R6 F6 m6 h0 h1f h18 h28 h29 hm6
+          have hfin : m6 = finalMem s.mem s.sp.toNat l1 n1 l2 n2 (absn v1) (absn v2) p
+              (atot (tl + (l1 + n1) + (l2 + n2) + 20)) (tl + (l1 + n1) + (l2 + n2) + 20) e tp tl := by
+            subst hm6 hm5 hm4 hm3 hm2 hm1
+            rfl
           trace_state
           sorry
 

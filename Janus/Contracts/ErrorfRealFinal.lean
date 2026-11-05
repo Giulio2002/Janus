@@ -1,5 +1,6 @@
 import Janus.Contracts.ErrorfRealStageDefs
 import Janus.Contracts.ErrorfRealFmt
+import Janus.Contracts.LiveToy
 
 /-!
 # The memory the real-format `fmt.errorf` stub leaves (ISA-independent)
@@ -345,5 +346,35 @@ theorem final_frame (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) (
       by_cases h : msgList (strBytes m0 tp tl) n1 n2 a1 a2 = []
       · exact Or.inl h
       · exact Or.inr ⟨(p, p + A), by simp, by omega, by rw [hLm']; omega⟩)) hs
+
+/-- The toy runtime's invariant holds for any live set whose ranges lie in the heap below the bump pointer
+`pn` (what an allocation block split into several objects needs). -/
+theorem toyInv_swap {tys : Toy.Tys} {b : Nat} {L L' : List (Nat × Nat)} {g : Nat} {m : Memory} (pn : Nat)
+    (hpn : m.readLE Toy.BUMP 8 = pn)
+    (hL : ∀ r ∈ L, Toy.HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ pn) (hL' : ∀ r ∈ L', Toy.HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ pn)
+    (hty : Toy.TysOK tys) (h : Toy.toyInv tys b L g (view (Toy.toyRt tys) L m)) :
+    Toy.toyInv tys b L' g (view (Toy.toyRt tys) L' m) := by
+  obtain ⟨p, hp, h1, h2, h3, -, hz, hac, hacB, hacW, hT⟩ := h
+  have hpm : m.readLE Toy.BUMP 8 = p := by
+    rw [← readLE_view (rt := Toy.toyRt tys) (L := L) (Toy.inRanges_bump tys)
+      (Toy.outside_live (p := pn) hL (by simp [Toy.BUMP, Toy.HEAP]))]; exact hp
+  have hpp : p = pn := by rw [← hpm, hpn]
+  subst hpp
+  have eq : ∀ a n, InRanges a n (Toy.toyRt tys) → (a + n ≤ Toy.HEAP ∨ p ≤ a) →
+      (view (Toy.toyRt tys) L' m).readLE a n = (view (Toy.toyRt tys) L m).readLE a n := by
+    intro a n hin hout
+    have o1 : Outside a n L := Toy.outside_of_forall fun r hr => by have := hL r hr; omega
+    have o2 : Outside a n L' := Toy.outside_of_forall fun r hr => by have := hL' r hr; omega
+    rw [readLE_view hin o1, readLE_view hin o2]
+  have hb : Toy.BUMP + 8 ≤ Toy.HEAP := by simp [Toy.BUMP, Toy.HEAP]
+  refine ⟨p, ?_, h1, h2, h3, hL', fun i hi hi' => ?_, by rw [view_accessible]; exact hac,
+    by rw [view_accessible]; exact hacB, by rw [view_accessible]; exact hacW, fun t ht => ?_⟩
+  · rw [eq _ _ (Toy.inRanges_bump tys) (Or.inl hb)]; exact hp
+  · rw [eq _ _ (Toy.inRanges_heap (n := 1) (by omega) (by omega)) (Or.inr hi)]; exact hz i hi hi'
+  · have hr := hT t ht
+    have ht' : t.1 + 16 ≤ Toy.HEAP := hty.heap ht
+    rw [eq _ _ (Toy.inRanges_ty ht (n := 8) (by omega)) (Or.inl (by omega)),
+      eq _ _ (InRanges.sub (Toy.inRanges_ty ht (n := 16) (by omega)) (by omega) (by omega)) (Or.inl (by omega))]
+    exact hr
 
 end Janus.Contracts.ErrorfRealFinal
