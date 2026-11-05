@@ -286,3 +286,6 @@ rw [Janus.Tactic.bv_xor_toNat_lt_top] at h
 Ordering: the sign rules mention the literal `2 ^ 63`. Apply them (`rw`, or a `simp only` that does not also contain
 `Nat.reducePow`) before `Nat.reducePow` turns `2 ^ 63` into `9223372036854775808`, otherwise they no longer match. All the
 rules match `(x ^^^ y).toNat`, so apply them before `BitVec.toNat_xor` rewrites the term to a `Nat` XOR.
+
+Also `Janus.Tactic.add_sub_norm : c ≤ a → a + d - c = d + (a - c)` (the byte address `K + ptr - 1` as `ptr + (K - 1)`), a public lemma for
+`simp (disch := omega) only [add_sub_norm, Nat.reduceSub, …]`, not in any simp set.
