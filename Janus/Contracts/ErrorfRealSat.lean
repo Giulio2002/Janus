@@ -152,6 +152,7 @@ theorem real_impl (ok : Nat → List Nat → Prop) :
     have := hendA
     simp only [HEND, HEAP, HSIZE] at this
     exact this
+  have h1' : 268435456 ≤ p := by simpa [HEAP] using h1
   have hTloc : tl = 0 ∨ tp + tl ≤ p ∨ 536870912 ≤ tp := by
     rcases hT4 with h | h | h
     · left; simpa using h
@@ -191,7 +192,47 @@ theorem real_impl (ok : Nat → List Nat → Prop) :
     have eL : (tl + (s.sp.toNat - 16 - (s.sp.toNat - 16 - l1 - n1)) + (s.sp.toNat - 48 - (s.sp.toNat - 48 - l2 - n2)) + 20) =
         tl + (l1 + n1) + (l2 + n2) + 20 := by omega
     rw [eL] at hm3
-    trace_state
-    sorry
+    have hm3acc : ∀ a k w, m3.accessible a k w = s.mem.accessible a k w := by
+      intro a k w; rw [hm3, putBytes_accessible, allocMem_accessible, hm2acc]
+    have hHacc : ∀ a k, 268435456 ≤ a → a + k ≤ 536870912 → s.mem.accessible a k true = true := fun a k h1 h2 =>
+      Memory.accessible_mono _ hH h1 (by omega)
+    have hscrr : ∀ a k, s.sp.toNat - 4096 ≤ a → a + k ≤ s.sp.toNat - 4096 + (4096 + 8 + 8 * 5) →
+        s.mem.accessible a k true = true := fun a k h1 h2 => Memory.accessible_mono _ hscr h1 h2
+    refine stageD s h30b h30a e tp tl (s.sp.toNat - 16 - (s.sp.toNat - 16 - l1 - n1)) (s.sp.toNat - 16 - l1 - n1)
+      (s.sp.toNat - 48 - (s.sp.toNat - 48 - l2 - n2)) (s.sp.toNat - 48 - l2 - n2) (p + 32 + tl) p R3 F3 m3 hP3 h1r h11 h25' h26'
+      h21 h22 (by omega) (by omega) (by omega) (by omega) ?_ ?_ ?_ ?_ _ ?_
+    · rw [hm3acc]; exact hHacc _ _ (by omega) (by omega)
+    · omega
+    · right
+      rw [hm3acc]
+      exact Memory.accessible_sub _ (hscrr (s.sp.toNat - 16 - l1 - n1) (s.sp.toNat - 16 - (s.sp.toNat - 16 - l1 - n1))
+        (by omega) (by omega)) (Or.inl rfl) (by omega) (by omega)
+    · right
+      rw [hm3acc]
+      exact hHacc _ _ (by omega) (by omega)
+    · intro R4 F4 m4 hP4 h1d h21d h22d h11d hm4
+      have hm4acc : ∀ a k w, m4.accessible a k w = s.mem.accessible a k w := by
+        intro a k w; rw [hm4]; simp only [putBytes_accessible]; exact hm3acc a k w
+      refine stageE s h30b h30a e tp tl (s.sp.toNat - 48 - (s.sp.toNat - 48 - l2 - n2)) (s.sp.toNat - 48 - l2 - n2)
+        (p + 32 + tl + 7 + (s.sp.toNat - 16 - (s.sp.toNat - 16 - l1 - n1))) p R4 F4 m4 hP4 h1d h11d h21d h22d
+        (by omega) (by omega) (by omega) (by omega) ?_ ?_ ?_ ?_ _ ?_
+      · rw [hm4acc]; exact hHacc _ _ (by omega) (by omega)
+      · omega
+      · right
+        rw [hm4acc]
+        exact Memory.accessible_sub _ (hscrr (s.sp.toNat - 48 - l2 - n2) (s.sp.toNat - 48 - (s.sp.toNat - 48 - l2 - n2))
+          (by omega) (by omega)) (Or.inl rfl) (by omega) (by omega)
+      · right
+        rw [hm4acc]
+        exact hHacc _ _ (by omega) (by omega)
+      · intro R5 F5 m5 hP5 h1e h11e hm5
+        have hm5acc : ∀ a k w, m5.accessible a k w = s.mem.accessible a k w := by
+          intro a k w; rw [hm5]; simp only [putBytes_accessible]; exact hm4acc a k w
+        refine stageF s h30b h30a e tp tl p (p + 32 + tl + 7 + (s.sp.toNat - 16 - (s.sp.toNat - 16 - l1 - n1)) + 7 +
+          (s.sp.toNat - 48 - (s.sp.toNat - 48 - l2 - n2))) R5 F5 m5 hP5 h11e h1e (by omega) ?_ _ ?_
+        · rw [hm5acc]; exact hHacc _ _ (by omega) (by omega)
+        · intro R6 F6 m6 h0 h1f h18 h28 h29 hm6
+          trace_state
+          sorry
 
 end Janus.Contracts.ErrorfRealSat
