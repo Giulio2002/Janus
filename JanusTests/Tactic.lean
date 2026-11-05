@@ -937,6 +937,7 @@ def g_framed : Prop :=
     (fun s s' => ∃ m, MemFrame s.mem m [(s.sp.toNat - 64, s.sp.toNat - 32)] ∧
       s' = { s with mem := m, regs := setReg s.regs 0 (s.regs 0 + 1#64), pc := s.regs 30 })
 
+set_option janus.callRegions true in
 theorem call_regions_named (hg : g_framed) (x : W64) :
     Ensures callp 0x50000 [x] (fun s => StackOK s 16 0) (fun _ _ => True) := by
   intro ret hret s hs ⟨hal, hb, ha, hw⟩
@@ -954,6 +955,7 @@ theorem call_regions_named (hg : g_framed) (x : W64) :
   janus_run calls [hg]
   all_goals (try trivial)
 
+set_option janus.callRegions true in
 /-- The unnamed form: `hrg1` after the first call, `hrg2` after the second. -/
 theorem call_regions_unnamed (hg : g_framed) (x : W64) :
     Ensures callp 0x50000 [x] (fun s => StackOK s 16 0) (fun _ _ => True) := by
@@ -965,6 +967,15 @@ theorem call_regions_unnamed (hg : g_framed) (x : W64) :
   janus_run until [0x5000c] calls [hg]
   have k2 := hrg2
   janus_run
+
+/-- Default (off): no `hrg` hypothesis; the explicit lemma `Summary.regions` gives the same fact. -/
+theorem call_regions_off (hg : g_framed) (x : W64) :
+    Ensures callp 0x50000 [x] (fun s => StackOK s 16 0) (fun _ _ => True) := by
+  intro ret hret s hs ⟨hal, hb, ha, hw⟩
+  janus_intro hs
+  janus_run until [0x50008] calls [hg]
+  fail_if_success (have := hrg1)
+  janus_run calls [hg]
 
 /-- Without the summary, the callee is simply executed inline. -/
 theorem call_spec_inline (x : W64) :

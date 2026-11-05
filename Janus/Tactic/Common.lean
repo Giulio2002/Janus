@@ -1040,8 +1040,8 @@ def namePost (g : MVarId) (hpost : FVarId) (name : Name) : MetaM (FVarId × MVar
   return (h, g)
 
 register_option janus.callRegions : Bool := {
-  defValue := true
-  descr := "after a `calls` step, add the callee's regions fact `hrg<n> : s'.mem.regions = s.mem.regions`"
+  defValue := false
+  descr := "(opt-in) after a `calls` step, add the callee's regions fact `hrg<n> : s'.mem.regions = s.mem.regions`"
 }
 
 /-- A fresh name for the regions equation of a callee summary (`hrg1`, `hrg2`, … in order of

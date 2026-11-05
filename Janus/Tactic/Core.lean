@@ -20,7 +20,7 @@ import Janus.Tactic.ReadOverlap
   `calls [hS := S]` also keeps the whole postcondition as `hS : post s s'` (exactly as stated in
   `Summary`, with `s'` substituted if the post is `s' = e`), at each call of `S`: destructure it with
   `obtain ⟨k, h₁, …⟩ := hS` by the names you choose.
-  Each `calls` step also adds the callee's regions fact `hrg<n> : s'.mem.regions = s.mem.regions` (`hS_regions`
+  With `set_option janus.callRegions true` (default false), each `calls` step also adds the callee's regions fact `hrg<n> : s'.mem.regions = s.mem.regions` (`hS_regions`
   for `hS := S`; the run keeps `mem.regions`, `Program.Steps.regions`; it is simplified, so it is dropped when it
   is trivial and reads `m.regions = s.mem.regions` for a callee known by a `MemFrame` to `m`): what
   `rtView_eq_of_frame` needs to carry `H … (rtView rt s.mem)` past a callee. Nothing else changes.

@@ -310,6 +310,7 @@ def g_framed64 : Prop :=
       s'.regs 0 = s.regs 0 + 1#64 ∧ s'.flags = s.flags ∧ s'.df = s.df ∧ s'.xmm = s.xmm ∧
       (∀ i, i ≠ 0 → i ≠ 4 → s'.regs i = s.regs i))
 
+set_option janus.callRegions true in
 example (hg : g_framed64) (x : BitVec 64) :
     Ensures callp64 0x1000 [x] (fun s => StackWritable s 8 8) (fun _ _ => True) := by
   intro ret hret s hs ⟨hle, hnw, hacc⟩
@@ -321,6 +322,7 @@ example (hg : g_framed64) (x : BitVec 64) :
   janus64_run
   all_goals simp_all [setRegF]
 
+set_option janus.callRegions true in
 example (hg : g_framed64) (x : BitVec 64) :
     Ensures callp64 0x1000 [x] (fun s => StackWritable s 8 8) (fun _ _ => True) := by
   intro ret hret s hs ⟨hle, hnw, hacc⟩
