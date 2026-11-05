@@ -168,13 +168,13 @@ theorem cpy_c1 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       ∀ Q : State → Prop,
         (∀ c : W64, ReachesRet (withCode code) (s.regs 30)
           { s with regs := setReg (setReg (setReg (setReg R 10 (BitVec.ofNat 64 (src + cnt))) 11 (BitVec.ofNat 64 (dst + cnt))) 12 0#64) 16 c,
-                   flags := F, mem := putBytes m dst (strBytes m src cnt), pc := 0x100110#64 } Q) →
-        ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x1000fc#64 } Q := by
+                   flags := F, mem := putBytes m dst (strBytes m src cnt), pc := 0x100118#64 } Q) →
+        ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x100104#64 } Q := by
   intro cnt
   induction cnt with
   | zero =>
     intro R m F src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
-    janus_run [h12, h10, h11, h30R] until [0x1000fc, 0x100110]
+    janus_run [h12, h10, h11, h30R] until [0x100104, 0x100118]
     have := htail (R 16)
     refine Eq.mpr (congrArg (fun st => ReachesRet (withCode code) (s.regs 30) st Q) ?_) this
     congr 1
@@ -187,7 +187,7 @@ theorem cpy_c1 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       rcases hsa with h | h; omega; exact h
     have hda' : m.accessible dst (cnt + 1) true = true := by
       rcases hda with h | h; omega; exact h
-    janus_run [h12, h10, h11, h30R] until [0x1000fc, 0x100110]
+    janus_run [h12, h10, h11, h30R] until [0x100104, 0x100118]
     have hb : m.readLE src 1 % 18446744073709551616 = (m.bytes src).toNat := by
       rw [Memory.readLE_one]; exact Nat.mod_eq_of_lt (by have := (m.bytes src).isLt; omega)
     rw [hb]
@@ -223,13 +223,13 @@ theorem cpy_c2 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       ∀ Q : State → Prop,
         (∀ c : W64, ReachesRet (withCode code) (s.regs 30)
           { s with regs := setReg (setReg (setReg (setReg R 10 (BitVec.ofNat 64 (src + cnt))) 11 (BitVec.ofNat 64 (dst + cnt))) 12 0#64) 16 c,
-                   flags := F, mem := putBytes m dst (strBytes m src cnt), pc := 0x100164#64 } Q) →
-        ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x100150#64 } Q := by
+                   flags := F, mem := putBytes m dst (strBytes m src cnt), pc := 0x10016c#64 } Q) →
+        ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x100158#64 } Q := by
   intro cnt
   induction cnt with
   | zero =>
     intro R m F src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
-    janus_run [h12, h10, h11, h30R] until [0x100150, 0x100164]
+    janus_run [h12, h10, h11, h30R] until [0x100158, 0x10016c]
     have := htail (R 16)
     refine Eq.mpr (congrArg (fun st => ReachesRet (withCode code) (s.regs 30) st Q) ?_) this
     congr 1
@@ -242,7 +242,7 @@ theorem cpy_c2 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       rcases hsa with h | h; omega; exact h
     have hda' : m.accessible dst (cnt + 1) true = true := by
       rcases hda with h | h; omega; exact h
-    janus_run [h12, h10, h11, h30R] until [0x100150, 0x100164]
+    janus_run [h12, h10, h11, h30R] until [0x100158, 0x10016c]
     have hb : m.readLE src 1 % 18446744073709551616 = (m.bytes src).toNat := by
       rw [Memory.readLE_one]; exact Nat.mod_eq_of_lt (by have := (m.bytes src).isLt; omega)
     rw [hb]
@@ -278,13 +278,13 @@ theorem cpy_c3 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       ∀ Q : State → Prop,
         (∀ c : W64, ReachesRet (withCode code) (s.regs 30)
           { s with regs := setReg (setReg (setReg (setReg R 10 (BitVec.ofNat 64 (src + cnt))) 11 (BitVec.ofNat 64 (dst + cnt))) 12 0#64) 16 c,
-                   flags := F, mem := putBytes m dst (strBytes m src cnt), pc := 0x1001b8#64 } Q) →
-        ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x1001a4#64 } Q := by
+                   flags := F, mem := putBytes m dst (strBytes m src cnt), pc := 0x1001c0#64 } Q) →
+        ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x1001ac#64 } Q := by
   intro cnt
   induction cnt with
   | zero =>
     intro R m F src dst hc h12 h10 h11 h30R hs hd hdis hsa hda Q htail
-    janus_run [h12, h10, h11, h30R] until [0x1001a4, 0x1001b8]
+    janus_run [h12, h10, h11, h30R] until [0x1001ac, 0x1001c0]
     have := htail (R 16)
     refine Eq.mpr (congrArg (fun st => ReachesRet (withCode code) (s.regs 30) st Q) ?_) this
     congr 1
@@ -297,7 +297,7 @@ theorem cpy_c3 (s : State) (h30 : (s.regs 30).toNat < 2 ^ 48) (h30' : (s.regs 30
       rcases hsa with h | h; omega; exact h
     have hda' : m.accessible dst (cnt + 1) true = true := by
       rcases hda with h | h; omega; exact h
-    janus_run [h12, h10, h11, h30R] until [0x1001a4, 0x1001b8]
+    janus_run [h12, h10, h11, h30R] until [0x1001ac, 0x1001c0]
     have hb : m.readLE src 1 % 18446744073709551616 = (m.bytes src).toNat := by
       rw [Memory.readLE_one]; exact Nat.mod_eq_of_lt (by have := (m.bytes src).isLt; omega)
     rw [hb]

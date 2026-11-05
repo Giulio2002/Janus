@@ -194,5 +194,7 @@ import Janus.Contracts.ErrorfRealCode
 import Janus.Contracts.ErrorfRealLoops
 import Janus.Contracts.ErrorfRealStageDefs
 import Janus.Contracts.ErrorfRealStageA
+import Janus.Contracts.ErrorfRealStageB
+import Janus.Contracts.ErrorfRealStageC
 import Janus.Contracts.ErrorfSat
 import Janus.Contracts.ErrorfSatAmd64

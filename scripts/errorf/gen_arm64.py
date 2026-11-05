@@ -22,8 +22,8 @@ def prog():
          "ldr x9, [x2, #40]", "ldr x9, [x9]"]
     a += number("x8", 16, "n1", "x25", "x26")
     a += number("x9", 48, "n2", "x21", "x22")
-    a += ["add x3, x7, x21", "add x3, x3, x25", "add x3, x3, #20", "lsl x4, x3, #1", "add x4, x4, #63",
-          "and x4, x4, #0xfffffffffffffff0", "movz x0, #0x40, lsl #16", "ldr x1, [x0]", "add x4, x1, x4", "str x4, [x0]",
+    a += ["add x3, x7, x21", "add x3, x3, x25", "add x3, x3, #20", "add x4, x3, x3", "add x4, x4, #63",
+          "mov x14, #16", "udiv x4, x4, x14", "mul x4, x4, x14", "movz x0, #0x40, lsl #16", "ldr x1, [x0]", "add x4, x1, x4", "str x4, [x0]",
           "add x2, x1, #32", "str x2, [x1]", "str x3, [x1, #8]", f"movz x17, #{IERR}", "str x17, [x1, #16]", "str x5, [x1, #24]"]
     a += ["mov x11, x2"]
     a += copy("c1", "x6", "x7")
