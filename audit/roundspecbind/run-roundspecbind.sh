@@ -77,11 +77,11 @@ row i1 blocked 'about the runtime implementation `impl2`'
 echo "== arm64: SbtsAddr.lean (the address of runtime.staticuint64s in slicebytetostringSpec, U-SBTS-POST)"
 run SbtsAddr.lean FromBytes c1 a1 a2 a3 a4
 NOTSPEC='which is not one of the framework'"'"'s named runtime-function specs'
-row c1 Verified 'RtContract@runtime.slicebytetostring[slicebytetostringSpec]'
+row c1 Verified 'RtContract@runtime.slicebytetostring'
 row a1 blocked "$NOTSPEC" 'slicebytetostringSpec 4096'
 row a2 blocked "$NOTSPEC" 'slicebytetostringSpec st'
 row a3 blocked "$NOTSPEC"
-row a4 blocked "$NOTSPEC"
+row a4 blocked 'but the extracted program has no data object of that name'
 echo "== amd64: SpecBind64.lean"
 run SpecBind64.lean AppendPoint64 h1 h2 h3 h4
 row h1 Verified 'RtContract64@runtime.growslice[growsliceSpec]'
