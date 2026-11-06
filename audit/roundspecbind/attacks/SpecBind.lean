@@ -46,6 +46,19 @@ theorem g6 (impl impl2 : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (R
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
   intro ret hret s hs hp; exact hp.elim
 
+
+/-- U14-LIVE-CONVT: the boxing spec of `convTstring` stated at the address of `growslice`. -/
+theorem g8 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (h : RtLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.growslice") 4096 R convTstringSpec convTstringLive) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
+/-- U14-LIVE-CONVT: the live data of `convT64` with the spec of `growslice`. -/
+theorem g9 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (h : RtLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.growslice") 4096 R growsliceSpec convT64Live) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
 /-- N1: the dedicated contract of `newobject` at the address of `growslice`. -/
 theorem n1 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
     (h : NewobjectContract (Extracted.program.link impl)

@@ -7,6 +7,7 @@ import JanusTests.LiveStub
 import JanusTests.LiveStubSlice
 import JanusTests.LiveStubGrow
 import JanusTests.LiveStubGrowMulti
+import JanusTests.LiveStubConvT
 import JanusTests.InternalCall
 import JanusTests.StubAlloc
 import JanusTests.Decode
