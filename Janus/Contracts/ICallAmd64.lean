@@ -15,22 +15,23 @@ namespace Janus.Contracts.ICall
 
 open Janus Janus.Amd64 Janus.Amd64.Tactic Janus.Contracts
 
-/-- The precondition of the call (amd64): `CallOK64`, `above ≥ 32` with `[RSP, RSP + above)` (the return
+/-- The precondition of the call (amd64): `CallOK64`, `above ≥ 8 + 8·nargs` with `[RSP, RSP + above)` (the return
 address slot and the caller's frame) outside every range of `rt`, and the call-site property `P`. -/
-def ICallPre64 (stack above : Nat) (rt : List (Nat × Nat)) (P : State → Prop) (s : State) : Prop :=
-  CallOK64 s stack 4 ∧ 32 ≤ above ∧ Outside (s.regs 4).toNat above rt ∧ P s
+def ICallPre64 (nargs stack above : Nat) (rt : List (Nat × Nat)) (P : State → Prop) (s : State) : Prop :=
+  CallOK64 s stack nargs ∧ 8 + 8 * nargs ≤ above ∧ Outside (s.regs 4).toNat above rt ∧ P s
 
 /-- How the callee returns (amd64). -/
-@[reducible] def ICallRet64 (stack : Nat) (rt : List (Nat × Nat)) (R : Res) (s s' : State) : Prop :=
+@[reducible] def ICallRet64 (nargs stack : Nat) (rt : List (Nat × Nat)) (keep : State → List (Nat × Nat)) (R : Res)
+    (s s' : State) : Prop :=
   ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Janus.Arm64.Memory)
     (zh : Nat → BitVec 256) (kr : Nat → W64),
-    s' = retState64 s junk [] f x yh m zh kr ∧ MemFrame s.mem m (rt ++ calleeStack64 s stack 4) ∧
-    (∀ a, (s.regs 3).toNat ≤ a → a < (s.regs 3).toNat + (s.regs 1).toNat → m.readLE a 1 = s.mem.readLE a 1) ∧
+    s' = retState64 s junk [] f x yh m zh kr ∧ MemFrame s.mem m (rt ++ calleeStack64 s stack nargs) ∧
+    (∀ r ∈ keep s, ∀ a, r.1 ≤ a → a < r.1 + r.2 → m.readLE a 1 = s.mem.readLE a 1) ∧
     R (s.regs 0) (s.regs 3) (s.regs 1) (s.regs 7) (junk 0) (junk 3) (junk 1)
 
 /-- The callee at the code address `fn` of `p` (amd64). -/
-def ICallContract64 (p : Janus.Amd64.Program) (fn stack above : Nat) (rt : List (Nat × Nat)) (R : Res)
-    (P : State → Prop) : Prop :=
-  Summary p fn (ICallPre64 stack above rt P) (ICallRet64 stack rt R)
+def ICallContract64 (p : Janus.Amd64.Program) (fn nargs stack above : Nat) (rt : List (Nat × Nat))
+    (keep : State → List (Nat × Nat)) (R : Res) (P : State → Prop) : Prop :=
+  Summary p fn (ICallPre64 nargs stack above rt P) (ICallRet64 nargs stack rt keep R)
 
 end Janus.Contracts.ICall
