@@ -1,6 +1,9 @@
 package basic
 
-import "math/bits"
+import (
+	"io"
+	"math/bits"
+)
 
 // The functions below make dynamic calls: through an interface, a method value, a closure, and
 // an open-coded defer. A dynamic call's target is a register value, so a theorem about the
@@ -65,3 +68,9 @@ func DeferAdd(x, y uint64) (r uint64) {
 	defer func() { r += y }()
 	return x
 }
+
+// WriteTo writes b to w and returns what w.Write returns: an interface method call to an
+// arbitrary callee (docs/RUNTIME-CONTRACTS.md, "Abstract callees"), whose target is not pinned.
+//
+//go:noinline
+func WriteTo(w io.Writer, b []byte) (int, error) { return w.Write(b) }

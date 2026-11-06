@@ -719,6 +719,27 @@ where
       | (some (_, g'), _) => return g'
       | (none, _) => return g
 
+/-- An indirect call whose target is the symbolic address `fn` of a `calls [h]` hypothesis (its entry is not a numeral,
+`parseCallsNamed` marks it with `symbolicEntry`): when the normal form of the pc is `BitVec.ofNat 64 fn`, the call
+continues from the summary's postcondition like a call to a literal entry. Any other pc stays an error. -/
+def symbolicCall (cfg : Cfg) (g : MVarId) (p s pcE pcPf : Expr) (hret? : Option Expr) :
+    TacticM (Option (List MVarId)) := do
+  for (n, hsum0) in cfg.calls do
+    unless n == Common.symbolicEntry do continue
+    let (mvs, _, hty) ← forallMetaTelescope (← instantiateMVars (← inferType hsum0))
+    let (``Summary, #[_, entry, _, _]) := hty.getAppFnArgs | continue
+    let want := mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) entry
+    unless (← withReducible (isDefEq pcE want)) do continue
+    let hpc ← mkExpectedTypeHint pcPf (← mkEq (← mkAppM ``State.pc #[s]) want)
+    let hsum := mkAppN hsum0 mvs
+    let hsum ← match hret? with
+      | some hret => mkAppM ``Summary.withExit #[hsum, hret]
+      | none => pure hsum
+    cfg.status.modify fun st => { st with instr := some "(an abstract callee, by its summary)" }
+    return some (← applySummary cfg g p s hsum hpc "the abstract callee" mvs
+      ((cfg.callNames.find? (·.1 == n)).map (·.2)))
+  return none
+
 /-- Perform one step on `g` (a `Reaches`/`ReachesRet` goal). `none`: stopped at an `until`
 address. -/
 def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List MVarId)) :=
@@ -760,6 +781,9 @@ def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (
           (← mkEq (← mkAppM ``State.pc #[s]) (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) retE))
         return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit_withExit) #[base, retE, s, Q, hret, hpc]))
     let some (c, hpc) := pc? |
+      -- an indirect call to an abstract callee (`calls [h]` with `h : Summary p fn …` for a symbolic `fn`):
+      -- the pc is `BitVec.ofNat 64 fn`, e.g. after `hF : s.mem.readLE (tab + 24) 8 = fn` rewrote the itab slot
+      if let some gs ← symbolicCall cfg g p s pcE pcPf hret? then return some gs
       throwError "{tacName}: stuck after {(← cfg.status.get).steps} instructions: the pc of the \
         current state is not a concrete address:{indentExpr pcE}\n\
         This is an indirect branch (`br`, `blr`, `ret`) to an address the hypotheses do not \
@@ -1160,7 +1184,9 @@ def parseCallsNamed (stx : Syntax) : TacticM (Array (Nat × Expr × Option Name)
       return (n, e, nm)
     let (``Summary, #[_, entry, _, _]) := ty.getAppFnArgs |
       throwError "janus_run calls: {t} is not a `Summary`: {ty0}"
-    let some n ← evalNat entry | throwError "janus_run calls: cannot evaluate the entry of {t}"
+    let some n ← evalNat entry | do
+      if entry.hasFVar then return (Common.symbolicEntry, e, nm) -- an abstract callee: matched against the pc (`symbolicCall`)
+      throwError "janus_run calls: cannot evaluate the entry of {t}"
     return (n, e, nm)
 
 def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) :=

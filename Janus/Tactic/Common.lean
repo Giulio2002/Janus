@@ -209,6 +209,10 @@ end Janus
 
 namespace Janus.Tactic.Common
 
+/-- The entry recorded for a `calls [h]` hypothesis whose entry address is a variable (an abstract callee: no real
+address is `2 ^ 64`); the executor matches such a hypothesis against the pc of an indirect call. -/
+def symbolicEntry : Nat := 2 ^ 64
+
 open Lean Meta Elab Tactic
 
 register_option janus.omega.log : Nat := {
