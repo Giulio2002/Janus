@@ -187,6 +187,7 @@ func TestReplayPlanKeys(t *testing.T) {
 	calls := 0
 	ok := func(argv ...string) (string, error) { mu.Lock(); calls++; mu.Unlock(); return "", nil }
 	t.Setenv("JANUS_CACHE_DIR", t.TempDir())
+	t.Setenv("JANUS_REPLAY_BATCH", "0") // one process per target
 	p7, _ := planReplay(resolved, graph, "v1", true)
 	if _, err := p7.replay("leanchecker", func(argv ...string) (string, error) { return "bad", fmt.Errorf("exit 1") }, p7.modules); err == nil {
 		t.Fatal("failing replay passed")
@@ -199,6 +200,50 @@ func TestReplayPlanKeys(t *testing.T) {
 	}
 	if p9, _ := planReplay(resolved, graph, "v1", true); len(p9.cached) != 3 {
 		t.Fatal("a passing replay was not cached")
+	}
+	// Batched: the targets share leanchecker processes; the -v output must name every module of every
+	// target exactly once, else the replay fails and nothing is recorded.
+	t.Setenv("JANUS_REPLAY_BATCH", "1")
+	batchRun := func(report func(targets []string) string) func(argv ...string) (string, error) {
+		return func(argv ...string) (string, error) {
+			mu.Lock()
+			calls++
+			mu.Unlock()
+			if len(argv) < 3 || argv[1] != "-v" {
+				return "", fmt.Errorf("batched replay without -v: %v", argv)
+			}
+			return report(argv[2:]), nil
+		}
+	}
+	say := func(ts []string) string {
+		out := ""
+		for _, m := range ts {
+			out += "replaying " + m + "\n"
+		}
+		return out
+	}
+	for name, rep := range map[string]func([]string) string{
+		"missing":   func(ts []string) string { return say(ts[1:]) },
+		"duplicate": func(ts []string) string { return say(append(ts, ts[0])) },
+		"silent":    func([]string) string { return "" },
+	} {
+		t.Setenv("JANUS_CACHE_DIR", t.TempDir())
+		pb, _ := planReplay(resolved, graph, "v1", true)
+		if _, err := pb.replay("leanchecker", batchRun(rep), pb.modules); err == nil {
+			t.Fatalf("batched replay with %s -v output passed", name)
+		}
+		if pc, _ := planReplay(resolved, graph, "v1", true); len(pc.cached) != 0 {
+			t.Fatalf("batched replay with %s -v output was cached", name)
+		}
+	}
+	t.Setenv("JANUS_CACHE_DIR", t.TempDir())
+	calls = 0
+	pb, _ := planReplay(resolved, graph, "v1", true)
+	if _, err := pb.replay("leanchecker", batchRun(say), pb.modules); err != nil || calls != 1 {
+		t.Fatalf("batched replay: %v, %d calls", err, calls)
+	}
+	if pc, _ := planReplay(resolved, graph, "v1", true); len(pc.cached) != 3 {
+		t.Fatal("a passing batched replay was not cached")
 	}
 }
 
