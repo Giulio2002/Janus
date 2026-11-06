@@ -8,8 +8,8 @@ namespace Janus.Contracts.ErrorfRealStages64
 
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Spec.Errorf Janus.Contracts
   Janus.Contracts.Toy Janus.Contracts.ErrorfMem Janus.Contracts.ErrorfRealFmt Janus.Contracts.ErrorfRealLoops64
-open Janus.Contracts.AllocSatAmd64 (toy A0 at0 link_at0 withCode)
-open Janus.Contracts.ErrorfRealCode64 (code64)
+open Janus.Contracts.RelocAmd64 (codeProg64)
+open Janus.Contracts.ErrorfRealCode64 (code64 E0)
 
 set_option maxRecDepth 100000
 set_option maxHeartbeats 0
@@ -27,12 +27,12 @@ theorem stageB64 (s : State) (e tp tl v2 n1 x13v : Nat) (R : Nat → W64) (F : F
       R' 13 = BitVec.ofNat 64 ((s.regs 4).toNat - 48 - (natBytes (absn v2)).length) →
       m' = putBytes (m.writeLE (x13v - 1) 1 (48 - 3 * n1)) ((s.regs 4).toNat - 48 - (natBytes (absn v2)).length)
         (natBytes (absn v2)) →
-      ReachesRet (withCode code64) (retAddrOf s) { s with regs := R', flags := F', mem := m', rip := 0x1000a7#64 } Q) :
-    ReachesRet (withCode code64) (retAddrOf s) { s with regs := R, flags := F, mem := m, rip := 0x100051#64 } Q := by
-  obtain ⟨hP9, hP10, hP4, hP5, hP14⟩ := hP
+      ReachesRet (codeProg64 E0 code64) (retAddrOf s) { s with regs := R', flags := F', mem := m', rip := 0x4000000000ab#64 } Q) :
+    ReachesRet (codeProg64 E0 code64) (retAddrOf s) { s with regs := R, flags := F, mem := m, rip := 0x400000000055#64 } Q := by
+  obtain ⟨hP9, hP10, hP4, hP5, hP14, hP15⟩ := hP
   have hlen2 := natBytes_length_le (absn v2) 19 (by omega) (by have := natAbs_lt _ hv2; unfold absn; omega)
   have hlenp2 := natBytes_length_pos (absn v2)
-  janus64_run [h12, h13, h7, hP4] until [0x100093]
+  janus64_run [h12, h13, h7, hP4] until [0x400000000097]
   have e : (4294967296 - (n1 + n1 * 2) % 4294967296 + 48) % 256 = 48 - 3 * n1 := by omega
   rw [e]
   refine dig64_n2 s (absn v2) _ _ _ ((s.regs 4).toNat - 48) (by have := natAbs_lt _ hv2; unfold absn; omega) ?_ ?_
@@ -43,7 +43,7 @@ theorem stageB64 (s : State) (e tp tl v2 n1 x13v : Nat) (R : Nat → W64) (F : F
     exact Janus.Arm64.Memory.accessible_mono _ hscr (by omega) (by omega)
   · intro c F'
     refine htail _ _ _ ?_ ?_ ?_ ?_ ?_ ?_ rfl
-    · refine ⟨?_, ?_, ?_, ?_, ?_⟩ <;> simp [setRegF, hP9, hP10, hP4, hP5, hP14]
+    · refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩ <;> simp [setRegF, hP9, hP10, hP4, hP5, hP14, hP15]
     · simp [setRegF, h8]
     · simp [setRegF]
       apply BitVec.eq_of_toNat_eq

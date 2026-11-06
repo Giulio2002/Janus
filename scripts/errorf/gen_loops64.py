@@ -5,7 +5,7 @@ sys.path.insert(0, "scripts/errorf")
 import gen_amd64
 from loop_templates64 import HDR, DIG, CPY
 _, lab = gen_amd64.build()
-pc = lambda k: hex(0x100000 + lab[k])
+pc = lambda k: hex(gen_amd64.E0 + lab[k])
 out = HDR
 for n in ("n1", "n2"):
     out += DIG.replace("@N@", n).replace("@H@", pc(n + "d")).replace("@X@", pc(n + "s")) + "\n"

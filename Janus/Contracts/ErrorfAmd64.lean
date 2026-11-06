@@ -19,11 +19,16 @@ namespace Janus.Contracts.ErrorfAmd64
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Spec.Errorf
   Janus.Contracts Janus.Contracts.Pool Janus.Contracts.Errorf Janus.Contracts.PoolAmd64
 
+/-- The saved return address (the word at `[RSP]`) is a user code address below `2^46`: a real caller's return address
+(Linux user space is below `2^47`, Go binaries far below `2^40`). A stub placed above it (`RelocAmd64`) cannot be
+returned into. -/
+def RetLow (s : State) : Prop := s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 46
+
 /-- **`fmt.errorf(format, a)`** (amd64), as `Errorf.ErrorfLive`. -/
 def ErrorfLive (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat) (R : RtInv)
     (tErr iErr tInt iWrap Fl Fm B : Nat) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
-    (fun s => CallOK64 s stack 5 ∧ StackRoom64 s stack 5 ∧
+    (fun s => CallOK64 s stack 5 ∧ RetLow s ∧ StackRoom64 s stack 5 ∧
       ArgsOK (Env.mk tErr iErr tInt iWrap) Fl Fm B s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat (s.regs 7).toNat (s.regs 6).toNat ∧
       ReadsOutside (errorfReads s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) (liveWin64 s stack 5) ∧
       ReadsSafe R L (errorfReads s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) ∧
