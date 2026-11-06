@@ -211,6 +211,8 @@ import Janus.Contracts.ErrorfRealPostC
 import Janus.Contracts.ErrorfRealWitC
 import Janus.Contracts.ErrorfRealImpl
 import Janus.Contracts.ErrorfRealLive
+import Janus.Contracts.ErrorfConsumer
+import Janus.Contracts.ErrorfConsumer
 import Janus.Contracts.ErrorfRealCode64
 import Janus.Contracts.ErrorfRealLoops64
 import Janus.Contracts.ErrorfRealStageDefs64
