@@ -26,8 +26,8 @@ def scratchMem (m0 : Memory) (sp0 l1 n1 l2 a1 a2 : Nat) : Memory :=
 def midMem (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e : Nat) : Memory :=
   allocMem (scratchMem m0 sp0 l1 n1 l2 a1 a2) (sp0 - 48 - l2) n2 p A Lm e
 
-/-- The memory the stub leaves. -/
-def finalMem (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) : Memory :=
+/-- The memory just before the last literal. -/
+def preMem (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) : Memory :=
   let M := midMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e
   let m3 := putBytes M (p + 32) (strBytes M tp tl)
   let d1 := p + 32 + tl
@@ -39,8 +39,15 @@ def finalMem (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) : Memory
   let st2 := sp0 - 48 - l2 - n2
   let len2 := sp0 - 48 - st2
   let M2 := putBytes m4 d2 [44, 32, 119, 97, 110, 116, 32]
-  let m5 := putBytes M2 (d2 + 7) (strBytes M2 st2 len2)
-  putBytes m5 (d2 + 7 + len2) [32, 98, 121, 116, 101, 115]
+  putBytes M2 (d2 + 7) (strBytes M2 st2 len2)
+
+/-- The memory the stub leaves. -/
+def finalMem (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) : Memory :=
+  let d1 := p + 32 + tl
+  let len1 := sp0 - 16 - (sp0 - 16 - l1 - n1)
+  let d2 := d1 + 7 + len1
+  let len2 := sp0 - 48 - (sp0 - 48 - l2 - n2)
+  putBytes (preMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl) (d2 + 7 + len2) [32, 98, 121, 116, 101, 115]
 
 set_option maxRecDepth 100000
 
@@ -144,7 +151,7 @@ theorem final_eq (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl : Nat) (hsp
     rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn1 with rfl | rfl <;> simp [hlen1] <;> omega
   have hD2len : ((if n2 = 1 then [45] else []) ++ natBytes a2).length = sp0 - 48 - (sp0 - 48 - l2 - n2) := by
     rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn2 with rfl | rfl <;> simp [hlen2] <;> omega
-  simp only [finalMem]
+  simp only [finalMem, preMem]
   rw [hTx]
   have hM1 : strBytes (putBytes (putBytes (midMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e) (p + 32) (strBytes m0 tp tl))
       (p + 32 + tl) [58, 32, 104, 97, 118, 101, 32]) (sp0 - 16 - l1 - n1) (sp0 - 16 - (sp0 - 16 - l1 - n1)) =
@@ -292,7 +299,7 @@ theorem msgList_length (T : List Nat) (tl l1 l2 n1 n2 a1 a2 : Nat) (hT : T.lengt
 
 theorem finalMem_accessible (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl a k : Nat) (w : Bool) :
     (finalMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl).accessible a k w = m0.accessible a k w := by
-  simp [finalMem, midMem, scratchMem, putBytes_accessible]
+  simp [finalMem, preMem, midMem, scratchMem, putBytes_accessible]
 
 theorem strBytes_lt256 (m : Memory) (p n : Nat) : ∀ b ∈ strBytes m p n, b < 256 := by
   intro b hb
@@ -425,5 +432,17 @@ theorem rsW_live (sp0 p A : Nat) (L : List (Nat × Nat)) (hp : 268435456 ≤ p) 
   simp only [outside_cons, outside_nil, and_true] at hLo ⊢
   simp only [HEAP] at hLr
   refine ⟨by omega, by omega, by omega⟩
+
+theorem pre_readLE (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl a : Nat) (hsp : 4096 ≤ sp0)
+    (hl1 : l1 ≤ 19) (hl2 : l2 ≤ 19) (hn1 : n1 ≤ 1) (hn2 : n2 ≤ 1)
+    (hlen1 : (natBytes a1).length = l1) (hlen2 : (natBytes a2).length = l2)
+    (hp : 268435456 ≤ p) (hpA : p + A ≤ 536870912) (hA : 2 * Lm + 48 ≤ A) (hLm : Lm = tl + (l1 + n1) + (l2 + n2) + 20)
+    (ha1 : a + 8 ≤ sp0 - 4096 ∨ sp0 - 8 ≤ a) (ha2 : a + 8 ≤ 4194304 ∨ 4194312 ≤ a) (ha3 : a + 8 ≤ p ∨ p + A ≤ a) :
+    (preMem m0 sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl).readLE a 8 = m0.readLE a 8 := by
+  have hl1p : 1 ≤ l1 := by rw [← hlen1]; exact natBytes_length_pos a1
+  have hl2p : 1 ≤ l2 := by rw [← hlen2]; exact natBytes_length_pos a2
+  unfold preMem midMem allocMem scratchMem
+  simp (disch := (first | omega | (simp only [List.length_cons, List.length_nil, Janus.Spec.strBytes_length, hlen1, hlen2]; omega))) only
+    [readLE_putBytes_out, Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
 
 end Janus.Contracts.ErrorfRealFinal
