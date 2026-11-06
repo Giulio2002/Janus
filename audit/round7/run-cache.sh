@@ -3,7 +3,10 @@
 # trusted verification-result cache. Exits 1 if a row regresses (BROKEN).
 # Usage: audit/round7/run-cache.sh [-j N]   (-j: rows at once, scripts/lib/parallel.sh)
 # Writes only under audit/round7/work/ and a temporary janus cache (removed at the end).
+# R7C_ROWS="priming rc1 rc2 rc3 rc4 rc56": only these row groups (default all). audit/run-rounds.sh runs three lanes,
+# r7c1..r7c3 (run-cache-{1,2,3}.sh), so the lane is no longer the longest one of the rounds.
 set -u
+want() { [ -z "${R7C_ROWS:-}" ] || [[ " $R7C_ROWS " == *" $1 "* ]]; }
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
@@ -35,10 +38,12 @@ cached() { grep -q '^  Cached:' <<<"$1"; }
 verdict() { grep -m1 -E '^(Verified|Invalid)' <<<"$1" | cut -c1-100; }
 
 tmark "cache priming start"
+want priming && {
 echo "== priming: an honest verification records its result (the cache now has a key and an entry)"
 out="$(v $W/Add --proof examples/proofs/Add.lean)"; again="$(v $W/Add --proof examples/proofs/Add.lean)"
 if cached "$again" && ! cached "$out"; then echo "  ok: the second run is a cache hit"
 else echo "  >>> priming failed (first: $(verdict "$out"), second cached: $(cached "$again" && echo yes || echo no))"; broken+=(priming); fi
+}
 
 # RC1: a sandboxed proof probes the cache (key, entries) and plants a file. It must see an empty
 # directory (the proof then compiles and verifies) and nothing may reach the host.
@@ -51,11 +56,11 @@ rc1() { # rc1 NAME DIR [env…]
   grep -q 'Stage: sandbox' <<<"$out" && { printf '  %-34s %s\n' "$name" "skipped (sandbox mode unavailable here)"; return 0; }
   row "$name" "$(verdict "$out") [cache invisible: $([ $ok = yes ] && echo yes || echo NO)]" "$([ "$(verdict "$out" | cut -c1-8)" = Verified ] && echo $ok || echo no)"
 }
-par_run 'echo "== RC1: a proof cannot read the key or the entries, nor plant a file"; rc1 RC1_proof_probe_bwrap $W/Add2'
-par_run 'rc1 RC1_proof_probe_unshare $W/Add5 JANUS_SANDBOX=unshare'
+want rc1 && par_run 'echo "== RC1: a proof cannot read the key or the entries, nor plant a file"; rc1 RC1_proof_probe_bwrap $W/Add2'
+want rc1 && par_run 'rc1 RC1_proof_probe_unshare $W/Add5 JANUS_SANDBOX=unshare'
 
 # RC2: a consumer lakefile (elaborated by the sandboxed Lake) probes and plants the same way.
-par_run '
+want rc2 && par_run '
 echo "== RC2: a lakefile cannot read or plant into the cache"
 P=$W/R1; rm -rf "$P"; cp -r audit/attacks/R1_pkg "$P"
 sed -i "s|@JANUS@|$root|; s|-- @EXTRA_REQUIRE@||" "$P/lakefile.lean"
@@ -67,7 +72,7 @@ row RC2_lakefile_probe "$(verdict "$out") [cache invisible: $([ $ok = yes ] && e
 
 # RC3: an entry modified on disk (its report claims multiplication) is not authentic: the next
 # verification ignores it, runs, and prints the real statement.
-par_run '
+want rc3 && par_run '
 echo "== RC3: a tampered entry is ignored"
 mkdir -p $W/RC3; cp examples/proofs/Add.lean $W/RC3/Add.lean
 out="$(v $W/Add4 --proof $W/RC3/Add.lean)"
@@ -81,7 +86,7 @@ else row RC3_tampered_entry "no entry was recorded for Add4" no; fi'
 
 # RC4: an entry recorded with one framework is not used with another (a --janus-root copy whose
 # GoABI.lean then changes by a comment: the framework hash differs, so the key differs).
-par_run '
+want rc4 && par_run '
 echo "== RC4: a stale framework never hits"
 F=$W/janus-root-copy; rm -rf "$F"; mkdir -p "$F/.lake"
 cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean Janus "$F/"; cp -a .lake/build "$F/.lake/"
@@ -95,7 +100,7 @@ row RC4_stale_framework "$(verdict "$out") [before the change cached: $(cached "
 rm -rf "$F"'
 
 # RC5/RC6: --fresh and --unsafe-no-sandbox never use the cache.
-par_run '
+want rc56 && par_run '
 echo "== RC5/RC6: --fresh and --unsafe-no-sandbox bypass the cache"
 out="$(v $W/Add --proof examples/proofs/Add.lean --fresh)"
 row RC5_fresh_bypasses "$(verdict "$out") [cached: $(cached "$out" && echo YES || echo no)]" "$(cached "$out" && echo no || echo yes)"

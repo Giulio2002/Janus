@@ -26,7 +26,7 @@ par_init "$@"
 PAR_JOB_MEM=20G
 declare -A script=([all]=audit/run-all.sh [r2]=audit/round2/run-round2.sh [r3]=audit/round3/run-round3.sh
   [r4]=audit/round4/run-round4.sh [r5]=audit/round5/run-round5.sh [r6]=audit/round6/run-round6.sh
-  [r7]=audit/round7/run-round7.sh [r7c]=audit/round7/run-cache.sh [r7j]=audit/round7/run-j1.sh [r8]=audit/round8/run-round8.sh)
+  [r7]=audit/round7/run-round7.sh [r7c]=audit/round7/run-cache.sh [r7c1]=audit/round7/run-cache-1.sh [r7c2]=audit/round7/run-cache-2.sh [r7c3]=audit/round7/run-cache-3.sh [r7j]=audit/round7/run-j1.sh [r8]=audit/round8/run-round8.sh)
 # Every audit/roundN/run-roundN.sh is a lane, so a new round can never be skipped silently.
 for f in audit/round*/run-round*.sh; do
   n="r${f#audit/round}"; n="${n%%/*}"
@@ -35,14 +35,15 @@ done
 # Longest first (measured), so the long lanes start at once; rounds without a measurement last.
 lanes=(${PAR_ARGS[@]+"${PAR_ARGS[@]}"})
 if [ ${#lanes[@]} -eq 0 ]; then
-  lanes=(r7 r7c r7j r8 r5 all r2 r6 r3 r4)
+  lanes=(r7 r7c1 r7c2 r7c3 r7j r8 r5 all r2 r6 r3 r4)
   for n in $(printf '%s\n' "${!script[@]}" | sort -V); do
+    [ "$n" != r7c ] || continue   # r7c = the three parts in one lane: only on request
     case " ${lanes[*]} " in *" $n "*) ;; *) lanes+=("$n");; esac
   done
 fi
-# Round 7's result-cache rows (audit/round7/run-cache.sh) are their own lane, r7c, and its consumer row J1a
+# Round 7's result-cache rows (audit/round7/run-cache.sh) are three lanes, r7c1..r7c3 (run-cache-{1,2,3}.sh: the longest lane of the rounds, 1703 s in one piece; r7c still selects all rows in one lane), and its consumer row J1a
 # (audit/round7/run-j1.sh) is r7j; selecting r7 selects all three, so no row is dropped (run-round7.sh alone still runs them at its end).
-case " ${lanes[*]} " in *" r7 "*) for x in r7c r7j; do case " ${lanes[*]} " in *" $x "*) ;; *) lanes+=($x);; esac; done;; esac
+case " ${lanes[*]} " in *" r7 "*) for x in r7c1 r7c2 r7c3 r7j; do case " ${lanes[*]} " in *" $x "*) ;; *) lanes+=($x);; esac; done;; esac
 export JANUS_R7_NO_CACHE_ROWS=1
 for l in "${lanes[@]}"; do
   [ -n "${script[$l]:-}" ] || { echo "unknown round $l (all r2 r3 r4 r5 r6 r7 r8)"; exit 2; }
