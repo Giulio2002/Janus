@@ -1,0 +1,50 @@
+# name<TAB>seconds: estimates of scripts/gotest-shards.sh (queue mode), overriding cmd/janus/order_test.go.
+# The tests below call t.Parallel(): `go test -v` reports their wall including the pause, so the table of order_test.go has no
+# usable figure for them. 150 s is a middle guess (a shard of 11 of them took ~3400 s in the gate of 10104e01); a run writes
+# the measured wall of every single-test item to artifacts/gate/gotest/learned.tsv: paste it here.
+TestAmd64Blockers	150
+TestAuditUndefinedStreamPins	150
+TestAuditWitnessNamedMainNotExempt	150
+TestBatchRequestErrors	150
+TestBlockers	150
+TestBoundInstanceRejected	150
+TestCacheGCStressConsumerVerifies	150
+TestConcurrentVerify	150
+TestConsumerAuditorLease	150
+TestConsumerExtraDep	150
+TestConsumerGit	150
+TestConsumerLakefileLean	150
+TestConsumerMathlib	150
+TestConsumerModstoreAcrossFamilies	150
+TestConsumerPathDep	150
+TestConsumerResultCache	150
+TestConsumerResultCacheExternalSrc	150
+TestConsumerTwoCheckouts	150
+TestConsumerVerify	150
+TestConsumerVerifyMany	150
+TestDataLarge	150
+TestDiagFlagsConsumer	150
+TestForeignFrameworkWriteDetected	150
+TestFullErrorsSingleFile	150
+TestHardeningAttacks	150
+TestHardeningB1	150
+TestInitEndToEnd	150
+TestInlineInstanceRejected	150
+TestInstallOutsideRepo	150
+TestKeepWorkspaceSingleFile	150
+TestMemGuardKillsHungryProof	150
+TestMemGuardNormalVerify	150
+TestMemguardShell	150
+TestParallelFrameworkReplayCatchesForgeryInEveryPartition	150
+TestParallelFrameworkReplayMatchesSingleProcessMini	150
+TestR1FrameworkTamper	150
+TestRound6StatementNames	150
+TestRoundTripRejectsAmbiguousPrint	150
+TestSandboxRecorded	150
+TestSeedFramework	150
+TestUnshareFallbackVerifies	150
+TestVerify	150
+TestVerifyBatch	150
+TestVerifyManyCacheIsolation	150
+TestVerifyManySharedFailure	150
+TestVerifyManyTheorems	150

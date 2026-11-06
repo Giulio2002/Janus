@@ -1701,12 +1701,33 @@ partial def strayImpl (ivs : Std.HashSet FVarId) (e : Expr) : Option FVarId :=
   | .mdata _ b | .proj _ _ b => strayImpl ivs b
   | _ => none
 
+/-- `a < b` / `a ≤ b` where `a` reads the word at `[RSP]` (`readLE _ (… regs 4 …) _`) and `b` is a literal or `2 ^ k`
+with `k ≤ 46`: the hand-written form of `ErrorfAmd64.RetLow`. -/
+def isSpBound (e : Expr) : Bool :=
+  let f := e.getAppFn
+  if (f.isConstOf ``LT.lt || f.isConstOf ``LE.le) && e.getAppNumArgs == 4 then
+    let lhs := e.getArg! 2
+    let rhs := e.getArg! 3
+    let readsSp := lhs.getAppFn.constName? == some `Janus.Arm64.Memory.readLE &&
+      (lhs.find? fun x => x.getAppFn.constName? == some `Janus.Amd64.State.regs &&
+        x.getAppNumArgs == 2 && (x.getArg! 1).nat? == some 4).isSome
+    let small := match rhs.nat? with
+      | some n => n ≤ 2 ^ 46
+      | none => rhs.getAppFn.isConstOf ``HPow.hPow && rhs.getAppNumArgs == 6 &&
+          (rhs.getArg! 4).nat? == some 2 && (match (rhs.getArg! 5).nat? with | some k => k ≤ 46 | none => false)
+    readsSp && small
+  else false
+
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
 Round 14 (V2): with `main` (the default; every theorem that is not a `Witness.nonvacuous`/`Witness.returns`)
 the runtime implementation must also be a variable of the statement (`concreteRuntime`) and every such
 `impl` is a runtime variable even when no contract mentions it. -/
 def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) := do
   let env ← getEnv
+  -- `ErrorfAmd64.RetLow` ([RSP] < 2^46) is a fact a consumer proves from its own call site's pushed return address;
+  -- a statement that assumes it (or states it of the caller) makes an unconstrained caller's return address a hypothesis
+  if ((ty.find? fun e => e.isConstOf `Janus.Contracts.ErrorfAmd64.RetLow).isSome || (ty.find? isSpBound).isSome) then
+    return some "mentions `ErrorfAmd64.RetLow` or states `[RSP] < 2^k` (k ≤ 46) by hand (the saved return address `[RSP]` is below `2^46`): a consumer discharges it inside its proof from the return address its own `call` pushes (a code address of the extracted program), it must not appear in a theorem's statement, where a caller would have to assume it"
   Meta.forallTelescope ty fun xs body => do
     let bound : Std.HashSet FVarId := xs.foldl (fun s x => s.insert x.fvarId!) {}
     let mut rtVars : Std.HashSet FVarId := {}

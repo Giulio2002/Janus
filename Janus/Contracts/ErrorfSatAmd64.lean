@@ -73,7 +73,7 @@ set_option maxRecDepth 20000 in
 theorem errorf_impl (ok : Nat → List Nat → Prop) :
     ErrorfLive (toy.link (at0 code)) A0 4096 (toyR tys0 ok) tErr iErr tInt iWrap 2 0x7725 0 := by
   rw [link_at0]
-  intro L b s hpc ⟨⟨hra, hal, hst, h8, hacc⟩, hguard, hargs, hreads, hsafe, hok, hinv, hcost, hLs, hWs⟩
+  intro L b s hpc ⟨⟨hra, hal, hst, h8, hacc⟩, hRL, hguard, hargs, hreads, hsafe, hok, hinv, hcost, hLs, hWs⟩
   obtain ⟨hFl, hFm, hsome, hsl, hsc, hF, hSl, hT0, hD0, hE, hTxt, hints, hlen, hB⟩ := hargs
   have hlen0 : (msgOf s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat).length = 0 := by omega
   have hcost32 : errorfCost s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat = 32 := by
@@ -198,6 +198,13 @@ theorem ew64guard : StackRoom64 ewstate64 4096 5 := by
       show Outside ((ewstate64.regs 14).toNat + 16) 8 [(CB, CB + 0x100)]
       rw [e14]; simp [LiveSat.wg, CB, outside_cons, outside_nil])]; exact c
 
+theorem ew64ret : RetLow ewstate64 := by
+  show ewmem.readLE (ewstate64.regs 4).toNat 8 < 2 ^ 46
+  have e4 : (ewstate64.regs 4).toNat = LiveSat.wsp := LiveSat.wspn
+  rw [e4, ewframe.readLE _ _ (by simp [LiveSat.wsp, CB, outside_cons, outside_nil])]
+  show LiveSat.wmem.readLE LiveSat.wsp 8 < 2 ^ 46
+  decide
+
 set_option maxRecDepth 100000 in
 theorem ew64reads : ReadsOutside (errorfReads ewmem eFP 2 eSP) (liveWin64 ewstate64 4096 5) := by
   have : errorfReads ewmem eFP 2 eSP = [(eFP, 2), (eSP, 16), (eE, 16), (eTxt, 0)] := by decide
@@ -210,7 +217,7 @@ theorem ew64reads : ReadsOutside (errorfReads ewmem eFP 2 eSP) (liveWin64 ewstat
 theorem errorfLive_satisfiable : ∃ (R : RtInv) (tErr iErr tInt iWrap Fl Fm B : Nat) (impl : List Janus.Amd64.Segment),
     ErrorfLive (toy.link impl) A0 4096 R tErr iErr tInt iWrap Fl Fm B ∧
     ∃ (s : State) (L : List (Nat × Nat)) (b : Nat), s.rip = BitVec.ofNat 64 A0 ∧
-      CallOK64 s 4096 5 ∧ StackRoom64 s 4096 5 ∧
+      CallOK64 s 4096 5 ∧ RetLow s ∧ StackRoom64 s 4096 5 ∧
       ArgsOK (Env.mk tErr iErr tInt iWrap) Fl Fm B s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat
         (s.regs 7).toNat (s.regs 6).toNat ∧
       ReadsOutside (errorfReads s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) (liveWin64 s 4096 5) ∧
@@ -218,7 +225,7 @@ theorem errorfLive_satisfiable : ∃ (R : RtInv) (tErr iErr tInt iWrap Fl Fm B :
       LiveAt R A0 [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat, (s.regs 7).toNat, (s.regs 6).toNat] L b
         (errorfCost s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) (s.regs 14).toNat s.mem
         (liveWin64 s 4096 5) :=
-  ⟨toyR tys0 okE, tErr, iErr, tInt, iWrap, 2, 0x7725, 0, at0 code, errorf_impl okE, ewstate64, [], 0x400, rfl, ew64call, ew64guard,
+  ⟨toyR tys0 okE, tErr, iErr, tInt, iWrap, 2, 0x7725, 0, at0 code, errorf_impl okE, ewstate64, [], 0x400, rfl, ew64call, ew64ret, ew64guard,
     ewargs, ew64reads, ewsafe, ⟨⟨rfl, by decide⟩, ewinv (ewstate64.regs 14).toNat, ewcost, by simp, wwin64 [eFP, 2, eSP, 1, 1] 5 (by omega)⟩⟩
 
 end Janus.Contracts.ErrorfSatAmd64

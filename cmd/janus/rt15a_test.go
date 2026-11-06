@@ -323,8 +323,9 @@ func TestRound15aPlantedOlean(t *testing.T) {
 	for _, f := range []string{"Add.olean", "Add.ilean", "Add.olean.hash", "Add.ilean.hash"} {
 		data, err := os.ReadFile(filepath.Join(rV.Consumer.Workspace, "root", L, f))
 		if err != nil {
-			continue
+			data = []byte("garbage, not an olean") // Lake no longer builds the module: plant garbage
 		}
+		os.MkdirAll(filepath.Join(rS.Consumer.Workspace, "root", L), 0o755)
 		if err := os.WriteFile(filepath.Join(rS.Consumer.Workspace, "root", L, f), data, 0o644); err != nil {
 			t.Fatal(err)
 		}
