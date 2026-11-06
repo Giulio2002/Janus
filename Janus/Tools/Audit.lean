@@ -1474,6 +1474,16 @@ partial def conclParts (env : Environment) (e : Expr) : Array Expr :=
     | .const c _ => if isRuntimeContract env c then #[] else #[e]
     | _ => #[e]
 
+/-- U-ICALL: exactly `Extracted.program.contractAddr "name"` (either ISA): the address of a `--contract` stub that the
+extraction itself lists in `Extracted.contracts` (the existing symbol-reference check requires `name` to be one: an
+absent name would make the address `0`). That code is not extracted and not the theorem's own: the weak ABI-only
+contract is the honest assumption about it. -/
+def isStubAddrLit (e : Expr) : Bool :=
+  let e := e.consumeMData
+  (e.getAppFn.isConstOf `Janus.Program.contractAddr || e.getAppFn.isConstOf `Janus.Amd64.Program.contractAddr) &&
+    e.getAppNumArgs == 2 && (e.getArg! 0).consumeMData.isConstOf `Extracted.program &&
+    (match (e.getArg! 1).consumeMData with | .lit (.strVal _) => true | _ => false)
+
 /-- The abstract-callee contracts (U-ICALL): `ICallContract`, `ICallContract64`. -/
 def isICallContract (c : Name) : Bool :=
   c == `Janus.Contracts.ICall.ICallContract || c == `Janus.Contracts.ICall.ICallContract64
@@ -1821,8 +1831,8 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
           -- the target address of the callee is a variable of the statement: a numeral or an expression (the address of
           -- an extracted function, `Extracted.entry`) would make the hypothesis a static contract about code the
           -- statement can choose, false for the real code at that address (U-ICALL red team)
-          if i == 1 && !isVar a then
-            return some s!"assumes the abstract-callee contract {c} at the address `{(← Meta.ppExpr a).pretty 10000}`, which is not a variable of the statement: the callee's address is a parameter of the theorem (linked to the call by the itab word), never a chosen address (U-ICALL)"
+          if i == 1 && !isVar a && !isStubAddrLit a then
+            return some s!"assumes the abstract-callee contract {c} at the address `{(← Meta.ppExpr a).pretty 10000}`, which is neither a variable of the statement (a dynamic callee: the address is a parameter of the theorem, linked to the call by the itab word) nor `Extracted.program.contractAddr \"name\"` (a static call to a non-extracted function the extraction lists as a `--contract` stub); an extracted function's address, `Extracted.entry` and a numeral are never accepted (U-ICALL)"
           if i == 6 || i == 8 then
             icallFree := icallFree.push a
             continue

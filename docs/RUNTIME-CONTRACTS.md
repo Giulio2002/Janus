@@ -557,7 +557,9 @@ fault. The contracts are satisfiable (`ICallSat`, `ICallSatAmd64`: a writer retu
 `examples/proofs/WriteTo.lean`, `examples/proofs-amd64/WriteTo/Proof.lean`, `examples/proofs/CountThenWrite.lean` (two callees).
 
 **Audit.** `ICallContract` is a pinned contract. The runtime parameters `impl`, `rt` and `R` follow the variable rule; the
-callee address `fn` must be a variable (never a numeral or `Extracted.entry`); `P` and `keep` may be closed terms (they are the
+callee address `fn` must be a variable (a dynamic callee) or exactly `Extracted.program.contractAddr "name"` (a static call to a
+non-extracted function that the extraction lists as a `--contract` stub, e.g. `fmt.Fprint`); never a numeral, `Extracted.entry`,
+the address of an extracted function, or an offset of a stub address (`JanusTests/ICallAudit.lean`); `P` and `keep` may be closed terms (they are the
 statement's claims about the call, mention no runtime variable); the only premise allowed on `rt` is exactly `Outside a n rt`
 with `a`, `n` free of runtime variables. Red team: `audit/icall/attacks.sh` (nine rows), `JanusTests/ICallRedTeam.lean`
 (a callee that clobbers `X28`/`X29`/`SP` or writes the caller's frame does not satisfy the postcondition), `audit/icall/run.sh`
