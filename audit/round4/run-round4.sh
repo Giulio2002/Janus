@@ -38,7 +38,7 @@ grep -q 'Proof.wide : Prop := (255 : BitVec' <<<"$ex" || { echo "  >>> D2 regres
 }
 d3_block() {
 echo "== D3: control characters in report text are neutralized (unit test) =="
-(cd cmd/janus && memguard_run -n go-test -- go test -timeout 60m -run TestTermSafe . >/dev/null 2>&1) || { echo "  >>> D3 regressed"; broken+=(D3); }
+(cd cmd/janus && . "$root/audit/lib/gotest-row.sh" && gotest_row round4-termsafe memguard_run -n go-test -- go test -timeout 60m -run TestTermSafe .) || { echo "  >>> D3 regressed"; broken+=(D3); }
 }
 par_run d12_block
 par_run d3_block
