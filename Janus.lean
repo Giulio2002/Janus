@@ -78,6 +78,7 @@ import Janus.Contracts.LiveStubSysAmd64
 import Janus.Amd64.Bridge
 import Janus.Amd64.CarryNorm
 import Janus.Tactic.AssumptionLint
+import Janus.Tactic.Grab
 import Janus.Tactic.MemAbstract
 import Janus.Tactic.CarryNf
 import Janus.Amd64.FFISat
