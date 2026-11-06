@@ -1,6 +1,7 @@
 import Janus.Contracts.ErrorfRealStageDefs
 import Janus.Contracts.ErrorfRealFmt
 import Janus.Contracts.LiveToy
+import Janus.Contracts.LiveSat
 
 /-!
 # The memory the real-format `fmt.errorf` stub leaves (ISA-independent)
@@ -388,5 +389,41 @@ theorem toyInv_swap {tys : Toy.Tys} {b : Nat} {L L' : List (Nat × Nat)} {g : Na
     rw [eq _ _ (Toy.inRanges_ty ht (n := 8) (by omega)) (Or.inl (by omega)),
       eq _ _ (InRanges.sub (Toy.inRanges_ty ht (n := 16) (by omega)) (by omega) (by omega)) (Or.inl (by omega))]
     exact hr
+
+theorem keepABI_eq (f r : Nat → W64) (h18 : r 18 = f 18) (h28 : r 28 = f 28) (h29 : r 29 = f 29) :
+    Map.keepABI f r = r := by
+  funext i
+  simp only [Map.keepABI]
+  split
+  · rename_i hi; rcases hi with rfl | rfl | rfl
+    · exact h18.symm
+    · exact h28.symm
+    · exact h29.symm
+  · rfl
+
+open Janus.Contracts.Toy Janus.Contracts.LiveSat in
+theorem rsW_sub (sp0 p A : Nat) (hp : 268435456 ≤ p) (hpA : p + A ≤ 536870912) (hsp : 4096 ≤ sp0) :
+    ∀ a n, Outside a n (toyRt tys0 ++ [(sp0 - 4096, sp0 - 8), (sp0 + 8, sp0 + 8 + 8 * 5)]) →
+      Outside a n [(sp0 - 4096, sp0 - 8), (4194304, 4194312), (p, p + A)] := by
+  intro a n h
+  simp only [outside_append] at h
+  obtain ⟨hrt', hwin'⟩ := h
+  simp only [toyRt, tys0, outside_cons, outside_nil, outside_append, List.map, and_true, HEAP, HEND, HSIZE, BUMP, WBUF,
+    tyA, tyB, tyC] at hrt'
+  simp only [outside_cons, outside_nil, and_true] at hwin' ⊢
+  refine ⟨by omega, by omega, by omega⟩
+
+open Janus.Contracts.Toy Janus.Contracts.LiveSat in
+theorem rsW_live (sp0 p A : Nat) (L : List (Nat × Nat)) (hp : 268435456 ≤ p) (hpA : p + A ≤ 536870912)
+    (hLp : ∀ r ∈ L, HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ p)
+    (hLs : LiveSep L [(sp0 - 4096, sp0 - 8), (sp0 + 8, sp0 + 8 + 8 * 5)]) :
+    ∀ a n, InRanges a n L → Outside a n [(sp0 - 4096, sp0 - 8), (4194304, 4194312), (p, p + A)] := by
+  intro a n hin
+  obtain ⟨r, hr, hr1, hr2⟩ := hin
+  have hLo := hLs r hr
+  have hLr := hLp r hr
+  simp only [outside_cons, outside_nil, and_true] at hLo ⊢
+  simp only [HEAP] at hLr
+  refine ⟨by omega, by omega, by omega⟩
 
 end Janus.Contracts.ErrorfRealFinal

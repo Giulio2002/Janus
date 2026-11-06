@@ -8,6 +8,8 @@ import Janus.Contracts.ErrorfRealStageD
 import Janus.Contracts.ErrorfRealStageE
 import Janus.Contracts.ErrorfRealStageF
 import Janus.Contracts.ErrorfRealFinal
+import Janus.Contracts.ErrorfRealPost
+import Janus.Contracts.LiveCall
 
 /-!
 # The `fmt.errorf` live contract is satisfiable for the real format (arm64)
@@ -27,7 +29,7 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Errorf Jan
 open Janus.Contracts.AllocSat (toy A0 at0 link_at0 withCode)
 open Janus.Contracts.ErrorfRealCode (code)
 open Janus.Contracts.ErrorfSat (tErr iErr tInt iWrap)
-open Janus.Contracts.ErrorfRealStages Janus.Contracts.ErrorfRealFinal
+open Janus.Contracts.ErrorfRealStages Janus.Contracts.ErrorfRealFinal Janus.Contracts.ErrorfRealPost
 
 set_option maxRecDepth 100000
 set_option maxHeartbeats 0
@@ -62,6 +64,7 @@ theorem real_impl (ok : Nat → List Nat → Prop) :
   have hQ2' : s.mem.readLE ((s.regs 2).toNat + 40) 8 + 8 ≤ 2 ^ 48 := by
     have := hD2R.1; simpa [operandD] using this
   have hscr : s.mem.accessible (s.sp.toNat - 4096) (4096 + 8 + 8 * 5) true = true := hacc
+  have hE64 : s.mem.readLE ((s.regs 2).toNat + 8) 8 < 2 ^ 64 := by simpa using Memory.readLE_lt s.mem ((s.regs 2).toNat + 8) 8
   generalize he : s.mem.readLE ((s.regs 2).toNat + 8) 8 = e at *
   generalize htp : s.mem.readLE e 8 = tp at *
   generalize htl : s.mem.readLE (e + 8) 8 = tl at *
@@ -237,7 +240,57 @@ theorem real_impl (ok : Nat → List Nat → Prop) :
               (atot (tl + (l1 + n1) + (l2 + n2) + 20)) (tl + (l1 + n1) + (l2 + n2) + 20) e tp tl := by
             subst hm6 hm5 hm4 hm3 hm2 hm1
             rfl
-          trace_state
-          sorry
+          have hreadsOut := hreads _ hTmem
+          have hRO : Outside tp tl (calleeStack s 4096 5) := hreadsOut
+          simp only [calleeStack, outside_cons, outside_nil, and_true] at hRO
+          have hTOK : TextOK s.sp.toNat p tp tl := by
+            unfold TextOK
+            rcases hT4 with h | h | h
+            · left; simpa using h
+            · right
+              have h' : Outside tp tl (toyRt tys0) := h
+              simp only [toyRt, tys0, outside_cons, outside_nil, outside_append, List.map, and_true, HEAP, HEND, HSIZE, BUMP,
+                WBUF, tyA, tyB, tyC] at h'
+              refine ⟨by omega, by omega, by omega⟩
+            · right
+              obtain ⟨r, hr, hr1, hr2⟩ := h
+              have := hLp r hr
+              simp only [HEAP] at this
+              refine ⟨by omega, by omega, by omega⟩
+          have hrtW : ∀ a, inRs (toyRt tys0) a = true → a < s.sp.toNat - 4096 ∨ s.sp.toNat - 8 ≤ a := by
+            intro a ha
+            simp only [inRs, toyRt, tys0, List.map, List.cons_append, List.nil_append, List.any_cons, List.any_nil,
+              Bool.or_false, Bool.or_eq_true, Bool.and_eq_true, decide_eq_true_eq, HEAP, HEND, HSIZE, BUMP, WBUF,
+              tyA, tyB, tyC] at ha
+            omega
+          have hmsgOf : msgOf s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat =
+              msgList (strBytes s.mem tp tl) n1 n2 (absn v1) (absn v2) := by
+            rw [hmsg, hd1, hd2]
+            simp [msgList, List.append_assoc]
+          have hop : operandD s.mem (s.regs 2).toNat 0 = e := by simp [operandD, he]
+          have hpost := real_errorfPost ok s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat (calleeStack s 4096 5) L
+            b (s.regs 28).toNat 0x4444 p s.sp.toNat l1 n1 l2 n2 (absn v1) (absn v2) p
+            (tl + (l1 + n1) + (l2 + n2) + 20) e tp tl hst1 (by omega) (by omega) hn1 hn2 hl1g hl2g (by omega) hendA' rfl hscrB hscrH
+            hTOK hE64 hmsgOf hop rfl rfl hinv' hap (by simpa using hacc') hWs hLp hrtW
+          have hfr := final_frame s.mem s.sp.toNat l1 n1 l2 n2 (absn v1) (absn v2) p (atot (tl + (l1 + n1) + (l2 + n2) + 20))
+            (tl + (l1 + n1) + (l2 + n2) + 20) e tp tl hst1 hl1 hl2 hn1 hn2 hl1g hl2g (by omega) hendA' (by omega) rfl hscrB hscrH hTOK
+          have h0' : (R6 0).toNat = 0x4444 := by rw [h0]; decide
+          have hR1 : (R6 1).toNat = p := by
+            rw [h1f]; simp only [BitVec.toNat_ofNat]; apply Nat.mod_eq_of_lt
+            simp only [HEND, HEAP, HSIZE] at hendA; omega
+          subst hfin
+          unfold Pool.LiveRet
+          refine ⟨R6, s.vregs, F6, finalMem s.mem s.sp.toNat l1 n1 l2 n2 (absn v1) (absn v2) p
+            (atot (tl + (l1 + n1) + (l2 + n2) + 20)) (tl + (l1 + n1) + (l2 + n2) + 20) e tp tl, s.excl, s.exclPass, ?_, ?_, ?_, ?_⟩
+          · rw [keepABI_eq _ _ h18 h28 h29]
+          · exact hfr.mono (fun a n h => rsW_sub s.sp.toNat p _ h1' hendA' hst1 a n (by
+              have h' : Outside a n (toyRt tys0 ++ [(s.sp.toNat - 4096, s.sp.toNat - 8), (s.sp.toNat + 8, s.sp.toNat + 8 + 8 * 5)]) := h
+              exact h'))
+          · exact LiveFrame.of_memFrame hfr (rsW_live s.sp.toNat p _ L h1' hendA' hLp (by
+              have h' : LiveSep L [(s.sp.toNat - 4096, s.sp.toNat - 8), (s.sp.toNat + 8, s.sp.toNat + 8 + 8 * 5)] := hLs
+              exact h'))
+          · show ErrorfPost (Env.mk tErr iErr tInt iWrap) (toyR tys0 ok) s.mem (s.regs 0).toNat (s.regs 1).toNat
+              (s.regs 2).toNat (calleeStack s 4096 5) L b (s.regs 28).toNat (R6 0).toNat (R6 1).toNat _
+            rw [h0', hR1]; exact hpost
 
 end Janus.Contracts.ErrorfRealSat
