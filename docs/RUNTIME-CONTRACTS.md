@@ -840,6 +840,7 @@ witnesses for both shapes of both contracts, on both ISAs: `Janus/Contracts/Ifac
 `janus_live_convtstring`, `janus_live_convtstring_empty`, `janus_live_convt64`, `janus_live_convt64_small`
 (`janus64_…`) are in `LiveStubConvT[Amd64].lean`. The single-call `ConvT*` stay for functions that box once and
 need the itab/equality model; a path that calls them after a live call is still unprovable.
+**Known limitation (U14-ZEROVAL).** The static boxes (`&zeroVal`, `&staticuint64s[v]`) lie in `R.rt` and are not in the live set, so a *later* runtime call (which may write `R.rt`) does not keep them: their words are known in the call's own postcondition only. The allocated boxes are in the live set and `LiveFrame` preserves them across later calls. Pinning the statics needs `RtInv` to treat runtime read-only statics as immutable; not done.
 
 **Allocating calls need readiness** (round 10 V3). `ConvT`, `ConvTnoptr`, `ConvT16/32/64`,
 `ConvTstring`, `ConvTslice`, `TypeAssert` and `InterfaceSwitch` take a readiness predicate
