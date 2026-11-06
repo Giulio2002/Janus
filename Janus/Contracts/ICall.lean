@@ -34,6 +34,12 @@ namespace Janus.Contracts.ICall
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Contracts
 
+/-- The target of an indirect call is an address the executor can branch to (arm64): 4-byte aligned and below `2^56`
+(a tagged pointer is not modelled). The executor treats any other target as a fault, and `Ensures` is total (a faulting
+path makes it unprovable), so a theorem that calls an arbitrary callee states this about the callee's address
+explicitly. It is a disclosed assumption of every `ICallContract` consumer, one named predicate, not a free conjunct. -/
+def CodePtrOK (fn : Nat) : Prop := fn % 4 = 0 ∧ fn < 2 ^ 56
+
 /-- The relation of a callee's three result registers to its four argument registers. -/
 abbrev Res := W64 → W64 → W64 → W64 → W64 → W64 → W64 → Prop
 

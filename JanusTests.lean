@@ -56,6 +56,7 @@ import JanusTests.Join
 import JanusTests.AssumptionLint
 import JanusTests.MemAbstract
 import JanusTests.CarryNf
+import JanusTests.ICallRedTeam
 import JanusTests.AddModCarry
 import JanusTests.ReadBounds
 import JanusTests.CallPre

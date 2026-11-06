@@ -74,3 +74,20 @@ func DeferAdd(x, y uint64) (r uint64) {
 //
 //go:noinline
 func WriteTo(w io.Writer, b []byte) (int, error) { return w.Write(b) }
+
+// Sink is a counter that is also a writer: two methods, so two itab slots (Count is Fun[0], Write Fun[1]).
+type Sink interface {
+	Count() int
+	Write(p []byte) (int, error)
+}
+
+// CountThenWrite asks s.Count() and, if it is not zero, writes p to s: two interface calls to arbitrary callees
+// (examples/proofs/CountThenWrite.lean), the second one depending on the first one's result.
+//
+//go:noinline
+func CountThenWrite(s Sink, p []byte) (int, error) {
+	if s.Count() == 0 {
+		return 0, nil
+	}
+	return s.Write(p)
+}

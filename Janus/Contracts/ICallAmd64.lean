@@ -15,6 +15,10 @@ namespace Janus.Contracts.ICall
 
 open Janus Janus.Amd64 Janus.Amd64.Tactic Janus.Contracts
 
+/-- The target of an indirect call is an address the executor can branch to (amd64): below `2^47` (canonical user
+address). See `Janus.Contracts.ICall.CodePtrOK`; `Ensures` is total, so a theorem states this about the callee's address. -/
+def CodePtrOK64 (fn : Nat) : Prop := fn < 2 ^ 47
+
 /-- The precondition of the call (amd64): `CallOK64`, `above ≥ 8 + 8·nargs` with `[RSP, RSP + above)` (the return
 address slot and the caller's frame) outside every range of `rt`, and the call-site property `P`. -/
 def ICallPre64 (nargs stack above : Nat) (rt : List (Nat × Nat)) (P : State → Prop) (s : State) : Prop :=

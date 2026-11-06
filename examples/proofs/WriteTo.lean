@@ -30,12 +30,12 @@ theorem correctness (fn stack : Nat) (rt : List (Nat × Nat)) (R : Res) (tab w p
     ICallContract Extracted.program fn 4 stack 48 rt (fun _ => []) R
       (fun sc => sc.regs 0 = w ∧ sc.regs 1 = ptr ∧ sc.regs 2 = len ∧ sc.regs 3 = cap) →
     Ensures Extracted.program Extracted.entry [tab, w, ptr, len, cap]
-      (fun s => 8 ≤ stack ∧ fn % 4 = 0 ∧ fn < 2 ^ 56 ∧ Disjoint (tab.toNat + 24) 8 (s.sp.toNat - 56) 88 ∧
+      (fun s => 8 ≤ stack ∧ CodePtrOK fn ∧ Disjoint (tab.toNat + 24) 8 (s.sp.toNat - 56) 88 ∧
         GuardOK s 0 ∧ StackOK s (48 + stack) 40 ∧
         tab.toNat + 32 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 8 false = true ∧ s.mem.readLE (tab.toNat + 24) 8 = fn ∧
         Outside (s.sp.toNat - 56) 56 rt)
       (fun _ s' => ∃ n e1 e2, R w ptr len cap n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 1 = e1 ∧ s'.regs 2 = e2) := by
-  intro hc ret hret s hs ⟨h8, hfn4, hfn, hd, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, htb, ht, hF, hrt⟩
+  intro hc ret hret s hs ⟨h8, ⟨hfn4, hfn⟩, hd, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, htb, ht, hF, hrt⟩
   janus_intro hs
   simp only [Disjoint] at hd
   have hrt' : Outside (s.sp.toNat - 48 - 8) (48 + 8) rt := hrt.of_sub (by omega) (by omega)
