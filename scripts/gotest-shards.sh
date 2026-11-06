@@ -309,6 +309,12 @@ if [ "$nskip" -gt 0 ] || [ "$ncov" -gt 0 ]; then
   [ "$extras_on" = 1 ] && [ "${JANUS_TEST_ASL_EXTRA:-}" != 1 ] && echo "  (the ASL extra is opt-in: JANUS_TEST_ASL_EXTRA=1 runs the four TestASL* tests; known gap, see QUEUE.md)"
   [ "$extras_on" = 1 ] || echo "  (extras off: JANUS_NIGHTLY=1 or JANUS_GOTEST_EXTRAS=1 also runs TestReplayUnderMemoryPressure and TestConsumerMathlib; the four TestASL* tests only with JANUS_TEST_ASL_EXTRA=1 as well)"
 fi
+# REDUCED-COVERAGE: a test that ran its merge-gate variant says so in its log (the full variant runs in the nightly gate)
+grep -h 'REDUCED-COVERAGE:' "$outdir"/shard-*.log 2>/dev/null | sed -E 's/^[ \t]*[A-Za-z0-9_]+\.go:[0-9]+: //' | sort -u > "$outdir/reduced.txt" || true
+if [ -s "$outdir/reduced.txt" ]; then
+  echo "REDUCED-COVERAGE: $(wc -l < "$outdir/reduced.txt") test(s) ran a shorter merge-gate variant (the nightly gate, JANUS_NIGHTLY=1, runs the full one):"
+  sed 's/^REDUCED-COVERAGE: /  /' "$outdir/reduced.txt"
+fi
 if [ "$nskip" -gt 0 ]; then
   echo "gotest-shards: $nskip test(s) SKIPPED (a skip is not a pass; this run is not recorded)"
   [ -z "${INCR_NORECORD_FILE:-}" ] || echo "gotest: $nskip skipped test(s)" >> "$INCR_NORECORD_FILE"

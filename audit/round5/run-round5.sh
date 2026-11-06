@@ -102,7 +102,7 @@ d viewRegs; row E3e_dep_structure_regs Verified 'DecLib.View.regs (def, DecLib)'
 e5_gotest_block() {
 echo "== E5 unit row (go test)"
 type tmark >/dev/null 2>&1 && tmark "== E5 unit row (go test)"
-(cd cmd/janus && memguard_run -n go-test -- go test -timeout 60m -run 'TestBoundInstanceRejected' . >/dev/null 2>&1) || { echo "  >>> TestBoundInstanceRejected failed"; broken+=(E5-gotest); }
+(cd cmd/janus && . "$root/audit/lib/gotest-row.sh" && gotest_row round5-bound memguard_run -n go-test -- go test -timeout 60m -run 'TestBoundInstanceRejected' .) || { echo "  >>> TestBoundInstanceRejected failed"; broken+=(E5-gotest); }
 }
 model_block() {
 if [ -z "${SKIP_MODEL:-}" ]; then
