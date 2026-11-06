@@ -492,3 +492,31 @@ func TestConsumerLakeFreeFallsBack(t *testing.T) {
 		t.Errorf("--keep-workspace: Lake did not build the proof module: %v", err)
 	}
 }
+
+// TestConsumerLakeFreeBrokenLakefile: skipping the Lake build does not skip the lakefile: a package whose lakefile.toml
+// is broken (syntax, or a dependency that does not resolve) is refused with a reason and never verified.
+func TestConsumerLakeFreeBrokenLakefile(t *testing.T) {
+	defer parallel(t)()
+	needLeanSlow(t)
+	useTestCache(t)
+	add := mustExtract(t, "example.com/basic.Add")
+	for name, tail := range map[string]string{
+		"syntax":     "\n[[lean_lib]\nname = = broken\n",
+		"dependency": "\n[[require]]\nname = \"nonexistent\"\npath = \"../does-not-exist\"\n",
+	} {
+		pkg := consumerCopy(t, "toml")
+		p := filepath.Join(pkg, "lakefile.toml")
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, p, string(b)+tail)
+		code, out, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(pkg, "ConsumerExample/Add.lean"), "--proof-root", pkg,
+			"--theorem", "ConsumerExample.Add.correctness", "--no-result-cache")
+		if code == 0 || strings.Contains(out, "Verified") {
+			t.Errorf("%s: a broken lakefile was verified: %d\n%s\n%s", name, code, out, stderr)
+		} else if strings.TrimSpace(out+stderr) == "" {
+			t.Errorf("%s: refused without a reason", name)
+		}
+	}
+}
