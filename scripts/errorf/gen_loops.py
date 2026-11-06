@@ -6,7 +6,7 @@ sys.path.insert(0, "scripts/errorf")
 import gen_arm64
 from loop_templates import HDR, DIG, CPY
 _, lab = gen_arm64.build()
-pc = lambda k: hex(0x100000 + 4 * lab[k])
+pc = lambda k: hex(gen_arm64.E0 + 4 * lab[k])
 out = HDR
 for n, head, exit_ in (("n1", "n1d", "n1s"), ("n2", "n2d", "n2s")):
     out += DIG.replace("@N@", n).replace("@H@", pc(head)).replace("@X@", pc(exit_)) + "\n"
