@@ -998,6 +998,8 @@ def pinnedContracts : Array (String × String) := #[
   ("Janus.Contracts.HashAmd64", "Rand"),
   ("Janus.Contracts.HashAmd64", "Strhash"),
   ("Janus.Contracts.HashAmd64", "Typehash"),
+  ("Janus.Contracts.ICall", "ICallContract"),
+  ("Janus.Contracts.ICallAmd64", "ICallContract64"),
   ("Janus.Contracts.Iface", "AssertE2I"),
   ("Janus.Contracts.Iface", "AssertE2I2"),
   ("Janus.Contracts.Iface", "ConvT"),

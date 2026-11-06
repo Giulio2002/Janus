@@ -27,7 +27,7 @@ theorem correctness (fn1 fn2 stack : Nat) (rt : List (Nat × Nat)) (R1 R2 : Res)
       (fun sc => sc.regs 0 = w ∧ sc.regs 1 = ptr ∧ sc.regs 2 = len ∧ sc.regs 3 = cap) →
     Ensures Extracted.program Extracted.entry [tab, w, ptr, len, cap]
       (fun s => 8 ≤ stack ∧ CodePtrOK fn1 ∧ CodePtrOK fn2 ∧
-        Disjoint (tab.toNat + 24) 16 (s.sp.toNat - 56) 104 ∧
+        Disjoint (tab.toNat + 24) 16 (s.sp.toNat - (48 + stack)) (96 + stack) ∧
         GuardOK s 0 ∧ StackOK s (48 + stack) 48 ∧
         tab.toNat + 40 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 16 false = true ∧
         s.mem.readLE (tab.toNat + 24) 8 = fn1 ∧ s.mem.readLE (tab.toNat + 32) 8 = fn2 ∧
@@ -40,6 +40,7 @@ theorem correctness (fn1 fn2 stack : Nat) (rt : List (Nat × Nat)) (R1 R2 : Res)
   simp only [Disjoint] at hd
   have hrt' : Outside (s.sp.toNat - 48 - 8) (96 + 8) rt := hrt.of_sub (by omega) (by omega)
   janus_run [hF1, hF2] calls [hc1, hc2]
-  all_goals (trace_state; sorry)
+  · exact ⟨_, _, _, _, _, _, by janus_assumption, Or.inl (by janus_assumption)⟩
+  · exact ⟨_, _, _, _, _, _, by janus_assumption, Or.inr ⟨by janus_assumption, _, _, _, by janus_assumption, rfl, rfl, rfl⟩⟩
 
 end Proof
