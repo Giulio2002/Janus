@@ -1466,7 +1466,7 @@ conversion in the toy stub and is not built. The `%d` and text clauses of `Error
 checked against the real `fmt.Errorf` (`JanusTests/Errorf.lean`) but have no machine-code witness.
 
 **Real-format satisfiability and placement (arm64: `ErrorfRealImpl`, `ErrorfRealLive`, `ErrorfRealSat`; amd64: `ErrorfRealSat64`).**
-For `"%w: have %d, want %d bytes"` the witness is a real stub (126 words, `scripts/errorf/gen_arm64.py`): two decimal
+For `"%w: have %d, want %d bytes"` the arm64 witness is a real stub (126 words, `scripts/errorf/gen_arm64.py`): two decimal
 loops, one bump allocation, three copy loops. `real_satisfiable` shows the contract and a state satisfying its whole
 precondition, with a message of any length and any `int` operands. The two itab words the stub stores
 (`iErr`, `iWrap`) are read from a two-word **constants cell** of the witness runtime (`ErrorfRealRt.errR`: the toy
@@ -1477,6 +1477,13 @@ It is proven at the address `E0 = 2^48` and **moved to any placement** by the tr
 check of the words (`CodeOK`: position-independent instruction classes, branch targets inside the stub, no write to
 `X30`) and a base address above every return address (`CallOK`: `X30 < 2^48`). Other live-contract stubs can use
 the same theorem.
+
+**amd64 (`ErrorfRealImpl64`, `ErrorfRealLive64`, `RelocAmd64`).** The same design. The stub begins with `mov r15, [rsp]`
+and ends with `add rsp, 8; jmp r15` instead of `ret` (`R15` is a Go-ABI scratch register: the contract's post leaves it
+arbitrary, so a consumer must not rely on it surviving the call). `RelocAmd64.summary_transport64` needs the static check
+`CodeOK64` (position-independent instruction classes, no `RIP`-relative operand, branch targets are instruction starts,
+no write to `R15` after the prologue) and a base address above the saved return address: the amd64 `ErrorfLive` has the
+precondition `RetLow` (`[RSP] < 2^46`, user code addresses), and the stub sits at `2^46`.
 | `DeferOrder(x)` | `panic(x)` with three open-coded defers: the deferred calls run last to first (both ISAs) |
 | `DeferMix(n)` | a loop's heap records and open-coded defers on one frame, in order, with `deferreturn` (both ISAs) |
 | `GoexitDefer(n)` | `runtime.Goexit()` runs the deferred calls and unwinds past the frame; `recover()` finds no panic (both ISAs) |
