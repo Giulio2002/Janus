@@ -334,6 +334,26 @@ next compile replaces it (round 8 M1). Like the replay cache it is written only 
 the sandbox, is read-only to sandboxed processes, and is off with `--fresh` and without a
 sandbox.
 
+**The module store** (`v1/modstore`, `cmd/janus/modstore.go`) holds Lake's build outputs of the consumer
+package's (and dependencies') modules whose import closure excludes `Extracted` and `JanusTrusted`. A consumer
+workspace is one extraction's; before the store, its Lake build was seeded from the newest sibling of its family only,
+and a family exists per framework build, so a module the sibling lacked, or every module after a framework change, was
+built again (String amd64: 68 modules, 55 min). The key covers everything the module's build reads: the toolchain,
+package, module and source, the lakefile's settings except `[[require]]`, the keys of the package modules it imports (so
+its whole package closure) and the digest of the framework modules in its import closure with the SHA-256 of each
+olean (`fwClosureDigest`). A module that imports `Extracted`/`JanusTrusted`, directly or through any import, has no key
+and is never stored; the trusted compile of `Extracted` is not touched. An entry is a directory written once by an
+atomic rename and never replaced while intact (concurrent writers: one wins, all wrote the same inputs' outputs),
+with a manifest authenticated like the trusted-compile entries (HMAC under the cache's hidden key) and the SHA-256
+of every file, checked on every load: a changed byte, a forged manifest, a path outside `lib/lean` and `ir`, or a key of
+another toolchain is a miss, and the next harvest replaces a damaged entry. **What it can and cannot change:** the entries
+are outputs of the untrusted Lake build, used only to skip rebuilding it, and Lake rechecks its traces on whatever is
+there. The audit and the kernel replay judge janus's own oleans (olean provenance), never Lake's. Those have a store of
+their own (`v1/oleans`), whose key used to digest the whole framework build including `Extracted`, so every new
+extraction recompiled every library module; it now digests the closure only (`fwClosureDigest`), and uses the
+authenticated keys as before. `JANUS_NO_MODSTORE=1` turns the Lake module store off. Both stores are collected by the
+cache collector like the other lock-free kinds (`janus cache gc`).
+
 **Toolchain identity.** Every cache key (replay, early replay, trusted compile, result) names
 the toolchain by `cacheID`: its version string, the SHA-256 of `bin/lean` and `bin/leanchecker`,
 and the path, size, modification and change times, inode, device and mode of every file under

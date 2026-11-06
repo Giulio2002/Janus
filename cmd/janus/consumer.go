@@ -67,6 +67,8 @@ type consumerInfo struct {
 	AllowPathDeps bool             `json:"allowPathDeps,omitempty"`
 	Workspace     string           `json:"workspace"`
 	Rebuilt       []string         `json:"rebuilt"`
+	// FromStore are the modules whose Lake outputs came from the module store (modstore.go) instead of a build.
+	FromStore []string `json:"fromModuleStore,omitempty"`
 }
 
 type lakeManifest struct {
@@ -504,6 +506,12 @@ type consumerWS struct {
 	baseLease *frameworkLease
 	// opened: openWorkspace finished (close then clears the busy marker, see beginUse).
 	opened bool
+	// storeMods are the modules the module store covers (modstore.go); nil without the replay cache.
+	storeMods map[string]*storeMod
+	// storeSeeded counts the modules the store supplied to this workspace's Lake build.
+	storeSeeded     int
+	storeSeededMods []string
+	storeDamaged    map[string]bool // keys of store entries that exist but did not verify when seeding
 }
 
 // reportKept (--keep-workspace) prints where the workspace is and how to run Lean in it. The
@@ -749,6 +757,13 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 	if err := os.WriteFile(filepath.Join(ws.Root, ".lake", "package-overrides.json"), override, 0o644); err != nil {
 		return fail(wsDiag(err))
 	}
+	// The module store (modstore.go): Lake's outputs of the Extracted-free modules this workspace lacks.
+	if ws.replayCache && os.Getenv("JANUS_NO_MODSTORE") == "" {
+		ws.storeMods = storeModules(tc.cacheID(), ws, pkg, jfiles, basePins.want)
+		ws.storeSeededMods = ws.modstoreSeed(ws.storeMods)
+		ws.storeSeeded = len(ws.storeSeededMods)
+	}
+	consumerTimer.mark("ws: module store seed")
 	// Trusted build of Extracted (Lake on our lakefile and sources only, unsandboxed: no
 	// consumer code is involved) and of the independently named JanusTrusted copy, before any
 	// untrusted code runs in the workspace. From here on janus/ is read-only to every
@@ -1354,6 +1369,10 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	}
 	rebuilt := append(builtModules(buildOut.String()), ws.prepBuilt...)
 	consumerTimer.mark("lake build of the proof modules")
+	if ws.storeMods != nil {
+		ws.modstoreHarvest(ws.storeMods)
+		consumerTimer.mark("module store harvest")
+	}
 	if strings.Contains(buildOut.String(), "manifest out of date") || strings.Contains(buildOut.String(), "not in manifest") {
 		failAll(&diag{Invalid: true, Msg: "lake-manifest.json does not match the lakefile.", Stage: "consumer manifest",
 			Next: "Run lake update in " + displayPath(pkg.Root) + ".", Details: mapPaths(buildOut.String())})
@@ -1709,7 +1728,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			Consumer: &consumerInfo{
 				Root: pkg.Root, Lakefile: pkg.Lakefile, Module: r.module, SnapshotSha256: pkg.Sha256,
 				Files: pkg.fileHashes(), Dependency: pkg.Dep, Dependencies: pkg.depInfos(), AllowPathDeps: pkg.opts.AllowPathDeps,
-				Workspace: wsRef, Rebuilt: nonNil(rebuilt),
+				Workspace: wsRef, Rebuilt: nonNil(rebuilt), FromStore: ws.storeSeededMods,
 			},
 		}
 		// --asl: the request's ASL corollary (recorded; it never fails the theorem above).

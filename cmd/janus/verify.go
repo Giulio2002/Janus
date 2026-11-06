@@ -416,6 +416,9 @@ func printVerifiedAt(stdout io.Writer, outdir, reportPath string, r *verifiedRep
 		} else {
 			fmt.Fprintf(stdout, "  Build: rebuilt %s\n", moduleList(c.Rebuilt))
 		}
+		if len(c.FromStore) > 0 {
+			fmt.Fprintf(stdout, "  Build: %d modules from the module store (%s)\n", len(c.FromStore), moduleList(c.FromStore))
+		}
 	}
 	if f := r.Framework; f != nil {
 		fmt.Fprintf(stdout, "  Framework: %s (SHA-256 %s, %d files, %s)\n", f.Source, f.Sha256, f.Files, f.Toolchain)

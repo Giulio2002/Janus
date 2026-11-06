@@ -863,6 +863,8 @@ which must be private to the user (docs/AUDIT-ROUND8.md, C1):
 | `v1/asl/<key>` | the JanusASL build for `--asl`, per framework, JanusASL version and framework directory | 1–2.5 GB, ~1 h to build | `.lock` while built, `.use` (shared) while used |
 | `v1/consumer/<family>/<ws>` | one workspace per consumer package, framework and extraction | 100–300 MB | exclusive lock |
 | `v1/trusted/<xx>/<key>` | compiled `Extracted`/`JanusTrusted` modules (HMAC-authenticated manifest) | ~1 MB | — |
+| `v1/modstore/<xx>/<key>` | Lake's build outputs of one Extracted-free consumer module (olean, ilean, trace, C; HMAC-authenticated manifest), shared by every extraction, workspace and framework build of the cache | 1–50 MB | — |
+| `v1/oleans/<xx>/<key>.olean` | janus's own compile of one consumer module (provenance), HMAC-authenticated | 1–50 MB | — |
 | `v1/result/<xx>/<key>.json` | recorded verification results (HMAC-authenticated; the key is `v1/result/.key`) | ~7 KB | — |
 | `v1/replay/…` | one empty marker per passing kernel replay | 4 KB | — |
 | `v1/tmp`, `v1/run` | temporary trees of running (or killed) processes | | — |

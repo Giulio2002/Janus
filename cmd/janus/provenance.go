@@ -320,6 +320,7 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 		return nil, provDiag(fmt.Sprintf("cannot read the import header of %s", srel))
 	}
 	var own []string
+	var ext []string // the framework/toolchain modules it imports directly
 	for _, imp := range imps {
 		if _, _, _, c := ob.locate(imp); c > 0 {
 			om, err := ob.ensure(imp, "")
@@ -332,12 +333,13 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 		if !ob.externalOlean(imp) {
 			return nil, provDiag(fmt.Sprintf("%s imports %s, which is neither a module of the packages nor of the framework or the toolchain", srel, imp))
 		}
+		ext = append(ext, imp)
 	}
 	sort.Strings(own)
 	if err := syncTreeOwn(pkg); err != nil {
 		return nil, wsDiag(err)
 	}
-	key := ob.moduleKey(pkg, m, srel, srcBytes, own)
+	key := ob.moduleKey(pkg, m, srel, srcBytes, own, ob.frameworkDigest(ext))
 	oleanPath := filepath.Join(pkg.lib, filepath.FromSlash(strings.ReplaceAll(m, ".", "/"))+".olean")
 	if err := os.MkdirAll(filepath.Dir(oleanPath), 0o755); err != nil {
 		return nil, wsDiag(err)
@@ -397,9 +399,69 @@ func syncTreeOwn(p *provPkg) error {
 	return nil
 }
 
-func (ob *ownBuild) moduleKey(pkg *provPkg, m, rel string, src []byte, own []string) string {
+// frameworkDigest: see fwClosureDigest (the pins are the workspace's, which include the trusted Extracted).
+func (ob *ownBuild) frameworkDigest(imps []string) string {
+	return fwClosureDigest(ob.ws.janusFiles, ob.ws.pins.want, imps)
+}
+
+// fwClosureDigest is the digest of the framework modules a compile reads: the transitive import closure, inside
+// the framework build (`Janus.*`, and `Extracted`/`JanusTrusted` when imported; files are the sources of
+// the framework package), of the module's direct framework imports, each with the SHA-256 of its olean in
+// the pinned build want. The compile of a module reads those oleans and no others (toolchain modules are covered by
+// the toolchain id), so two frameworks that differ only in modules outside the closure, or two extractions for a
+// module that does not import `Extracted`, give the same digest and share the stored olean (the key used to digest
+// the whole framework build, Extracted included: every new extraction and every framework change recompiled every
+// library module). Any module of the closure whose source cannot be read, or whose olean is not pinned, makes the
+// digest the whole build's.
+func fwClosureDigest(files map[string][]byte, want pins, imps []string) string {
+	all := func() string { return "all " + pinsDigest(want) }
+	if files == nil {
+		return all()
+	}
+	seen := map[string]bool{}
+	var mods []string
+	var visit func(m string) bool
+	visit = func(m string) bool {
+		if seen[m] {
+			return true
+		}
+		seen[m] = true
+		src, ok := files[strings.ReplaceAll(m, ".", "/")+".lean"]
+		if !ok {
+			return true // a toolchain module
+		}
+		mods = append(mods, m)
+		is, ok := parseImports(src)
+		if !ok {
+			return false
+		}
+		for _, i := range is {
+			if !visit(i) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, i := range imps {
+		if !visit(i) {
+			return all()
+		}
+	}
+	sort.Strings(mods)
 	h := sha256.New()
-	fmt.Fprintf(h, "janus-own-olean-v1\n%q\n%s\n", ob.ws.tc.cacheID(), pinsDigest(ob.ws.pins.want))
+	for _, m := range mods {
+		sha, ok := want[moduleRel(m)]
+		if !ok {
+			return all()
+		}
+		fmt.Fprintf(h, "%q %s\n", m, sha)
+	}
+	return "closure " + hex.EncodeToString(h.Sum(nil))
+}
+
+func (ob *ownBuild) moduleKey(pkg *provPkg, m, rel string, src []byte, own []string, fwDigest string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "janus-own-olean-v2\n%q\n%s\n", ob.ws.tc.cacheID(), fwDigest)
 	fmt.Fprintf(h, "package %q\nmodule %q\nsource %q %s\nopts %q\nimports %q\n", pkg.name, m, rel, sha256Hex(src), pkg.dopts, own)
 	return hex.EncodeToString(h.Sum(nil))
 }

@@ -384,11 +384,15 @@ func TestCacheGCRetentionAndTemporary(t *testing.T) {
 	// A zero budget takes every lock-less entry too, never the key.
 	f.file("trusted/ab/abcdef/manifest.json", 10, 2*day)
 	f.age("trusted/ab/abcdef", 2*day)
+	f.file("modstore/ab/abcdef/manifest.json", 10, 2*day)
+	f.age("modstore/ab/abcdef", 2*day)
+	f.file("oleans/ab/abcdef.olean", 10, 2*day)
+	f.file("oleans/ab/abcdef.json", 10, 2*day)
 	f.file("replay/ab/abcdef", 0, 2*day)
 	f.file("replay/early/ab/abcdef", 0, 2*day)
 	f.file("replay/locks/0123.lock", 0, 2*day)
 	f.gc(gcOptions{Max: 0})
-	for _, p := range []string{"trusted/ab/abcdef", "replay/ab/abcdef", "replay/early/ab/abcdef", "replay/locks/0123.lock", "result/ab/abcd.json"} {
+	for _, p := range []string{"trusted/ab/abcdef", "modstore/ab/abcdef", "oleans/ab/abcdef.olean", "oleans/ab/abcdef.json", "replay/ab/abcdef", "replay/early/ab/abcdef", "replay/locks/0123.lock", "result/ab/abcd.json"} {
 		if exists(f.p(p)) {
 			t.Errorf("%s survived a zero budget", p)
 		}
@@ -396,7 +400,7 @@ func TestCacheGCRetentionAndTemporary(t *testing.T) {
 	if b, err := os.ReadFile(key); err != nil || len(b) != 32 {
 		t.Errorf("the result key was touched: %v", err)
 	}
-	for _, d := range []string{"trusted/ab", "result/ab", "replay/ab"} {
+	for _, d := range []string{"trusted/ab", "modstore/ab", "oleans/ab", "result/ab", "replay/ab"} {
 		if !exists(f.p(d)) {
 			t.Errorf("shard %s removed (a concurrent store creates entries in it)", d)
 		}
