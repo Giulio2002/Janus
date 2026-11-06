@@ -871,7 +871,9 @@ func TestConsumerResultCache(t *testing.T) {
 	max := mustExtract(t, "example.com/basic.Max")
 	verify := func(outdir, proof, thm string, extra ...string) string {
 		t.Helper()
+		t0 := time.Now()
 		code, out, stderr := runJanus(t, append([]string{"verify", outdir, "--proof", filepath.Join(pkg, proof), "--proof-root", pkg, "--theorem", thm}, extra...)...)
+		t.Logf("verify %s %v: %.1fs", thm, extra, time.Since(t0).Seconds())
 		if code != 0 {
 			t.Fatalf("verify %v: %d\n%s\n%s", extra, code, out, stderr)
 		}

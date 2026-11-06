@@ -3,8 +3,10 @@
 # usable figure for them. 150 s is a middle guess (a shard of 11 of them took ~3400 s in the gate of 10104e01); a run writes
 # the measured wall of every single-test item to artifacts/gate/gotest/learned.tsv: paste it here.
 # Measured (gate 20261106, -j 8, two gates sharing the host): wall of each single-test item, replacing the 150 s guesses.
-TestCacheGCStressConsumerVerifies	2645
-TestConsumerResultCache	1902
+# On a quiet host (alone): TestCacheGCStressConsumerVerifies 1149 s with 2 rounds (round 0: 612 s, round 1: 534 s) -> merge-gate variant = 1 round = 612 s;
+# TestConsumerResultCache 2081 s alone with a cold framework (first verify 974 s, --fresh 771 s, --unsafe-no-sandbox 301 s): ~1200 s seeded.
+TestCacheGCStressConsumerVerifies	612
+TestConsumerResultCache	1200
 TestCacheGCConcurrentVerify	832
 TestParallelFrameworkReplayMatchesSingleProcess	825
 TestR1ForgedFrameworkLemma	819
