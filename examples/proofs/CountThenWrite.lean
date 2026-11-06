@@ -20,12 +20,12 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts.ICall
 
 namespace Proof
 
-theorem correctness (fn1 fn2 stack : Nat) (rt : List (Nat × Nat)) (R1 R2 : Res)
+theorem correctness (impl : List Segment) (fn1 fn2 stack : Nat) (rt : List (Nat × Nat)) (R1 R2 : Res)
     (tab w ptr len cap : BitVec 64) :
-    ICallContract Extracted.program fn1 1 stack 96 rt (fun _ => []) R1 (fun sc => sc.regs 0 = w) →
-    ICallContract Extracted.program fn2 4 stack 96 rt (fun _ => []) R2
+    ICallContract (Extracted.program.link impl) fn1 1 stack 96 rt (fun _ => []) R1 (fun sc => sc.regs 0 = w) →
+    ICallContract (Extracted.program.link impl) fn2 4 stack 96 rt (fun _ => []) R2
       (fun sc => sc.regs 0 = w ∧ sc.regs 1 = ptr ∧ sc.regs 2 = len ∧ sc.regs 3 = cap) →
-    Ensures Extracted.program Extracted.entry [tab, w, ptr, len, cap]
+    Ensures (Extracted.program.link impl) Extracted.entry [tab, w, ptr, len, cap]
       (fun s => 8 ≤ stack ∧ CodePtrOK fn1 ∧ CodePtrOK fn2 ∧
         Disjoint (tab.toNat + 24) 16 (s.sp.toNat - (48 + stack)) (96 + stack) ∧
         GuardOK s 0 ∧ StackOK s (48 + stack) 48 ∧

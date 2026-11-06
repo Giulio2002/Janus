@@ -536,6 +536,33 @@ of the closure at each exit, executed like any other code (`DeferAdd`, `DeferInc
 `runtime.deferreturn` call such functions contain is reached only after a recovered panic; without
 `--contract runtime.deferreturn` it is not extracted (`omittedCalls` in `identity.json`).
 
+### Abstract callees (`Janus/Contracts/ICall.lean`, `ICallAmd64.lean`): interface method calls to arbitrary code
+
+`w.Write(p)` through an interface calls whatever dynamic type `w` has. A theorem for **every** writer cannot pin the
+target (`ItabIs`) nor extract it. It assumes a hypothesis about the callee, `ICallContract (Extracted.program.link impl)
+fn nargs stack above rt keep R P` (`ICallContract64` on amd64), for a code address `fn` that is a variable of the theorem,
+linked to the call by the itab word (`s.mem.readLE (tab + 24 + 8k) 8 = fn`). `janus_run calls [hc₁, hc₂, …]` matches an
+indirect call whose target is `fn` (several hypotheses in one proof, one per itab slot; the continuation holds for
+every result value).
+
+| Part | Meaning |
+|---|---|
+| pre | the Go-ABI call conditions (`CallOK`), the caller's frame `[SP-8, SP+above)` apart from the callee's memory `rt` (`Outside`), and the call-site property `P`, which the **caller must prove at the call** (the arguments passed, memory contents before the call) |
+| post | returns to the caller with `SP`, `X18`, `X28`, `X29` (amd64: `RSP`+8, `RBP`, `R14`) preserved; everything else arbitrary; memory changed only in `rt` and the callee's own stack window; the ranges `keep s` unchanged (an assumption beyond the ABI: `fun _ => []` assumes nothing); the three result registers satisfy `R` of the four argument registers |
+
+Nothing assumes the callee leaves heap objects alone. A consumer states what the callee was *given* (`P`), and that its
+own results are the callee's: `∃ n e₁ e₂, R … n e₁ e₂ ∧ results = (n, e₁, e₂)`. The assumption `CodePtrOK fn` (4-aligned,
+below `2^56`; amd64 `CodePtrOK64`: below `2^47`) is stated by the theorem: `Ensures` is total, a call to any other target is a
+fault. The contracts are satisfiable (`ICallSat`, `ICallSatAmd64`: a writer returning `(len, nil)`); examples:
+`examples/proofs/WriteTo.lean`, `examples/proofs-amd64/WriteTo/Proof.lean`, `examples/proofs/CountThenWrite.lean` (two callees).
+
+**Audit.** `ICallContract` is a pinned contract. The runtime parameters `impl`, `rt` and `R` follow the variable rule; the
+callee address `fn` must be a variable (never a numeral or `Extracted.entry`); `P` and `keep` may be closed terms (they are the
+statement's claims about the call, mention no runtime variable); the only premise allowed on `rt` is exactly `Outside a n rt`
+with `a`, `n` free of runtime variables. Red team: `audit/icall/attacks.sh` (nine rows), `JanusTests/ICallRedTeam.lean`
+(a callee that clobbers `X28`/`X29`/`SP` or writes the caller's frame does not satisfy the postcondition), `audit/icall/run.sh`
+(wrong argument bytes, forged `fn`).
+
 ### Maps (`Janus/Spec/Map.lean`, `Janus/Contracts/Map.lean`, `MapVar.lean`, `MapStr.lean` and their `…Amd64.lean` files)
 
 Go 1.26 maps are Swiss tables (`internal/runtime/maps`). The compiler lowers map operations to

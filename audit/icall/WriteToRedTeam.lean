@@ -20,10 +20,10 @@ namespace Proof
 
 namespace Proof
 
-theorem wrong_argument_bytes (fn stack : Nat) (rt : List (Nat × Nat)) (R : Res) (tab w ptr len cap : BitVec 64) :
-    ICallContract Extracted.program fn 4 stack 48 rt (fun _ => []) R
+theorem wrong_argument_bytes (impl : List Segment) (fn stack : Nat) (rt : List (Nat × Nat)) (R : Res) (tab w ptr len cap : BitVec 64) :
+    ICallContract (Extracted.program.link impl) fn 4 stack 48 rt (fun _ => []) R
       (fun sc => sc.regs 0 = w ∧ sc.regs 1 = ptr ∧ sc.regs 2 = len + 1 ∧ sc.regs 3 = cap) →
-    Ensures Extracted.program Extracted.entry [tab, w, ptr, len, cap]
+    Ensures (Extracted.program.link impl) Extracted.entry [tab, w, ptr, len, cap]
       (fun s => 8 ≤ stack ∧ CodePtrOK fn ∧ Disjoint (tab.toNat + 24) 8 (s.sp.toNat - 56) 88 ∧
         GuardOK s 0 ∧ StackOK s (48 + stack) 40 ∧
         tab.toNat + 32 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 8 false = true ∧ s.mem.readLE (tab.toNat + 24) 8 = fn ∧
@@ -36,10 +36,10 @@ theorem wrong_argument_bytes (fn stack : Nat) (rt : List (Nat × Nat)) (R : Res)
   fail_if_success (janus_run [hF] calls [hc])
   sorry
 
-theorem forged_fn (fn fn2 stack : Nat) (rt : List (Nat × Nat)) (R : Res) (tab w ptr len cap : BitVec 64) :
-    ICallContract Extracted.program fn 4 stack 48 rt (fun _ => []) R
+theorem forged_fn (impl : List Segment) (fn fn2 stack : Nat) (rt : List (Nat × Nat)) (R : Res) (tab w ptr len cap : BitVec 64) :
+    ICallContract (Extracted.program.link impl) fn 4 stack 48 rt (fun _ => []) R
       (fun sc => sc.regs 0 = w ∧ sc.regs 1 = ptr ∧ sc.regs 2 = len ∧ sc.regs 3 = cap) →
-    Ensures Extracted.program Extracted.entry [tab, w, ptr, len, cap]
+    Ensures (Extracted.program.link impl) Extracted.entry [tab, w, ptr, len, cap]
       (fun s => 8 ≤ stack ∧ CodePtrOK fn ∧ CodePtrOK fn2 ∧ Disjoint (tab.toNat + 24) 8 (s.sp.toNat - 56) 88 ∧
         GuardOK s 0 ∧ StackOK s (48 + stack) 40 ∧
         tab.toNat + 32 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 8 false = true ∧ s.mem.readLE (tab.toNat + 24) 8 = fn2 ∧
