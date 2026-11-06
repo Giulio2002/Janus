@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generate cmd/janus/stubpins_gen.go: the code of every runtime stub Janus models as an outcome
 # (and of the functions those stubs call), and of every function a framework contract describes
-# (runtimeContractStubs: runtime entry points, and sync.(*Pool).Get/Put), per architecture, as
+# (runtimeContractStubs: runtime entry points, sync.(*Pool).Get/Put and fmt.errorf), per architecture, as
 # built by pinned Go toolchains.
 # See cmd/janus/stubpin.go and docs/SOUNDNESS.md (stub classification).
 #
@@ -33,6 +33,8 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 names=$(grep -oE '"runtime\.[A-Za-z0-9_]+(\.abi0)?": *true' cmd/janus/extract.go | cut -d'"' -f2 | grep -v '\.abi0$' | sort -u)
 # the contract stubs outside package runtime (sync.(*Pool).Get, Put): referenced as method
 # expressions, so the linker keeps them
+# fmt.errorf (unexported, package fmt): pulled by //go:linkname like the runtime ones
+fmtfns=$(grep -oE '"fmt\.[A-Za-z0-9_]+": *true' cmd/janus/extract.go | cut -d'"' -f2 | sort -u)
 methods=$(grep -oE '"sync\.\(\*Pool\)\.[A-Za-z0-9_]+": *true' cmd/janus/extract.go | cut -d'"' -f2 | sed 's/^sync\.(\*Pool)\.//' | sort -u)
 {
   cat <<'EOF'
@@ -51,7 +53,9 @@ import (
 
 EOF
   for n in $names; do echo "//go:linkname s_${n#runtime.} $n"; echo "func s_${n#runtime.}()"; echo; done
-  echo "var keep = []func(){"; for n in $names; do echo "	s_${n#runtime.},"; done; echo "}"
+  for n in $fmtfns; do echo "//go:linkname s_fmt_${n#fmt.} $n"; echo "func s_fmt_${n#fmt.}()"; echo; done
+  echo "var keep = []func(){"; for n in $names; do echo "	s_${n#runtime.},"; done
+  for n in $fmtfns; do echo "	s_fmt_${n#fmt.},"; done; echo "}"
   echo; echo "var keepMethods = []any{"; for n in $methods; do echo "	(*sync.Pool).$n,"; done; echo "}"
   echo; echo 'func main() { fmt.Println(len(keep), len(keepMethods)) }'
 } >"$tmp/main.go"

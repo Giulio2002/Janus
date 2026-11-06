@@ -653,6 +653,9 @@ func s_typedmemclr()
 //go:linkname s_typedmemmove runtime.typedmemmove
 func s_typedmemmove()
 
+//go:linkname s_fmt_errorf fmt.errorf
+func s_fmt_errorf()
+
 var keep = []func(){
 	s_assertE2I,
 	s_assertE2I2,
@@ -868,6 +871,7 @@ var keep = []func(){
 	s_typeAssert,
 	s_typedmemclr,
 	s_typedmemmove,
+	s_fmt_errorf,
 }
 
 var keepMethods = []any{

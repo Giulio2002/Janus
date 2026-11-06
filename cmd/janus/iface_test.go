@@ -144,8 +144,8 @@ func TestContractStubNames(t *testing.T) {
 		}
 		lean.Write(b)
 	}
-	if len(runtimeContractStubs) != 88+len(rtmiscContractStubs) {
-		t.Errorf("%d contract stubs, want 88 (13 interface + 37 equality/hash/typed-memory + 24 map + 12 allocation/write barrier + 2 sync.Pool) + %d rtmisc", len(runtimeContractStubs), len(rtmiscContractStubs))
+	if len(runtimeContractStubs) != 89+len(rtmiscContractStubs) {
+		t.Errorf("%d contract stubs, want 89 (13 interface + 37 equality/hash/typed-memory + 24 map + 12 allocation/write barrier + 2 sync.Pool + fmt.errorf) + %d rtmisc", len(runtimeContractStubs), len(rtmiscContractStubs))
 	}
 	for name := range runtimeContractStubs {
 		if rtmiscContractStubs[name] {
@@ -155,6 +155,11 @@ func TestContractStubNames(t *testing.T) {
 			// a method: referenced as a method expression
 			if contractStubPackage(name) != "sync" || !strings.Contains(string(src), "\t(*sync.Pool)."+m+",\n") {
 				t.Errorf("scripts/stubpins does not reference %s", name)
+			}
+		} else if m, ok := strings.CutPrefix(name, "fmt."); ok {
+			// an unexported function of package fmt: pulled by //go:linkname
+			if contractStubPackage(name) != "fmt" || !strings.Contains(string(src), "//go:linkname s_fmt_"+m+" "+name+"\n") {
+				t.Errorf("scripts/stubpins does not link %s", name)
 			}
 		} else if contractStubPackage(name) != "runtime" ||
 			!strings.Contains(string(src), "//go:linkname s_"+strings.TrimPrefix(name, "runtime.")+" "+name+"\n") {

@@ -75,6 +75,9 @@ case "$1" in
   StackGrow) printf '%s\n' --contract 'sync.(*Pool).Get' --contract 'sync.(*Pool).Put' \
       --contract runtime.newobject --contract runtime.growslice --contract 'runtime.gcWriteBarrier*' \
       --contract runtime.memclrNoHeapPointers ;;
+  # the fmt.Errorf example (examples/basic/zzerrf.go): the worker fmt.errorf (Janus/Contracts/Errorf.lean, ErrorfAmd64.lean;
+  # pinned to package fmt's code, with the type descriptors and itabs it names)
+  ErrWrap) printf '%s\n' --contract fmt.errorf --contract runtime.newobject ;;
   Box) printf '%s\n' --contract runtime.convT64 ;;
   AsHasher) printf '%s\n' --contract runtime.typeAssert --targets \
       'go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher' ;;

@@ -321,6 +321,80 @@ func (b *Binary) linkWords(d DataSym) []DataSym {
 // Extracted.lean; the auditor accepts no other argument for the spec.
 var contractDataSyms = map[string]string{"runtime.slicebytetostring": "runtime.staticuint64s"}
 
+// errorfDataSyms are the type descriptors and itabs the framework's fmt.errorf contract (Janus/Contracts/Errorf.lean)
+// names: its parameters tErr, iErr, tInt and iWrap. The extractor checks them (checkErrorfData) and names their
+// addresses in Extracted.lean (`dataAddr.«type:*errors.errorString»`, ...); the auditor accepts no other argument.
+var errorfDataSyms = map[string]bool{"fmt.errorf": true}
+
+// typeNamed is the address of the type descriptor named "type:<name>#..." (typeIdentity) in the linker's type region.
+func (b *Binary) typeNamed(name string) (uint64, bool) {
+	types, ok := b.markerAddr("runtime.types")
+	if !ok {
+		return 0, false
+	}
+	sec, ok := b.sectionOf(types)
+	if !ok || !readOnlyData(sec) {
+		return 0, false
+	}
+	for a := types; a+48 <= sec.End(); a += 8 {
+		if id, ok := b.typeDescriptorAt(a); ok && strings.HasPrefix(id, "type:"+name+"#") {
+			return a, true
+		}
+	}
+	return 0, false
+}
+
+// checkErrorfData finds the four objects the contract for fn names and checks them. The itabs are symbols of the
+// binary in a read-only section: `go:itab.*errors.errorString,error` pairs type:error with the descriptor of
+// *errors.errorString, `go:itab.*fmt.wrapError,error` pairs it with that of *fmt.wrapError (both read from the itab
+// and checked against the descriptors' names); the descriptor of int is found by name in the linker's type region.
+func (b *Binary) checkErrorfData(fn string) ([]DataSym, error) {
+	bad := func(why string) ([]DataSym, error) {
+		return nil, &diag{
+			Msg:   fmt.Sprintf("--contract names %s, whose framework contract takes the type descriptors and itabs of *errors.errorString, int and *fmt.wrapError, but %s", fn, why),
+			Stage: "code extraction",
+			Next:  "Build with a Go toolchain of the pinned versions and without stripping the symbol table (no -ldflags=-s).",
+		}
+	}
+	var out []DataSym
+	itabType := func(name, wantType string) (uint64, uint64, bool, error) {
+		s, ok := b.dataSymbol(name)
+		if !ok {
+			return 0, 0, false, nil
+		}
+		sec, ok := b.sectionOf(s.Addr)
+		if !ok || sec.Writable || s.Size != 32 {
+			return 0, 0, false, nil
+		}
+		inter, ok1 := b.readWord(s.Addr)
+		ty, ok2 := b.readWord(s.Addr + 8)
+		in, okI := b.typeDescriptorAt(inter)
+		tn, okT := b.typeDescriptorAt(ty)
+		if !ok1 || !ok2 || !okI || !okT || !strings.HasPrefix(in, "type:error#") || !strings.HasPrefix(tn, "type:"+wantType+"#") {
+			return 0, 0, false, nil
+		}
+		out = append(out, DataSym{Name: s.Name, Addr: s.Addr, Size: s.Size, Section: sec.Name, Kind: "sym"})
+		return s.Addr, ty, true, nil
+	}
+	_, tErr, ok, _ := itabType("go:itab.*errors.errorString,error", "*errors.errorString")
+	if !ok {
+		return bad("the itab go:itab.*errors.errorString,error is missing or does not pair type:error with *errors.errorString")
+	}
+	_, tWrap, ok, _ := itabType("go:itab.*fmt.wrapError,error", "*fmt.wrapError")
+	if !ok {
+		return bad("the itab go:itab.*fmt.wrapError,error is missing or does not pair type:error with *fmt.wrapError")
+	}
+	_ = tWrap
+	tInt, ok := b.typeNamed("int")
+	if !ok {
+		return bad("the binary has no type descriptor for int")
+	}
+	sec, _ := b.sectionOf(tErr)
+	out = append(out, DataSym{Name: "type:*errors.errorString", Addr: tErr, Section: sec.Name, Kind: "link", Type: true},
+		DataSym{Name: "type:int", Addr: tInt, Section: sec.Name, Kind: "link", Type: true})
+	return out, nil
+}
+
 // staticuint64sTable is the contents of runtime.staticuint64s: the little-endian words 0, 1, …, 255.
 func staticuint64sTable() []byte {
 	t := make([]byte, 256*8)

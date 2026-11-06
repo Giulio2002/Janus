@@ -14,6 +14,12 @@ var stubPins = map[string]map[string][]stubPin{
 		"_cgo_topofstack": {
 			{Hash: "fb6b55b88eba0158f6b038a941c2691d0522b8516494b4bec0dd00623dd569e1", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
 		},
+		"fmt.errorf": {
+			{Hash: "01ea33ad8d4aad1aba08f1aa7ce540d2a8f9491282ed5467890a401b7764abd5", File: "fmt/errors.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: v3 v4
+			{Hash: "849bc48969eaeac9f826fc1c6589b0cd9858b9c11cc1680b2cb113857b9ab09b", File: "fmt/errors.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2
+			{Hash: "bb225384d637e5922ab89366331001acf15fa0dfb036fb4aff7894671260bb81", File: "fmt/errors.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: scexp
+			{Hash: "de49dc725db9c8185a8c228c5deb9f4932f07ff9ce1e076881d39cc72beabb5c", File: "fmt/errors.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
 		"internal/abi.BoundsDecode": {
 			{Hash: "df2ca918e5dc949f4e997758ef7422df6aa7a3c3f8fb7683eefc023ea56cc15b", File: "internal/abi/bounds.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
 		},
@@ -951,6 +957,11 @@ var stubPins = map[string]map[string][]stubPin{
 	"arm64": {
 		"_cgo_topofstack": {
 			{Hash: "c07f77b39b37aac55b5de466c20097b45047b5e2c21a85e70f1691edc9cb7f57", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
+		},
+		"fmt.errorf": {
+			{Hash: "06947a52be570cb1967f1957a13f8f9f628c071879eacfebd06626fb3c8fe603", File: "fmt/errors.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "938a0613a6bf96fc67b4f6c39b0e0ed3003b8858e78d63e6a689653e506b5d82", File: "fmt/errors.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: scexp
+			{Hash: "cfeb0ce289b145976b406d9a38870144368539a0e955872e4993994ce9e1ead1", File: "fmt/errors.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
 		},
 		"internal/abi.BoundsDecode": {
 			{Hash: "75493c1f81ee564ce964391602ea711bcedba433ded450f0d3391cdaeaa75469", File: "internal/abi/bounds.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
