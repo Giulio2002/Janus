@@ -60,6 +60,21 @@ for isa in "" 64; do
   row a7 blocked 'but the extracted program has no data object of that name'
   row a8 blocked 'runtime.newobject'
 done
+echo "== amd64: ErrorfRet64.lean (RetLow in a statement)"
+run ErrorfRet64.lean ErrWrap64 a9
+run ErrorfRet64b.lean ErrWrap64 a10
+chk() { # NAME file pattern: a single-theorem run prints the verdict without a per-theorem block
+  if grep -qF -- "$3" "$2" && ! grep -q 'verified ===' "$2"; then printf '  %-12s %-8s %s\n' "$1" blocked "rejected: $3"
+  else printf '  %-12s %-8s %s   <-- BROKEN\n' "$1" blocked "$3"; broken+=("$1"); fi
+}
+chk a9 "$W/ErrorfRet64.lean.txt" 'ErrorfAmd64.RetLow'
+chk a10 "$W/ErrorfRet64b.lean.txt" 'by hand'
+echo "== amd64: relying on R15 across the call (the stub's return jumps through R15, so the contract leaves it arbitrary)"
+sed 's/^  (s'"'"'.regs 0).toNat = iWrap ∧ ∃ d, (s'"'"'.regs 3).toNat = d/  s'"'"'.regs 15 = s.regs 15 ∧ (s'"'"'.regs 0).toNat = iWrap ∧ ∃ d, (s'"'"'.regs 3).toNat = d/' examples/proofs-amd64/ErrWrap/Proof.lean > "$W/ErrWrapR15.lean"
+grep -qF "s'.regs 15 = s.regs 15" "$W/ErrWrapR15.lean" || { echo "r15 mutation did not apply"; exit 1; }
+all="$("$J" verify --allow-no-witness --janus-root "$root" --proof "$W/ErrWrapR15.lean" "$W/ErrWrap64" --theorem "$P.correctness" 2>&1)"
+printf '%s\n' "$all" > "$W/ErrWrapR15.txt"
+chk r15 "$W/ErrWrapR15.txt" 'Lean rejected'
 echo
 if [ ${#broken[@]} -gt 0 ]; then echo "round errorf: BROKEN rows: ${broken[*]}"; exit 1; fi
 echo "round errorf: all rows as expected"
