@@ -38,6 +38,7 @@ import JanusTests.OmegaCap
 import JanusTests.LiveForallFocus
 import JanusTests.ConjApartAll
 import JanusTests.DischargeOrder
+import JanusTests.DischargeMemo
 import JanusTests.AddrSub
 import JanusTests.JanusExact
 import JanusTests.AddrRefute

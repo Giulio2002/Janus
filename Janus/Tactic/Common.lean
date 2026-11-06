@@ -1944,8 +1944,8 @@ proof built (the kernel checks the final term as always), so reuse can only skip
 that was not proved. Failures are not remembered. -/
 initialize outsideMemo : IO.Ref (Std.HashMap Expr OutsideMemoEntry) ← IO.mkRef {}
 
-def outsideMemoLookup (g : MVarId) (t : Expr) : MetaM Bool := g.withContext do
-  let some e := (← outsideMemo.get)[t]? | return false
+def memoLookup (memo : IO.Ref (Std.HashMap Expr OutsideMemoEntry)) (g : MVarId) (t : Expr) : MetaM Bool := g.withContext do
+  let some e := (← memo.get)[t]? | return false
   let lctx ← getLCtx
   for (fv, ty) in e.fvars do
     let some d := lctx.find? fv | return false
@@ -1953,7 +1953,7 @@ def outsideMemoLookup (g : MVarId) (t : Expr) : MetaM Bool := g.withContext do
   g.assign e.proof
   return true
 
-def outsideMemoStore (g : MVarId) (t : Expr) : MetaM Unit := g.withContext do
+def memoStore (memo : IO.Ref (Std.HashMap Expr OutsideMemoEntry)) (g : MVarId) (t : Expr) : MetaM Unit := g.withContext do
   let pf ← instantiateMVars (mkMVar g)
   if pf.hasMVar || pf.hasLevelMVar || pf.hasSorry then return
   -- no auxiliary constants (`_proof_n`, `_auxLemma`, private names): they live in the environment of the state the proof was
@@ -1964,7 +1964,36 @@ def outsideMemoStore (g : MVarId) (t : Expr) : MetaM Unit := g.withContext do
   for fv in (collectFVars {} pf).fvarIds do
     let some d := lctx.find? fv | return
     fvs := fvs.push (fv, ← instantiateMVars d.type)
-  outsideMemo.modify fun m => (if m.size > 20000 then ({} : Std.HashMap Expr OutsideMemoEntry) else m).insert t { proof := pf, fvars := fvs }
+  memo.modify fun m => (if m.size > 20000 then ({} : Std.HashMap Expr OutsideMemoEntry) else m).insert t { proof := pf, fvars := fvs }
+
+def outsideMemoLookup (g : MVarId) (t : Expr) : MetaM Bool := memoLookup outsideMemo g t
+def outsideMemoStore (g : MVarId) (t : Expr) : MetaM Unit := memoStore outsideMemo g t
+
+/-- The side conditions proved by the dischargers (`janus_disch`, `janus64_disch`) so far, by statement. A run asks the
+same address and bound conditions again and again: the next instruction of the same block, the next read of the same
+chain (a print proof: ~600 `janus64_disch` calls, ~80 ms each, most of them a repeat of an earlier statement). A condition
+proved once is reused where every hypothesis its proof uses is present with the same type (the proof term is the first
+proof's, checked by the kernel as always: reuse can only skip a search, never accept a statement that was not proved).
+Only conditions without metavariables and with a free variable (the closed ones are decided at once); failures are not
+remembered (a later context may prove what an earlier one could not). -/
+initialize dischMemo : IO.Ref (Std.HashMap Expr OutsideMemoEntry) ← IO.mkRef {}
+
+register_option janus.dischMemo : Bool := {
+  defValue := true
+  descr := "remember the side conditions the dischargers proved (reused where the hypotheses of the proof are still present)"
+}
+
+/-- Run the discharger `body` on the main goal through `dischMemo`. -/
+def withDischMemo (body : TacticM Unit) : TacticM Unit := do
+  unless janus.dischMemo.get (← getOptions) do return ← body
+  let g ← getMainGoal
+  let t ← instantiateMVars (← g.getType)
+  if t.hasMVar || !t.hasFVar then return ← body
+  if ← memoLookup dischMemo g t then
+    replaceMainGoal []
+    return
+  body
+  if ← g.isAssigned then memoStore dischMemo g t
 
 /-- A side condition `Outside a n rs` (of a `MemFrame` read rule): unfold the literal list and
 prove each range condition by `omega`. -/

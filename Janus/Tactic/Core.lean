@@ -1015,17 +1015,17 @@ saves). -/
 elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
   -- the fast path is the bare discharger (no state saved per call: it is asked thousands of times, and many
   -- of its attempts are expected to fail)
-  unless (← Common.slowOn) do return ← janusdischBody
+  unless (← Common.slowOn) do return ← Common.withDischMemo janusdischBody
   let g0 ← getMainGoal
   let saved ← saveState
-  try janusdischBody
+  try Common.withDischMemo janusdischBody
   catch e =>
     saved.restore
     unless (← Common.slowOn) do throw e
     let (g1, changed) ← Common.normNatConsts g0
     unless changed do throw e
     replaceMainGoal [g1]
-    janusdischBody
+    Common.withDischMemo janusdischBody
 
 /-! ## Arithmetic -/
 
