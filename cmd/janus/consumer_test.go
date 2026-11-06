@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -893,14 +894,32 @@ func TestConsumerResultCache(t *testing.T) {
 	} else if r := readReport(t, add); !r.Cached || r.CachedFrom == "" || r.Consumer == nil || r.Consumer.Root != pkg || len(r.Consumer.Rebuilt) != 0 {
 		t.Errorf("verified.json of a hit: %+v %+v", r, r.Consumer)
 	}
-	if out := addV("--fresh"); isCached(out) {
-		t.Errorf("--fresh used the cache")
+	// --fresh (a cold build and a full framework replay, about 500 s), --unsafe-no-sandbox (a full framework replay: an unsandboxed
+	// run does not trust the replay verdict, about 250 s) and --no-result-cache are independent of each other: each runs, concurrently,
+	// on its own extraction of Add (identical bytes, so the same cache key as `add`, whose entry the runs above recorded), and
+	// each must still be a miss while that entry exists. Every one runs in full: none shares a verdict, build or result with another.
+	var bypass sync.WaitGroup
+	bypassOut := map[string]*string{"--fresh": new(string), "--unsafe-no-sandbox": new(string), "--no-result-cache": new(string)}
+	bypassCode := map[string]*int{"--fresh": new(int), "--unsafe-no-sandbox": new(int), "--no-result-cache": new(int)}
+	for flag := range bypassOut {
+		dir := mustExtract(t, "example.com/basic.Add")
+		bypass.Add(1)
+		go func(flag, dir string) {
+			defer bypass.Done()
+			t0 := time.Now()
+			code, out, stderr := runJanus(t, "verify", dir, "--proof", filepath.Join(pkg, "ConsumerExample/Add.lean"), "--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness", flag)
+			t.Logf("verify ConsumerExample.Add.correctness [%s] (concurrent): %.1fs", flag, time.Since(t0).Seconds())
+			*bypassCode[flag], *bypassOut[flag] = code, out+"\n"+stderr
+		}(flag, dir)
 	}
-	if out := addV("--unsafe-no-sandbox"); isCached(out) {
-		t.Errorf("--unsafe-no-sandbox used the cache")
-	}
-	if out := addV("--no-result-cache"); isCached(out) {
-		t.Errorf("--no-result-cache used the cache")
+	bypass.Wait()
+	for _, flag := range []string{"--fresh", "--unsafe-no-sandbox", "--no-result-cache"} {
+		if *bypassCode[flag] != 0 {
+			t.Fatalf("verify %s: %d\n%s", flag, *bypassCode[flag], *bypassOut[flag])
+		}
+		if isCached(*bypassOut[flag]) {
+			t.Errorf("%s used the cache", flag)
+		}
 	}
 	// Another extraction and another theorem are other keys.
 	if out := verify(max, "ConsumerExample/Max.lean", "ConsumerExample.Max.correctness"); isCached(out) {

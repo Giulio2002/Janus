@@ -22,7 +22,7 @@ func cpuSeconds() float64 {
 		return 0
 	}
 	tv := func(t syscall.Timeval) float64 { return float64(t.Sec) + float64(t.Usec)/1e6 }
-	return tv(s.Utime) + tv(s.Stime) + tv(c.Utime) + tv(c.Stime)
+	return tv(s.Utime) + tv(s.Stime) + tv(c.Utime) + tv(c.Stime) + float64(jobCPUUsec.Load())/1e6
 }
 
 type stageTimer struct {
