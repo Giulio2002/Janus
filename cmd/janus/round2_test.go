@@ -152,6 +152,14 @@ func TestUnshareFallbackConfinement(t *testing.T) {
 	script += "true"
 	out, err := sb.command(ws, nil, []string{"/bin/sh", "-c", script}, os.Environ()).CombinedOutput()
 	if err != nil {
+		// Environment, not confinement: the sandbox script could not even start. Its own diagnostics name the two known causes:
+		// the host's /dev/null is not a writable character device (a stray `lean -o /dev/null` once replaced it by a regular file,
+		// and the sandbox's `2>/dev/null` then failed with "cannot create /dev/null: Read-only file system"), or `setpriv`
+		// (util-linux) is missing, which the fallback needs to drop the namespace capabilities. Skip with the reason (the
+		// gate's SKIPPED-COVERAGE summary prints it; a skip is never a pass); any other failure is still a failure.
+		if so := string(out); strings.Contains(so, "cannot create /dev/null") || strings.Contains(so, "setpriv is needed") {
+			t.Skipf("unshare fallback cannot start on this host (environment: check /dev/null is the character device 1:3 and that setpriv is installed): %s", strings.TrimSpace(so))
+		}
 		t.Fatalf("sandbox: %v %s", err, out)
 	}
 	if !strings.Contains(string(out), "OWN") {

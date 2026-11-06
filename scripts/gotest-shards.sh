@@ -12,7 +12,15 @@
 #                 against that list; scripts/gate.sh --gotest-run). Not a gate run.
 #   --outdir DIR  per-shard logs and the result (default artifacts/gate/gotest)
 #
-# The plan: `go test -list` gives the full list of tests (Test*, Example* and Fuzz* functions; benchmarks
+# DYNAMIC QUEUE (default; JANUS_GOTEST_STATIC=1 restores the static shards below). The shards are worker slots that pull work
+# from one queue, longest first: the test binary of each package is built once (`go test -c`), the heavy tests (estimate
+# >= $JANUS_GOTEST_HEAVY s, default 15) are items of their own and the light ones are chunked (<= 60 s estimated, <= 40 tests),
+# each item is `PKG.test -test.run '^(T1|T2)$'` run in the package directory. Static shards fixed the assignment from stale
+# estimates (a full gate: shard 3 took 3564 s while shards 1/2/4/5/6 took 1266/1286/323/1505/895 s: the gate waited for the
+# slowest of six while the others idled); a queue is balanced by construction, wall = max(longest item, total / workers).
+# Estimates: cmd/janus/order_test.go, overridden by scripts/gotest-durations.tsv (`name<TAB>seconds`; refreshed from the
+# measured wall of each single-test item, written to $outdir/learned.tsv after every run). The partition check is the same.
+# The plan (static shards): `go test -list` gives the full list of tests (Test*, Example* and Fuzz* functions; benchmarks
 # are not run by `go test` either) of every package under ./cmd/...; they are dealt to the shards
 # longest first (greedy, onto the least loaded shard) using the measured durations in
 # cmd/janus/order_test.go (testDurations; unknown tests, i.e. the ones under 1 s, count $JANUS_GOTEST_UNKNOWN s, default 1).
@@ -63,6 +71,40 @@ fi
 # durations (order_test.go) -> "name<TAB>seconds"
 grep -ohE '"[A-Za-z0-9_]+": [0-9.]+' cmd/janus/order_test.go | sed -E 's/^"([^"]+)": ([0-9.]+)$/\1\t\2/' > "$outdir/durations.txt" || true
 
+# measured durations of earlier runs (name<TAB>seconds) override the table of order_test.go
+[ ! -f scripts/gotest-durations.tsv ] || grep -vE '^(#|$)' scripts/gotest-durations.tsv >> "$outdir/durations.txt"
+static="${JANUS_GOTEST_STATIC:-}"
+heavy="${JANUS_GOTEST_HEAVY:-15}"
+if [ -z "$static" ]; then
+# ---- dynamic queue: items = heavy tests alone + chunks of light ones, longest first ----
+rm -f "$outdir"/item-*.txt "$outdir/items.txt" "$outdir/assign.txt" "$outdir/loads.txt" "$outdir/item-times.tsv" "$outdir/learned.tsv"
+awk -F'\t' -v unk="$unknown" -v heavy="$heavy" -v out="$outdir" '
+  FILENAME == ARGV[1] { d[$1] = $2; next }   # later lines of durations.txt win
+  { pkg = $1; name = $2; c = (name in d) ? d[name] : unk
+    if (c >= heavy) { n++; print c "\t" pkg "\t" name > (out "/items.raw"); print n "\t" pkg "\t" name > (out "/assign.txt") }
+    else { light[pkg] = light[pkg] "\n" c "\t" name; if (!(pkg in seen)) { seen[pkg] = 1; pk[++np] = pkg } } }
+  END {
+    for (q = 1; q <= np; q++) { pkg = pk[q]; m = split(substr(light[pkg], 2), L, "\n"); chunk = ""; cs = 0; cn = 0
+      for (i = 1; i <= m; i++) { split(L[i], f, "\t"); chunk = chunk (cn ? "|" : "") f[2]; cs += f[1]; cn++
+        names[cn] = f[2]
+        if (cs >= 60 || cn >= 40 || i == m) { n++; print cs "\t" pkg "\t" chunk > (out "/items.raw"); for (j = 1; j <= cn; j++) print n "\t" pkg "\t" names[j] > (out "/assign.txt"); chunk = ""; cs = 0; cn = 0 } } }
+  }' "$outdir/durations.txt" "$outdir/all.txt"
+sort -t$'\t' -k1,1 -g -r "$outdir/items.raw" > "$outdir/items.txt"; rm -f "$outdir/items.raw"
+assigned=$(wc -l < "$outdir/assign.txt")
+if [ "$assigned" -ne "$total" ] ||
+   ! diff -q <(cut -f1,2 "$outdir/all.txt" | sort) <(cut -f2,3 "$outdir/assign.txt" | sort) >/dev/null; then
+  echo "gotest-shards: the items do not partition the test list ($assigned assigned, $total listed)"; exit 1
+fi
+{
+  nitems=$(wc -l < "$outdir/items.txt")
+  est=$(awk -F'\t' '{ s += $1 } END { printf "%d", s }' "$outdir/items.txt")
+  mk=$(awk -F'\t' -v n="$nshards" '{ c[NR] = $1 } END { for (s = 1; s <= n; s++) l[s] = 0; for (i = 1; i <= NR; i++) { b = 1; for (s = 2; s <= n; s++) if (l[s] < l[b]) b = s; l[b] += c[i] } m = 0; for (s = 1; s <= n; s++) if (l[s] > m) m = l[s]; printf "%d", m }' "$outdir/items.txt")
+  echo "gotest queue: $total tests in $nitems items for $nshards workers (-parallel $par each), estimated $est s of work, estimated wall $mk s"
+  echo "longest items:"; head -5 "$outdir/items.txt" | awk -F'\t' '{ n = split($3, a, "|"); printf "  %ds %s%s\n", $1, a[1], (n > 1 ? " (+" n - 1 " more)" : "") }'
+  echo "partition check: ok ($total listed = $assigned assigned, each once)"
+} | tee "$outdir/plan.txt"
+[ -z "$plan" ] || exit 0
+else
 # deal: longest first onto the least loaded shard
 awk -F'\t' -v n="$nshards" -v unk="$unknown" -v out="$outdir" '
   FILENAME == ARGV[1] { d[$1] = $2; next }
@@ -95,6 +137,7 @@ fi
   echo "partition check: ok ($total listed = $assigned assigned, each once)"
 } | tee "$outdir/plan.txt"
 [ -z "$plan" ] || exit 0
+fi
 
 # A test cache of its own per shard, on disk next to the user cache (not in a RAM /tmp), seeded by the tests'
 # TestMain from the user's cache and removed at the end, also when the run is interrupted (trap).
@@ -102,8 +145,35 @@ cachebase="${XDG_CACHE_HOME:-$HOME/.cache}"; mkdir -p "$cachebase"
 runcache="$(mktemp -d "$cachebase/janus-test-run-XXXXXX")"
 trap 'rm -rf "$runcache"' EXIT
 trap 'exit 143' TERM INT
+# dynamic queue: the test binary of every package, built once; the queue file is popped under a lock by the workers
+if [ -z "$static" ]; then
+  mkdir -p "$outdir/bin"; : > "$outdir/item-times.tsv"
+  declare -A pkgbin pkgdir
+  for pkg in $(cut -f1 "$outdir/all.txt" | sort -u); do
+    slug=$(printf '%s' "$pkg" | tr '/.' '__'); pkgbin[$pkg]="$outdir/bin/$slug.test"; pkgdir[$pkg]=$(go list -f '{{.Dir}}' "$pkg")
+    go test -c -o "${pkgbin[$pkg]}" "$pkg" || { echo "gotest-shards: cannot build the test binary of $pkg"; exit 1; }
+  done
+  cp "$outdir/items.txt" "$outdir/queue.txt"
+fi
+pop_item() { flock "$outdir/queue.lock" bash -c 'l=$(head -n 1 "$0"); [ -n "$l" ] || exit 1; sed -i 1d "$0"; printf "%s\n" "$l"' "$outdir/queue.txt"; }
+run_shard_queue() { # S
+  local s=$1 rc=0 f="$outdir/shard-$s" item est pkg re t1 t2 irc first
+  : > "$f.log"
+  mkdir -p "$runcache/$s"; export JANUS_TEST_CACHE_DIR="$runcache/$s"
+  while item=$(pop_item); do
+    IFS=$'\t' read -r est pkg re <<< "$item"
+    echo "== $(basename "${pkgbin[$pkg]}") -test.count=1 -test.timeout 7000s -test.parallel $par -test.v -test.run '^($re)\$' (est ${est}s)" >> "$f.log"
+    t1=$(date +%s); irc=0
+    (cd "${pkgdir[$pkg]}" && memguard_run -n "gotest-$s" -- "${pkgbin[$pkg]}" -test.count=1 -test.timeout 7000s -test.parallel "$par" -test.v -test.run "^($re)\$") >> "$f.log" 2>&1 || irc=$?
+    t2=$(date +%s); [ "$irc" = 0 ] || rc=$irc
+    first=${re%%|*}
+    printf '%s\t%s\t%s\t%s\n' "$first" "$((t2 - t1))" "$(awk -F'|' '{ print NF }' <<< "$re")" "$est" >> "$outdir/item-times.tsv"
+  done
+  echo "$rc" > "$f.rc"
+}
 run_shard() { # S
   local s=$1 pkg re rc=0 f="$outdir/shard-$s"
+  if [ -z "$static" ]; then run_shard_queue "$s"; return; fi
   : > "$f.log"
   mkdir -p "$runcache/$s"; export JANUS_TEST_CACHE_DIR="$runcache/$s"
   for pkg in $(awk -F'\t' -v s="$s" '$1 == s { print $2 }' "$outdir/assign.txt" | sort -u); do
@@ -172,14 +242,23 @@ for ((s = 1; s <= nshards; s++)); do
   printf 'shard %d: go test exit %s (%ss since start)\n' "$s" "$rc" "$(( $(date +%s) - t0 ))"
   [ "$rc" = 0 ] || { fail=1; tail -n 40 "$outdir/shard-$s.log" | sed 's/^/  | /'; }
 done
-# after: the tests that ran are exactly the shard's tests
+# after: the tests that ran are exactly the shard's tests (queue: exactly the listed tests, each once, whichever worker ran them)
 for ((s = 1; s <= nshards; s++)); do
   grep -E '^--- (PASS|FAIL|SKIP): ' "$outdir/shard-$s.log" | awk '{ sub(/:$/, "", $3); print $3 }' | sort > "$outdir/ran-$s.txt" || true
+  [ -z "$static" ] && continue
   awk -F'\t' -v s="$s" '$1 == s { print $3 }' "$outdir/assign.txt" | sort > "$outdir/want-$s.txt"
   if ! diff -q "$outdir/want-$s.txt" "$outdir/ran-$s.txt" >/dev/null; then
     echo "gotest-shards: shard $s ran a different set of tests than assigned:"; diff "$outdir/want-$s.txt" "$outdir/ran-$s.txt" | head -20; fail=1
   fi
 done
+if [ -z "$static" ]; then
+  if ! diff -q <(cut -f2 "$outdir/all.txt" | sort) <(cat "$outdir"/ran-*.txt | sort) >/dev/null; then
+    echo "gotest-shards: the tests that ran are not the listed tests (each exactly once):"; diff <(cut -f2 "$outdir/all.txt" | sort) <(cat "$outdir"/ran-*.txt | sort) | head -20; fail=1
+  fi
+  # measured wall of the single-test items: the estimates of the next run (copy into scripts/gotest-durations.tsv)
+  awk -F'\t' '$3 == 1 { print $1 "\t" $2 }' "$outdir/item-times.tsv" > "$outdir/learned.tsv"
+  echo "gotest queue: slowest items (measured):"; sort -t$'\t' -k2,2 -gr "$outdir/item-times.tsv" | head -5 | awk -F'\t' '{ printf "  %ss (est %ss, %s test(s)) %s\n", $2, $4, $3, $1 }'
+fi
 ran=$(cat "$outdir"/ran-*.txt | sort | wc -l)
 if [ "$ran" -ne "$total" ] || [ "$(cat "$outdir"/ran-*.txt | sort -u | wc -l)" -ne "$total" ]; then
   echo "gotest-shards: $ran test results for $total listed tests (each must run exactly once)"; fail=1
