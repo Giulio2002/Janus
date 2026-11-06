@@ -118,6 +118,20 @@ func TestModstoreKeys(t *testing.T) {
 	if kO := storeModules("tc1", wsO, pkgO, msFw, msWant("")); kO == nil || kO["Pkg.A"].key == k0["Pkg.A"].key {
 		t.Errorf("a leanOption did not change the key (%v)", kO)
 	}
+	// a closure module's SOURCE changed with its olean unchanged (a comment): Lake would rebuild, so the Lake key changes ...
+	fw2 := map[string][]byte{}
+	for k, v := range msFw {
+		fw2[k] = v
+	}
+	fw2["Janus/Core.lean"] = append(append([]byte{}, msFw["Janus/Core.lean"]...), []byte("-- comment\n")...)
+	kS := base(msMods, "tc1", msWant(""), fw2)
+	if kS["Pkg.A"].key == k0["Pkg.A"].key {
+		t.Error("the Lake key ignores a changed framework source (Lake's trace does not)")
+	}
+	// ... while the olean-only digest (janus's own compile) does not
+	if fwClosureDigest(msFw, msWant(""), []string{"Janus.Other"}) != fwClosureDigest(fw2, msWant(""), []string{"Janus.Other"}) {
+		t.Error("the own-compile digest depends on a source comment")
+	}
 	// another toolchain
 	k5 := base(msMods, "tc2", msWant(""), msFw)
 	if k5["Pkg.A"].key == k0["Pkg.A"].key {
@@ -366,4 +380,24 @@ func TestConsumerModstoreAcrossFamilies(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestOwnJobs(t *testing.T) {
+	t.Setenv("JANUS_OWN_JOBS", "")
+	t.Setenv("JANUS_JOBS", "")
+	if ownJobs() != 4 {
+		t.Errorf("default %d", ownJobs())
+	}
+	t.Setenv("JANUS_JOBS", "1")
+	if ownJobs() != 2 {
+		t.Errorf("JANUS_JOBS=1: %d", ownJobs())
+	}
+	t.Setenv("JANUS_JOBS", "30")
+	if ownJobs() != 8 {
+		t.Errorf("JANUS_JOBS=30: %d", ownJobs())
+	}
+	t.Setenv("JANUS_OWN_JOBS", "3")
+	if ownJobs() != 3 {
+		t.Errorf("JANUS_OWN_JOBS=3: %d", ownJobs())
+	}
 }

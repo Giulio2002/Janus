@@ -35,6 +35,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -207,6 +208,8 @@ type ownBuild struct {
 	busy     map[string]bool
 	hits     int
 	compiled int
+	mu       sync.Mutex // guards done, busy, hits, compiled, errs while modules compile in parallel (ensureAll)
+	errs     map[string]error
 }
 
 type ownMod struct {
@@ -290,17 +293,25 @@ func (ob *ownBuild) leanPath() string {
 // ensure makes janus's own olean of module m (and of its consumer/dependency imports) current and
 // returns its record. rel, when not empty, must be the module's source path.
 func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
+	ob.mu.Lock()
 	if om, ok := ob.done[m]; ok {
+		ob.mu.Unlock()
 		if rel != "" && om.rel != rel {
 			return nil, provDiag(fmt.Sprintf("module %s is the file %s, not %s", m, om.rel, rel))
 		}
 		return om, nil
 	}
+	if err, ok := ob.errs[m]; ok {
+		ob.mu.Unlock()
+		return nil, err
+	}
 	if ob.busy[m] {
+		ob.mu.Unlock()
 		return nil, provDiag("import cycle through " + m)
 	}
 	ob.busy[m] = true
-	defer delete(ob.busy, m)
+	ob.mu.Unlock()
+	defer func() { ob.mu.Lock(); delete(ob.busy, m); ob.mu.Unlock() }()
 	pkg, srel, sroot, n := ob.locate(m)
 	if n == 0 {
 		return nil, provDiag(fmt.Sprintf("module %s is not a source file of the consumer package or its dependencies", m))
@@ -348,13 +359,14 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 	if ob.ws.replayCache {
 		if d, ok := oleanStoreGet(key); ok {
 			data = d
+			ob.mu.Lock()
 			ob.hits++
+			ob.mu.Unlock()
 		}
 	}
 	if data == nil {
-		work := filepath.Join(ob.ws.Dir, "ownwork")
-		_ = os.RemoveAll(work)
-		if err := os.MkdirAll(work, 0o755); err != nil {
+		work, err := os.MkdirTemp(ob.ws.Dir, "ownwork-")
+		if err != nil {
 			return nil, wsDiag(err)
 		}
 		out := filepath.Join(work, "out.olean")
@@ -362,7 +374,9 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 		argv = append(argv, pkg.dopts...)
 		argv = append(argv, filepath.Join(pkg.src, filepath.FromSlash(srel)))
 		ownCompiles.Add(1)
+		ob.mu.Lock()
 		ob.compiled++
+		ob.mu.Unlock()
 		lp := ob.leanPath()
 		o, err := runLeanProtected(ob.ws.sb, ob.ws.tc, work, nil, ob.ws.protected(true), lp, argv...)
 		if err != nil {
@@ -383,8 +397,129 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 		return nil, wsDiag(err)
 	}
 	om := &ownMod{sha: sha256Hex(data), rel: srel, pkg: pkg}
+	ob.mu.Lock()
 	ob.done[m] = om
+	ob.mu.Unlock()
 	return om, nil
+}
+
+// ownJobs is how many modules janus compiles at once (JANUS_OWN_JOBS, else twice JANUS_JOBS, 2..8).
+func ownJobs() int {
+	if n, err := strconv.Atoi(os.Getenv("JANUS_OWN_JOBS")); err == nil && n > 0 {
+		return n
+	}
+	n := 4
+	if j, err := strconv.Atoi(os.Getenv("JANUS_JOBS")); err == nil && j > 0 {
+		n = 2 * j
+	}
+	if n < 2 {
+		n = 2
+	}
+	if n > 8 {
+		n = 8
+	}
+	return n
+}
+
+// ensureAll makes the owned oleans of the modules mods and of everything they import current, compiling independent modules
+// at once (each module after its imports, at most ownJobs() at a time): the closure of a theorem is a DAG with long
+// parallel stretches (String amd64: 64 modules, 1870 s one at a time). The result is exactly what ensure on each module
+// in turn would produce: a module is compiled by ensure, only after the owned oleans of its imports exist, from the same
+// hashed source with the same options; an error is the error ensure reports for it (and for every module that imports it).
+func (ob *ownBuild) ensureAll(rels map[string]string, order []string) {
+	// the module graph (package modules only), cycles and unreadable headers are left to ensure's own errors
+	deps := map[string][]string{}
+	var visit func(m string) bool
+	visit = func(m string) bool {
+		if _, ok := deps[m]; ok {
+			return true
+		}
+		pkg, srel, _, n := ob.locate(m)
+		if n != 1 {
+			return false
+		}
+		imps, ok := parseImports(pkg.files[srel])
+		if !ok {
+			return false
+		}
+		deps[m] = nil
+		var ds []string
+		for _, i := range imps {
+			if _, _, _, c := ob.locate(i); c > 0 {
+				ds = append(ds, i)
+			}
+		}
+		deps[m] = ds
+		for _, d := range ds {
+			if !visit(d) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, m := range order {
+		if !visit(m) {
+			return // not a plain DAG of readable modules: the sequential ensure reports it
+		}
+	}
+	// a cycle would deadlock the waiting below
+	color := map[string]int{}
+	var cyc func(m string) bool
+	cyc = func(m string) bool {
+		switch color[m] {
+		case 1:
+			return true
+		case 2:
+			return false
+		}
+		color[m] = 1
+		for _, d := range deps[m] {
+			if cyc(d) {
+				return true
+			}
+		}
+		color[m] = 2
+		return false
+	}
+	for m := range deps {
+		if cyc(m) {
+			return
+		}
+	}
+	for _, p := range ob.pkgs {
+		if err := syncTreeOwn(p); err != nil {
+			return
+		}
+	}
+	ob.mu.Lock()
+	if ob.errs == nil {
+		ob.errs = map[string]error{}
+	}
+	ob.mu.Unlock()
+	finished := map[string]chan struct{}{}
+	for m := range deps {
+		finished[m] = make(chan struct{})
+	}
+	sem := make(chan struct{}, ownJobs())
+	var wg sync.WaitGroup
+	for m := range deps {
+		wg.Add(1)
+		go func(m string) {
+			defer wg.Done()
+			defer close(finished[m])
+			for _, d := range deps[m] {
+				<-finished[d]
+			}
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if _, err := ob.ensure(m, rels[m]); err != nil {
+				ob.mu.Lock()
+				ob.errs[m] = err
+				ob.mu.Unlock()
+			}
+		}(m)
+	}
+	wg.Wait()
 }
 
 // syncTreeOwn writes the trusted copy of a package's hashed files (once per build).
@@ -414,6 +549,14 @@ func (ob *ownBuild) frameworkDigest(imps []string) string {
 // library module). Any module of the closure whose source cannot be read, or whose olean is not pinned, makes the
 // digest the whole build's.
 func fwClosureDigest(files map[string][]byte, want pins, imps []string) string {
+	return fwClosureDigestX(files, want, imps, false)
+}
+
+// fwClosureDigestX is fwClosureDigest; with withSrc each closure module's source hash is part of it too. The
+// module store (modstore.go) keys Lake's outputs, and Lake's traces hash the sources of the modules a module imports, not
+// their oleans: a comment changed in a framework module leaves the olean (and janus's own compile) unchanged but makes
+// Lake rebuild everything downstream, so a Lake entry made under the old source would be loaded and rebuilt anyway.
+func fwClosureDigestX(files map[string][]byte, want pins, imps []string, withSrc bool) string {
 	all := func() string { return "all " + pinsDigest(want) }
 	if files == nil {
 		return all()
@@ -454,7 +597,11 @@ func fwClosureDigest(files map[string][]byte, want pins, imps []string) string {
 		if !ok {
 			return all()
 		}
-		fmt.Fprintf(h, "%q %s\n", m, sha)
+		if withSrc {
+			fmt.Fprintf(h, "%q %s %s\n", m, sha, sha256Hex(files[strings.ReplaceAll(m, ".", "/")+".lean"]))
+		} else {
+			fmt.Fprintf(h, "%q %s\n", m, sha)
+		}
 	}
 	return "closure " + hex.EncodeToString(h.Sum(nil))
 }
@@ -486,7 +633,13 @@ func (ob *ownBuild) reset() error {
 	if err := os.RemoveAll(ob.dir); err != nil {
 		return err
 	}
-	_ = os.RemoveAll(filepath.Join(ob.ws.Dir, "ownwork"))
+	if ents, err := os.ReadDir(ob.ws.Dir); err == nil {
+		for _, e := range ents {
+			if strings.HasPrefix(e.Name(), "ownwork") {
+				_ = os.RemoveAll(filepath.Join(ob.ws.Dir, e.Name()))
+			}
+		}
+	}
 	for _, p := range ob.pkgs {
 		if err := os.MkdirAll(p.lib, 0o755); err != nil {
 			return err

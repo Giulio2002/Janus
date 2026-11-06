@@ -1443,6 +1443,14 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			failAll(wsDiag(err))
 			return
 		}
+		rels, order := map[string]string{}, []string{}
+		for _, r := range reqs {
+			if r.Err == nil {
+				rels[r.module] = r.rel
+				order = append(order, r.module)
+			}
+		}
+		ob.ensureAll(rels, order)
 		for _, r := range reqs {
 			if r.Err != nil {
 				continue

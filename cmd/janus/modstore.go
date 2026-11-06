@@ -370,7 +370,7 @@ func storeModules(tcID string, ws *consumerWS, pkg *consumerPkg, fwFiles map[str
 		h := sha256.New()
 		fmt.Fprintf(h, "janus-modstore-key-v1\n%q\npackage %q\nmodule %q\nsource %q %s\nconfig %q %s\nopts %q\nimports %q\nframework %s\n",
 			tcID, l.p.name, m, l.rel, sha256Hex(src), l.p.config, lakefileBuildDigest(l.p.files[l.p.config]), l.p.dopts, own,
-			fwClosureDigest(fwFiles, want, ext))
+			fwClosureDigestX(fwFiles, want, ext, true))
 		r := res{hex.EncodeToString(h.Sum(nil)), true}
 		memo[m] = r
 		return r
