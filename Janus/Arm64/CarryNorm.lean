@@ -6,8 +6,8 @@ import Janus.Arm64.Exec
 
 `janus_run` on arm64 multi-limb arithmetic leaves `addWithCarry` limbs, carry flags as `decide (2^64 ≤ A)` and
 borrows as `decide (b ≤ a)`, `ngc` masks and negated flag tests. These lemmas (from FV-G's `UtilAM`, now the library's)
-put them in the floors-and-remainders vocabulary `janus_carry`/`janus_carry_nf` normalise (`janus_carry_simp` applies
-them; the side conditions are closed by `janus_carry_disch`, whose last alternative is `omega` on the bound facts only).
+put them in the floors-and-remainders vocabulary `janus_carry`/`janus_carry_nf` normalise (`janus_carry_simp_b` applies
+them; the side conditions are closed by `janus_carry_disch_b`: `janus_carry_disch`, then `omega` on the bound facts only).
 Every lemma is an ordinary kernel-checked theorem; none is in a default simp set.
 -/
 
