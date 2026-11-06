@@ -374,7 +374,10 @@ pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.
 pre_fixture_emb() { JANUS_TEST_FIXTURE_PART=embedded JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
 pre_fixture() { JANUS_TEST_FIXTURE_PART=checkout JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
 pre_stamp() { JANUS_ROOT="$root" JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
-pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
+# pre-warm verifies Add against the EMBEDDED framework (JANUS_ROOT unset: janus builds it itself in the user cache and records its
+# replay verdict there) from a private extraction directory, so it neither reads the checkout's build nor shares artifacts/Add with
+# pre-stamp (the checkout's --janus-root verification): the two run side by side instead of one after the other.
+pre_warm() { mkdir -p "$out/prewarm"; env -u JANUS_ROOT JANUS_EXAMPLES_ARTIFACTS="$out/prewarm" JANUS_EXAMPLES_SUMMARY="$out/prewarm/summary.txt" JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
 # From the moment the shared framework build (.lake/build) is finished nothing may write it (a lake that rebuilds a
 # module while another lane's verification has pinned its .olean fails that verification: "framework build changed after
 # the kernel replay"). pre-pin hashes the finished build and switches scripts/lib/lakeguard/lake on (it turns every

@@ -49,6 +49,8 @@ verify_theorems() {
   local rc=0
   jv "$out" --proof "$proof" "${targs[@]}" --results "$st/results.json" ${args[@]+"${args[@]}"} > "$st/all.log" 2>&1 || rc=$?
   [ "$rc" != 124 ] || echo "TIMEOUT: $out ${thms[*]}" >&2
+  # JANUS_TIMINGS=1 and JANUS_TIMINGS_LOG=FILE: keep this run's per-phase lines (janus-timing:) in FILE, one block per run (profiling only)
+  [ -z "${JANUS_TIMINGS_LOG:-}" ] || printf '== %s\n%s\n' "$out $proof" "$(grep -a '^janus-timing:' "$st/all.log")" >> "$JANUS_TIMINGS_LOG"
   exec {lkfd}>&-
   local trc
   for ((i = 0; i < ${#thms[@]}; i++)); do
