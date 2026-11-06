@@ -82,4 +82,21 @@ theorem decBytes_eq (v : Nat) : decBytes (toSigned v) = (if sgn v = 1 then [45] 
   · simp [h]
   · simp [h]; congr 1; omega
 
+theorem segsOf_real (m : Memory) (fp fl : Nat) (hFl : fl = 26) (hFm : m.readLE fp 26 = fmtNum) :
+    segsOf m fp fl = [Seg.ch 58, Seg.ch 32, Seg.ch 104, Seg.ch 97, Seg.ch 118, Seg.ch 101, Seg.ch 32, Seg.dec, Seg.ch 44,
+      Seg.ch 32, Seg.ch 119, Seg.ch 97, Seg.ch 110, Seg.ch 116, Seg.ch 32, Seg.dec, Seg.ch 32, Seg.ch 98,
+      Seg.ch 121, Seg.ch 116, Seg.ch 101, Seg.ch 115] := by
+  unfold segsOf; rw [hFl, fmt_strBytes m fp hFm, fmt_segs]; rfl
+
+/-- The message of the real format, from memory: the text, `": have "`, number 1, `", want "`, number 2, `" bytes"`. -/
+theorem msgOf_real (m : Memory) (fp fl sp : Nat) (hFl : fl = 26) (hFm : m.readLE fp 26 = fmtNum) :
+    msgOf m fp fl sp =
+      strBytes m (m.readLE (m.readLE (sp + 8) 8) 8) (m.readLE (m.readLE (sp + 8) 8 + 8) 8) ++
+        ([58, 32, 104, 97, 118, 101, 32] ++ decBytes (toSigned (m.readLE (m.readLE (sp + 24) 8) 8)) ++
+          [44, 32, 119, 97, 110, 116, 32] ++ decBytes (toSigned (m.readLE (m.readLE (sp + 40) 8) 8)) ++
+          [32, 98, 121, 116, 101, 115]) := by
+  unfold msgOf
+  rw [segsOf_real m fp fl hFl hFm]
+  simp [render, renderRest, nDec, ints, Errorf.intOf, errTxt, operandD, List.range_succ]
+
 end Janus.Contracts.ErrorfRealFmt
