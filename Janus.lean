@@ -223,3 +223,8 @@ import Janus.Contracts.ErrorfRealStage64F
 import Janus.Contracts.ErrorfRealSat64
 import Janus.Contracts.ErrorfSat
 import Janus.Contracts.ErrorfSatAmd64
+import Janus.Contracts.IfaceLive
+import Janus.Contracts.LiveStubConvT
+import Janus.Contracts.LiveStubConvTAmd64
+import Janus.Contracts.IfaceLiveSat
+import Janus.Contracts.IfaceLiveSatAmd64

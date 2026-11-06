@@ -1,6 +1,6 @@
 # Design (no code): live `convT64` / `convTstring` (and `convT16/32/convTslice`)
 
-Status: DESIGN ONLY. Adds trusted statements, so nothing here is implemented; it needs main's review, a SAT witness and a red team first.
+Status: IMPLEMENTED (agent/u14-liveconvt): `Janus/Contracts/IfaceLive.lean` (specs), `LiveStubConvT[Amd64].lean` (stubs + tactics), `IfaceLiveSat[Amd64].lean` (satisfiability), `JanusTests/LiveStubConvT.lean` (tests + red team). `convT16/32/convTslice` are not covered.
 Motivation: `(*uint256.Int).Value` (both ISAs) reaches `runtime.convTstring` after live `growslice`/`mallocgc`/`memmove` calls
 (`ex-{arm64,amd64}-Value`: convTstring, memmove, growslice, mallocgc). The single-call `ConvTstring` (Janus/Contracts/Iface.lean) needs its own
 `H : RtReady` and an `IfaceModel R`, and `R.Env` is handed back without budget (round 10 V3), so it cannot sit on a path after live calls.

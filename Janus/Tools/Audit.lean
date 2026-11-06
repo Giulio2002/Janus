@@ -1250,6 +1250,8 @@ def frameworkSpecs : List Name :=
    `growsliceNoAliasSpec, `growsliceBufSpec, `growsliceBufNoAliasSpec, `makeslicecopySpec,
    `moveSliceSpec, `moveSliceNoScanSpec, `moveSliceNoCapSpec, `moveSliceNoCapNoScanSpec,
    `slicecopySpec, `typedslicecopySpec, `wbZeroSpec, `wbMoveSpec,
+   -- the live boxing contracts (`Janus.Contracts.IfaceLive`: `convTstring`, `convT64`) and their live data
+   `convTstringSpec, `convT64Spec, `convTstringLive, `convT64Live,
    -- the live data of the growslice specs (`LiveSpec`: cost, fresh and kept objects), the second description
    -- argument of `RtLiveContract` (round 15)
    `growsliceLive, `growsliceNoAliasLive, `growsliceBufLive, `growsliceBufNoAliasLive].map (`Janus.Contracts ++ ·)
@@ -1349,12 +1351,14 @@ def specRuntimeNames : List (String × List String) :=
    ("moveSliceSpec", ["runtime.moveSlice"]), ("moveSliceNoScanSpec", ["runtime.moveSliceNoScan"]),
    ("moveSliceNoCapSpec", ["runtime.moveSliceNoCap"]), ("moveSliceNoCapNoScanSpec", ["runtime.moveSliceNoCapNoScan"]),
    ("slicecopySpec", ["runtime.slicecopy"]), ("typedslicecopySpec", ["runtime.typedslicecopy"]),
-   ("wbZeroSpec", ["runtime.wbZero"]), ("wbMoveSpec", ["runtime.wbMove"])]
+   ("wbZeroSpec", ["runtime.wbZero"]), ("wbMoveSpec", ["runtime.wbMove"]),
+   ("convTstringSpec", ["runtime.convTstring"]), ("convT64Spec", ["runtime.convT64"])]
 
 /-- The allow-listed `LiveSpec` constants and the `RtSpec` each is the live data of. -/
 def liveSpecOf : List (String × String) :=
   [("growsliceLive", "growsliceSpec"), ("growsliceNoAliasLive", "growsliceNoAliasSpec"),
-   ("growsliceBufLive", "growsliceBufSpec"), ("growsliceBufNoAliasLive", "growsliceBufNoAliasSpec")]
+   ("growsliceBufLive", "growsliceBufSpec"), ("growsliceBufNoAliasLive", "growsliceBufNoAliasSpec"),
+   ("convTstringLive", "convTstringSpec"), ("convT64Live", "convT64Spec")]
 
 /-- The short name of a constant of `Janus.Contracts` (`none` for any other). -/
 def contractsShort? (c : Name) : Option String :=

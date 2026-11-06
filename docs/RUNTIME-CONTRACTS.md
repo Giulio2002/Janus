@@ -828,6 +828,19 @@ the descriptor's `Cache` word; `R.Env` holds again):
 | `a == b` on `any` | `efaceeq(t, x, y)` | `Efaceeq` | `efaceEqual`: true for `t = nil`; for a direct type the words; else `R.eq t` |
 | `a == b`, non-empty interfaces | `ifaceeq(tab, x, y)` | `Ifaceeq` | `ifaceEqual`: the same with `t = tab.Type` |
 
+**Live boxing** (`Janus/Contracts/IfaceLive.lean`; U14-LIVE-CONVT). `ConvTstring`/`ConvT64` need their own
+`H` and an `IfaceModel` and cannot follow live calls (`growslice`, `mallocgc`, `memmove`). The live forms are
+two `RtSpec`s and two `LiveSpec`s for `RtLiveContract`/`RtLiveContract64` over the same `R : RtInv` as the
+other live contracts: `convTstringSpec`/`convTstringLive` (a box in `R.rt` holding `(ptr, len)`, `(0, 0)` for
+`""`; cost `blockSize 16 false` and a fresh 16-byte box unless `len = 0`) and `convT64Spec`/`convT64Live` (a box
+holding `v`; cost `blockSize 8 true` and a fresh 8-byte box unless `v < 256`). The static boxes (`&zeroVal`,
+`&staticuint64s[v]`) lie in `R.rt` and add nothing to the live set; no readiness `H`, no `IfaceModel`. Satisfiability
+witnesses for both shapes of both contracts, on both ISAs: `Janus/Contracts/IfaceLiveSat[Amd64].lean`
+(`convTstringLive_satisfiable[_empty]`, `convT64Live_satisfiable[_small]`, and the `64` forms); the stubs and tactics
+`janus_live_convtstring`, `janus_live_convtstring_empty`, `janus_live_convt64`, `janus_live_convt64_small`
+(`janus64_…`) are in `LiveStubConvT[Amd64].lean`. The single-call `ConvT*` stay for functions that box once and
+need the itab/equality model; a path that calls them after a live call is still unprovable.
+
 **Allocating calls need readiness** (round 10 V3). `ConvT`, `ConvTnoptr`, `ConvT16/32/64`,
 `ConvTstring`, `ConvTslice`, `TypeAssert` and `InterfaceSwitch` take a readiness predicate
 `H : RtReady`, required at the call for its argument registers, `g`, `SP` and
