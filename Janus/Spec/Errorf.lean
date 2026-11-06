@@ -50,10 +50,37 @@ def parseFmt : List Nat → Option (List Seg)
   | 0x25 :: 0x77 :: t => parseRest t
   | _ => none
 
+/-- The decimal digits of `n`, as bytes (`'0' = 48`), most significant first, with a fuel for the recursion
+(so that the kernel can evaluate it). -/
+def natBytesAux : Nat → Nat → List Nat
+  | 0, n => [48 + n % 10]
+  | f + 1, n => if n < 10 then [48 + n] else natBytesAux f (n / 10) ++ [48 + n % 10]
+
 /-- The decimal digits of `n`, as bytes (`'0' = 48`): the most significant digit first. -/
-def natBytes (n : Nat) : List Nat :=
-  if n < 10 then [48 + n] else natBytes (n / 10) ++ [48 + n % 10]
-decreasing_by omega
+def natBytes (n : Nat) : List Nat := natBytesAux (n + 1) n
+
+theorem natBytesAux_fuel : ∀ f f' m, m < f → m < f' → natBytesAux f m = natBytesAux f' m := by
+  intro f
+  induction f with
+  | zero => intro f' m h; omega
+  | succ f ih =>
+    intro f' m h1 h2
+    cases f' with
+    | zero => omega
+    | succ f' =>
+      simp only [natBytesAux]
+      by_cases h : m < 10
+      · simp [h]
+      · simp only [h, if_false]
+        rw [ih f' (m / 10) (by omega) (by omega)]
+
+theorem natBytes_lt {n : Nat} (h : n < 10) : natBytes n = [48 + n] := by
+  unfold natBytes; simp only [natBytesAux, h, if_true]
+
+theorem natBytes_ge {n : Nat} (h : 10 ≤ n) : natBytes n = natBytes (n / 10) ++ [48 + n % 10] := by
+  unfold natBytes
+  rw [natBytesAux, if_neg (by omega)]
+  rw [natBytesAux_fuel n (n / 10 + 1) (n / 10) (by omega) (by omega)]
 
 /-- `%d` of the integer `v`: an optional `-` and the digits. -/
 def decBytes (v : Int) : List Nat :=
@@ -70,22 +97,18 @@ def renderRest : List Seg → List Int → List Nat
 `renderRest`. -/
 def render (segs : List Seg) (e : List Nat) (ns : List Int) : List Nat := e ++ renderRest segs ns
 
-theorem natBytes_lt {n : Nat} (h : n < 10) : natBytes n = [48 + n] := by
-  rw [natBytes]; simp [h]
-
-theorem natBytes_ge {n : Nat} (h : 10 ≤ n) : natBytes n = natBytes (n / 10) ++ [48 + n % 10] := by
-  rw [natBytes]; simp [Nat.not_lt.mpr h]
-
 theorem natBytes_length_pos (n : Nat) : 0 < (natBytes n).length := by
-  rw [natBytes]; split <;> simp
+  by_cases h : n < 10
+  · rw [natBytes_lt h]; simp
+  · rw [natBytes_ge (by omega)]; simp
 
 theorem natBytes_lt256 (n : Nat) : ∀ b ∈ natBytes n, b < 256 := by
   induction n using Nat.strongRecOn with
   | _ n ih =>
-    rw [natBytes]
-    split
-    · intro b hb; simp at hb; omega
-    · intro b hb
+    by_cases h : n < 10
+    · rw [natBytes_lt h]; intro b hb; simp at hb; omega
+    · rw [natBytes_ge (by omega)]
+      intro b hb
       simp only [List.mem_append, List.mem_singleton] at hb
       rcases hb with hb | hb
       · exact ih (n / 10) (by omega) b hb
