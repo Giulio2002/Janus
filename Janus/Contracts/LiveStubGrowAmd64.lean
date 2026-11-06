@@ -95,6 +95,19 @@ theorem growslice_read64 {tys : Tys} {ok : Nat → List Nat → Prop} {addr : Na
   simp only [hargs, arg, List.getD_cons_succ, List.getD_cons_zero, hsz, hob] at hacc
   rw [hq0]; exact hacc
 
+/-- The old array does not wrap the address space: `p + ob ≤ 2^48`, the first component of
+`Readable m p ob` in `growsliceSpec.pre` (the stepper needs it for the address of every later chunk). -/
+theorem growslice_bound64 {tys : Tys} {ok : Nat → List Nat → Prop} {addr : Nat}
+    {t : Nat × Nat × Nat} {n c0 num ob oldp : Nat} {L : List (Nat × Nat)} {b : Nat} {s : State}
+    (pre : RtLivePre64 4096 (toyR tys ok) growsliceSpec growsliceLive addr L b s)
+    (hq0 : (s.regs 0).toNat = oldp) (hargs : argWords64 s growsliceSpec.nargs = [oldp, n, c0, num, t.1])
+    (hsz : typSize s.mem t.1 = t.2.1) (hob : (n - num) * t.2.1 = ob) :
+    (s.regs 0).toNat + ob ≤ 2 ^ 48 := by
+  obtain ⟨hcall, hspec, -⟩ := pre
+  obtain ⟨-, -, -, -, -, hrd, -⟩ := hspec
+  simp only [hargs, arg, List.getD_cons_succ, List.getD_cons_zero, hsz, hob] at hrd
+  rw [hq0]; exact hrd
+
 set_option maxHeartbeats 1000000 in
 theorem growslice_finish64 {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr : Nat}
     {t : Nat × Nat × Nat} (ht : t ∈ tys) {n c0 num ob A cap K : Nat}
@@ -228,11 +241,15 @@ macro_rules
       have hap := Janus.Contracts.LiveSatAmd64.bump_apart64 hWsx
       have hapH := Janus.Contracts.LiveStubAmd64.toy_heap_apart64 (ob := (($n - $num) * ($t).2.1)) (g := (s.regs 14).toNat)
         (L := L) (tys := _) hinvx (Nat.le_trans (by decide) hq4) hWsx
+      have hbump := Janus.Contracts.LiveStub.toy_heap_bound (ob := (($n - $num) * ($t).2.1))
+        (g := (s.regs 14).toNat) (L' := L) (tys := _) hinvx (Nat.le_trans (by decide) hq4)
       first
         | (have hread := Janus.Contracts.LiveStubAmd64.growslice_read64 pre hq0 hq2 hq5 rfl (by decide))
         | skip
       open Janus.Contracts.Toy in
-        simp only [BUMP, Nat.reduceSub, Nat.reduceMul] at hheap hacB' hapH
+        simp only [BUMP, Nat.reduceSub, Nat.reduceMul, Nat.reducePow] at hbump hheap hacB' hapH
+      have hbnd := Janus.Contracts.LiveStubAmd64.growslice_bound64 pre hq0 hq2 hq5 rfl
+      simp only [Nat.reduceSub, Nat.reduceMul, Nat.reducePow] at hbnd
       first | (simp only [Nat.reduceSub, Nat.reduceMul] at hread) | skip
       change Janus.Amd64.Tactic.ReachesRet _ _ s _
       janus64_run
