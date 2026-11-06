@@ -21,7 +21,7 @@ o="$(rounds_longest_first)"
 set -- $o
 [ "$1 $2" = "r7c r7c1" ] && echo "ok: r7c r7c1 first" || { echo "FAIL: order starts '$1 $2'"; fail=1; }
 [ "$(printf '%s\n' $o | sort | uniq -d | wc -l)" = 0 ] && echo "ok: no lane twice" || { echo "FAIL: a lane twice"; fail=1; }
-for l in r2 r3 r4 r5 r6 r7 r7c r7c1 r7c2 r7c3 r7j r8 r9 r10 r11 r12 rfw all; do
+for l in r2 r3 r4 r5 r6 r7 r7c r7c1 r7c2 r7c3 r7j r8 r8a r8b r8c r9 r10 r11 r12 rfw all alla allb allc; do
   case " $o " in *" $l "*) ;; *) echo "FAIL: lane $l missing from the order"; fail=1 ;; esac
 done
 [ "$fail" = 0 ] && echo "rounds-lanes self-test: all ok" || exit 1

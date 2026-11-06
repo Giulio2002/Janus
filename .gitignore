@@ -5,6 +5,9 @@
 .janus-build/
 audit/bin/
 audit/work/
+audit/work-base/
+audit/work-r1/
+audit/work-root/
 examples/consumer/.lake/
 audit/round2/bin/
 audit/round2/work/
