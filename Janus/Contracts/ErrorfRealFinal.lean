@@ -445,4 +445,29 @@ theorem pre_readLE (m0 : Memory) (sp0 l1 n1 l2 n2 a1 a2 p A Lm e tp tl a : Nat) 
   simp (disch := (first | omega | (simp only [List.length_cons, List.length_nil, Janus.Spec.strBytes_length, hlen1, hlen2]; omega))) only
     [readLE_putBytes_out, Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
 
+open Janus.Contracts.Toy Janus.Contracts.LiveSat in
+theorem rsW_sub64 (sp0 p A : Nat) (hp : 268435456 ≤ p) (hpA : p + A ≤ 536870912) (hsp : 4096 ≤ sp0) :
+    ∀ a n, Outside a n (toyRt tys0 ++ [(sp0 - 4096, sp0), (sp0 + 8, sp0 + 8 + 8 * 5)]) →
+      Outside a n [(sp0 - 4096, sp0 - 8), (4194304, 4194312), (p, p + A)] := by
+  intro a n h
+  simp only [outside_append] at h
+  obtain ⟨hrt', hwin'⟩ := h
+  simp only [toyRt, tys0, outside_cons, outside_nil, outside_append, List.map, and_true, HEAP, HEND, HSIZE, BUMP, WBUF,
+    tyA, tyB, tyC] at hrt'
+  simp only [outside_cons, outside_nil, and_true] at hwin' ⊢
+  refine ⟨by omega, by omega, by omega⟩
+
+open Janus.Contracts.Toy Janus.Contracts.LiveSat in
+theorem rsW_live64 (sp0 p A : Nat) (L : List (Nat × Nat)) (hp : 268435456 ≤ p) (hpA : p + A ≤ 536870912)
+    (hLp : ∀ r ∈ L, HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ p)
+    (hLs : LiveSep L [(sp0 - 4096, sp0), (sp0 + 8, sp0 + 8 + 8 * 5), (sp0, sp0 + 8)]) :
+    ∀ a n, InRanges a n L → Outside a n [(sp0 - 4096, sp0 - 8), (4194304, 4194312), (p, p + A)] := by
+  intro a n hin
+  obtain ⟨r, hr, hr1, hr2⟩ := hin
+  have hLo := hLs r hr
+  have hLr := hLp r hr
+  simp only [outside_cons, outside_nil, and_true] at hLo ⊢
+  simp only [HEAP] at hLr
+  refine ⟨by omega, by omega, by omega⟩
+
 end Janus.Contracts.ErrorfRealFinal
