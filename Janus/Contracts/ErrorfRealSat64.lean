@@ -300,4 +300,61 @@ theorem real_impl64 (ok : Nat → List Nat → Prop) :
               (s.regs 1).toNat (liveWin64 s 4096 5) L b (s.regs 14).toNat (R6 0).toNat (R6 3).toNat _
             rw [h0', hR3]; exact hpost
 
+/-! ## A call state that satisfies the whole precondition -/
+
+open Janus.Contracts.ErrorfRealWit
+
+def rstate64 : State := { LiveSatAmd64.wst [rFP, 26, rSP, 3, 3] with mem := rmem }
+
+theorem rcall64 : CallOK64 rstate64 4096 5 := by
+  obtain ⟨a, b, c, d, e⟩ := wcallOK64 [rFP, 26, rSP, 3, 3] 5 (by omega)
+  have e4 : (rstate64.regs 4).toNat = LiveSat.wsp := LiveSat.wspn
+  refine ⟨?_, b, c, d, ?_⟩
+  · show rmem.readLE (rstate64.regs 4).toNat 8 < _
+    rw [e4, rframe.readLE _ _ (by simp [LiveSat.wsp, CB, outside_cons, outside_nil])]
+    have a' := a
+    rw [LiveSatAmd64.wmem_eq, LiveSatAmd64.w4, LiveSat.wspn] at a'
+    exact a'
+  · show rmem.accessible ((rstate64.regs 4).toNat - 4096) _ true = true
+    rw [e4, rframe.accessible]
+    have e' := e
+    rw [LiveSatAmd64.wmem_eq, LiveSatAmd64.w4, LiveSat.wspn] at e'
+    exact e'
+
+theorem rguard64 : StackRoom64 rstate64 4096 5 := by
+  obtain ⟨⟨a, b, c⟩, d⟩ := wguard64 [rFP, 26, rSP, 3, 3] 5 (by omega)
+  refine ⟨⟨a, ?_, ?_⟩, d⟩
+  · show rmem.accessible _ _ false = true
+    rw [rframe.accessible]; exact b
+  · have e14 : (rstate64.regs 14).toNat = LiveSat.wg := LiveSat.wgn
+    show rmem.readLE _ 8 + 4096 < _
+    rw [rframe.readLE _ _ (by
+      show Outside ((rstate64.regs 14).toNat + 16) 8 [(CB, CB + 0x200)]
+      rw [e14]; simp [LiveSat.wg, CB, outside_cons, outside_nil])]; exact c
+
+set_option maxRecDepth 100000 in
+theorem rreadsOut64 : ReadsOutside (errorfReads rmem rFP 26 rSP) (liveWin64 rstate64 4096 5) := by
+  rw [rreads]
+  simp only [ReadsOutside, List.mem_cons, List.not_mem_nil, or_false]
+  intro r hr
+  rcases hr with rfl | rfl | rfl | rfl | rfl | rfl <;>
+    simp [liveWin64, calleeStack64, rstate64, LiveSatAmd64.wst, LiveSat.wsp, rFP, rSP, rE, rTXT, rQ1, rQ2, CB,
+      outside_cons, outside_nil]
+
+theorem real_satisfiable64 : ∃ (R : RtInv) (tErr iErr tInt iWrap Fl Fm B : Nat) (impl : List Janus.Amd64.Segment),
+    ErrorfLive (toy.link impl) A0 4096 R tErr iErr tInt iWrap Fl Fm B ∧
+    ∃ (s : State) (L : List (Nat × Nat)) (b : Nat), s.rip = BitVec.ofNat 64 A0 ∧
+      CallOK64 s 4096 5 ∧ StackRoom64 s 4096 5 ∧
+      ArgsOK (Env.mk tErr iErr tInt iWrap) Fl Fm B s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat
+        (s.regs 7).toNat (s.regs 6).toNat ∧
+      ReadsOutside (errorfReads s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) (liveWin64 s 4096 5) ∧
+      ReadsSafe R L (errorfReads s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) ∧
+      LiveAt R A0 [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat, (s.regs 7).toNat, (s.regs 6).toNat] L b
+        (errorfCost s.mem (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) (s.regs 14).toNat s.mem
+        (liveWin64 s 4096 5) :=
+  ⟨toyR tys0 okR, tErr, iErr, tInt, iWrap, 26, fmtNum, 4294967296, at0 code64, real_impl64 okR, rstate64, [], 0x400, rfl,
+    rcall64, rguard64, rargs, rreadsOut64, rsafe, ⟨⟨rfl, by decide⟩, rinv (rstate64.regs 14).toNat,
+    by show errorfCost rmem rFP 26 rSP ≤ 0x400; rw [rcost]; decide, by simp,
+    wwin64 [rFP, 26, rSP, 3, 3] 5 (by omega)⟩⟩
+
 end Janus.Contracts.ErrorfRealSat64
