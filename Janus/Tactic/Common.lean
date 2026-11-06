@@ -1834,6 +1834,36 @@ def clearIrrelevant2 (g : MVarId) : MetaM MVarId := g.withContext do
     unless (arithAtoms ty).all expanded.contains do toClear := toClear.push d.fvarId
   fastClear g toClear
 
+/-- The first stage of `omegaStaged` alone, for screening candidates: `omega` with every disjunctive hypothesis
+cleared (no case splits), under a small heartbeat budget. A candidate hypothesis that is not the one a side
+condition needs makes every stage of `omegaStaged` fail (sparse splits, focused, capped full context: ~0.25 s
+each, ~1000 of them in one print proof); screening first with this stage (~0.04 s) and running the staged search
+only on the candidates that survive no screening keeps every proof the staged search finds: it is the same search in
+another order. The proof terms are those of `omega`, checked by the kernel as always. -/
+def omegaCheap (g : MVarId) : TacticM Bool := g.withContext do
+  let mut ors : Array FVarId := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    if (← isProp ty) then
+      let ty' ← whnfR ty
+      if ty'.consumeMData.isAppOfArity ``Or 2 then ors := ors.push d.fvarId
+  let saved ← saveState
+  let ok ← tryCatchRuntimeEx
+    (do
+      let g' ← fastClear g ors
+      let gs ← withTheReader Core.Context (fun c => { c with maxHeartbeats := 2000 * 1000 }) <|
+        withCurrHeartbeats <| Tactic.run g' <| withoutRecover (evalTactic (← `(tactic| omega)))
+      pure gs.isEmpty)
+    (fun _ => pure false)
+  unless ok do saved.restore
+  return ok
+
+elab "janus_omega_cheap" : tactic => do
+  let g ← getMainGoal
+  unless ← omegaCheap g do throwError "janus_omega_cheap: no proof without case splits"
+  replaceMainGoal []
+
 /-- A side condition `Apart a n b k` (e.g. part of a callee's precondition): from a hypothesis
 `Apart a' n' b' k'` (or its mirror) of which it is a sub-range pair, the containments by `omega`. -/
 def dischargeApart (g : MVarId) : TacticM Bool := g.withContext do
@@ -1844,22 +1874,31 @@ def dischargeApart (g : MVarId) : TacticM Bool := g.withContext do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
     unless ty.isAppOfArity ``Janus.Apart 4 do continue
-    let ha := ty.getArg! 0; let hn := ty.getArg! 1; let hb := ty.getArg! 2; let hk := ty.getArg! 3
     -- an exact match
     if (← withReducible (isDefEq ty t)) then
       g.assign d.toExpr; return true
+  -- candidates: one of the two ranges is the goal's (syntactically), so only the other needs a containment by `omega`
+  let mut cands : Array (LocalDecl × Bool) := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ty.isAppOfArity ``Janus.Apart 4 do continue
+    let ha := ty.getArg! 0; let hn := ty.getArg! 1; let hb := ty.getArg! 2; let hk := ty.getArg! 3
     for symm in [false, true] do
-      -- candidates: one of the two ranges is the goal's (syntactically), so only the other
-      -- needs a containment by `omega`
       let (a, n, b, k) := if symm then (hb, hk, ha, hn) else (ha, hn, hb, hk)
       unless (a == ga && n == gn) || (b == gb && k == gk) do continue
+      cands := cands.push (d, symm)
+  -- first the screening stage on every candidate, then the full staged search (the same search in another order)
+  for stage in [`janus_omega_cheap, `janus_omega_staged] do
+    for (d, symm) in cands do
       let saved ← saveState
       try
         let h ← Term.exprToSyntax d.toExpr
         let gs ← Tactic.run g <| withoutRecover do
           if symm then evalTactic (← `(tactic| refine Janus.Apart.sub (Janus.Apart.symm $h) ?_ ?_ ?_ ?_))
           else evalTactic (← `(tactic| refine Janus.Apart.sub $h ?_ ?_ ?_ ?_))
-          evalTactic (← `(tactic| all_goals janus_omega_staged))
+          if stage == `janus_omega_cheap then evalTactic (← `(tactic| all_goals janus_omega_cheap))
+          else evalTactic (← `(tactic| all_goals janus_omega_staged))
         if gs.isEmpty then return true
         saved.restore
       catch _ => saved.restore
@@ -1892,6 +1931,69 @@ partial def exposeConj (g : MVarId) : MetaM MVarId := g.withContext do
     let (_, g') ← (← g.assert `h_conj t e).intro1P
     g := g'
   return g
+/-- A proved part of an `Outside` side condition (see `dischargeOutside`), with the hypotheses its proof uses. -/
+structure OutsideMemoEntry where
+  proof : Expr
+  fvars : Array (FVarId × Expr)
+
+/-- The parts of `Outside` side conditions proved so far, by statement. One read through a chain of stores asks
+`Outside a n [r₁, …, rₖ]` and splits it into one arithmetic part per range; the next read, the next store of the chain
+and the next call ask most of the same parts again (a print proof: ~230 side conditions, ~0.8 s each). A part proved
+once is reused where the hypotheses its proof uses are present with the same types; the proof term is the one the first
+proof built (the kernel checks the final term as always), so reuse can only skip a search, never accept a statement
+that was not proved. Failures are not remembered. -/
+initialize outsideMemo : IO.Ref (Std.HashMap Expr OutsideMemoEntry) ← IO.mkRef {}
+
+def memoLookup (memo : IO.Ref (Std.HashMap Expr OutsideMemoEntry)) (g : MVarId) (t : Expr) : MetaM Bool := g.withContext do
+  let some e := (← memo.get)[t]? | return false
+  let lctx ← getLCtx
+  for (fv, ty) in e.fvars do
+    let some d := lctx.find? fv | return false
+    unless (← instantiateMVars d.type) == ty do return false
+  g.assign e.proof
+  return true
+
+def memoStore (memo : IO.Ref (Std.HashMap Expr OutsideMemoEntry)) (g : MVarId) (t : Expr) : MetaM Unit := g.withContext do
+  let pf ← instantiateMVars (mkMVar g)
+  if pf.hasMVar || pf.hasLevelMVar || pf.hasSorry then return
+  -- no auxiliary constants (`_proof_n`, `_auxLemma`, private names): they live in the environment of the state the proof was
+  -- found in, which a later `restore` removes, and a new one may take the same name
+  if pf.getUsedConstants.any (·.isInternal) then return
+  let lctx ← getLCtx
+  let mut fvs : Array (FVarId × Expr) := #[]
+  for fv in (collectFVars {} pf).fvarIds do
+    let some d := lctx.find? fv | return
+    fvs := fvs.push (fv, ← instantiateMVars d.type)
+  memo.modify fun m => (if m.size > 20000 then ({} : Std.HashMap Expr OutsideMemoEntry) else m).insert t { proof := pf, fvars := fvs }
+
+def outsideMemoLookup (g : MVarId) (t : Expr) : MetaM Bool := memoLookup outsideMemo g t
+def outsideMemoStore (g : MVarId) (t : Expr) : MetaM Unit := memoStore outsideMemo g t
+
+/-- The side conditions proved by the dischargers (`janus_disch`, `janus64_disch`) so far, by statement. A run asks the
+same address and bound conditions again and again: the next instruction of the same block, the next read of the same
+chain (a print proof: ~600 `janus64_disch` calls, ~80 ms each, most of them a repeat of an earlier statement). A condition
+proved once is reused where every hypothesis its proof uses is present with the same type (the proof term is the first
+proof's, checked by the kernel as always: reuse can only skip a search, never accept a statement that was not proved).
+Only conditions without metavariables and with a free variable (the closed ones are decided at once); failures are not
+remembered (a later context may prove what an earlier one could not). -/
+initialize dischMemo : IO.Ref (Std.HashMap Expr OutsideMemoEntry) ← IO.mkRef {}
+
+register_option janus.dischMemo : Bool := {
+  defValue := true
+  descr := "remember the side conditions the dischargers proved (reused where the hypotheses of the proof are still present)"
+}
+
+/-- Run the discharger `body` on the main goal through `dischMemo`. -/
+def withDischMemo (body : TacticM Unit) : TacticM Unit := do
+  unless janus.dischMemo.get (← getOptions) do return ← body
+  let g ← getMainGoal
+  let t ← instantiateMVars (← g.getType)
+  if t.hasMVar || !t.hasFVar then return ← body
+  if ← memoLookup dischMemo g t then
+    replaceMainGoal []
+    return
+  body
+  if ← g.isAssigned then memoStore dischMemo g t
 
 /-- A side condition `Outside a n rs` (of a `MemFrame` read rule): unfold the literal list and
 prove each range condition by `omega`. -/
@@ -1910,15 +2012,26 @@ def dischargeOutside (g : MVarId) : TacticM Bool := do
     return true
   catch _ => saved.restore; return false
 where
+  /-- `closePartRaw` with the memo of proved parts (`outsideMemo`). -/
+  closePart (g : MVarId) : TacticM Bool := do
+    let t ← instantiateMVars (← g.getType)
+    if t.hasMVar then return ← closePartRaw g
+    if ← outsideMemoLookup g t then return true
+    if ← closePartRaw g then
+      outsideMemoStore g t
+      return true
+    return false
   /-- One conjunct: arithmetic by `omega`, or `Outside a n rs` for a list `rs` that is not a
   literal (a variable such as the runtime-owned ranges of a contract) from a hypothesis
   `Outside b k rs` with `[a, a+n) ⊆ [b, b+k)` (`Outside.of_sub`). -/
-  closePart (g : MVarId) : TacticM Bool := do
+  closePartRaw (g : MVarId) : TacticM Bool := do
     let g ← exposeConj g
     g.withContext do
     let t ← instantiateMVars (← g.getType)
     if t.isAppOfArity ``Janus.Outside 3 then
       let rs := t.getArg! 2
+      -- candidates: `Outside b k rs'` or `ApartAll b k rs'` of the context with a list equal to the goal's
+      let mut cands : Array (LocalDecl × Bool) := #[]
       for d in ← getLCtx do
         if d.isImplementationDetail then continue
         let ty ← instantiateMVars d.type
@@ -1927,16 +2040,23 @@ where
         let isApartAll := ty.isAppOfArity `Janus.Contracts.ApartAll 3
         unless ty.isAppOfArity ``Janus.Outside 3 || isApartAll do continue
         unless ← withReducible (isDefEq (ty.getArg! 2) rs) do continue
-        let saved ← saveState
-        try
-          let h ← if isApartAll then
-              Term.exprToSyntax (← mkAppM `Janus.Contracts.ApartAll.outside #[d.toExpr])
-            else Term.exprToSyntax d.toExpr
-          let gs ← Tactic.run g <| withoutRecover do
-            evalTactic (← `(tactic| (apply Janus.Outside.of_sub $h <;> janus_omega_staged)))
-          if gs.isEmpty then return true
-          saved.restore
-        catch _ => saved.restore
+        cands := cands.push (d, isApartAll)
+      -- the screening stage on every candidate first, then the full staged search (the same search in another order)
+      for stage in [`janus_omega_cheap, `janus_omega_staged] do
+        for (d, isApartAll) in cands do
+          let saved ← saveState
+          try
+            let h ← if isApartAll then
+                Term.exprToSyntax (← mkAppM `Janus.Contracts.ApartAll.outside #[d.toExpr])
+              else Term.exprToSyntax d.toExpr
+            let gs ← Tactic.run g <| withoutRecover do
+              if stage == `janus_omega_cheap then
+                evalTactic (← `(tactic| (apply Janus.Outside.of_sub $h <;> janus_omega_cheap)))
+              else
+                evalTactic (← `(tactic| (apply Janus.Outside.of_sub $h <;> janus_omega_staged)))
+            if gs.isEmpty then return true
+            saved.restore
+          catch _ => saved.restore
       return false
     let saved ← saveState
     -- first with only the hypotheses about the goal's atoms (cheap: the contexts after several
@@ -1947,6 +2067,11 @@ where
       if gs.isEmpty then return true
       saved.restore
     catch _ => saved.restore
+    -- a disjunctive goal (the read-over-write and frame side conditions: `a + n ≤ b ∨ b + k ≤ a`) is almost always
+    -- closed by an `Apart` fact of the context (omegaApart: false at once when there is none), where the staged
+    -- search below fails every stage first (~0.25 s each, ~100 per print proof): the same two searches, the cheaper
+    -- one first
+    if ← omegaApart g then return true
     try
       let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic| janus_omega_staged)))
       if gs.isEmpty then return true
