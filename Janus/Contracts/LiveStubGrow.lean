@@ -57,6 +57,17 @@ theorem toy_heap_acc {tys : Tys} {b g ob : Nat} {m : Memory}
   rw [hpm, ← view_accessible (toyRt tys) L' m]
   exact Memory.accessible_mono _ hac hH (by simp only [HEND, HEAP, HSIZE] at *; omega)
 
+/-- The bump pointer plus the copied bytes does not wrap the address space (the stores of later
+chunks address `p + 8`, ...). -/
+theorem toy_heap_bound {tys : Tys} {b g ob : Nat} {m : Memory}
+    {L' : List (Nat × Nat)} (h : toyInv tys b L' g (view (toyRt tys) L' m)) (hob : ob ≤ b) :
+    m.readLE BUMP 8 + ob ≤ 2 ^ 48 := by
+  obtain ⟨p, hp, hH, h16, hbud, hL, hzero, hac, hacB, hacW, hty0⟩ := h
+  have hpm : m.readLE BUMP 8 = p := by
+    rw [← readLE_view (rt := toyRt tys) (L := L') (inRanges_bump tys) (outside_live hL (by simp [BUMP, HEAP]))]
+    exact hp
+  rw [hpm]; simp only [HEND, HEAP, HSIZE] at *; omega
+
 /-- What the request pins: the arguments, and the call's cost. -/
 theorem growslice_unpack {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr : Nat}
     {t : Nat × Nat × Nat} (ht : t ∈ tys) {n c0 num K : Nat}
@@ -106,6 +117,19 @@ theorem growslice_read {tys : Tys} {ok : Nat → List Nat → Prop} {addr : Nat}
   obtain ⟨-, -, -, -, -, -, hacc⟩ := hspec
   simp only [hargs, arg, List.getD_cons_succ, List.getD_cons_zero, hsz, hob] at hacc
   rw [hq0]; exact hacc
+
+/-- The old array does not wrap the address space: `p + ob ≤ 2^48`, the first component of
+`Readable m p ob` in `growsliceSpec.pre` (the stepper needs it for the address of every later chunk). -/
+theorem growslice_bound {tys : Tys} {ok : Nat → List Nat → Prop} {addr : Nat}
+    {t : Nat × Nat × Nat} {n c0 num ob oldp : Nat} {L : List (Nat × Nat)} {b : Nat} {s : State}
+    (pre : RtLivePre 4096 (toyR tys ok) growsliceSpec growsliceLive addr L b s)
+    (hq0 : (s.regs 0).toNat = oldp) (hargs : argWords s growsliceSpec.nargs = [oldp, n, c0, num, t.1])
+    (hsz : typSize s.mem t.1 = t.2.1) (hob : (n - num) * t.2.1 = ob) :
+    (s.regs 0).toNat + ob ≤ 2 ^ 48 := by
+  obtain ⟨hcall, hspec, -⟩ := pre
+  obtain ⟨-, -, -, -, -, hrd, -⟩ := hspec
+  simp only [hargs, arg, List.getD_cons_succ, List.getD_cons_zero, hsz, hob] at hrd
+  rw [hq0]; exact hrd
 
 set_option maxHeartbeats 1000000 in
 /-- The return of the `growslice` stub meets the live contract. -/
@@ -250,11 +274,15 @@ macro_rules
         Janus.Contracts.LiveStub.growslice_unpack (by decide) (t := $t) (by decide) $hok rfl pre
       have hheap := Janus.Contracts.LiveStub.toy_heap_acc (ob := (($n - $num) * ($t).2.1))
         (g := (s.regs 28).toNat) (L' := L) (tys := _) hinvx (Nat.le_trans (by decide) hq4)
+      have hbump := Janus.Contracts.LiveStub.toy_heap_bound (ob := (($n - $num) * ($t).2.1))
+        (g := (s.regs 28).toNat) (L' := L) (tys := _) hinvx (Nat.le_trans (by decide) hq4)
       first
         | (have hread := Janus.Contracts.LiveStub.growslice_read pre hq0 hq2 hq5 rfl (by decide))
         | skip
       open Janus.Contracts.Toy Janus.Tactic in
-        simp only [BUMP, Nat.reduceSub, Nat.reduceMul] at hheap hacB'
+        simp only [BUMP, Nat.reduceSub, Nat.reduceMul, Nat.reducePow] at hbump hheap hacB'
+      have hbnd := Janus.Contracts.LiveStub.growslice_bound pre hq0 hq2 hq5 rfl
+      simp only [Nat.reduceSub, Nat.reduceMul, Nat.reducePow] at hbnd
       first | (simp only [Nat.reduceSub, Nat.reduceMul] at hread) | skip
       change Janus.Tactic.ReachesRet _ _ s _
       janus_run
