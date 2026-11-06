@@ -205,6 +205,7 @@ import Janus.Contracts.ErrorfRealWit
 import Janus.Contracts.ErrorfRealFmt
 import Janus.Contracts.ErrorfRealSat
 import Janus.Contracts.RelocArm64
+import Janus.Contracts.RelocAmd64
 import Janus.Contracts.ErrorfRealRt
 import Janus.Contracts.ErrorfRealFinalC
 import Janus.Contracts.ErrorfRealPostC
