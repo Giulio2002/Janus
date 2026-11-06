@@ -118,6 +118,20 @@ func TestModstoreKeys(t *testing.T) {
 	if kO := storeModules("tc1", wsO, pkgO, msFw, msWant("")); kO == nil || kO["Pkg.A"].key == k0["Pkg.A"].key {
 		t.Errorf("a leanOption did not change the key (%v)", kO)
 	}
+	// a closure module's SOURCE changed with its olean unchanged (a comment): Lake would rebuild, so the Lake key changes ...
+	fw2 := map[string][]byte{}
+	for k, v := range msFw {
+		fw2[k] = v
+	}
+	fw2["Janus/Core.lean"] = append(append([]byte{}, msFw["Janus/Core.lean"]...), []byte("-- comment\n")...)
+	kS := base(msMods, "tc1", msWant(""), fw2)
+	if kS["Pkg.A"].key == k0["Pkg.A"].key {
+		t.Error("the Lake key ignores a changed framework source (Lake's trace does not)")
+	}
+	// ... while the olean-only digest (janus's own compile) does not
+	if fwClosureDigest(msFw, msWant(""), []string{"Janus.Other"}) != fwClosureDigest(fw2, msWant(""), []string{"Janus.Other"}) {
+		t.Error("the own-compile digest depends on a source comment")
+	}
 	// another toolchain
 	k5 := base(msMods, "tc2", msWant(""), msFw)
 	if k5["Pkg.A"].key == k0["Pkg.A"].key {
@@ -309,7 +323,7 @@ func TestConsumerModstoreAcrossFamilies(t *testing.T) {
 	needLeanSlow(t)
 	useTestCache(t)
 	verify := func(pkg, outdir, proof, thm string) *verifiedReport {
-		code, out, stderr := runJanus(t, "verify", outdir, "--proof", filepath.Join(pkg, proof), "--proof-root", pkg, "--theorem", thm, "--no-result-cache")
+		code, out, stderr := runJanus(t, "verify", outdir, "--proof", filepath.Join(pkg, proof), "--proof-root", pkg, "--theorem", thm, "--no-result-cache", "--keep-workspace") // the Lake path, where the module store works
 		if code != 0 {
 			t.Fatalf("%s: %d\n%s\n%s", thm, code, out, stderr)
 		}
@@ -366,4 +380,115 @@ func TestConsumerModstoreAcrossFamilies(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestOwnJobs(t *testing.T) {
+	t.Setenv("JANUS_OWN_JOBS", "")
+	t.Setenv("JANUS_JOBS", "")
+	if ownJobs() != 4 {
+		t.Errorf("default %d", ownJobs())
+	}
+	t.Setenv("JANUS_JOBS", "1")
+	if ownJobs() != 2 {
+		t.Errorf("JANUS_JOBS=1: %d", ownJobs())
+	}
+	t.Setenv("JANUS_JOBS", "30")
+	if ownJobs() != 8 {
+		t.Errorf("JANUS_JOBS=30: %d", ownJobs())
+	}
+	t.Setenv("JANUS_OWN_JOBS", "3")
+	if ownJobs() != 3 {
+		t.Errorf("JANUS_OWN_JOBS=3: %d", ownJobs())
+	}
+}
+
+// ---- the Lake-free verify (consumer.go tryLakeFree): Lake's output is not an input ----
+
+func lakeBuildFile(ws, rel string) string {
+	return filepath.Join(ws, "root", ".lake", "build", "lib", "lean", filepath.FromSlash(rel))
+}
+
+// TestConsumerLakeFreeIgnoresLake: the proof's module is not built by Lake (no olean in the workspace's Lake build);
+// garbage planted where Lake's oleans would be (the proof's, a shared module's, with traces) changes nothing: the
+// verification is the same, because only janus's own oleans are read.
+func TestConsumerLakeFreeIgnoresLake(t *testing.T) {
+	defer parallel(t)()
+	needLeanSlow(t)
+	useTestCache(t)
+	pkg := consumerCopy(t, "toml")
+	add := mustExtract(t, "example.com/basic.Add")
+	verify := func(extra ...string) (int, string, string) {
+		return runJanus(t, append([]string{"verify", add, "--proof", filepath.Join(pkg, "ConsumerExample/Add.lean"), "--proof-root", pkg,
+			"--theorem", "ConsumerExample.Add.correctness", "--no-result-cache"}, extra...)...)
+	}
+	code, out, stderr := verify()
+	if code != 0 || !strings.HasPrefix(out, "Verified: ConsumerExample.Add.correctness") {
+		t.Fatalf("first: %d\n%s\n%s", code, out, stderr)
+	}
+	r1 := readReport(t, add)
+	ws := r1.Consumer.Workspace
+	if _, err := os.Stat(lakeBuildFile(ws, "ConsumerExample/Add.olean")); err == nil {
+		t.Fatal("Lake built the proof module although janus compiled it itself")
+	}
+	if r1.OleanProvenance != "checked" {
+		t.Fatalf("provenance %q", r1.OleanProvenance)
+	}
+	// plant
+	for _, m := range []string{"ConsumerExample/Add", "ConsumerExample/Spec"} {
+		for _, ext := range []string{".olean", ".ilean", ".trace", ".olean.hash"} {
+			p := lakeBuildFile(ws, m+ext)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte("garbage, not an olean"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	code, out2, stderr := verify()
+	dropBuild := func(s string) string { // the Build line says what was reused, which differs on purpose
+		var keep []string
+		for _, l := range strings.Split(s, "\n") {
+			if !strings.Contains(l, "Build:") {
+				keep = append(keep, l)
+			}
+		}
+		return strings.Join(keep, "\n")
+	}
+	if code != 0 || dropBuild(out2) != dropBuild(out) {
+		t.Fatalf("with planted Lake output: %d\n%s\n%s\n(first run printed)\n%s", code, out2, stderr, out)
+	}
+	r2 := readReport(t, add)
+	if !reflect.DeepEqual(r1.KernelReplay.Modules, r2.KernelReplay.Modules) || !reflect.DeepEqual(r1.Axioms, r2.Axioms) {
+		t.Errorf("the planted Lake output changed the verified environment: %v / %v", r2.KernelReplay.Modules, r2.Axioms)
+	}
+}
+
+// TestConsumerLakeFreeFallsBack: a proof file janus cannot compile as a module of the package (outside its source
+// directories) is not silently skipped: the Lake path builds it and the verifier rejects it as before. `--keep-workspace`
+// takes the Lake path too, so authors have the built modules for `lake env lean`.
+func TestConsumerLakeFreeFallsBack(t *testing.T) {
+	defer parallel(t)()
+	needLeanSlow(t)
+	useTestCache(t)
+	pkg := consumerCopy(t, "toml")
+	add := mustExtract(t, "example.com/basic.Add")
+	writeFile(t, filepath.Join(pkg, "Stray.lean"), "import Extracted\ntheorem Stray.t : Extracted.entry = Extracted.entry := rfl\n")
+	code, out, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(pkg, "Stray.lean"), "--proof-root", pkg, "--theorem", "Stray.t", "--no-result-cache")
+	if code == 0 || strings.Contains(out, "Verified") {
+		t.Fatalf("a file outside the package's modules was verified: %d\n%s\n%s", code, out, stderr)
+	}
+	if stderr == "" {
+		t.Fatal("rejected without a reason")
+	}
+	// --keep-workspace: the Lake path, the built module is there
+	code, out, stderr = runJanus(t, "verify", add, "--proof", filepath.Join(pkg, "ConsumerExample/Add.lean"), "--proof-root", pkg,
+		"--theorem", "ConsumerExample.Add.correctness", "--no-result-cache", "--keep-workspace")
+	if code != 0 {
+		t.Fatalf("keep-workspace: %d\n%s\n%s", code, out, stderr)
+	}
+	ws := readReport(t, add).Consumer.Workspace
+	if _, err := os.Stat(lakeBuildFile(ws, "ConsumerExample/Add.olean")); err != nil {
+		t.Errorf("--keep-workspace: Lake did not build the proof module: %v", err)
+	}
 }

@@ -1341,6 +1341,26 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 
 	leanVersion := ws.tc.version
 
+	// Lake-free path. The audit, the replay and the pins use only the oleans janus compiles itself from the hashed source
+	// (olean provenance, ob.reset below discards Lake's), so Lake's build of the same modules is the same work done a
+	// second time, in the sandbox, by untrusted code, and its result is never read (String amd64, framework bump: 1422 s of
+	// 3978). When janus can compile the closure itself, Lake only resolves the package (`lake env true`: a broken
+	// lakefile or manifest still fails loudly) and the proof's module comes from its path; a module janus cannot compile
+	// (outside the package's source directories, a compile that fails) takes the Lake path below, which builds it and
+	// reports exactly what it always reported. `--keep-workspace` (authors iterate with `lake env lean` on the built
+	// modules) and JANUS_LAKE_BUILD=1 take the Lake path too.
+	pinned := pinSet{ws.pins}
+	lakeFree, ownPre := false, false
+	if ob != nil && !ws.dg.KeepWorkspace && os.Getenv("JANUS_LAKE_BUILD") == "" {
+		var lerr error
+		lakeFree, ownPre, lerr = ws.tryLakeFree(pkg, ob, reqs, pinned)
+		if lerr != nil {
+			failAll(lerr)
+			return
+		}
+		consumerTimer.mark(fmt.Sprintf("lake-free: package resolved, own compile (%d compiled, %d from the store), ok=%v", ob.compiled, ob.hits, lakeFree))
+	}
+
 	// One build per distinct proof module of the group, each of only that module's import closure
 	// (sandboxed: lakefile and modules are untrusted). The requests share the workspace, so a module
 	// already built for an earlier one is reused through Lake's own traces; theorems of the same
@@ -1349,7 +1369,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	var buildOut strings.Builder
 	seenRel := map[string]bool{}
 	for _, r := range reqs {
-		if seenRel[r.rel] {
+		if lakeFree || seenRel[r.rel] {
 			continue
 		}
 		seenRel[r.rel] = true
@@ -1368,8 +1388,11 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		}
 	}
 	rebuilt := append(builtModules(buildOut.String()), ws.prepBuilt...)
+	if lakeFree {
+		rebuilt = append(ob.compiledModules(), ws.prepBuilt...)
+	}
 	consumerTimer.mark("lake build of the proof modules")
-	if ws.storeMods != nil {
+	if ws.storeMods != nil && !lakeFree {
 		ws.modstoreHarvest(ws.storeMods)
 		consumerTimer.mark("module store harvest")
 	}
@@ -1380,7 +1403,6 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	}
 	// The framework build (with the trusted Extracted/JanusTrusted) must be exactly as pinned
 	// before the untrusted build: no module replaced, corrupted, removed or added (R1).
-	pinned := pinSet{ws.pins}
 	if err := pinned.check("the consumer's Lake build"); err != nil {
 		failAll(err)
 		return
@@ -1408,7 +1430,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	// Per request: its module (and, when it failed, its own diagnostics). lake query runs the
 	// untrusted lakefile again, so the pins are re-checked after it.
 	for _, r := range reqs {
-		if r.Err != nil {
+		if r.Err != nil || lakeFree {
 			continue
 		}
 		out, all, err := ws.run("query", "--no-ansi", r.rel+":olean")
@@ -1439,9 +1461,19 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	if ob != nil {
 		// Lake's oleans (and the lakefile's last word) are ignored from here on: the audit, the replay and the pins
 		// use only the oleans janus compiled from the hashed source.
-		if err := ob.reset(); err != nil {
-			failAll(wsDiag(err))
-			return
+		if !ownPre {
+			if err := ob.reset(); err != nil {
+				failAll(wsDiag(err))
+				return
+			}
+			rels, order := map[string]string{}, []string{}
+			for _, r := range reqs {
+				if r.Err == nil {
+					rels[r.module] = r.rel
+					order = append(order, r.module)
+				}
+			}
+			ob.ensureAll(rels, order)
 		}
 		for _, r := range reqs {
 			if r.Err != nil {
@@ -1819,4 +1851,79 @@ func wsMatchesSnapshot(root string, files map[string][]byte) error {
 		}
 	}
 	return nil
+}
+
+// tryLakeFree is the Lake-free preparation of verifyGroup: Lake resolves the package (a sandboxed `lake env true`, after which
+// the framework build must still be as pinned), the proof modules are read off the paths, and janus compiles the closure. It
+// reports ok when every request's module was compiled; own is true when the compile ran (a failure then leaves its results,
+// and its errors, in ob for the Lake path, which reports a Lean error in the proof as it always did).
+func (ws *consumerWS) tryLakeFree(pkg *consumerPkg, ob *ownBuild, reqs []*consumerRequest, pinned pinSet) (ok, own bool, err error) {
+	_, out, rerr := ws.run("env", "true")
+	if rerr != nil || strings.Contains(out, "manifest out of date") || strings.Contains(out, "not in manifest") {
+		return false, false, nil // the Lake path reports it
+	}
+	if perr := pinned.check("the consumer's Lake package resolution"); perr != nil {
+		return false, false, perr
+	}
+	mods := map[*consumerRequest]string{}
+	for _, r := range reqs {
+		if r.Err != nil {
+			continue
+		}
+		m, found := ob.moduleOfRel(r.rel)
+		if !found {
+			return false, false, nil
+		}
+		if !leanLibCovers(pkg.Files, pkg.Lakefile, m) {
+			return false, false, nil // Lake decides whether it builds this module
+		}
+		mods[r] = m
+	}
+	if rerr := ob.reset(); rerr != nil {
+		return false, false, wsDiag(rerr)
+	}
+	rels, order := map[string]string{}, []string{}
+	for r, m := range mods {
+		rels[m] = r.rel
+		order = append(order, m)
+	}
+	sort.Strings(order)
+	ob.ensureAll(rels, order)
+	for _, m := range order {
+		if _, eerr := ob.ensure(m, rels[m]); eerr != nil {
+			return false, true, nil
+		}
+	}
+	for r, m := range mods {
+		r.module = m
+	}
+	return true, true, nil
+}
+
+// leanLibCovers reports whether Lake would build module m as part of a [[lean_lib]] of the lakefile.toml: the
+// module's first component is a library name. Libraries with explicit roots or globs are outside this check (false),
+// so the Lake path decides those.
+func leanLibCovers(files map[string][]byte, config, m string) bool {
+	pairs, ok := parseLakefileToml(string(files[config]))
+	if !ok {
+		return false
+	}
+	first, found := m, false
+	if i := strings.IndexByte(m, '.'); i >= 0 {
+		first = m[:i]
+	}
+	for _, p := range pairs {
+		if p.table != "lean_lib" {
+			continue
+		}
+		switch p.key {
+		case "roots", "globs":
+			return false
+		case "name":
+			if p.isStr && p.str == first {
+				found = true
+			}
+		}
+	}
+	return found
 }
