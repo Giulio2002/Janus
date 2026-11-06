@@ -63,7 +63,7 @@ row q4 blocked 'with the spec `growsliceSpec`' "$SPEC runtime.growslice"
 row p1 blocked 'about the runtime implementation `impl2`' 'but the statement runs `Extracted.program.link impl`'
 row s15 blocked 'about the runtime implementation `impl2`' 'but the statement runs `Extracted.program.link impl`'
 echo "== arm64: SpecBind.lean"
-run SpecBind.lean AppendOne g1 g2 g3 g4 g5 g6 g7 n1 d1 i1
+run SpecBind.lean AppendOne g1 g2 g3 g4 g5 g6 g7 g8 g9 n1 d1 i1
 row g1 Verified 'RtContract@runtime.growslice[growsliceSpec]'
 row g2 Verified 'RtLiveContract@runtime.growslice[growsliceSpec/growsliceLive]'
 row g3 blocked 'with the spec `growsliceBufSpec`' "$SPEC runtime.growsliceBuf"
@@ -71,6 +71,8 @@ row g4 blocked 'with the spec `concatstringSpec 3`' "$SPEC runtime.concatstring3
 row g5 blocked 'live data `growsliceBufLive`, which belong to the spec `growsliceBufSpec`'
 row g6 blocked 'with the spec `growsliceBufSpec`' "$SPEC runtime.growsliceBuf"
 row g7 Verified 'RtLiveContract@runtime.growslice[growsliceSpec/growsliceLive]'   # a proof-local alias of the allowed constant is expanded: the statement is the one with growsliceLive
+row g8 blocked 'with the spec `convTstringSpec`' "$SPEC runtime.convTstring"
+row g9 blocked 'live data `convT64Live`, which belong to the spec `convT64Spec`'
 row n1 blocked 'the contract of `runtime.newobject`, at the address of `runtime.growslice`'
 row d1 blocked 'which is not Extracted.program; object names are looked up in the extracted program only'
 row i1 blocked 'about the runtime implementation `impl2`'
