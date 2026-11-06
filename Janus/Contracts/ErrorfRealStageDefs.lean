@@ -28,4 +28,13 @@ def allocMem (m : Memory) (x13v2 n2 p A Lm e : Nat) : Memory :=
     (allocMem m x n p A Lm e).accessible a k w = m.accessible a k w := by
   simp [allocMem]
 
+/-- `allocMem` with the `err` itab word `iE` (read from the runtime's constants cell) in place of the toy constant. -/
+def allocMemC (m : Memory) (x13v2 n2 p A Lm e iE : Nat) : Memory :=
+  ((((m.writeLE (x13v2 - 1) 1 (48 - 3 * n2)).writeLE 4194304 8 (p + A)).writeLE p 8 (p + 32)).writeLE (p + 8) 8 Lm
+    |>.writeLE (p + 16) 8 iE).writeLE (p + 24) 8 e
+
+@[simp] theorem allocMemC_accessible (m : Memory) (x n p A Lm e iE a k : Nat) (w : Bool) :
+    (allocMemC m x n p A Lm e iE).accessible a k w = m.accessible a k w := by
+  simp [allocMemC]
+
 end Janus.Contracts.ErrorfRealStages

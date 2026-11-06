@@ -8,8 +8,8 @@ namespace Janus.Contracts.ErrorfRealStages
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Errorf Janus.Contracts
   Janus.Contracts.Toy Janus.Contracts.ErrorfMem Janus.Contracts.ErrorfRealFmt Janus.Contracts.ErrorfRealLoops
-open Janus.Contracts.AllocSat (toy A0 at0 link_at0 withCode)
-open Janus.Contracts.ErrorfRealCode (code)
+open Janus.Contracts.RelocArm64 (codeProg)
+open Janus.Contracts.ErrorfRealCode (code E0)
 
 set_option maxRecDepth 100000
 set_option maxHeartbeats 0
@@ -29,12 +29,12 @@ theorem stageB (s : State) (h30b : (s.regs 30).toNat < 2 ^ 48) (h30a : (s.regs 3
       R' 13 = BitVec.ofNat 64 (s.sp.toNat - 48 - (natBytes (absn v2)).length) →
       m' = putBytes (m.writeLE (x13v - 1) 1 (48 - 3 * n1)) (s.sp.toNat - 48 - (natBytes (absn v2)).length)
         (natBytes (absn v2)) →
-      ReachesRet (withCode code) (s.regs 30) { s with regs := R', flags := F', mem := m', pc := 0x100090#64 } Q) :
-    ReachesRet (withCode code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x100048#64 } Q := by
+      ReachesRet (codeProg E0 code) (s.regs 30) { s with regs := R', flags := F', mem := m', pc := 0x1000000000090#64 } Q) :
+    ReachesRet (codeProg E0 code) (s.regs 30) { s with regs := R, flags := F, mem := m, pc := 0x1000000000048#64 } Q := by
   obtain ⟨hP5, hP6, hP7, hP15, hP18, hP28, hP29, hP30⟩ := hP
   have hlen2 := natBytes_length_le (absn v2) 19 (by omega) (by have := natAbs_lt _ hv2; unfold absn; omega)
   have hlenp2 := natBytes_length_pos (absn v2)
-  janus_run [h9, h12, h13, hP30] until [0x100078]
+  janus_run [h9, h12, h13, hP30] until [0x1000000000078]
   have hx13 : x13v < 2 ^ 48 := by omega
   refine dig_n2 s h30b h30a (absn v2) _ _ _ (s.sp.toNat - 48) (by have := natAbs_lt _ hv2; unfold absn; omega) ?_ ?_
     (by simp [setReg, hP15]) (by simp [setReg, hP30]) (by omega) (by omega) ?_ _ ?_
