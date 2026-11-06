@@ -1275,6 +1275,27 @@ def isStaticAddr (env : Environment) (k : Expr) : Bool :=
       | none => false
   | _ => false
 
+/-- Is `k` exactly `Extracted.dataAddr.«name»` (imported from the `Extracted` module)? -/
+def isExtractedDataAddr (env : Environment) (k : Expr) (name : String) : Bool :=
+  match k.consumeMData with
+  | .const c _ =>
+      c == .str `Extracted.dataAddr name &&
+      match env.getModuleIdxFor? c with
+      | some idx => env.header.moduleNames[idx.toNat]? == some `Extracted
+      | none => false
+  | _ => false
+
+/-- The contract `ErrorfLive` (both ISAs): the type descriptors and itabs it names, as the argument positions of
+`tErr`, `iErr`, `tInt`, `iWrap` and the `Extracted.dataAddr` constants `janus extract --contract fmt.errorf` generates
+for them (the extractor checks the itabs pair `type:error` with the types and finds the descriptor of `int` by
+name). Another number would state the result of `fmt.errorf` with an itab or type the binary never uses. -/
+def errorfDataArgs : List (Nat × String) :=
+  [(4, "type:*errors.errorString"), (5, "go:itab.*errors.errorString,error"), (6, "type:int"),
+   (7, "go:itab.*fmt.wrapError,error")]
+
+def isErrorfLive (c : Name) : Bool :=
+  c == `Janus.Contracts.Errorf.ErrorfLive || c == `Janus.Contracts.ErrorfAmd64.ErrorfLive
+
 /-- The specs that take the address of `runtime.staticuint64s` (see `isStaticAddr`). -/
 def frameworkSpecsStatic : List Name := [`slicebytetostringSpec].map (`Janus.Contracts ++ ·)
 
@@ -1740,6 +1761,10 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
           if let some (want, isPrefix) := contractFunction? c then
             unless (if isPrefix then fn.startsWith want else fn == want) do
               return some s!"assumes the runtime contract {c}, the contract of `{want}`, at the address of `{fn}` (spec binding)"
+      if isErrorfLive c then
+        for (i, nm) in errorfDataArgs do
+          unless isExtractedDataAddr env args[i]! nm do
+            return some s!"assumes the runtime contract {c} for the argument `{(← Meta.ppExpr args[i]!).pretty 10000}` where it takes `Extracted.dataAddr.«{nm}»` (the address of that type descriptor or itab in the binary, generated and checked by `janus extract --contract fmt.errorf`): any other number states the result of fmt.errorf with a type or itab the binary does not use"
       for i in [0:doms.size] do
         let a := args[i]!.consumeMData
         if let some isSpec := frameworkConstParamType doms[i]! then
