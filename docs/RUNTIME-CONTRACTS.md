@@ -1464,6 +1464,19 @@ precondition. **Limit:** the witnessed instance is the format `%w` alone with `B
 text is empty): a witness for a message with bytes or `%d` verbs needs a copy loop and a decimal
 conversion in the toy stub and is not built. The `%d` and text clauses of `ErrorfPost` are therefore
 checked against the real `fmt.Errorf` (`JanusTests/Errorf.lean`) but have no machine-code witness.
+
+**Real-format satisfiability and placement (arm64: `ErrorfRealImpl`, `ErrorfRealLive`, `ErrorfRealSat`; amd64: `ErrorfRealSat64`).**
+For `"%w: have %d, want %d bytes"` the witness is a real stub (126 words, `scripts/errorf/gen_arm64.py`): two decimal
+loops, one bump allocation, three copy loops. `real_satisfiable` shows the contract and a state satisfying its whole
+precondition, with a message of any length and any `int` operands. The two itab words the stub stores
+(`iErr`, `iWrap`) are read from a two-word **constants cell** of the witness runtime (`ErrorfRealRt.errR`: the toy
+bump allocator plus the cell, fixed by the runtime invariant), so the stub is the same for every consumer.
+It is proven at the address `E0 = 2^48` and **moved to any placement** by the translation-invariance theorem
+`RelocArm64.summary_transport` (`ErrorfRealLive.errorf_live_at`: `ErrorfLive (P.link impl) a ...` for every program
+`P` that fetches the stub's words at `a` and has no code, stub or exit address there). The theorem needs a static
+check of the words (`CodeOK`: position-independent instruction classes, branch targets inside the stub, no write to
+`X30`) and a base address above every return address (`CallOK`: `X30 < 2^48`). Other live-contract stubs can use
+the same theorem.
 | `DeferOrder(x)` | `panic(x)` with three open-coded defers: the deferred calls run last to first (both ISAs) |
 | `DeferMix(n)` | a loop's heap records and open-coded defers on one frame, in order, with `deferreturn` (both ISAs) |
 | `GoexitDefer(n)` | `runtime.Goexit()` runs the deferred calls and unwinds past the frame; `recover()` finds no panic (both ISAs) |
