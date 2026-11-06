@@ -323,7 +323,7 @@ func TestConsumerModstoreAcrossFamilies(t *testing.T) {
 	needLeanSlow(t)
 	useTestCache(t)
 	verify := func(pkg, outdir, proof, thm string) *verifiedReport {
-		code, out, stderr := runJanus(t, "verify", outdir, "--proof", filepath.Join(pkg, proof), "--proof-root", pkg, "--theorem", thm, "--no-result-cache")
+		code, out, stderr := runJanus(t, "verify", outdir, "--proof", filepath.Join(pkg, proof), "--proof-root", pkg, "--theorem", thm, "--no-result-cache", "--keep-workspace") // the Lake path, where the module store works
 		if code != 0 {
 			t.Fatalf("%s: %d\n%s\n%s", thm, code, out, stderr)
 		}
@@ -446,7 +446,16 @@ func TestConsumerLakeFreeIgnoresLake(t *testing.T) {
 		}
 	}
 	code, out2, stderr := verify()
-	if code != 0 || out2 != out {
+	dropBuild := func(s string) string { // the Build line says what was reused, which differs on purpose
+		var keep []string
+		for _, l := range strings.Split(s, "\n") {
+			if !strings.Contains(l, "Build:") {
+				keep = append(keep, l)
+			}
+		}
+		return strings.Join(keep, "\n")
+	}
+	if code != 0 || dropBuild(out2) != dropBuild(out) {
 		t.Fatalf("with planted Lake output: %d\n%s\n%s\n(first run printed)\n%s", code, out2, stderr, out)
 	}
 	r2 := readReport(t, add)

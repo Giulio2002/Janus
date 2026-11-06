@@ -1874,6 +1874,9 @@ func (ws *consumerWS) tryLakeFree(pkg *consumerPkg, ob *ownBuild, reqs []*consum
 		if !found {
 			return false, false, nil
 		}
+		if !leanLibCovers(pkg.Files, pkg.Lakefile, m) {
+			return false, false, nil // Lake decides whether it builds this module
+		}
 		mods[r] = m
 	}
 	if rerr := ob.reset(); rerr != nil {
@@ -1895,4 +1898,32 @@ func (ws *consumerWS) tryLakeFree(pkg *consumerPkg, ob *ownBuild, reqs []*consum
 		r.module = m
 	}
 	return true, true, nil
+}
+
+// leanLibCovers reports whether Lake would build module m as part of a [[lean_lib]] of the lakefile.toml: the
+// module's first component is a library name. Libraries with explicit roots or globs are outside this check (false),
+// so the Lake path decides those.
+func leanLibCovers(files map[string][]byte, config, m string) bool {
+	pairs, ok := parseLakefileToml(string(files[config]))
+	if !ok {
+		return false
+	}
+	first, found := m, false
+	if i := strings.IndexByte(m, '.'); i >= 0 {
+		first = m[:i]
+	}
+	for _, p := range pairs {
+		if p.table != "lean_lib" {
+			continue
+		}
+		switch p.key {
+		case "roots", "globs":
+			return false
+		case "name":
+			if p.isStr && p.str == first {
+				found = true
+			}
+		}
+	}
+	return found
 }
