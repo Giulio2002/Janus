@@ -309,7 +309,7 @@ func TestConsumerModstoreAcrossFamilies(t *testing.T) {
 	needLeanSlow(t)
 	useTestCache(t)
 	verify := func(pkg, outdir, proof, thm string) *verifiedReport {
-		code, out, stderr := runJanus(t, "verify", outdir, "--proof", filepath.Join(pkg, proof), "--proof-root", pkg, "--theorem", thm)
+		code, out, stderr := runJanus(t, "verify", outdir, "--proof", filepath.Join(pkg, proof), "--proof-root", pkg, "--theorem", thm, "--no-result-cache")
 		if code != 0 {
 			t.Fatalf("%s: %d\n%s\n%s", thm, code, out, stderr)
 		}
