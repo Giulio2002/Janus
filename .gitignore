@@ -23,6 +23,7 @@ audit/round10/scratch-*/
 /janus
 examples/.print-proofs.*/
 audit/*/work-cache/
+audit/*/work-cache-*/
 audit/*/work-j1/
 __pycache__/
 *.pyc

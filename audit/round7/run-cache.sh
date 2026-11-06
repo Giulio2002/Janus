@@ -20,7 +20,7 @@ J="$root/audit/round7/bin/janus"; mkdir -p "$(dirname "$J")"
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
-W=audit/round7/work-cache; rm -rf "$W"; mkdir -p $W
+W=audit/round7/work-cache${R7C_WORK:+-$R7C_WORK}; rm -rf "$W"; mkdir -p $W
 C="$(mktemp -d "${TMPDIR:-/tmp}/janus-round7-cache.XXXXXX")"
 trap 'rm -rf "$C"' EXIT
 export JANUS_CACHE_DIR="$C"

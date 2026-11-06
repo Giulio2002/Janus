@@ -22,7 +22,7 @@ if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 [ -d artifacts/amd64/HexDigit ] && [ -d artifacts/amd64/Add ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
-W=audit/round8/work/rows; rm -rf "$W"; mkdir -p $W
+W=audit/round8/work/rows${R8_ROWS:+-$R8_ROWS}; rm -rf "$W"; mkdir -p $W
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-round8.XXXXXX")" || exit 1   # 0700: the caches' parent
 trap 'rm -rf "$T"' EXIT
 mkdir -m 700 "$T/fresh"; export JANUS_CACHE_DIR="$T/fresh"
