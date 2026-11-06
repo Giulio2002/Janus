@@ -208,6 +208,7 @@ type ownBuild struct {
 	busy     map[string]bool
 	hits     int
 	compiled int
+	names    []string   // the modules janus compiled (not the store's), under mu
 	mu       sync.Mutex // guards done, busy, hits, compiled, errs while modules compile in parallel (ensureAll)
 	errs     map[string]error
 }
@@ -376,6 +377,7 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 		ownCompiles.Add(1)
 		ob.mu.Lock()
 		ob.compiled++
+		ob.names = append(ob.names, m)
 		ob.mu.Unlock()
 		lp := ob.leanPath()
 		o, err := runLeanProtected(ob.ws.sb, ob.ws.tc, work, nil, ob.ws.protected(true), lp, argv...)
@@ -709,4 +711,36 @@ func oleanStorePut(key string, data []byte) {
 	}
 	e, _ := json.Marshal(oleanEntry{Key: key, Sha: sha, MAC: oleanMAC(hk, key, sha)})
 	_ = writeFileAtomic(filepath.Join(dir, key+".json"), e)
+}
+
+// moduleOfRel is the module whose source is the file rel of the consumer package (a hashed file under one of its
+// source directories), if there is exactly one such module.
+func (ob *ownBuild) moduleOfRel(rel string) (string, bool) {
+	p := ob.pkgs[0]
+	if !strings.HasSuffix(rel, ".lean") {
+		return "", false
+	}
+	for _, sd := range p.srcDirs {
+		base := sd
+		if base != "" {
+			base += "/"
+		}
+		if !strings.HasPrefix(rel, base) {
+			continue
+		}
+		m := strings.ReplaceAll(strings.TrimSuffix(strings.TrimPrefix(rel, base), ".lean"), "/", ".")
+		if hp, hrel, _, n := ob.locate(m); n == 1 && hp == p && hrel == rel {
+			return m, true
+		}
+	}
+	return "", false
+}
+
+// compiledModules are the modules janus compiled itself in this build (the others came from the store), sorted.
+func (ob *ownBuild) compiledModules() []string {
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
+	out := append([]string{}, ob.names...)
+	sort.Strings(out)
+	return out
 }

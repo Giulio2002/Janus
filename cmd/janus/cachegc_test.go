@@ -758,6 +758,9 @@ func TestCacheGCConcurrentVerify(t *testing.T) {
 	run1 := func(args ...string) (int, string) {
 		cmd := exec.Command(bin, args...)
 		cmd.Env = env
+		// An empty reader, not the nil Stdin (which makes os/exec open /dev/null in this process, and that open failed once in
+		// the gate with ENOENT while the collector loop ran: "cache gc: open /dev/null: no such file or directory")
+		cmd.Stdin = strings.NewReader("")
 		out, err := cmd.CombinedOutput()
 		if ee, ok := err.(*exec.ExitError); ok {
 			return ee.ExitCode(), string(out)
