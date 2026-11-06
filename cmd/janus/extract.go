@@ -520,6 +520,13 @@ func (x *Extraction) contractTarget(m *contractMatcher, seen map[uint64]bool, g 
 			}
 			x.ContractData = append(x.ContractData, ds)
 		}
+		if errorfDataSyms[g.Name] {
+			ds, err := x.Bin.checkErrorfData(g.Name)
+			if err != nil {
+				return true, err
+			}
+			x.ContractData = append(x.ContractData, ds...)
+		}
 		x.Contracts = append(x.Contracts, c)
 	}
 	return true, nil
