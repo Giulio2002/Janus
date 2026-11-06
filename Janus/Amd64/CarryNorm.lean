@@ -1,5 +1,6 @@
 import Lean
 import Janus.Amd64.Exec
+import Janus.Arm64.CarryNorm
 import Janus.Tactic.Carry
 import Janus.Arm64.MemoryLemmas
 
@@ -60,6 +61,22 @@ end Janus.Amd64
 
 namespace Janus.Tactic
 
+open Lean Meta Elab Tactic in
+/-- `janus_bounds_only`: clear every hypothesis except the bound facts `a < n`, `a ≤ n` (`n` a numeral), so that
+`omega` on a carry-sized side condition (`A < 2 * 2^64` for a sum of two limbs and a carry) sees only the ranges of its
+atoms and not the branch conditions, the equations of the run or their disjunctions. -/
+elab "janus_bounds_only" : tactic => do
+  let mut g ← getMainGoal
+  for d in ← g.withContext getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ← g.withContext (isProp ty) do continue
+    let isBound := match ty.getAppFnArgs with
+      | (``LT.lt, #[t, _, _, b]) | (``LE.le, #[t, _, _, b]) => t.isConstOf ``Nat && (Janus.Carry.evalLit b).isSome
+      | _ => false
+    unless isBound do g ← g.tryClear d.fvarId
+  replaceMainGoal [g]
+
 /-- Side conditions of the `janus_carry_simp` lemmas, closed without `omega` (which would read the whole
 context of a run): a hypothesis, the range of a memory read or a `BitVec.toNat`, a truncated
 subtraction or a remainder bounded by its operands, a flag. -/
@@ -71,12 +88,15 @@ macro "janus_carry_disch" : tactic =>
     | exact Nat.mod_lt _ (by decide)
     | exact Nat.lt_of_lt_of_le (Janus.Arm64.Memory.readLE_lt _ _ _) (by decide)
     | exact Nat.lt_of_lt_of_le (BitVec.isLt _) (by decide)
-    | exact Nat.lt_of_lt_of_le (BitVec.isLt _) (Nat.le_refl _))
+    | exact Nat.lt_of_lt_of_le (BitVec.isLt _) (Nat.le_refl _)
+    | (janus_bounds_only; omega))
 
 /-- `janus_carry_simp` rewrites the borrow chains of the goal into floors and remainders (see
 `Janus.Amd64.CarryNorm`); `janus_carry_simp at h₁ h₂ ⊢` or `at *` for hypotheses. Fails if nothing
 changes. Opt-in: `janus64_run` does not use it. -/
 macro "janus_carry_simp" loc:(Lean.Parser.Tactic.location)? : tactic =>
-  `(tactic| simp (disch := janus_carry_disch) only [Janus.Amd64.subFlags_fst_toNat_ofNat, Janus.Amd64.borrow64_toNat, Janus.Amd64.borrow64_in_toNat, Nat.reducePow] $[$loc]?)
+  `(tactic| simp (disch := janus_carry_disch) only [Janus.Amd64.subFlags_fst_toNat_ofNat, Janus.Amd64.borrow64_toNat, Janus.Amd64.borrow64_in_toNat, Nat.reducePow,
+      Janus.Arm64.addWithCarry_fst_toNat, Janus.Arm64.addWithCarry_c, Janus.Arm64.dec_le_div, Janus.Arm64.dec_add_div,
+      Janus.Arm64.ngc_flag, Janus.Arm64.flag_mod, Janus.Arm64.sbc_num, Janus.Arm64.not_sub_flag, Janus.Arm64.not_flag, Bool.toNat_false] $[$loc]?)
 
 end Janus.Tactic

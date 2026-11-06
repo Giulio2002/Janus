@@ -37,6 +37,14 @@ theorem mod_cases3 (S E M : Nat) (h : S = E ∨ S = E + M ∨ S = E + 2 * M) (hE
   · subst h; rw [Nat.add_comm, Nat.add_mod_left]; exact Nat.mod_eq_of_lt hE
   · subst h; rw [Nat.add_comm, Nat.mul_comm, Nat.mul_add_mod]; exact Nat.mod_eq_of_lt hE
 
+/-- `S % M = E` from `S = E + k M` for `k ≤ 3` (arm64 `AddMod`: both operands reduced once, then a final reduction). -/
+theorem mod_cases4 (S E M : Nat) (h : S = E ∨ S = E + M ∨ S = E + 2 * M ∨ S = E + 3 * M) (hE : E < M) : S % M = E := by
+  rcases h with h | h | h | h
+  · subst h; exact Nat.mod_eq_of_lt hE
+  · subst h; rw [Nat.add_comm, Nat.add_mod_left]; exact Nat.mod_eq_of_lt hE
+  · subst h; rw [Nat.add_comm, Nat.mul_comm, Nat.mul_add_mod]; exact Nat.mod_eq_of_lt hE
+  · subst h; rw [Nat.add_comm, Nat.mul_comm, Nat.mul_add_mod]; exact Nat.mod_eq_of_lt hE
+
 theorem nf_eq (a b Pa Na Pb Nb : Nat) (ha : a + Na = Pa) (hb : b + Nb = Pb) :
     (a = b) = (Pa + Nb = Pb + Na) := propext (by omega)
 theorem nf_le (a b Pa Na Pb Nb : Nat) (ha : a + Na = Pa) (hb : b + Nb = Pb) :
