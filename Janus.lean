@@ -209,5 +209,6 @@ import Janus.Contracts.ErrorfRealLoops64
 import Janus.Contracts.ErrorfRealStageDefs64
 import Janus.Contracts.ErrorfRealStage64A
 import Janus.Contracts.ErrorfRealStage64B
+import Janus.Contracts.ErrorfRealStage64C
 import Janus.Contracts.ErrorfSat
 import Janus.Contracts.ErrorfSatAmd64
