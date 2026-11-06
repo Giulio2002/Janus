@@ -42,6 +42,13 @@ def fmtAddr : Nat :=
   adrpLdTarget (Extracted.entry + 0x60) (segWord Extracted.program "example.com/basic.ErrWrap" 24)
     (segWord Extracted.program "example.com/basic.ErrWrap" 25) 0
 
+/-- Addresses of the binary's symbols, evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "adrFmt" : term => `(janus_eval% fmtAddr)
+local macro "adrEvData" : term => `(janus_eval% evData)
+local macro "adrTInt" : term => `(janus_eval% tInt)
+local macro "adrQ1" : term => `(janus_eval% Extracted.dataAddr.«.rodata#4de38626»)
+local macro "adrQ2" : term => `(janus_eval% Extracted.dataAddr.«.rodata#df6f96c5»)
+
 /-- The `errBadLen` variable holds its link-time image: the itab word and the data word (the static errorString whose
 header `(text, length)` is in writable `.data`), a short readable text. -/
 def ErrHolds (m : Janus.Arm64.Memory) (tp tl : Nat) : Prop :=
@@ -92,85 +99,85 @@ theorem correctness (impl : List Segment) (R : RtInv)
   simp only [ev, evType, evData, Extracted.dataAddr.«example.com/basic.errBadLen»,
     Extracted.dataAddr.«example.com/basic.errBadLen→type», Extracted.dataAddr.«example.com/basic.errBadLen→data»] at hv1 hv2 hv3 hv4 hv5 hv6 hevO hevDO hevW hevDW
   rw [hFA] at hok
-  have hO2 : Outside 983979 256 R.rt := hdataO _ (List.getElem_mem (l := Extracted.program.data) (n := 2) (by decide))
-  have hO3 : Outside 1012432 80 R.rt := hdataO _ (List.getElem_mem (l := Extracted.program.data) (n := 3) (by decide))
+  have hO2 : Outside adrFmt 256 R.rt := hdataO _ (List.getElem_mem (l := Extracted.program.data) (n := 2) (by decide))
+  have hO3 : Outside adrQ1 80 R.rt := hdataO _ (List.getElem_mem (l := Extracted.program.data) (n := 3) (by decide))
   have hsp112 : (s.sp - 112#64).toNat = s.sp.toNat - 112 := by
     rw [BitVec.toNat_sub_of_le (by simp only [BitVec.le_def, BitVec.toNat_ofNat]; omega)]; rfl
   have hsp56 : (s.sp - 56#64).toNat = s.sp.toNat - 56 := by
     rw [BitVec.toNat_sub_of_le (by simp only [BitVec.le_def, BitVec.toNat_ofNat]; omega)]; rfl
   have facts : ∀ M : Memory, MemFrame s.mem M [(s.sp.toNat - 4208, s.sp.toNat)] →
-      M.readLE (s.sp.toNat - 56) 8 = 864000 → M.readLE (s.sp.toNat - 48) 8 = 1790704 →
-      M.readLE (s.sp.toNat - 40) 8 = 837696 → M.readLE (s.sp.toNat - 32) 8 = 1012432 →
-      M.readLE (s.sp.toNat - 24) 8 = 837696 → M.readLE (s.sp.toNat - 16) 8 = 1012440 →
-      ArgsOK (Env.mk tErr iErr tInt iWrap) 26 fmtNum 4294967296 M 983979 26 (s.sp.toNat - 56) 3 3 ∧
-      errorfReads M 983979 26 (s.sp.toNat - 56) =
-        [(983979, 26), (s.sp.toNat - 56, 48), (1790704, 16), (tp, tl), (1012432, 8), (1012440, 8)] ∧
-      msgOf M 983979 26 (s.sp.toNat - 56) = strBytes s.mem tp tl ++ [58, 32, 104, 97, 118, 101, 32, 54, 52, 44, 32, 119, 97, 110, 116, 32, 51, 50, 32, 98, 121, 116, 101, 115] ∧
-      errorfCost M 983979 26 (s.sp.toNat - 56) = 2 * (tl + 24) + 48 ∧ operandD M (s.sp.toNat - 56) 0 = 1790704 := by
+      M.readLE (s.sp.toNat - 56) 8 = 864000 → M.readLE (s.sp.toNat - 48) 8 = adrEvData →
+      M.readLE (s.sp.toNat - 40) 8 = adrTInt → M.readLE (s.sp.toNat - 32) 8 = adrQ1 →
+      M.readLE (s.sp.toNat - 24) 8 = adrTInt → M.readLE (s.sp.toNat - 16) 8 = adrQ2 →
+      ArgsOK (Env.mk tErr iErr tInt iWrap) 26 fmtNum 4294967296 M adrFmt 26 (s.sp.toNat - 56) 3 3 ∧
+      errorfReads M adrFmt 26 (s.sp.toNat - 56) =
+        [(adrFmt, 26), (s.sp.toNat - 56, 48), (adrEvData, 16), (tp, tl), (adrQ1, 8), (adrQ2, 8)] ∧
+      msgOf M adrFmt 26 (s.sp.toNat - 56) = strBytes s.mem tp tl ++ [58, 32, 104, 97, 118, 101, 32, 54, 52, 44, 32, 119, 97, 110, 116, 32, 51, 50, 32, 98, 121, 116, 101, 115] ∧
+      errorfCost M adrFmt 26 (s.sp.toNat - 56) = 2 * (tl + 24) + 48 ∧ operandD M (s.sp.toNat - 56) 0 = adrEvData := by
     intro M hf' hA0 hA1 hA2 hA3 hA4 hA5
     have hrd : ∀ a n, Outside a n [(s.sp.toNat - 4208, s.sp.toNat)] → M.readLE a n = s.mem.readLE a n :=
       fun a n h => hf'.readLE a n h
     have hacc : ∀ a n w, M.accessible a n w = s.mem.accessible a n w := fun a n w => hf'.accessible a n w
     have hW1 : ∀ a n, a + n ≤ s.sp.toNat - 4208 ∨ s.sp.toNat ≤ a → Outside a n [(s.sp.toNat - 4208, s.sp.toNat)] := by
       intro a n h; simp only [outside_cons, outside_nil, and_true]; omega
-    have hfm : M.readLE 983979 26 = fmtNum := by
-      rw [hrd _ _ (hW1 _ _ (by omega)), h_rodata 983979 26 (by decide +kernel)]; decide +kernel
-    have hv64 : M.readLE 1012432 8 = 64 := by
-      rw [hrd _ _ (hW1 _ _ (by omega)), h_rodata 1012432 8 (by decide +kernel)]; decide +kernel
-    have hv32 : M.readLE 1012440 8 = 32 := by
-      rw [hrd _ _ (hW1 _ _ (by omega)), h_rodata 1012440 8 (by decide +kernel)]; decide +kernel
-    have hfR : Readable M 983979 26 :=
+    have hfm : M.readLE adrFmt 26 = fmtNum := by
+      rw [hrd _ _ (hW1 _ _ (by omega)), h_rodata adrFmt 26 (by decide +kernel)]; decide +kernel
+    have hv64 : M.readLE adrQ1 8 = 64 := by
+      rw [hrd _ _ (hW1 _ _ (by omega)), h_rodata adrQ1 8 (by decide +kernel)]; decide +kernel
+    have hv32 : M.readLE adrQ2 8 = 32 := by
+      rw [hrd _ _ (hW1 _ _ (by omega)), h_rodata adrQ2 8 (by decide +kernel)]; decide +kernel
+    have hfR : Readable M adrFmt 26 :=
       ⟨by omega, fun _ => by rw [hacc]; exact Memory.accessible_mono _ h_data2 (by omega) (by omega)⟩
     have hsR : Readable M (s.sp.toNat - 56) 48 :=
       ⟨by omega, fun _ => by rw [hacc]; exact Memory.accessible_weaken _ (Memory.accessible_mono _ hw4 (by omega) (by omega))⟩
-    have heR : Readable M 1790704 16 := ⟨by omega, fun _ => by rw [hacc]; exact hv4⟩
+    have heR : Readable M adrEvData 16 := ⟨by omega, fun _ => by rw [hacc]; exact hv4⟩
     have htR : Readable M tp tl :=
       ⟨htpb, fun hpos => by rw [hacc]; rcases htx with h | h; omega; exact h⟩
-    have hq1R : Readable M 1012432 8 :=
+    have hq1R : Readable M adrQ1 8 :=
       ⟨by omega, fun _ => by rw [hacc]; exact Memory.accessible_mono _ h_data3 (by omega) (by omega)⟩
-    have hq2R : Readable M 1012440 8 :=
+    have hq2R : Readable M adrQ2 8 :=
       ⟨by omega, fun _ => by rw [hacc]; exact Memory.accessible_mono _ h_data3 (by omega) (by omega)⟩
-    have hA1' : M.readLE (s.sp.toNat - 56 + 8) 8 = 1790704 := by
+    have hA1' : M.readLE (s.sp.toNat - 56 + 8) 8 = adrEvData := by
       rw [show s.sp.toNat - 56 + 8 = s.sp.toNat - 48 by omega]; exact hA1
-    have hA2' : M.readLE (s.sp.toNat - 56 + 16) 8 = 837696 := by
+    have hA2' : M.readLE (s.sp.toNat - 56 + 16) 8 = adrTInt := by
       rw [show s.sp.toNat - 56 + 16 = s.sp.toNat - 40 by omega]; exact hA2
-    have hA3' : M.readLE (s.sp.toNat - 56 + 24) 8 = 1012432 := by
+    have hA3' : M.readLE (s.sp.toNat - 56 + 24) 8 = adrQ1 := by
       rw [show s.sp.toNat - 56 + 24 = s.sp.toNat - 32 by omega]; exact hA3
-    have hA4' : M.readLE (s.sp.toNat - 56 + 32) 8 = 837696 := by
+    have hA4' : M.readLE (s.sp.toNat - 56 + 32) 8 = adrTInt := by
       rw [show s.sp.toNat - 56 + 32 = s.sp.toNat - 24 by omega]; exact hA4
-    have hA5' : M.readLE (s.sp.toNat - 56 + 40) 8 = 1012440 := by
+    have hA5' : M.readLE (s.sp.toNat - 56 + 40) 8 = adrQ2 := by
       rw [show s.sp.toNat - 56 + 40 = s.sp.toNat - 16 by omega]; exact hA5
-    have htp' : M.readLE 1790704 8 = tp := by rw [hrd _ _ (hW1 _ _ (by omega))]; exact hv5
-    have htl' : M.readLE (1790704 + 8) 8 = tl := by rw [hrd _ _ (hW1 _ _ (by omega))]; exact hv6
-    have hargs := ErrorfConsumer.argsOK_real (Env.mk tErr iErr tInt iWrap) 4294967296 M 983979 (s.sp.toNat - 56)
-      1790704 tp tl 1012432 1012440 (by decide) hfm hfR hsR hA0 hA1' (by decide) heR htp' htl' htR hA2' hA3' (by decide)
+    have htp' : M.readLE adrEvData 8 = tp := by rw [hrd _ _ (hW1 _ _ (by omega))]; exact hv5
+    have htl' : M.readLE (adrEvData + 8) 8 = tl := by rw [hrd _ _ (hW1 _ _ (by omega))]; exact hv6
+    have hargs := ErrorfConsumer.argsOK_real (Env.mk tErr iErr tInt iWrap) 4294967296 M adrFmt (s.sp.toNat - 56)
+      adrEvData tp tl adrQ1 adrQ2 (by decide) hfm hfR hsR hA0 hA1' (by decide) heR htp' htl' htR hA2' hA3' (by decide)
       hq1R hA4' hA5' (by decide) hq2R (by omega)
-    have hn : nDec (segsOf M 983979 26) = 2 := by rw [segsOf_real _ _ _ rfl hfm]; decide
+    have hn : nDec (segsOf M adrFmt 26) = 2 := by rw [segsOf_real _ _ _ rfl hfm]; decide
     have hstr : strBytes M tp tl = strBytes s.mem tp tl := by
       apply strBytes_congr
       intro i hi
       exact hf'.bytes (hW1 _ _ (by omega))
-    have hmsg : msgOf M 983979 26 (s.sp.toNat - 56) = strBytes s.mem tp tl ++ [58, 32, 104, 97, 118, 101, 32, 54, 52, 44, 32, 119, 97, 110, 116, 32, 51, 50, 32, 98, 121, 116, 101, 115] := by
+    have hmsg : msgOf M adrFmt 26 (s.sp.toNat - 56) = strBytes s.mem tp tl ++ [58, 32, 104, 97, 118, 101, 32, 54, 52, 44, 32, 119, 97, 110, 116, 32, 51, 50, 32, 98, 121, 116, 101, 115] := by
       rw [msgOf_real _ _ _ _ rfl hfm, hA1', htp', htl', hA3', hA5', hv64, hv32, hstr]
       have d64 : decBytes (toSigned 64) = [54, 52] := by decide
       have d32 : decBytes (toSigned 32) = [51, 50] := by decide
       rw [d64, d32]; rfl
-    have hmlen : (msgOf M 983979 26 (s.sp.toNat - 56)).length = tl + 24 := by
+    have hmlen : (msgOf M adrFmt 26 (s.sp.toNat - 56)).length = tl + 24 := by
       rw [hmsg]; simp [strBytes]
-    have hcost : errorfCost M 983979 26 (s.sp.toNat - 56) = 2 * (tl + 24) + 48 := by
+    have hcost : errorfCost M adrFmt 26 (s.sp.toNat - 56) = 2 * (tl + 24) + 48 := by
       unfold errorfCost; rw [hmlen, if_neg (by omega)]; simp only [wrapBytes]; omega
-    have hreads : errorfReads M 983979 26 (s.sp.toNat - 56) =
-        [(983979, 26), (s.sp.toNat - 56, 48), (1790704, 16), (tp, tl), (1012432, 8), (1012440, 8)] := by
+    have hreads : errorfReads M adrFmt 26 (s.sp.toNat - 56) =
+        [(adrFmt, 26), (s.sp.toNat - 56, 48), (adrEvData, 16), (tp, tl), (adrQ1, 8), (adrQ2, 8)] := by
       unfold errorfReads
       rw [hn]
       simp [operandD, hA1', htp', htl', hA3', hA5', List.range_succ]
     exact ⟨hargs, hreads, hmsg, hcost, by unfold operandD; exact hA1'⟩
   have key : ∀ S : State, MemFrame s.mem S.mem [(s.sp.toNat - 4208, s.sp.toNat)] → S.regs 28 = s.regs 28 →
       S.sp.toNat + 112 = s.sp.toNat → (S.regs 30).toNat % 4 = 0 → (S.regs 30).toNat < 2 ^ 48 →
-      S.regs 0 = 983979#64 → S.regs 1 = 26#64 → S.regs 2 = s.sp - 56#64 → S.regs 3 = 3#64 → S.regs 4 = 3#64 →
-      S.mem.readLE (s.sp.toNat - 56) 8 = 864000 → S.mem.readLE (s.sp.toNat - 48) 8 = 1790704 →
-      S.mem.readLE (s.sp.toNat - 40) 8 = 837696 → S.mem.readLE (s.sp.toNat - 32) 8 = 1012432 →
-      S.mem.readLE (s.sp.toNat - 24) 8 = 837696 → S.mem.readLE (s.sp.toNat - 16) 8 = 1012440 →
+      S.regs 0 = (BitVec.ofNat 64 adrFmt) → S.regs 1 = 26#64 → S.regs 2 = s.sp - 56#64 → S.regs 3 = 3#64 → S.regs 4 = 3#64 →
+      S.mem.readLE (s.sp.toNat - 56) 8 = 864000 → S.mem.readLE (s.sp.toNat - 48) 8 = adrEvData →
+      S.mem.readLE (s.sp.toNat - 40) 8 = adrTInt → S.mem.readLE (s.sp.toNat - 32) 8 = adrQ1 →
+      S.mem.readLE (s.sp.toNat - 24) 8 = adrTInt → S.mem.readLE (s.sp.toNat - 16) 8 = adrQ2 →
       (CallOK S 4096 5 ∧ StackRoom S 4096 5 ∧
         ArgsOK (Env.mk tErr iErr tInt iWrap) 26 fmtNum 4294967296 S.mem (S.regs 0).toNat (S.regs 1).toNat
           (S.regs 2).toNat (S.regs 3).toNat (S.regs 4).toNat ∧
@@ -181,15 +188,15 @@ theorem correctness (impl : List Segment) (R : RtInv)
           (errorfCost S.mem (S.regs 0).toNat (S.regs 1).toNat (S.regs 2).toNat) (S.regs 28).toNat S.mem
           (calleeStack S 4096 5)) := by
     intro S hf' hg hsp h30a h30b h0 h1 h2 h3 h4 hA0 hA1 hA2 hA3 hA4 hA5
-    have e0 : (S.regs 0).toNat = 983979 := by rw [h0]; rfl
+    have e0 : (S.regs 0).toNat = adrFmt := by rw [h0]; rfl
     have e1 : (S.regs 1).toNat = 26 := by rw [h1]; rfl
     have e2 : (S.regs 2).toNat = s.sp.toNat - 56 := by rw [h2]; exact hsp56
     have e3 : (S.regs 3).toNat = 3 := by rw [h3]; rfl
     have e4 : (S.regs 4).toNat = 3 := by rw [h4]; rfl
     rw [e0, e1, e2, e3, e4]
     obtain ⟨hargs, hreads, hmsg, hcosteq, hop⟩ := facts S.mem hf' hA0 hA1 hA2 hA3 hA4 hA5
-    have hc := call_pre R L bud (errorfCost S.mem 983979 26 (s.sp.toNat - 56))
-      (Extracted.program.contractAddr "fmt.errorf") [983979, 26, s.sp.toNat - 56, 3, 3]
+    have hc := call_pre R L bud (errorfCost S.mem adrFmt 26 (s.sp.toNat - 56))
+      (Extracted.program.contractAddr "fmt.errorf") [adrFmt, 26, s.sp.toNat - 56, 3, 3]
       (s := s) (S := S) (lo := s.sp.toNat - 4208) (hi := s.sp.toNat) (stack := 4096) (nargs := 5) (fr := 112)
       hg1 hg2 (by omega) hgo (hf'.widen R.rt) hg hsp (by omega) h30a h30b (by decide) (by omega) (by omega) (by omega) ha4
       (by rw [show s.sp.toNat - (s.sp.toNat - 4208) = 4208 + 0 by omega]; exact hw4) hwrt hwL hok
@@ -217,12 +224,12 @@ theorem correctness (impl : List Segment) (R : RtInv)
       · exact Or.inr (Or.inl (Outside.of_sub hO3 (by omega) (by omega)))
   have post_facts : ∀ (M m1 : Memory), MemFrame M m1 (R.rt ++ [(s.sp.toNat - 112 - 4096, s.sp.toNat - 112 - 8), (s.sp.toNat - 112 + 8, s.sp.toNat - 112 + 8 + 8 * 5)]) →
       MemFrame s.mem M [(s.sp.toNat - 4208, s.sp.toNat)] →
-      M.readLE (s.sp.toNat - 56) 8 = 864000 → M.readLE (s.sp.toNat - 48) 8 = 1790704 →
-      M.readLE (s.sp.toNat - 40) 8 = 837696 → M.readLE (s.sp.toNat - 32) 8 = 1012432 →
-      M.readLE (s.sp.toNat - 24) 8 = 837696 → M.readLE (s.sp.toNat - 16) 8 = 1012440 →
+      M.readLE (s.sp.toNat - 56) 8 = 864000 → M.readLE (s.sp.toNat - 48) 8 = adrEvData →
+      M.readLE (s.sp.toNat - 40) 8 = adrTInt → M.readLE (s.sp.toNat - 32) 8 = adrQ1 →
+      M.readLE (s.sp.toNat - 24) 8 = adrTInt → M.readLE (s.sp.toNat - 16) 8 = adrQ2 →
       M.readLE (s.sp.toNat - 120) 8 = (s.regs 29).toNat → M.readLE (s.sp.toNat - 112) 8 = ret →
       LiveFrame M m1 L [] → ∀ a b : Nat,
-      ErrorfPost (Env.mk tErr iErr tInt iWrap) R M 983979 26 (s.sp.toNat - 56) [(s.sp.toNat - 112 - 4096, s.sp.toNat - 112 - 8), (s.sp.toNat - 112 + 8, s.sp.toNat - 112 + 8 + 8 * 5)] L bud (s.regs 28).toNat a b m1 →
+      ErrorfPost (Env.mk tErr iErr tInt iWrap) R M adrFmt 26 (s.sp.toNat - 56) [(s.sp.toNat - 112 - 4096, s.sp.toNat - 112 - 8), (s.sp.toNat - 112 + 8, s.sp.toNat - 112 + 8 + 8 * 5)] L bud (s.regs 28).toNat a b m1 →
       m1.readLE (s.sp.toNat - 120) 8 = (s.regs 29).toNat ∧ m1.readLE (s.sp.toNat - 112) 8 = ret ∧
         m1.accessible (s.sp.toNat - 120) 8 false = true ∧ m1.accessible (s.sp.toNat - 112) 8 false = true ∧
         a = iWrap ∧ b + 32 ≤ 2 ^ 48 ∧ m1.accessible b 32 true = true ∧ m1.readLE (b + 8) 8 = tl + 24 ∧
@@ -251,7 +258,7 @@ theorem correctness (impl : List Segment) (R : RtInv)
       exact h30
     have hacc : ∀ a n w, m1.accessible a n w = s.mem.accessible a n w := fun a n w => by
       rw [hfr.accessible, hMF.accessible]
-    have hmlen : (msgOf M 983979 26 (s.sp.toNat - 56)).length = tl + 24 := by
+    have hmlen : (msgOf M adrFmt 26 (s.sp.toNat - 56)).length = tl + 24 := by
       rw [hmsgM]; simp [strBytes]
     refine ⟨hs29, hs30, ?_, ?_, hiw, ?_, ?_, ?_, ?_, ?_, ?_, hfresh, hinr, ?_, ?_, ?_⟩
     · rw [hacc]; exact Memory.accessible_weaken _ (Memory.accessible_mono _ hw4 (by omega) (by omega))
@@ -315,7 +322,7 @@ open Janus.Contracts.Toy Janus.Contracts.ErrorfRealRt
 def sp0 : Nat := 0x200000
 def g0 : Nat := 0x300000
 def retA : Nat := 0x1000
-def textAddr : Nat := 0x1b5300
+def textAddr : Nat := ev + 0x30
 def txtNum : Nat := 493273389536941829284194
 
 /-- The byte of the program's static data at `a`. -/
