@@ -9,7 +9,7 @@
 #
 #   scripts/check-merge.sh [-j N] [--lanes N] [any other scripts/gate.sh option]
 #
-#   -j N       items at once in the example pool and the gate's own pool (default $JANUS_JOBS, else 4); the
+#   -j N       items at once in the example pool and the gate's own pool (default $JANUS_JOBS, else 8); the
 #              go test shards and the audit lanes scale with it (docs/TESTING.md "The gate driver")
 #   --lanes N  lanes at once (default N + 3: the pool and N+2 others)
 #
@@ -21,7 +21,10 @@
 set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
-jobs_n="${JANUS_JOBS:-4}"
+jobs_n="${JANUS_JOBS:-8}"
+# memory stays admitted by the pools (MemAvailable never below this floor + one item), measured at -j 8 alongside another
+# full gate: peak 85.7 GiB, MemAvailable never below 133 GiB
+export JANUS_GATE_MEM_FLOOR_GIB="${JANUS_GATE_MEM_FLOOR_GIB:-60}"
 lanes_n=""
 args=()
 while [ $# -gt 0 ]; do
