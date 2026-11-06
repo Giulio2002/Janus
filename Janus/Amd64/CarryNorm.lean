@@ -88,7 +88,15 @@ macro "janus_carry_disch" : tactic =>
     | exact Nat.mod_lt _ (by decide)
     | exact Nat.lt_of_lt_of_le (Janus.Arm64.Memory.readLE_lt _ _ _) (by decide)
     | exact Nat.lt_of_lt_of_le (BitVec.isLt _) (by decide)
-    | exact Nat.lt_of_lt_of_le (BitVec.isLt _) (Nat.le_refl _)
+    | exact Nat.lt_of_lt_of_le (BitVec.isLt _) (Nat.le_refl _))
+
+/-- `janus_carry_disch` and, as the last resort, `omega` on the bound facts alone (`janus_bounds_only`): for the
+arm64 vocabulary of `janus_carry_simp_b`. It is a separate discharger because proving more side conditions makes the
+amd64 borrow lemmas fire on some occurrences of a borrow and not on others (Fv256 `RecipG`, 3c0c6f9a), so
+`janus_carry_simp` keeps the discharger it always had. -/
+macro "janus_carry_disch_b" : tactic =>
+  `(tactic| first
+    | janus_carry_disch
     | (janus_bounds_only; omega))
 
 /-- `janus_carry_simp` rewrites the borrow chains of the goal into floors and remainders (see
@@ -96,6 +104,13 @@ macro "janus_carry_disch" : tactic =>
 changes. Opt-in: `janus64_run` does not use it. -/
 macro "janus_carry_simp" loc:(Lean.Parser.Tactic.location)? : tactic =>
   `(tactic| simp (disch := janus_carry_disch) only [Janus.Amd64.subFlags_fst_toNat_ofNat, Janus.Amd64.borrow64_toNat, Janus.Amd64.borrow64_in_toNat, Nat.reducePow,
+      Janus.Arm64.addWithCarry_fst_toNat, Janus.Arm64.addWithCarry_c64, Janus.Arm64.dec_le_div, Janus.Arm64.dec_add_div,
+      Janus.Arm64.ngc_flag, Janus.Arm64.flag_mod, Janus.Arm64.sbc_num, Janus.Arm64.not_sub_flag, Janus.Arm64.not_flag, Bool.toNat_false] $[$loc]?)
+
+/-- `janus_carry_simp` with the bounds discharger `janus_carry_disch_b`: the arm64 `adds`/`adcs`/`subs`/`sbcs`/`ngc`
+vocabulary whose side conditions follow from the bound facts in the context (`a < 2^64`). -/
+macro "janus_carry_simp_b" loc:(Lean.Parser.Tactic.location)? : tactic =>
+  `(tactic| simp (disch := janus_carry_disch_b) only [Janus.Amd64.subFlags_fst_toNat_ofNat, Janus.Amd64.borrow64_toNat, Janus.Amd64.borrow64_in_toNat, Nat.reducePow,
       Janus.Arm64.addWithCarry_fst_toNat, Janus.Arm64.addWithCarry_c64, Janus.Arm64.dec_le_div, Janus.Arm64.dec_add_div,
       Janus.Arm64.ngc_flag, Janus.Arm64.flag_mod, Janus.Arm64.sbc_num, Janus.Arm64.not_sub_flag, Janus.Arm64.not_flag, Bool.toNat_false] $[$loc]?)
 
