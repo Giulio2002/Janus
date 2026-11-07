@@ -40,9 +40,9 @@ def rt0 : List (Nat × Nat) := [(0x30000, 0x31000)]
 def R0 : Res := fun _ _ a2 _ n e1 e2 => n = a2 ∧ e1 = 0 ∧ e2 = 0
 
 /-- The return of the writer as `ICallRet`. -/
-theorem ret_of (pr : State → Memory → Prop) (s : State) (hpr : pr s s.mem) (R : Nat → W64) (F : Flags) (h0 : R 0 = s.regs 2) (h1 : R 1 = 0) (h2 : R 2 = 0)
+theorem ret_of {nargs stack : Nat} (pr : State → Memory → Prop) (s : State) (hpr : pr s s.mem) (R : Nat → W64) (F : Flags) (h0 : R 0 = s.regs 2) (h1 : R 1 = 0) (h2 : R 2 = 0)
     (h18 : R 18 = s.regs 18) (h28 : R 28 = s.regs 28) (h29 : R 29 = s.regs 29) (hF : F = s.flags) :
-    ICallRetP 4 16 rt0 (fun _ => []) R0 pr s { s with regs := R, flags := F, pc := s.regs 30 } := by
+    ICallRetP nargs stack rt0 (fun _ => []) R0 pr s { s with regs := R, flags := F, pc := s.regs 30 } := by
   refine ⟨R, F, s.vregs, s.mem, s.excl, s.exclPass, ?_, MemFrame.refl _ _, by simp, ?_, hpr⟩
   · simp only [retStateX]
     congr 1
@@ -53,8 +53,8 @@ theorem ret_of (pr : State → Memory → Prop) (s : State) (hpr : pr s s.mem) (
     · simp only [h, ite_false, List.getD_nil]
   · exact ⟨h0, h1, h2⟩
 
-theorem impl_okP (pr : State → Memory → Prop) (hpr : ∀ s, pr s s.mem) :
-    ICallContract (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R0 (fun _ => True) pr := by
+theorem impl_okP {nargs stack above : Nat} {P : State → Prop} (pr : State → Memory → Prop) (hpr : ∀ s, pr s s.mem) :
+    ICallContract (toy.link impl) A0 nargs stack above rt0 (fun _ => []) R0 P pr := by
   rw [link_eq]
   intro s hpc ⟨⟨hr1, hr2, _⟩, _⟩
   have hpc' : s.pc = 0x100000#64 := hpc
