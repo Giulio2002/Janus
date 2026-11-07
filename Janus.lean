@@ -234,5 +234,7 @@ import Janus.Contracts.IfaceLiveSat
 import Janus.Contracts.IfaceLiveSatAmd64
 import Janus.Contracts.SbtsLiveSat
 import Janus.Contracts.SbtsLiveSatAmd64
+import Janus.Contracts.SbtsStaticSat
+import Janus.Contracts.SbtsStaticSatAmd64
 import Janus.Contracts.LiveStubSbts
 import Janus.Contracts.LiveStubSbtsAmd64
