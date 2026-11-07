@@ -215,6 +215,7 @@ type ownBuild struct {
 
 type ownMod struct {
 	sha string // of the olean janus holds
+	ext bool   // its import closure reaches Extracted or JanusTrusted
 	rel string // source path inside the package
 	pkg *provPkg
 }
@@ -333,6 +334,7 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 	}
 	var own []string
 	var ext []string // the framework/toolchain modules it imports directly
+	reachesExt := false
 	for _, imp := range imps {
 		if _, _, _, c := ob.locate(imp); c > 0 {
 			om, err := ob.ensure(imp, "")
@@ -340,6 +342,7 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 				return nil, err
 			}
 			own = append(own, imp+" "+om.sha)
+			reachesExt = reachesExt || om.ext
 			continue
 		}
 		if !ob.externalOlean(imp) {
@@ -348,10 +351,11 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 		ext = append(ext, imp)
 	}
 	sort.Strings(own)
+	reachesExt = reachesExt || fwReaches(ob.ws.janusFiles, ext, "Extracted") || fwReaches(ob.ws.janusFiles, ext, "JanusTrusted")
 	if err := syncTreeOwn(pkg); err != nil {
 		return nil, wsDiag(err)
 	}
-	key := ob.moduleKey(pkg, m, srel, srcBytes, own, ob.frameworkDigest(ext))
+	key := ob.moduleKey(pkg, m, srel, srcBytes, own, ob.frameworkDigest(ext), reachesExt)
 	oleanPath := filepath.Join(pkg.lib, filepath.FromSlash(strings.ReplaceAll(m, ".", "/"))+".olean")
 	if err := os.MkdirAll(filepath.Dir(oleanPath), 0o755); err != nil {
 		return nil, wsDiag(err)
@@ -398,7 +402,7 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 	if err := os.WriteFile(oleanPath, data, 0o644); err != nil {
 		return nil, wsDiag(err)
 	}
-	om := &ownMod{sha: sha256Hex(data), rel: srel, pkg: pkg}
+	om := &ownMod{sha: sha256Hex(data), rel: srel, pkg: pkg, ext: reachesExt}
 	ob.mu.Lock()
 	ob.done[m] = om
 	ob.mu.Unlock()
@@ -608,9 +612,16 @@ func fwClosureDigestX(files map[string][]byte, want pins, imps []string, withSrc
 	return "closure " + hex.EncodeToString(h.Sum(nil))
 }
 
-func (ob *ownBuild) moduleKey(pkg *provPkg, m, rel string, src []byte, own []string, fwDigest string) string {
+func (ob *ownBuild) moduleKey(pkg *provPkg, m, rel string, src []byte, own []string, fwDigest string, reachesExt bool) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "janus-own-olean-v2\n%q\n%s\n", ob.ws.tc.cacheID(), fwDigest)
+	if reachesExt {
+		// A module whose import closure includes Extracted or JanusTrusted was elaborated against one
+		// extraction: its key also covers the generated Extracted.lean and the whole pinned build of the
+		// workspace (framework, Extracted and JanusTrusted module data, every part), so no other
+		// extraction can reuse it (U-CACHE-EXTRACT).
+		fmt.Fprintf(h, "extraction %s %s\n", sha256Hex(ob.ws.janusFiles["Extracted.lean"]), pinsDigest(ob.ws.pins.want))
+	}
 	fmt.Fprintf(h, "package %q\nmodule %q\nsource %q %s\nopts %q\nimports %q\n", pkg.name, m, rel, sha256Hex(src), pkg.dopts, own)
 	return hex.EncodeToString(h.Sum(nil))
 }

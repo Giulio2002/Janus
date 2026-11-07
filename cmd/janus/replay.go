@@ -289,6 +289,12 @@ type replayPlan struct {
 	cached  []string
 	cacheOn bool
 	done    map[string]bool // replayed and passed in this run
+
+	// resolved (module -> olean path), graph (module -> direct imports) and known (file -> pinned
+	// SHA-256) are what planReplayPinned was given: the replay builds its closure view from them.
+	resolved map[string]string
+	graph    map[string][]string
+	known    map[string]string
 }
 
 // replayCacheDir holds one marker per passing replay, named by its key and authenticated by an
@@ -311,7 +317,7 @@ func planReplay(resolved map[string]string, graph map[string][]string, toolchain
 // replay, so the pinned bytes are the bytes Lean loaded; the digest is the same one, so the
 // keys (and the cache entries) are unchanged. A file that is not in known is read as before.
 func planReplayPinned(resolved map[string]string, graph map[string][]string, toolchainVersion string, useCache bool, known map[string]string) (*replayPlan, error) {
-	p := &replayPlan{keys: map[string]string{}, cacheOn: useCache}
+	p := &replayPlan{keys: map[string]string{}, cacheOn: useCache, resolved: resolved, graph: graph, known: known}
 	for m := range resolved {
 		p.modules = append(p.modules, m)
 	}
@@ -419,6 +425,95 @@ func replayParallel() int {
 	return n
 }
 
+// viewClosure is the non-core modules loaded by replaying mods: mods and their transitive imports.
+func (p *replayPlan) viewClosure(mods []string) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	var walk func(m string) error
+	walk = func(m string) error {
+		if seen[m] || isCoreModule(m) {
+			return nil
+		}
+		seen[m] = true
+		if _, ok := p.resolved[m]; !ok {
+			return fmt.Errorf("the replay needs module %s, which is not in the audited environment", m)
+		}
+		out = append(out, m)
+		for _, i := range p.graph[m] {
+			if err := walk(i); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, m := range mods {
+		if err := walk(m); err != nil {
+			return nil, err
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// makeClosureView builds the directory the replay of mods searches for non-core modules: the
+// module-data files (olean, server, private, ir) of mods and of their transitive imports, under
+// their own names, as hard links to the verified files (or, across file systems or for a
+// non-regular entry, byte copies checked against the pinned hash). Nothing else is in it, so no
+// module outside the closure can be replayed or imported.
+func (p *replayPlan) makeClosureView(mods []string) (string, func(), error) {
+	need, err := p.viewClosure(mods)
+	if err != nil {
+		return "", func() {}, err
+	}
+	base, err := janusRunBase()
+	if err != nil {
+		base = ""
+	}
+	dir, err := os.MkdirTemp(base, "replay-view-")
+	if err != nil {
+		return "", func() {}, err
+	}
+	cleanup := func() { os.RemoveAll(dir) }
+	for _, m := range need {
+		olean := p.resolved[m]
+		stem := strings.TrimSuffix(olean, ".olean")
+		relStem := strings.TrimSuffix(filepath.FromSlash(moduleRel(m)), ".olean")
+		for _, ext := range moduleDataExts {
+			src := stem + ext
+			st, err := os.Lstat(src)
+			if err != nil {
+				if ext == ".olean" {
+					cleanup()
+					return "", func() {}, err
+				}
+				continue
+			}
+			dst := filepath.Join(dir, relStem+ext)
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				cleanup()
+				return "", func() {}, err
+			}
+			if st.Mode().IsRegular() && os.Link(src, dst) == nil {
+				continue
+			}
+			b, err := os.ReadFile(src)
+			if err != nil {
+				cleanup()
+				return "", func() {}, err
+			}
+			if want, ok := p.known[src]; ok && isHexDigest(want) && want != sha256Hex(b) {
+				cleanup()
+				return "", func() {}, fmt.Errorf("%s does not match its pin; the build changed during the replay", displayPath(src))
+			}
+			if err := os.WriteFile(dst, b, 0o444); err != nil {
+				cleanup()
+				return "", func() {}, err
+			}
+		}
+	}
+	return dir, cleanup, nil
+}
+
 // pending is the subset of mods without a cached (or already recorded) passing replay.
 func (p *replayPlan) pending(mods []string) []string {
 	var out []string
@@ -477,11 +572,22 @@ func replayTargets(mods []string) (targets []string, covers map[string][]string)
 // once; a target whose modules all became cached while waiting is not replayed again. Passing
 // targets are recorded in the replay cache. It returns leanchecker's output on the first failure
 // (in target order).
-func (p *replayPlan) replay(checker string, run func(argv ...string) (string, error), mods []string) (string, error) {
-	targets, covers := replayTargets(p.pending(mods))
+func (p *replayPlan) replay(checker string, runIn func(view string, argv ...string) (string, error), mods []string) (string, error) {
+	pending := p.pending(mods)
+	targets, covers := replayTargets(pending)
 	if len(targets) == 0 {
 		return "", nil
 	}
+	// leanchecker's targets are name prefixes and it replays everything it finds on the search path
+	// under them, orphans (an olean whose source is gone) included. The replay therefore runs on a
+	// search path whose only non-core directory is a view of exactly the modules it needs: the
+	// pending modules and the transitive imports they load (U-ORPHAN-OLEAN).
+	view, cleanup, err := p.makeClosureView(pending)
+	if err != nil {
+		return err.Error(), err
+	}
+	defer cleanup()
+	run := func(argv ...string) (string, error) { return runIn(view, argv...) }
 	outs := make([]string, len(targets))
 	errs := make([]error, len(targets))
 	width := replayParallel()
@@ -763,4 +869,41 @@ func isHexDigest(s string) bool {
 		}
 	}
 	return true
+}
+
+// makeFrameworkView links (or, across file systems, copies and checks against the pin) the module-data
+// files the framework pins cover from the build directory into a fresh directory under base, under
+// their own names. Orphans (module-data files with no pin: the pins cover only modules that have a
+// framework source) are left out.
+func makeFrameworkView(base, from string, fw *pinnedLib) (string, func(), error) {
+	dir, err := os.MkdirTemp(base, "replay-fw-")
+	if err != nil {
+		return "", func() {}, err
+	}
+	cleanup := func() { os.RemoveAll(dir) }
+	for rel, want := range fw.want {
+		src := filepath.Join(from, filepath.FromSlash(rel))
+		dst := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			cleanup()
+			return "", func() {}, err
+		}
+		if st, err := os.Lstat(src); err == nil && st.Mode().IsRegular() && os.Link(src, dst) == nil {
+			continue
+		}
+		b, err := os.ReadFile(src)
+		if err != nil {
+			cleanup()
+			return "", func() {}, err
+		}
+		if isHexDigest(want) && want != sha256Hex(b) {
+			cleanup()
+			return "", func() {}, fmt.Errorf("the framework's %s does not match its pin; the build changed during the replay", rel)
+		}
+		if err := os.WriteFile(dst, b, 0o444); err != nil {
+			cleanup()
+			return "", func() {}, err
+		}
+	}
+	return dir, cleanup, nil
 }

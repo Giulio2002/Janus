@@ -764,7 +764,10 @@ func runASLStage(e *aslEnv) *aslReport {
 		run := func(argv ...string) (string, error) {
 			return runLeanProtected(e.sb, e.tc, auditDir, nil, readOnly, leanPath, argv...)
 		}
-		if out, err := plan.replay(e.tc.leanchecker, run, plan.modules); err != nil {
+		runIn := func(view string, argv ...string) (string, error) {
+			return runLeanProtected(e.sb, e.tc, auditDir, nil, readOnly, e.tc.leanPathEnv(view), argv...)
+		}
+		if out, err := plan.replay(e.tc.leanchecker, runIn, plan.modules); err != nil {
 			return aslFail(r, replayDiag(mapPaths(out)))
 		}
 		fresh := ""

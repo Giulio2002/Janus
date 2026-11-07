@@ -1636,10 +1636,13 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 				all = append(all, m)
 			}
 			sort.Strings(all)
-			_, unionErr := plan.replay(ws.tc.leanchecker, run, all)
+			runIn := func(view string, argv ...string) (string, error) {
+				return ws.runLeanDirect(ws.tc.leanPathEnv(view), argv...)
+			}
+			_, unionErr := plan.replay(ws.tc.leanchecker, runIn, all)
 			for _, r := range passing {
 				if unionErr != nil {
-					if out, err := plan.replay(ws.tc.leanchecker, run, r.closure); err != nil {
+					if out, err := plan.replay(ws.tc.leanchecker, runIn, r.closure); err != nil {
 						r.Err = replayDiag(mapPaths(out))
 						continue
 					}

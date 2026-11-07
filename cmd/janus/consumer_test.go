@@ -1003,3 +1003,29 @@ func TestConsumerResultCacheExternalSrc(t *testing.T) {
 		t.Fatalf("a broken external source was not noticed: %d\n%.600s", code, out)
 	}
 }
+
+// TestConsumerMidAcrossExtractions (U-CACHE-EXTRACT): a consumer module that imports Extracted and
+// whose proof depends on the extraction's contents is verified against two extractions with one
+// cache (the same olean store, module store and workspace family). Each verification elaborates the
+// module against its own Extracted; a module reused from the other extraction would be rejected by
+// the kernel replay.
+func TestConsumerMidAcrossExtractions(t *testing.T) {
+	defer parallel(t)()
+	needLeanSlow(t)
+	useTestCache(t)
+	pkg := consumerCopy(t, "toml")
+	writeFile(t, filepath.Join(pkg, "ConsumerExample", "Mid.lean"),
+		"import Extracted\nnamespace ConsumerExample.Mid\ntheorem entryEven : Extracted.entry % 2 = 0 := by simp [Extracted.entry]\n"+
+			"theorem segs : Extracted.program.segments.length = Extracted.program.segments.length := by decide\nend ConsumerExample.Mid\n")
+	writeFile(t, filepath.Join(pkg, "ConsumerExample", "Top.lean"),
+		"import Extracted\nimport ConsumerExample.Mid\nnamespace ConsumerExample.Top\ntheorem correctness : Extracted.entry = Extracted.entry := by\n  have _ := ConsumerExample.Mid.entryEven\n  rfl\nend ConsumerExample.Top\n")
+	add := mustExtract(t, "example.com/basic.Add")
+	max := mustExtract(t, "example.com/basic.Max")
+	for _, outdir := range []string{add, max, add, max} {
+		code, out, stderr := runJanus(t, "verify", outdir, "--proof", filepath.Join(pkg, "ConsumerExample", "Top.lean"), "--proof-root", pkg,
+			"--theorem", "ConsumerExample.Top.correctness", "--no-result-cache")
+		if code != 0 || !strings.HasPrefix(out, "Verified: ConsumerExample.Top.correctness\n") {
+			t.Fatalf("%s: %d\n%s\n%s", outdir, code, out, stderr)
+		}
+	}
+}

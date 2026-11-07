@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -137,6 +138,11 @@ func TestClosureCheck(t *testing.T) {
 	}
 }
 
+// noView adapts a plain runner to the view-taking one of replayPlan.replay.
+func noView(f func(argv ...string) (string, error)) func(view string, argv ...string) (string, error) {
+	return func(_ string, argv ...string) (string, error) { return f(argv...) }
+}
+
 func TestReplayPlanKeys(t *testing.T) {
 	t.Setenv("JANUS_CACHE_DIR", t.TempDir())
 	lib := t.TempDir()
@@ -189,13 +195,13 @@ func TestReplayPlanKeys(t *testing.T) {
 	t.Setenv("JANUS_CACHE_DIR", t.TempDir())
 	t.Setenv("JANUS_REPLAY_BATCH", "0") // one process per target
 	p7, _ := planReplay(resolved, graph, "v1", true)
-	if _, err := p7.replay("leanchecker", func(argv ...string) (string, error) { return "bad", fmt.Errorf("exit 1") }, p7.modules); err == nil {
+	if _, err := p7.replay("leanchecker", noView(func(argv ...string) (string, error) { return "bad", fmt.Errorf("exit 1") }), p7.modules); err == nil {
 		t.Fatal("failing replay passed")
 	}
 	if p8, _ := planReplay(resolved, graph, "v1", true); len(p8.cached) != 0 {
 		t.Fatal("a failing replay was cached")
 	}
-	if _, err := p7.replay("leanchecker", ok, p7.modules); err != nil || calls != 3 {
+	if _, err := p7.replay("leanchecker", noView(ok), p7.modules); err != nil || calls != 3 {
 		t.Fatalf("replay: %v, %d calls", err, calls)
 	}
 	if p9, _ := planReplay(resolved, graph, "v1", true); len(p9.cached) != 3 {
@@ -229,7 +235,7 @@ func TestReplayPlanKeys(t *testing.T) {
 	} {
 		t.Setenv("JANUS_CACHE_DIR", t.TempDir())
 		pb, _ := planReplay(resolved, graph, "v1", true)
-		if _, err := pb.replay("leanchecker", batchRun(rep), pb.modules); err == nil {
+		if _, err := pb.replay("leanchecker", noView(batchRun(rep)), pb.modules); err == nil {
 			t.Fatalf("batched replay with %s -v output passed", name)
 		}
 		if pc, _ := planReplay(resolved, graph, "v1", true); len(pc.cached) != 0 {
@@ -239,7 +245,7 @@ func TestReplayPlanKeys(t *testing.T) {
 	t.Setenv("JANUS_CACHE_DIR", t.TempDir())
 	calls = 0
 	pb, _ := planReplay(resolved, graph, "v1", true)
-	if _, err := pb.replay("leanchecker", batchRun(say), pb.modules); err != nil || calls != 1 {
+	if _, err := pb.replay("leanchecker", noView(batchRun(say)), pb.modules); err != nil || calls != 1 {
 		t.Fatalf("batched replay: %v, %d calls", err, calls)
 	}
 	if pc, _ := planReplay(resolved, graph, "v1", true); len(pc.cached) != 3 {
@@ -492,5 +498,150 @@ func TestWithoutProgress(t *testing.T) {
 		if got := withoutProgress(in); got != want {
 			t.Errorf("withoutProgress(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestClosureViewExact: the directory a replay searches holds exactly the modules it needs (the
+// pending modules and their transitive imports): a module outside the closure, an orphan olean
+// under a closure module's name prefix included, is not in it.
+func TestClosureViewExact(t *testing.T) {
+	t.Setenv("JANUS_CACHE_DIR", t.TempDir())
+	lib := t.TempDir()
+	for _, m := range []string{"A", "B", "C", "A/Orphan", "Janus", "Janus/Used", "Janus/Other", "Janus/Orphan"} {
+		writeBytes(t, filepath.Join(lib, m+".olean"), []byte("olean "+m))
+	}
+	writeBytes(t, filepath.Join(lib, "B.olean.server"), []byte("server B"))
+	resolved := map[string]string{}
+	for _, m := range []string{"A", "B", "C", "Janus", "Janus.Used", "Janus.Other"} {
+		resolved[m] = filepath.Join(lib, filepath.FromSlash(moduleRel(m)))
+	}
+	graph := map[string][]string{"A": {"Init"}, "B": {"A", "Init.Core"}, "C": {}, "Janus": {"Janus.Used"}, "Janus.Used": {}, "Janus.Other": {}}
+	p, err := planReplay(resolved, graph, "v1", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, cleanup, err := p.makeClosureView([]string{"B", "Janus"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	filepath.WalkDir(view, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			rel, _ := filepath.Rel(view, path)
+			got = append(got, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	sort.Strings(got)
+	if want := "A.olean,B.olean,B.olean.server,Janus.olean,Janus/Used.olean"; strings.Join(got, ",") != want {
+		t.Fatalf("view holds %v, want %s", got, want)
+	}
+	if b, _ := os.ReadFile(filepath.Join(view, "B.olean.server")); string(b) != "server B" {
+		t.Fatalf("view file bytes %q", b)
+	}
+	cleanup()
+	if _, err := os.Stat(view); err == nil {
+		t.Fatal("the view was not removed")
+	}
+	// A pending module outside the audited environment is an error, not a silent omission.
+	if _, _, err := p.makeClosureView([]string{"Nowhere"}); err == nil {
+		t.Fatal("module outside the environment accepted")
+	}
+	// replay hands the runner the view, and a target never sees a module outside the closure.
+	t.Setenv("JANUS_REPLAY_BATCH", "0")
+	var seen []string
+	var mu sync.Mutex
+	run := func(view string, argv ...string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if _, err := os.Stat(filepath.Join(view, "Janus", "Other.olean")); err == nil {
+			t.Error("the view of a replay of Janus.Used holds Janus.Other")
+		}
+		seen = append(seen, argv[1:]...)
+		return "", nil
+	}
+	p2, _ := planReplay(resolved, graph, "v1", false)
+	if _, err := p2.replay("leanchecker", run, []string{"Janus.Used"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(seen, ",") != "Janus.Used" {
+		t.Fatalf("targets %v", seen)
+	}
+}
+
+// TestOrphanOleanIgnored (U-ORPHAN-OLEAN): a module-data file in the framework build whose source
+// is gone, and which the kernel would reject (a forged lemma), does not fail the verification of a
+// proof that does not import it, and a proof that imports it is refused.
+func TestOrphanOleanIgnored(t *testing.T) {
+	defer parallel(t)()
+	needLeanSlow(t)
+	useTestCache(t)
+	root := filepath.Join(t.TempDir(), "janus")
+	for _, f := range []string{"lakefile.toml", "lake-manifest.json", "lean-toolchain", "Janus.lean"} {
+		b, err := os.ReadFile(filepath.Join(repoRoot, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeBytes(t, filepath.Join(root, f), b)
+	}
+	if err := copyTree(filepath.Join(repoRoot, "Janus"), filepath.Join(root, "Janus")); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyTree(filepath.Join(repoRoot, ".lake", "build"), filepath.Join(root, ".lake", "build")); err != nil {
+		t.Skip("the repository's Janus build is not present (run lake build Janus Janus.Tools.Audit)")
+	}
+	src, _ := os.ReadFile(filepath.Join(repoRoot, "Janus", "GoABI.lean"))
+	forge, _ := os.ReadFile(filepath.Join(repoRoot, "audit", "attacks", "R1_forged_lemma.lean"))
+	fdir := filepath.Join(t.TempDir(), "orphan")
+	writeBytes(t, filepath.Join(fdir, "Janus", "OrphanForged.lean"), append(append([]byte("import Lean\n"), src...), forge...))
+	lake, _ := findLake()
+	cmd := exec.Command(lake, "env", "lean", "--root="+fdir, "-o", filepath.Join(root, ".lake", "build", "lib", "lean", "Janus", "OrphanForged.olean"),
+		filepath.Join(fdir, "Janus", "OrphanForged.lean"))
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("building the orphan: %v\n%s", err, out)
+	}
+	add := mustExtract(t, "example.com/basic.Add")
+	proofs := t.TempDir()
+	good := filepath.Join(proofs, "Good.lean")
+	writeFile(t, good, "import Extracted\nnamespace Proof\ntheorem correctness : Extracted.entry = Extracted.entry := rfl\nend Proof\n")
+	for _, extra := range [][]string{nil, {"--fresh"}} {
+		code, out, stderr := runJanus(t, append([]string{"verify", add, "--proof", good, "--janus-root", root}, extra...)...)
+		if code != 0 || !strings.Contains(out, "Verified: Proof.correctness") {
+			t.Fatalf("orphan olean present %v: %d\n%s\n%s", extra, code, out, stderr)
+		}
+	}
+	bad := filepath.Join(proofs, "Bad.lean")
+	writeFile(t, bad, "import Extracted\nimport Janus.OrphanForged\nnamespace Proof\ntheorem correctness : Extracted.entry = Extracted.entry := rfl\nend Proof\n")
+	code, out, stderr := runJanus(t, "verify", add, "--proof", bad, "--janus-root", root)
+	if code == 0 || out != "" || !strings.Contains(stderr, "OrphanForged") {
+		t.Fatalf("a proof importing the orphan was accepted: %d\n%s\n%s", code, out, stderr)
+	}
+}
+
+// TestOwnModuleKeyExtraction (U-CACHE-EXTRACT): the stored olean key of a module that reaches
+// Extracted covers the extraction (its generated source and the workspace's pinned module data), a
+// module that does not reach it keeps one key across extractions.
+func TestOwnModuleKeyExtraction(t *testing.T) {
+	tc := &toolchain{version: "v"}
+	mk := func(extracted, extOlean string) *ownBuild {
+		return &ownBuild{ws: &consumerWS{tc: tc,
+			janusFiles: map[string][]byte{"Extracted.lean": []byte(extracted)},
+			pins:       &pinnedLib{want: pins{"Extracted.olean": extOlean, "Janus.olean": "j"}}}}
+	}
+	pkg := &provPkg{name: "p"}
+	a, b := mk("data 256", "o1"), mk("data 258", "o1") // same olean hash: the source alone must separate them
+	c := mk("data 256", "o2")
+	key := func(ob *ownBuild, ext bool) string {
+		return ob.moduleKey(pkg, "M", "M.lean", []byte("src"), nil, "closure x", ext)
+	}
+	if key(a, true) == key(b, true) || key(a, true) == key(c, true) {
+		t.Error("an Extracted-reaching module has one key across extractions")
+	}
+	if key(a, true) != key(mk("data 256", "o1"), true) {
+		t.Error("the key is not deterministic")
+	}
+	if key(a, false) != key(b, false) || key(a, false) != key(c, false) {
+		t.Error("an Extracted-free module lost cross-extraction sharing")
 	}
 }

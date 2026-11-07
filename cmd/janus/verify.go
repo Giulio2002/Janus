@@ -825,8 +825,18 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 				defer os.RemoveAll(fwRunDir)
 			}
 		}
+		// The framework is replayed from a view of exactly its pinned modules: an orphaned olean
+		// in the build directory (source gone) is neither replayed nor importable (U-ORPHAN-OLEAN).
+		fwView := ""
+		if err == nil && !fwHave {
+			var cleanup func()
+			fwView, cleanup, err = makeFrameworkView(rb, janusLibDir, fwPins)
+			if err == nil {
+				defer cleanup()
+			}
+		}
 		if err == nil {
-			fwPath := tc.leanPathEnv(janusLibDir)
+			fwPath := tc.leanPathEnv(fwView)
 			effLimit, headroom := effectiveMemLimit(), currentHeadroom()
 			nWorkers, fwThreads := replaySizing(replayWorkers(), effLimit, guardLimitBytes(), headroom)
 			logReplaySizing(nWorkers, fwThreads, effLimit, headroom)
@@ -837,7 +847,7 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 				threads:   fwThreads,
 				aliasBase: rb,
 				run: func(extra []string, argv ...string) (string, error) {
-					return runLeanProtectedThreads(sb, tc, fwRunDir, nil, []string{janusLibDir}, tc.leanPathEnv(append(append([]string{}, extra...), janusLibDir)...), fwThreads, argv...)
+					return runLeanProtectedThreads(sb, tc, fwRunDir, nil, []string{janusLibDir}, tc.leanPathEnv(append(append([]string{}, extra...), fwView)...), fwThreads, argv...)
 				},
 			}
 			earlyFw = startFrameworkReplayPar(vstore, tc.leanchecker, func(argv ...string) (string, error) {
@@ -1029,6 +1039,9 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	replayRun := func(argv ...string) (string, error) {
 		return runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), proofPathEnv, argv...)
 	}
+	replayRunIn := func(view string, argv ...string) (string, error) {
+		return runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), tc.leanPathEnv(view), argv...)
+	}
 	// The kernel replay of the three modules of this verification runs alongside the audit
 	// (it reads only pinned files; see speed.go). Its result is used below only for modules of
 	// the audited closure.
@@ -1170,7 +1183,7 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 				if len(plan.pending(plan.modules)) > 0 {
 					lateReplay = true
 				}
-				if out, err := plan.replay(tc.leanchecker, replayRun, plan.modules); err != nil {
+				if out, err := plan.replay(tc.leanchecker, replayRunIn, plan.modules); err != nil {
 					return replayOutcome{err: replayDiag(mapPaths(out))}
 				}
 				fresh := ""
