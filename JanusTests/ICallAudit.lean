@@ -2,6 +2,7 @@ import Janus.Tools.Audit
 import Janus.Contracts.ICall
 import Janus.Contracts.Live
 import Janus.Contracts.LiveToy
+import Janus.Contracts.ICallSat
 
 /-!
 # The auditor's rule for the callee address of an abstract-callee contract (U-ICALL)
@@ -279,5 +280,23 @@ run_elab uaccepts "n" "16" "a" "(a : Nat) → (hn : 1 ≤ n) → (ha : 520 ≤ a
 run_elab uaccepts "n" "16" "a" "(a : Nat) → (hn : 60 ≤ n) → (ha : 480 ≤ a) → " "True"
 run_elab uaccepts "n" "16" "a" "(a : Nat) → (hn : 60 ≤ n) → (ha : 488 ≤ a) → " "True"
 run_elab uaccepts "n" "s" "a" "(s a : Nat) → (hn : 1 ≤ n) → (ha : 16 ≤ a) → " "True"
+
+
+/-! ### U-ICALL-INHABITED: an author-chosen call-site property needs a kernel-checked inhabitation lemma -/
+
+/-- the lemma for `P := fun _ => 1 = 1` (a non-stock `P`), found by statement -/
+theorem inhab_one_eq_one : ∃ s, Janus.Contracts.ICall.ICallPre 4 16 48 Janus.Contracts.ICallSat.rt0 (fun _ => 1 = 1) s :=
+  ⟨Janus.Contracts.ICallSat.wstate, Janus.Contracts.ICallSat.wstate_pre.1, Janus.Contracts.ICallSat.wstate_pre.2.1,
+    Janus.Contracts.ICallSat.wstate_pre.2.2.1, rfl⟩
+
+def pstmt2 (P : String) : String :=
+  "∀ (impl : List Janus.Segment) (fn : Nat) (rt : List (Nat × Nat)) (R : Janus.Contracts.ICall.Res), " ++
+  "Janus.Contracts.ICall.ICallContract (Extracted.program.link impl) fn 4 16 48 rt (fun _ => []) R (" ++ P ++ ") → True"
+
+-- stock: accepted without a lemma; non-stock with a lemma: accepted; without a lemma, or unsatisfiable: rejected
+run_elab (do if let some m ← audit (pstmt2 "fun _ => True") then throwError "stock P rejected: {m}")
+run_elab (do if let some m ← audit (pstmt2 "fun _ => 1 = 1") then throwError "P with lemma rejected: {m}")
+run_elab (do if (← audit (pstmt2 "fun _ => False")).isNone then throwError "P := False accepted")
+run_elab (do if (← audit (pstmt2 "fun s => s.sp.toNat = s.sp.toNat + 1")).isNone then throwError "unsatisfiable P without lemma accepted")
 
 end JanusTests.ICallAudit

@@ -1826,6 +1826,63 @@ partial def ensuresPres (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
   | .mdata _ b | .proj _ _ b => ensuresPres b acc
   | _ => acc
 
+/-- UP3 (honesty of the call-site property): an `ICallContract[64]` whose `P` is anything but `fun _ => True` is a hypothesis
+with an AUTHOR-CHOSEN predicate; `P := False` (or any unsatisfiable `P`) makes the contract's call precondition unsatisfiable, so
+the hypothesis holds vacuously. The proof module must contain a kernel-checked theorem
+`∃ …, ∃ s, ICallPre[64] nargs stack above rt P s` (any leading `∀`/`∃`; the family's own precondition, `CallOK` included) that
+unifies with the statement's contract at SOME instantiation of the statement's variables (they are mvars here: the contract may
+not be unsatisfiable for every instantiation). Found by statement among the theorems of the non-trusted modules, whose axioms
+must be among propext / Classical.choice / Quot.sound. Returns the names of the lemmas tried when none matches. -/
+def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM (Except String Name) := do
+  let pre := if c == `Janus.Contracts.ICall.ICallContract then `Janus.Contracts.ICall.ICallPre else `Janus.Contracts.ICallAmd64.ICallPre64
+  -- the statement's own variables become mvars: the instantiation is existential
+  let args ← args.mapM instantiateMVars
+  let fvs : Array FVarId := (args.foldl (fun st a => collectFVars st a) ({} : CollectFVars.State)).fvarIds
+  let mut mvs : Array Expr := #[]
+  for v in fvs do mvs := mvs.push (← Meta.mkFreshExprMVar (← Meta.inferType (.fvar v)))
+  let tgt := args.map fun a => (a.abstract (fvs.map Expr.fvar)).instantiateRev mvs
+  -- ICallContract p fn nargs stack above rt keep R P preserves
+  let want := #[tgt[2]!, tgt[3]!, tgt[4]!, tgt[5]!, tgt[8]!]
+  let modNames := env.header.moduleNames
+  let cands := env.const2ModIdx.fold (init := (#[] : Array Name)) fun acc n idx =>
+    match modNames[idx.toNat]? with
+    | some m =>
+      if !trustedModule m && !n.isInternal then
+        match env.find? n with
+        | some (.thmInfo _) => acc.push n
+        | _ => acc
+      else acc
+    | none => acc
+  -- declarations of the module being elaborated (no module index yet: tests)
+  let local_ := env.constants.map₂.foldl (init := (#[] : Array Name)) fun acc n ci =>
+    match ci with | .thmInfo _ => if n.isInternal then acc else acc.push n | _ => acc
+  for n in cands ++ local_ do
+    let some ci := env.find? n | continue
+    let st ← Meta.saveState
+    let ok ← try
+      let ty := ci.instantiateTypeLevelParams (← Meta.mkFreshLevelMVars ci.levelParams.length)
+      let (_, _, b) ← Meta.forallMetaTelescope ty
+      let mut b := (← instantiateMVars b).consumeMData
+      -- peel the `∃`s
+      for _ in [0:64] do
+        if b.isAppOfArity ``Exists 2 then
+          let x ← Meta.mkFreshExprMVar (b.getArg! 0)
+          b := (← instantiateMVars (Expr.headBeta (mkApp (b.getArg! 1) x))).consumeMData
+        else break
+      if b.getAppFn.isConstOf pre && b.getAppNumArgs == 6 then
+        let ba := b.getAppArgs
+        let mut all := true
+        for j in [0:5] do
+          unless ← Meta.isDefEq ba[j]! want[j]! do all := false; break
+        pure all
+      else pure false
+    catch _ => pure false
+    st.restore
+    if ok then
+      let axs ← collectAxioms n
+      if axs.all fun a => a == ``propext || a == ``Classical.choice || a == ``Quot.sound then return .ok n
+  return .error s!"no kernel-checked theorem of the proof module states `∃ s, {pre.getString!} nargs stack above rt P s` for this contract at some instantiation of the statement's variables"
+
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
 Round 14 (V2): with `main` (the default; every theorem that is not a `Witness.nonvacuous`/`Witness.returns`)
 the runtime implementation must also be a variable of the statement (`concreteRuntime`) and every such
@@ -2188,6 +2245,19 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
           break
       if !converged then
         return some "assumes runtime contracts whose size arguments feed each other (`above ≥ 8 + 8·nargs` through a shared variable) without a solution (U-ICALL-STACK, joint)"
+    -- UP3: an author-chosen call-site property `P` needs a kernel-checked inhabitation lemma (stock `fun _ => True` does not)
+    if main then
+      for app in apps do
+        let .const c _ := app.getAppFn | continue
+        unless isICallContract c do continue
+        let args := app.getAppArgs
+        if args.size < 9 then continue
+        let pBody ← Meta.lambdaTelescope args[8]! fun _ b => do pure (← Meta.whnfR b).consumeMData
+        if pBody.isConstOf ``True then continue
+        match ← inhabitationLemma env c args with
+        | .ok _ => pure ()
+        | .error m =>
+          return some s!"assumes the abstract-callee contract {c} with the call-site property `{(← Meta.ppExpr args[8]!).pretty 10000}`, which is not `fun _ => True`: {m}. A call-site property chosen by the statement can be unsatisfiable (`fun _ => False`), which makes the contract's call precondition unsatisfiable and the hypothesis vacuous; state and prove the lemma (any name) in the proof module (U-ICALL-INHABITED)"
     -- U-ICALL red team B1/B2: the callee address `fn` of an abstract-callee contract appears only inside contract
     -- hypotheses (and the statement's own body); any other premise mentioning it (`fn = Extracted.entry`, `fn = 0x100000`,
     -- an inequality, …) would pin the abstract callee to code the statement chooses
