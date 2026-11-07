@@ -1488,14 +1488,9 @@ def isStubAddrLit (e : Expr) : Bool :=
 def isICallContract (c : Name) : Bool :=
   c == `Janus.Contracts.ICall.ICallContract || c == `Janus.Contracts.ICall.ICallContract64
 
-/-- U-ICALL: `Outside a n rt` for a runtime-owned range list `rt` (a variable) and a range `[a, a+n)` that mentions no
-runtime variable: the callee's memory is apart from a region of the caller (its frame, a read-only table). Like
-`depthBound`, it cannot pin the contract's runtime argument: `rt = []` satisfies it for every range, and a contract
-with `rt = []` is met by a callee that writes nothing. -/
-def outsideRtPremise (rtVars : Std.HashSet FVarId) (t : Expr) : Bool :=
-  t.isAppOfArity `Janus.Outside 3 &&
-    (match (t.getArg! 2).consumeMData with | .fvar v => rtVars.contains v | _ => false) &&
-    !(t.getArg! 0).hasAnyFVar (rtVars.contains ·) && !(t.getArg! 1).hasAnyFVar (rtVars.contains ·)
+/- U-ICALL: NO premise of the theorem may constrain `rt` through `Outside a n rt` (red team B3-B6): `Outside 0 2^48 rt`, or two such
+premises covering the address space, force `rt = []` ("the callee writes nothing"). The caller's own frame is stated in the
+`Ensures` precondition (over the entry state), where it is an obligation, not an assumption. -/
 
 /-- A premise that bounds the stack depth of a runtime model (the `depth` field of
 `IfaceModel`, `MapModel`, …) and mentions the runtime variables only there: `n ≤ R.depth` /
@@ -1756,6 +1751,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
   Meta.forallTelescope ty fun xs body => do
     let bound : Std.HashSet FVarId := xs.foldl (fun s x => s.insert x.fvarId!) {}
     let mut rtVars : Std.HashSet FVarId := {}
+    let mut icallFns : Array FVarId := #[]  -- U-ICALL: the callee-address variables of the abstract-callee contracts
     let mut icallFree : Array Expr := #[]  -- U-ICALL: the `P` and `keep` arguments, checked once `rtVars` is complete
     -- the implementation variables no recognised contract mentions (round 14)
     let mut implOnly : Std.HashSet FVarId := {}
@@ -1833,6 +1829,15 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
           -- statement can choose, false for the real code at that address (U-ICALL red team)
           if i == 1 && !isVar a && !isStubAddrLit a then
             return some s!"assumes the abstract-callee contract {c} at the address `{(← Meta.ppExpr a).pretty 10000}`, which is neither a variable of the statement (a dynamic callee: the address is a parameter of the theorem, linked to the call by the itab word) nor `Extracted.program.contractAddr \"name\"` (a static call to a non-extracted function the extraction lists as a `--contract` stub); an extracted function's address, `Extracted.entry` and a numeral are never accepted (U-ICALL)"
+          if i == 1 && isVar a then icallFns := icallFns.push a.fvarId!
+          -- the stack and caller-frame sizes: a numeral of 2^47 or more pins the contract to a state that cannot exist
+          -- (no stack window of that size fits below 2^48), so the hypothesis would hold vacuously (U-ICALL red team B12)
+          if i == 3 || i == 4 then
+            let big : Bool := match a.consumeMData.rawNatLit? with
+              | some n => decide (n ≥ 2 ^ 47)
+              | none => match a.consumeMData.nat? with | some n => decide (n ≥ 2 ^ 47) | none => false
+            if big then
+              return some s!"assumes the abstract-callee contract {c} with the {if i == 3 then "stack" else "frame"} size `{(← Meta.ppExpr a).pretty 10000}`, a numeral of 2^47 or more: no such window fits in the address space, so the hypothesis would hold vacuously (U-ICALL)"
           if i == 6 || i == 8 then
             icallFree := icallFree.push a
             continue
@@ -1929,6 +1934,16 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
     for a in icallFree do
       if a.hasAnyFVar (rtVars.contains ·) then
         return some s!"has an abstract-callee contract whose call-site property or kept ranges `{(← Meta.ppExpr a).pretty 10000}` mention a runtime variable of a contract hypothesis: they may mention only the statement's own variables (U-ICALL)"
+    -- U-ICALL red team B1/B2: the callee address `fn` of an abstract-callee contract appears only inside contract
+    -- hypotheses (and the statement's own body); any other premise mentioning it (`fn = Extracted.entry`, `fn = 0x100000`,
+    -- an inequality, …) would pin the abstract callee to code the statement chooses
+    for (x, t) in premises do
+      if t.hasAnyFVar (icallFns.contains ·) then
+        let isICall := match t.consumeMData.getAppFn with
+          | .const c _ => isICallContract c
+          | _ => false
+        unless isICall do
+          return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}) about the callee address of an abstract-callee contract: the address may appear only inside the contract hypothesis (it is a parameter of the theorem linked to the call by the itab word, or exactly `Extracted.program.contractAddr \"name\"`); a premise that pins it chooses the callee (U-ICALL)"
     for (x, t) in premises do
       unless t.hasAnyFVar (rtVars.contains ·) do continue
       let t' := t.consumeMData
@@ -1945,7 +1960,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
       -- Round 15: "the runtime's code does not overlap the extracted function's code"
       let isApart := isImplApartPremise env t' &&
         (match t'.getArg! 1 |>.consumeMData with | .fvar v => bound.contains v | _ => false)
-      unless isContract || isLaws || isApart || depthBound bound rtVars t' || outsideRtPremise rtVars t' do
+      unless isContract || isLaws || isApart || depthBound bound rtVars t' do
         return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}), which constrains a runtime variable of a contract hypothesis; only the contracts and the model laws may mention them (round 10 V1, round 11)"
     return none
 
