@@ -1,6 +1,9 @@
 package basic
 
-import "math/bits"
+import (
+	"io"
+	"math/bits"
+)
 
 // The functions below make dynamic calls: through an interface, a method value, a closure, and
 // an open-coded defer. A dynamic call's target is a register value, so a theorem about the
@@ -64,4 +67,27 @@ func AffineSum(xs []uint64, a, b uint64) uint64 {
 func DeferAdd(x, y uint64) (r uint64) {
 	defer func() { r += y }()
 	return x
+}
+
+// WriteTo writes b to w and returns what w.Write returns: an interface method call to an
+// arbitrary callee (docs/RUNTIME-CONTRACTS.md, "Abstract callees"), whose target is not pinned.
+//
+//go:noinline
+func WriteTo(w io.Writer, b []byte) (int, error) { return w.Write(b) }
+
+// Sink is a counter that is also a writer: two methods, so two itab slots (Count is Fun[0], Write Fun[1]).
+type Sink interface {
+	Count() int
+	Write(p []byte) (int, error)
+}
+
+// CountThenWrite asks s.Count() and, if it is not zero, writes p to s: two interface calls to arbitrary callees
+// (examples/proofs/CountThenWrite.lean), the second one depending on the first one's result.
+//
+//go:noinline
+func CountThenWrite(s Sink, p []byte) (int, error) {
+	if s.Count() == 0 {
+		return 0, nil
+	}
+	return s.Write(p)
 }

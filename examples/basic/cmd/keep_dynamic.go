@@ -10,7 +10,7 @@ import (
 // once so that both itabs of basic.Hasher are in the binary.
 func init() {
 	Keep = append(Keep, basic.HashWith, basic.ApplyTwice, basic.HashTwice, basic.MapSum,
-		basic.AffineSum, basic.DeferAdd)
+		basic.AffineSum, basic.DeferAdd, basic.WriteTo, basic.CountThenWrite)
 	n := uint64(len(os.Args))
 	m, r := &basic.MulHasher{K: n}, &basic.RotHasher{K: n}
 	xs := []uint64{n, n + 1}

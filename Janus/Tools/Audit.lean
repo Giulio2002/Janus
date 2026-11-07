@@ -998,6 +998,8 @@ def pinnedContracts : Array (String × String) := #[
   ("Janus.Contracts.HashAmd64", "Rand"),
   ("Janus.Contracts.HashAmd64", "Strhash"),
   ("Janus.Contracts.HashAmd64", "Typehash"),
+  ("Janus.Contracts.ICall", "ICallContract"),
+  ("Janus.Contracts.ICallAmd64", "ICallContract64"),
   ("Janus.Contracts.Iface", "AssertE2I"),
   ("Janus.Contracts.Iface", "AssertE2I2"),
   ("Janus.Contracts.Iface", "ConvT"),
@@ -1481,6 +1483,29 @@ partial def conclParts (env : Environment) (e : Expr) : Array Expr :=
     | .const c _ => if isRuntimeContract env c then #[] else #[e]
     | _ => #[e]
 
+/-- U-ICALL: exactly `Extracted.program.contractAddr "name"` (either ISA): the address of a `--contract` stub that the
+extraction itself lists in `Extracted.contracts` (the existing symbol-reference check requires `name` to be one: an
+absent name would make the address `0`). That code is not extracted and not the theorem's own: the weak ABI-only
+contract is the honest assumption about it. -/
+def isStubAddrLit (e : Expr) : Bool :=
+  let e := e.consumeMData
+  (e.getAppFn.isConstOf `Janus.Program.contractAddr || e.getAppFn.isConstOf `Janus.Amd64.Program.contractAddr) &&
+    e.getAppNumArgs == 2 && (e.getArg! 0).consumeMData.isConstOf `Extracted.program &&
+    (match (e.getArg! 1).consumeMData with | .lit (.strVal _) => true | _ => false)
+
+/-- The abstract-callee contracts (U-ICALL): `ICallContract`, `ICallContract64`. -/
+def isICallContract (c : Name) : Bool :=
+  c == `Janus.Contracts.ICall.ICallContract || c == `Janus.Contracts.ICall.ICallContract64
+
+/-- U-ICALL: `Outside a n rt` for a runtime-owned range list `rt` (a variable) and a range `[a, a+n)` that mentions no
+runtime variable: the callee's memory is apart from a region of the caller (its frame, a read-only table). Like
+`depthBound`, it cannot pin the contract's runtime argument: `rt = []` satisfies it for every range, and a contract
+with `rt = []` is met by a callee that writes nothing. -/
+def outsideRtPremise (rtVars : Std.HashSet FVarId) (t : Expr) : Bool :=
+  t.isAppOfArity `Janus.Outside 3 &&
+    (match (t.getArg! 2).consumeMData with | .fvar v => rtVars.contains v | _ => false) &&
+    !(t.getArg! 0).hasAnyFVar (rtVars.contains ·) && !(t.getArg! 1).hasAnyFVar (rtVars.contains ·)
+
 /-- A premise that bounds the stack depth of a runtime model (the `depth` field of
 `IfaceModel`, `MapModel`, …) and mentions the runtime variables only there: `n ≤ R.depth` /
 `n < R.depth` with a closed `n` (a model may always be given a larger stack bound, which only
@@ -1806,6 +1831,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
   Meta.forallTelescope ty fun xs body => do
     let bound : Std.HashSet FVarId := xs.foldl (fun s x => s.insert x.fvarId!) {}
     let mut rtVars : Std.HashSet FVarId := {}
+    let mut icallFree : Array Expr := #[]  -- U-ICALL: the `P` and `keep` arguments, checked once `rtVars` is complete
     -- the implementation variables no recognised contract mentions (round 14)
     let mut implOnly : Std.HashSet FVarId := {}
     let mut premises : Array (Expr × Expr) := #[]
@@ -1871,6 +1897,37 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
           unless isFrameworkConstArg env isSpec a do
             return some s!"assumes the runtime contract {c} for the argument `{(← Meta.ppExpr a).pretty 10000}`, which is not one of the framework's named {if isSpec then "runtime-function specs (`concatstringSpec 2`, `growsliceSpec`, …)" else "float formats (`binary32`, `binary64`)"}: the function or format a contract describes cannot be chosen by the statement, not even from imported parts such as `default` (round 11)"
           continue
+        -- U-ICALL: the call-site property `P` and the kept ranges `keep` of an abstract-callee contract are the
+        -- STATEMENT's claims about the call (a precondition the consumer proves at the call, and bytes it asks the
+        -- callee to leave alone), not assumptions about the runtime's data: `P := False` only makes the hypothesis
+        -- weaker, and every `keep` is met by a callee that writes nothing. They are closed terms by design; the
+        -- runtime parameters of the contract (`impl`, `rt`, the result relation `R`) keep the variable rule.
+        if isICallContract c then
+          -- the target address of the callee is a variable of the statement: a numeral or an expression (the address of
+          -- an extracted function, `Extracted.entry`) would make the hypothesis a static contract about code the
+          -- statement can choose, false for the real code at that address (U-ICALL red team)
+          if i == 1 && !isVar a && !isStubAddrLit a then
+            return some s!"assumes the abstract-callee contract {c} at the address `{(← Meta.ppExpr a).pretty 10000}`, which is neither a variable of the statement (a dynamic callee: the address is a parameter of the theorem, linked to the call by the itab word) nor `Extracted.program.contractAddr \"name\"` (a static call to a non-extracted function the extraction lists as a `--contract` stub); an extracted function's address, `Extracted.entry` and a numeral are never accepted (U-ICALL)"
+          if i == 6 || i == 8 then
+            icallFree := icallFree.push a
+            continue
+          -- U-ICALL-PRESERVES: `preserves` is the callee's disclosed assumption about the runtime it leaves behind. Exactly two
+          -- forms: `fun _ _ => True` (nothing assumed, the default), or `RtPreserves R2` (`RtPreserves64 R2` on amd64) for a
+          -- VARIABLE `R2` of the statement (then a runtime variable: the usual rules for runtime variables apply to it).
+          -- Anything else (a lambda that constrains bytes, values or registers, `False`, a closed model, an eta-expanded
+          -- `RtPreserves`, an extra argument) is a post smuggled into the hypothesis and is rejected; a separate premise
+          -- of the same shape is rejected by the premise rule below (it mentions a runtime variable and is no contract).
+          if i == 9 then
+            let isTrue := match a.consumeMData with
+              | .lam _ _ (.lam _ _ b _) _ => b.consumeMData.isConstOf ``True
+              | _ => false
+            let rtp := if c == `Janus.Contracts.ICall.ICallContract then `Janus.Contracts.ICall.RtPreserves
+              else `Janus.Contracts.ICall.RtPreserves64
+            if isTrue then continue
+            if a.isAppOfArity rtp 1 && isVar (a.getArg! 0).consumeMData then
+              rtVars := rtVars.insert (a.getArg! 0).consumeMData.fvarId!
+              continue
+            return some s!"assumes the abstract-callee contract {c} with the `preserves` argument `{(← Meta.ppExpr a).pretty 10000}`, which is neither `fun _ _ => True` (nothing assumed) nor `{rtp.getString!} R2` for a runtime model variable `R2` of the statement: `preserves` may only say that the callee keeps the runtime's invariant, never constrain bytes, values or registers (U-ICALL-PRESERVES)"
         -- Round 13: an argument that is EXACTLY a constant generated by `janus extract` into
         -- `Extracted.lean` (`Extracted.funcs`, the function metadata the panic contracts read from
         -- .gopclntab, …) is the extraction's own data: `janus check` regenerates the whole file
@@ -1942,6 +1999,11 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
       if ← Meta.isProp t then continue
       if t.hasAnyFVar (rtVars.contains ·) then
         return some s!"has the non-Prop binder `{(← x.fvarId!.getUserName)} : {(← Meta.ppExpr t).pretty 10000}` whose type mentions a runtime variable of a contract hypothesis: a binder of any sort (`PLift`, `ULift`, `Subtype`, `Sigma`, a structure, a proof-local `def …: Type`) could carry a constraint on the runtime that only the contracts and the model laws may state; put such a condition in the precondition instead (round 13)"
+    -- U-ICALL: the call-site property and the kept ranges mention no runtime variable (`impl`, `rt`, `R`, …): they are the
+    -- statement's own claims about the call, they must not constrain the runtime's parameters
+    for a in icallFree do
+      if a.hasAnyFVar (rtVars.contains ·) then
+        return some s!"has an abstract-callee contract whose call-site property or kept ranges `{(← Meta.ppExpr a).pretty 10000}` mention a runtime variable of a contract hypothesis: they may mention only the statement's own variables (U-ICALL)"
     for (x, t) in premises do
       unless t.hasAnyFVar (rtVars.contains ·) do continue
       let t' := t.consumeMData
@@ -1958,7 +2020,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
       -- Round 15: "the runtime's code does not overlap the extracted function's code"
       let isApart := isImplApartPremise env t' &&
         (match t'.getArg! 1 |>.consumeMData with | .fvar v => bound.contains v | _ => false)
-      unless isContract || isLaws || isApart || depthBound bound rtVars t' do
+      unless isContract || isLaws || isApart || depthBound bound rtVars t' || outsideRtPremise rtVars t' do
         return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}), which constrains a runtime variable of a contract hypothesis; only the contracts and the model laws may mention them (round 10 V1, round 11)"
     return none
 

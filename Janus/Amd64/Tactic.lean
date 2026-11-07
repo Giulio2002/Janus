@@ -1798,6 +1798,26 @@ where
       | (some (_, g'), _) => return g'
       | (none, _) => return g
 
+/-- An indirect call whose target is the symbolic address `fn` of a `calls [h]` hypothesis (see `Janus.Tactic.symbolicCall`):
+when the normal form of `rip` is `BitVec.ofNat 64 fn` the call continues from the summary's postcondition. -/
+def symbolicCall (cfg : Cfg) (g : MVarId) (p s pcE pcPf : Expr) (hret? : Option Expr) :
+    TacticM (Option (List MVarId)) := do
+  for (n, hsum0) in cfg.calls do
+    unless n == Janus.Tactic.Common.symbolicEntry do continue
+    let (mvs, _, hty) ← forallMetaTelescope (← instantiateMVars (← inferType hsum0))
+    let (``Summary, #[_, entry, _, _]) := hty.getAppFnArgs | continue
+    let want := mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) entry
+    unless (← withReducible (isDefEq pcE want)) do continue
+    let hpc ← mkExpectedTypeHint pcPf (← mkEq (← mkAppM ``State.rip #[s]) want)
+    let hsum := mkAppN hsum0 mvs
+    let hsum ← match hret? with
+      | some hret => mkAppM ``Summary.withExit #[hsum, hret]
+      | none => pure hsum
+    cfg.status.modify fun st => { st with instr := some "(an abstract callee, by its summary)" }
+    return some (← applySummary cfg g p s hsum hpc "the abstract callee" mvs
+      ((cfg.callNames.find? (·.1 == n)).map (·.2)))
+  return none
+
 /-- Perform one step on `g` (a `Reaches`/`ReachesRet` goal). `none`: stopped at an `until`
 address. -/
 def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List MVarId)) :=
@@ -1836,6 +1856,8 @@ def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (
           (← mkEq (← mkAppM ``State.rip #[s]) (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) retE))
         return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit_withExit) #[base, retE, s, Q, hret, hpc]))
     let some (c, hpc) := pc? |
+      -- an indirect call to an abstract callee: `calls [h]` with `h : Summary p fn …` for a symbolic `fn`
+      if let some gs ← symbolicCall cfg g p s pcE pcPf hret? then return some gs
       throwError "{tacName}: stuck after {(← cfg.status.get).steps} instructions: the rip of the \
         current state is not a concrete address:{indentExpr pcE}\n\
         This is an indirect jump or a return to an address the hypotheses do not determine. \
@@ -2126,7 +2148,9 @@ def parseCallsNamed (stx : Syntax) : TacticM (Array (Nat × Expr × Option Name)
       return (n, e, nm)
     let (``Summary, #[_, entry, _, _]) := ty.getAppFnArgs |
       throwError "janus64_run calls: {t} is not a `Summary`: {ty0}"
-    let some n ← evalNat entry | throwError "janus64_run calls: cannot evaluate the entry of {t}"
+    let some n ← evalNat entry | do
+      if entry.hasFVar then return (Janus.Tactic.Common.symbolicEntry, e, nm)
+      throwError "janus64_run calls: cannot evaluate the entry of {t}"
     return (n, e, nm)
 
 def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) :=
