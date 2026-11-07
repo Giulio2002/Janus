@@ -31,10 +31,10 @@ def prog : Janus.Amd64.Program := { segments := impl, stubs := [], exitAddr := 0
 
 theorem link_eq : toy.link impl = prog := rfl
 
-theorem ret_of (s : State) (R : Nat → W64) (F : Flags) (h0 : R 0 = s.regs 1) (h3 : R 3 = 0) (h1 : R 1 = 0)
+theorem ret_of (pr : State → Janus.Arm64.Memory → Prop) (s : State) (hpr : pr s s.mem) (R : Nat → W64) (F : Flags) (h0 : R 0 = s.regs 1) (h3 : R 3 = 0) (h1 : R 1 = 0)
     (h4 : R 4 = s.regs 4 + 8#64) (h5 : R 5 = s.regs 5) (h14 : R 14 = s.regs 14) :
-    ICallRet64 4 16 rt0 (fun _ => []) R0 s { s with regs := R, flags := F, rip := retAddrOf s } := by
-  refine ⟨R, F, s.xmm, s.ymmHi, s.mem, s.zmmHi, s.kreg, ?_, MemFrame.refl _ _, by simp, ?_⟩
+    ICallRetP64 4 16 rt0 (fun _ => []) R0 pr s { s with regs := R, flags := F, rip := retAddrOf s } := by
+  refine ⟨R, F, s.xmm, s.ymmHi, s.mem, s.zmmHi, s.kreg, ?_, MemFrame.refl _ _, by simp, ?_, hpr⟩
   · simp only [retState64]
     congr 1
     · funext i
@@ -54,7 +54,8 @@ theorem ret_of (s : State) (R : Nat → W64) (F : Flags) (h0 : R 0 = s.regs 1) (
     · funext i; split <;> simp_all
   · exact ⟨h0, h3, h1⟩
 
-theorem impl_ok : ICallContract64 (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R0 (fun _ => True) := by
+theorem impl_okP (pr : State → Janus.Arm64.Memory → Prop) (hpr : ∀ s, pr s s.mem) :
+    ICallContract64 (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R0 (fun _ => True) pr := by
   rw [link_eq]
   intro s hpc ⟨⟨hr, _, hst, _, hw⟩, _⟩
   have hacc : s.mem.accessible (s.regs 4).toNat 8 false = true :=
@@ -62,8 +63,11 @@ theorem impl_ok : ICallContract64 (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R
   have hpc' : s.rip = 0x100000#64 := hpc
   janus64_run [hpc']
   all_goals
-    apply ret_of
+    apply ret_of pr _ (hpr _)
     all_goals simp [setRegF]
+
+theorem impl_ok : ICallContract64 (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R0 (fun _ => True) :=
+  impl_okP (fun _ _ => True) (fun _ => trivial)
 
 def wstate : State :=
   { regs := fun i => if i = 4 then 0x1800#64 else 0#64, rip := BitVec.ofNat 64 A0,
@@ -80,5 +84,12 @@ theorem iCall64_satisfiable : ∃ impl : List Janus.Amd64.Segment,
     ICallContract64 (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R0 (fun _ => True) ∧
     ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧ ICallPre64 4 16 48 rt0 (fun _ => True) s :=
   ⟨impl, impl_ok, wstate, rfl, wstate_pre⟩
+
+/-- The `preserves` parameter is satisfiable (amd64): the writer leaves the memory as it found it, so it meets
+`ICallContract64 … (RtPreserves64 R2)` for every runtime model `R2`. -/
+theorem iCallPreserves64_satisfiable (R2 : RtInv) : ∃ impl : List Janus.Amd64.Segment,
+    ICallContract64 (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R0 (fun _ => True) (RtPreserves64 R2) ∧
+    ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧ ICallPre64 4 16 48 rt0 (fun _ => True) s :=
+  ⟨impl, impl_okP _ (fun _ b L h => h), wstate, rfl, wstate_pre⟩
 
 end Janus.Contracts.ICallSatAmd64

@@ -40,10 +40,10 @@ def rt0 : List (Nat × Nat) := [(0x30000, 0x31000)]
 def R0 : Res := fun _ _ a2 _ n e1 e2 => n = a2 ∧ e1 = 0 ∧ e2 = 0
 
 /-- The return of the writer as `ICallRet`. -/
-theorem ret_of (s : State) (R : Nat → W64) (F : Flags) (h0 : R 0 = s.regs 2) (h1 : R 1 = 0) (h2 : R 2 = 0)
+theorem ret_of (pr : State → Memory → Prop) (s : State) (hpr : pr s s.mem) (R : Nat → W64) (F : Flags) (h0 : R 0 = s.regs 2) (h1 : R 1 = 0) (h2 : R 2 = 0)
     (h18 : R 18 = s.regs 18) (h28 : R 28 = s.regs 28) (h29 : R 29 = s.regs 29) (hF : F = s.flags) :
-    ICallRet 4 16 rt0 (fun _ => []) R0 s { s with regs := R, flags := F, pc := s.regs 30 } := by
-  refine ⟨R, F, s.vregs, s.mem, s.excl, s.exclPass, ?_, MemFrame.refl _ _, by simp, ?_⟩
+    ICallRetP 4 16 rt0 (fun _ => []) R0 pr s { s with regs := R, flags := F, pc := s.regs 30 } := by
+  refine ⟨R, F, s.vregs, s.mem, s.excl, s.exclPass, ?_, MemFrame.refl _ _, by simp, ?_, hpr⟩
   · simp only [retStateX]
     congr 1
     funext i
@@ -53,14 +53,18 @@ theorem ret_of (s : State) (R : Nat → W64) (F : Flags) (h0 : R 0 = s.regs 2) (
     · simp only [h, ite_false, List.getD_nil]
   · exact ⟨h0, h1, h2⟩
 
-theorem impl_ok : ICallContract (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R0 (fun _ => True) := by
+theorem impl_okP (pr : State → Memory → Prop) (hpr : ∀ s, pr s s.mem) :
+    ICallContract (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R0 (fun _ => True) pr := by
   rw [link_eq]
   intro s hpc ⟨⟨hr1, hr2, _⟩, _⟩
   have hpc' : s.pc = 0x100000#64 := hpc
   janus_run [hpc']
   all_goals
-    apply ret_of
+    apply ret_of pr _ (hpr _)
     all_goals simp [setReg]
+
+theorem impl_ok : ICallContract (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R0 (fun _ => True) :=
+  impl_okP (fun _ _ => True) (fun _ => trivial)
 
 /-- The witness call state: `SP = 0x1800` in a writable region, `X30` outside the code. -/
 def wstate : State :=
@@ -79,5 +83,14 @@ theorem iCall_satisfiable : ∃ impl : List Segment,
     ICallContract (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R0 (fun _ => True) ∧
     ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ ICallPre 4 16 48 rt0 (fun _ => True) s :=
   ⟨impl, impl_ok, wstate, rfl, wstate_pre⟩
+
+/-- **The `preserves` parameter is satisfiable (U-ICALL-PRESERVES).** The same writer meets
+`ICallContract … (RtPreserves R2)` for EVERY runtime model `R2` (it leaves the memory as it found it, so any invariant of
+the view still holds), and a call state satisfies the precondition. The allocating shapes (a callee that writes the heap
+and re-establishes `R2.inv`) are the consumer's hypothesis about its own callee. -/
+theorem iCallPreserves_satisfiable (R2 : RtInv) : ∃ impl : List Segment,
+    ICallContract (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R0 (fun _ => True) (RtPreserves R2) ∧
+    ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ ICallPre 4 16 48 rt0 (fun _ => True) s :=
+  ⟨impl, impl_okP _ (fun _ b L h => h), wstate, rfl, wstate_pre⟩
 
 end Janus.Contracts.ICallSat

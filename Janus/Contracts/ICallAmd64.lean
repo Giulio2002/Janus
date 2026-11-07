@@ -1,3 +1,4 @@
+import Janus.Contracts.Live
 import Janus.Contracts.ICall
 import Janus.Contracts.AllocAmd64
 
@@ -33,9 +34,23 @@ def ICallPre64 (nargs stack above : Nat) (rt : List (Nat × Nat)) (P : State →
     (∀ r ∈ keep s, ∀ a, r.1 ≤ a → a < r.1 + r.2 → m.readLE a 1 = s.mem.readLE a 1) ∧
     R (s.regs 0) (s.regs 3) (s.regs 1) (s.regs 7) (junk 0) (junk 3) (junk 1)
 
+/-- `ICallRet64` plus `preserves s m` (U-ICALL-PRESERVES; see `ICallRetP`). -/
+@[reducible] def ICallRetP64 (nargs stack : Nat) (rt : List (Nat × Nat)) (keep : State → List (Nat × Nat)) (R : Res)
+    (preserves : State → Janus.Arm64.Memory → Prop) (s s' : State) : Prop :=
+  ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Janus.Arm64.Memory)
+    (zh : Nat → BitVec 256) (kr : Nat → W64),
+    s' = retState64 s junk [] f x yh m zh kr ∧ MemFrame s.mem m (rt ++ calleeStack64 s stack nargs) ∧
+    (∀ r ∈ keep s, ∀ a, r.1 ≤ a → a < r.1 + r.2 → m.readLE a 1 = s.mem.readLE a 1) ∧
+    R (s.regs 0) (s.regs 3) (s.regs 1) (s.regs 7) (junk 0) (junk 3) (junk 1) ∧ preserves s m
+
+/-- The amd64 `RtPreserves` (the goroutine register is `R14`). -/
+def RtPreserves64 (R2 : RtInv) (s : State) (m : Janus.Arm64.Memory) : Prop :=
+  ∀ b L, R2.inv b L (s.regs 14).toNat (view R2.rt L s.mem) → R2.inv b L (s.regs 14).toNat (view R2.rt L m)
+
 /-- The callee at the code address `fn` of `p` (amd64). -/
 def ICallContract64 (p : Janus.Amd64.Program) (fn nargs stack above : Nat) (rt : List (Nat × Nat))
-    (keep : State → List (Nat × Nat)) (R : Res) (P : State → Prop) : Prop :=
-  Summary p fn (ICallPre64 nargs stack above rt P) (ICallRet64 nargs stack rt keep R)
+    (keep : State → List (Nat × Nat)) (R : Res) (P : State → Prop)
+    (preserves : State → Janus.Arm64.Memory → Prop := fun _ _ => True) : Prop :=
+  Summary p fn (ICallPre64 nargs stack above rt P) (ICallRetP64 nargs stack rt keep R preserves)
 
 end Janus.Contracts.ICall
