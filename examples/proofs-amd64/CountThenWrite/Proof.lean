@@ -77,19 +77,20 @@ theorem hc2 : ICallContract64 (Extracted.program.link impl) A0 4 16 96 rt0 (fun 
     (impl_okP (nargs := 4) (stack := 16) (above := 96)
       (P := fun sc => sc.regs 0 = 0x600000 ∧ sc.regs 3 = 0x500000 ∧ sc.regs 1 = 3 ∧ sc.regs 7 = 3) (fun _ _ => True) (fun _ => trivial))
 
-/-- UP3 (U-ICALL-INHABITED): the call-site property of the contract of `correctness` is satisfiable at a call state. -/
-theorem inhabited_count : ∃ (stack : Nat) (rt : List (Nat × Nat)) (w : BitVec 64) (s : Janus.Amd64.State),
-    Janus.Contracts.ICall.ICallPre64 1 stack 96 rt (fun sc => sc.regs 0 = w) s :=
-  ⟨16, Janus.Contracts.ICallSat.rt0, 0x600000, { Janus.Contracts.ICallSatAmd64.wstate with regs := fun i => if i = 4 then 0x1800#64 else if i = 0 then 0x600000#64 else 0#64 },
-    ⟨by decide, by decide, by decide, by decide, by decide⟩, by decide,
-    by show Janus.Outside 0x1800 96 Janus.Contracts.ICallSat.rt0; simp [Janus.Contracts.ICallSat.rt0], rfl⟩
+/-- The call states of the two writer contracts (U-WITNESS-CALLSITE): at the callee's entry `A0`, with each contract's precondition. -/
+def wsCall1 : State :=
+  { Janus.Contracts.ICallSatAmd64.wstate with regs := fun i => if i = 4 then 0x1800#64 else if i = 0 then 0x600000#64 else 0#64 }
 
-/-- UP3 (U-ICALL-INHABITED): the call-site property of the contract of `correctness` is satisfiable at a call state. -/
-theorem inhabited_write : ∃ (stack : Nat) (rt : List (Nat × Nat)) (w ptr len cap : BitVec 64) (s : Janus.Amd64.State),
-    Janus.Contracts.ICall.ICallPre64 4 stack 96 rt (fun sc => sc.regs 0 = w ∧ sc.regs 3 = ptr ∧ sc.regs 1 = len ∧ sc.regs 7 = cap) s :=
-  ⟨16, Janus.Contracts.ICallSat.rt0, 0x600000, 0x500000, 3, 3, { Janus.Contracts.ICallSatAmd64.wstate with regs := fun i => if i = 4 then 0x1800#64 else if i = 0 then 0x600000#64 else if i = 3 then 0x500000#64 else if i = 1 then 3#64 else if i = 7 then 3#64 else 0#64 },
-    ⟨by decide, by decide, by decide, by decide, by decide⟩, by decide,
-    by show Janus.Outside 0x1800 96 Janus.Contracts.ICallSat.rt0; simp [Janus.Contracts.ICallSat.rt0], rfl, rfl, rfl, rfl⟩
+theorem wsCall1_pre : Janus.Contracts.ICall.ICallPre64 1 16 96 rt0 (fun sc => sc.regs 0 = 0x600000) wsCall1 :=
+  ⟨⟨by decide, by decide, by decide, by decide, by decide⟩, by decide,
+    by show Janus.Outside 0x1800 96 rt0; simp [rt0], rfl⟩
+
+def wsCall2 : State :=
+  { Janus.Contracts.ICallSatAmd64.wstate with regs := fun i => if i = 4 then 0x1800#64 else if i = 0 then 0x600000#64 else if i = 3 then 0x500000#64 else if i = 1 then 3#64 else if i = 7 then 3#64 else 0#64 }
+
+theorem wsCall2_pre : Janus.Contracts.ICall.ICallPre64 4 16 96 rt0 (fun sc => sc.regs 0 = 0x600000 ∧ sc.regs 3 = 0x500000 ∧ sc.regs 1 = 3 ∧ sc.regs 7 = 3) wsCall2 :=
+  ⟨⟨by decide, by decide, by decide, by decide, by decide⟩, by decide,
+    by show Janus.Outside 0x1800 96 rt0; simp [rt0], rfl, rfl, rfl, rfl⟩
 
 theorem hret : RetAddr (Extracted.program.link impl) ret := RetAddr.of_check (by decide)
 
@@ -104,6 +105,17 @@ theorem setup : CallSetup ((Extracted.program.link impl).withExit ret) Extracted
       | 3, _ => rfl
       | 4, _ => rfl), rfl⟩
 
+/-- The theorem fires: the concrete call of `CountThenWrite` (the concrete writer serves the itab) returns, and its results are the ones
+`correctness` describes. -/
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    ∃ c a1 a2 a3 e1 e2, R0 0x600000 a1 a2 a3 c e1 e2 ∧
+        ((c = 0 ∧ s'.regs 0 = 0 ∧ s'.regs 3 = 0 ∧ s'.regs 1 = 0) ∨
+         (c ≠ 0 ∧ ∃ n f1 f2, R0 0x600000 0x500000 3 3 n f1 f2 ∧ s'.regs 0 = n ∧ s'.regs 3 = f1 ∧ s'.regs 1 = f2)) :=
+  correctness impl A0 A0 16 rt0 R0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc1 hc2 ret hret s0 setup
+    ⟨by decide, (by unfold CodePtrOK64; decide), (by unfold CodePtrOK64; decide), by decide,
+    ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, (by unfold SPAligned; decide),
+    by decide, by decide, by decide, by decide, by simp [tabA, rt0], by simp [s0, sp0, rt0]⟩
+
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (fn1 fn2 stack : Nat) (rt : List (Nat × Nat)) (R1 R2 : Res) (ret : Nat)
     (s : State) (tab w ptr len cap : BitVec 64),
     ICallContract64 (Extracted.program.link impl) fn1 1 stack 96 rt (fun _ => []) R1 (fun sc => sc.regs 0 = w) ∧
@@ -116,22 +128,19 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (fn1 fn2 stack : Nat)
       StackGuardOK s 0 ∧ StackWritable s (48 + stack) 48 ∧ SPAligned s ∧
       tab.toNat + 40 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 16 false = true ∧
       s.mem.readLE (tab.toNat + 24) 8 = fn1 ∧ s.mem.readLE (tab.toNat + 32) 8 = fn2 ∧
-      Outside (tab.toNat + 24) 16 rt ∧ Outside ((s.regs 4).toNat - 48) 96 rt) :=
-  ⟨impl, A0, A0, 16, rt0, R0, R0, ret, s0, BitVec.ofNat 64 tabA, 0x600000, 0x500000, 3, 3, hc1, hc2, hret, setup,
-    by decide, (by unfold CodePtrOK64; decide), (by unfold CodePtrOK64; decide), by decide,
-    ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, (by unfold SPAligned; decide),
-    by decide, by decide, by decide, by decide, by simp [tabA, rt0], by simp [s0, sp0, rt0]⟩
-
-/-- The theorem fires: the concrete call of `CountThenWrite` (the concrete writer serves the itab) returns, and its results are the ones
-`correctness` describes. -/
-theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    ∃ c a1 a2 a3 e1 e2, R0 0x600000 a1 a2 a3 c e1 e2 ∧
+      Outside (tab.toNat + 24) 16 rt ∧ Outside ((s.regs 4).toNat - 48) 96 rt) ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 fn1 ∧ Janus.Contracts.ICall.ICallPre64 1 stack 96 rt (fun sc => sc.regs 0 = w) s_c) ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 fn2 ∧
+      Janus.Contracts.ICall.ICallPre64 4 stack 96 rt (fun sc => sc.regs 0 = w ∧ sc.regs 3 = ptr ∧ sc.regs 1 = len ∧ sc.regs 7 = cap) s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+      ∃ c a1 a2 a3 e1 e2, R1 w a1 a2 a3 c e1 e2 ∧
         ((c = 0 ∧ s'.regs 0 = 0 ∧ s'.regs 3 = 0 ∧ s'.regs 1 = 0) ∨
-         (c ≠ 0 ∧ ∃ n f1 f2, R0 0x600000 0x500000 3 3 n f1 f2 ∧ s'.regs 0 = n ∧ s'.regs 3 = f1 ∧ s'.regs 1 = f2)) :=
-  correctness impl A0 A0 16 rt0 R0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc1 hc2 ret hret s0 setup
+         (c ≠ 0 ∧ ∃ n f1 f2, R2 w ptr len cap n f1 f2 ∧ s'.regs 0 = n ∧ s'.regs 3 = f1 ∧ s'.regs 1 = f2)) :=
+  ⟨impl, A0, A0, 16, rt0, R0, R0, ret, s0, BitVec.ofNat 64 tabA, 0x600000, 0x500000, 3, 3, hc1, hc2, hret, setup,
     ⟨by decide, (by unfold CodePtrOK64; decide), (by unfold CodePtrOK64; decide), by decide,
     ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, (by unfold SPAligned; decide),
-    by decide, by decide, by decide, by decide, by simp [tabA, rt0], by simp [s0, sp0, rt0]⟩
+    by decide, by decide, by decide, by decide, by simp [tabA, rt0], by simp [s0, sp0, rt0]⟩,
+    ⟨wsCall1, rfl, wsCall1_pre⟩, ⟨wsCall2, rfl, wsCall2_pre⟩, returns⟩
 
 end Witness
 

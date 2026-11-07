@@ -2452,11 +2452,15 @@ def roundTrip (thm : Name) (thmType : Expr) (sig : String) : MetaM (Option Strin
 /-- Print the signature of `thm` (whose type is `thmType`) so that it round-trips: first with the
 current options, then, if a numeral's type is what the plain print loses (`5 ≠ 7` at
 `BitVec 64` reads back at `Nat`), with `pp.numericTypes` too. The first print that round-trips
-is the statement; if none does, the error of the plain print. -/
+is the statement; if none does, the error of the plain print. Every print is made with `pp.deepTerms`
+(UP3b): the default depth limit elides a deep subterm as `⋯`, which reads back as a hole, so a statement
+with several call-site conjuncts in front of the run (a witness) would never round-trip. -/
 def printFaithful (thm : Name) (thmType : Expr) : MetaM (Except String String) := do
   let mut firstErr := none
   for numeric in [false, true] do
-    let sig ← withOptions (fun o => if numeric then o.setBool `pp.numericTypes true else o)
+    let sig ← withOptions (fun o =>
+        let o := (o.setBool `pp.deepTerms true).insert `pp.maxSteps (100000 : Nat)
+        if numeric then o.setBool `pp.numericTypes true else o)
       (PrettyPrinter.ppSignature thm)
     let sigStr := sig.fmt.pretty 10000
     match ← roundTrip thm thmType sigStr with
@@ -3069,14 +3073,33 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
         let h ← instantiateMVars h
         let .const c _ := h.getAppFn | continue
         unless isRuntimeContract (← getEnv) c do continue
+        -- the contract's shape (checked over every family of Janus/Contracts): `Summary p entry pre post`, or
+        -- `∀ xs, Summary p entry pre post` (the live and map families), or `∀ xs, H₁ → … → Hₙ → concl` (the panic engine contracts, morestack)
         let mut u := h
-        let mut found := false
-        for _ in [0:6] do
-          if u.getAppFn.isConstOf `Janus.Tactic.Summary || u.getAppFn.isConstOf `Janus.Amd64.Tactic.Summary then found := true; break
+        let mut xs : Array Expr := #[]
+        let mut prems : Array Expr := #[]
+        let mut isSummary := false
+        for _ in [0:8] do
+          let (ms, _, body) ← Meta.forallMetaTelescope u
+          for m in ms do
+            let mt ← instantiateMVars (← Meta.inferType m)
+            if ← Meta.isProp mt then prems := prems.push mt else xs := xs.push m
+          u := body.consumeMData
+          if u.getAppFn.isConstOf `Janus.Tactic.Summary || u.getAppFn.isConstOf `Janus.Amd64.Tactic.Summary then isSummary := true; break
+          if !prems.isEmpty then break
           match ← Meta.unfoldDefinition? u with
           | some u2 => u := u2.consumeMData
           | none => break
-        unless found && u.getAppNumArgs == 4 do
+        if !isSummary then
+          -- not a `Summary`: the call state is the instantiation of the premises (the first one fixes the entry, `s.pc = addr`)
+          if prems.isEmpty then
+            return some s!"the contract hypothesis `{c}` does not unfold to a `Summary` or a `∀ xs, premises → …` claim, so the witness cannot be required to exhibit its call-site state (U-WITNESS-CALLSITE)"
+          for q in prems do
+            let q ← instantiateMVars q
+            unless ← findConj q wconjs do
+              return some s!"the witness does not exhibit a call-site state for the contract hypothesis `{(← Meta.ppExpr h).pretty 200}`: it must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr q).pretty 400}` (the contract's premise; U-WITNESS-CALLSITE)"
+          continue
+        unless u.getAppNumArgs == 4 do
           return some s!"the contract hypothesis `{c}` does not unfold to a `Summary`, so the witness cannot be required to exhibit its call-site state (U-WITNESS-CALLSITE)"
         let entry := u.getArg! 1
         let pre := u.getArg! 2
@@ -3098,7 +3121,7 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
             if ← findConj (← instantiateMVars e2) wconjs then ok := true
           if !ok then st.restore
         unless ok do
-          return some s!"the witness does not exhibit a call-site state for the contract hypothesis `{(← Meta.ppExpr h).pretty 200}`: it must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr expected).pretty 400}` (a state at the callee's entry satisfying the contract's call precondition; U-WITNESS-CALLSITE)"
+          return some s!"the witness does not exhibit a call-site state for the contract hypothesis `{(← Meta.ppExpr h).pretty 200}`: it must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr (← instantiateMVars expected)).pretty 400}` (a state at the callee's entry satisfying the contract's call precondition; U-WITNESS-CALLSITE)"
       -- U-WITNESS-RUN (UP3): the witness must also state the RUN: the unfolded conclusion's final `Returns`-style claim
       -- (`Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')`) at the SAME instantiation the premises fixed. A
       -- vacuous contract, an unsatisfiable pre or an empty `R` admits no such run through the call, so a witness that only exhibits
