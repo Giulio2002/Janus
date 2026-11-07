@@ -1347,11 +1347,13 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	// 3978). When janus can compile the closure itself, Lake only resolves the package (`lake env true`: a broken
 	// lakefile or manifest still fails loudly) and the proof's module comes from its path; a module janus cannot compile
 	// (outside the package's source directories, a compile that fails) takes the Lake path below, which builds it and
-	// reports exactly what it always reported. `--keep-workspace` (authors iterate with `lake env lean` on the built
-	// modules) and JANUS_LAKE_BUILD=1 take the Lake path too.
+	// reports exactly what it always reported. JANUS_LAKE_BUILD=1 takes the Lake path too. `--keep-workspace` (authors
+	// iterate with `lake env lean` on the built modules) skips Lake like any run: janus's own oleans are laid out in the
+	// workspace's `.lake/build` tree after the verification (exportOwnOleans), as diagnostics Lake never builds and
+	// janus never reads.
 	pinned := pinSet{ws.pins}
 	lakeFree, ownPre := false, false
-	if ob != nil && !ws.dg.KeepWorkspace && os.Getenv("JANUS_LAKE_BUILD") == "" {
+	if ob != nil && os.Getenv("JANUS_LAKE_BUILD") == "" {
 		var lerr error
 		lakeFree, ownPre, lerr = ws.tryLakeFree(pkg, ob, reqs, pinned)
 		if lerr != nil {
@@ -1684,6 +1686,10 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	}()
 
 	consumerTimer.mark("stale-input check")
+	if lakeFree && ws.dg.KeepWorkspace && staleErr == nil {
+		ws.exportOwnOleans(ob)
+		consumerTimer.mark("--keep-workspace: own oleans laid out in .lake/build")
+	}
 	sort.Strings(rebuilt)
 	rebuilt = dedup(rebuilt)
 	fi := fw.info()
@@ -1926,4 +1932,24 @@ func leanLibCovers(files map[string][]byte, config, m string) bool {
 		}
 	}
 	return found
+}
+
+// exportOwnOleans lays janus's own oleans (the consumer's and the dependencies', compiled from the hashed sources) out in
+// the workspace's Lake build tree, so that an author who keeps the workspace (`--keep-workspace`) can iterate with
+// `lake env lean File.lean` there without the verification having run Lake's build of the same modules. Fail-closed by
+// construction: it runs after every check of the verification, copies bytes janus produced and verified, writes only
+// below `.lake/build` of the workspace's packages, and nothing reads those files back (the Lake-free path ignores that
+// tree; the Lake path rebuilds from traces, and these files carry none). An error is ignored: the diagnostics are
+// optional, the verdict is already decided.
+func (ws *consumerWS) exportOwnOleans(ob *ownBuild) {
+	for _, p := range ob.pkgs {
+		dst := filepath.Join(ws.Root, ".lake", "build", "lib", "lean")
+		if p.name != "" {
+			dst = filepath.Join(ws.DepsDir, p.name, ".lake", "build", "lib", "lean")
+		}
+		if err := os.MkdirAll(dst, 0o755); err != nil {
+			continue
+		}
+		_ = copyTree(p.lib, dst)
+	}
 }
