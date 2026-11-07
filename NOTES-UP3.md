@@ -147,3 +147,28 @@ Timing (cold framework, --no-result-cache, one machine at load ~50): arm64 Write
 ## HANDOVER delta for UP3b (supersedes "Step 2 design" above)
 Done: step 2 as frozen above; limitation documented (NOTES, docs/SOUNDNESS.md), audit/roundup3/known-accepted/KA1 (md only; no executable row).
 Remaining: (2) upgrade examples: WriteTo amd64, CountThenWrite both ISAs, every contract-bearing example; record WARM timing; (3) regressions: the Add-based RT rows now fail ONLY at the witness (U-WITNESS-CALLSITE / pins make pre uninhabited): needs a verify-level runner variant with a witness-bearing Add proof per row (statement-only rows stay Verified in --audit-only: N10 N11 N18 N62 N65 and the six removed ICallAudit pins); add R01 (rows2) and WIT rows with expected reasons; controls verify; (4) corpus (fv/wrun once FV-WRUN is done) zero false rejects — watch "does not unfold to a Summary" rejections; (5) `check-merge` + SAT (commands above); Go tests via gotest lane. Head: see `git log -1` on agent/up3-vacuity.
+
+# FROZEN (step 2b, UP3b b9871e0a): U-WITNESS-CALLSITE for EVERY contract shape (checked over all pinned families of Janus/Contracts)
+The auditor unfolds each contract hypothesis `c` generically (forallMetaTelescope over the unfolded body; the telescope's data binders become the
+witness's own existential variables, tied to the same ones by unification) and needs, among the FLATTENED conjuncts of `Witness.nonvacuous`:
+1. Bare `Summary p entry pre post` (ICall, Alloc, Cmpstring, Hash, Iface, Instrument, Libc/Lock, Wb, Soft, Cmp, Mem*, Eq*, Panic Deferproc*/Gorecover, Rt, KeepAlive, ConvT64, Sched ...):
+       (∃ s_c : State, s_c.pc = BitVec.ofNat 64 <entry> ∧ <pre> s_c)               -- amd64: Janus.Amd64.State, s_c.rip
+   `<pre>` = the Summary's 3rd argument with the contract's arguments substituted; write it as its conjuncts (any nesting, matched up to defeq).
+2. `∀ xs, Summary p entry pre post` (all *Live families: Newobject/Mallocgc/Makeslice/Growslice/Wb/Rt/Memmove/Typed*/Memclr*Live (+64), ErrorfLive, PoolGet/PutLive
+   [PoolPutLive: xs = L b rs]; the map families `∀ f` (Access1/2, Assign, Delete, Clear, IterStart, IterNext `∀ mp f k ks`, ...); Iface InterfaceSwitch `∀ cs`):
+       (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : State), s_c.pc = BitVec.ofNat 64 <entry> ∧ <pre with xs := L b> s_c)
+   Each x in xs is an existential of the SAME conjunct; it may also be a closed term (`L := []`, `b := 0x400`) inside the pre instead of a bound variable.
+   Tiny example (NewobjectLiveContract, arm64):
+       (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : State), s_c.pc = BitVec.ofNat 64 addr ∧ NewobjectPre stack s_c ∧ StackRoom s_c stack 1 ∧
+          LiveAt R addr [(s_c.regs 0).toNat] L b (newobjectRound s_c) (s_c.regs 28).toNat s_c.mem (calleeStack s_c stack 1))
+   WbLiveContract: same with its own pre (see its def in Janus/Contracts/LiveAmd64.lean / Live.lean); map `∀ f`: `∃ (f : …) (s_c : State), s_c.pc = … ∧ RTPre M 3 s_c ∧ …`.
+3. Premise chain, no Summary (panic engine: DeferreturnContract `∀ s, s.pc = addr → DeferreturnPre P s → Engine …`; GopanicContract / GoexitContract
+   `∀ s fi, s.pc = addr → FuncInfo.find T (s.regs 30).toNat = some fi → GopanicPre P fi s → Engine …`; MorestackContract `∀ g lo hi s_m, MorestackPre … s_m → ∃ …`):
+   the conjunct is ∃ the data binders, each PREMISE (as a flattened conjunct, same variables):
+       (∃ (s : State) (fi : FuncInfo), s.pc = BitVec.ofNat 64 addr ∧ FuncInfo.find T (s.regs 30).toNat = some fi ∧ GopanicPre P fi s)
+       (∃ (s : State), s.pc = BitVec.ofNat 64 addr ∧ DeferreturnPre P s)                          -- amd64: s.rip
+       (∃ (g lo hi : Nat) (s_m : State), MorestackPre p FT pool rt H g lo hi s_m)
+   A contract that is neither a Summary nor has a premise is rejected ("does not unfold to a Summary or a ∀ xs, premises → … claim").
+The reject message prints the exact expected conjunct. Also fixed (needed by two call-site conjuncts): the printed statement is made with pp.deepTerms (the depth limit elided
+the tail of a deep witness as `⋯`, which read back as a hole: "elaborates back only partially"). Verified audit-only: WriteTo + CountThenWrite on both ISAs ok; the Live shape
+is checked only negatively so far (ScratchSum/ErrWrap print the expected conjunct); first positive Live witness = FV-WRUN's IntoBig.
