@@ -1701,22 +1701,75 @@ partial def strayImpl (ivs : Std.HashSet FVarId) (e : Expr) : Option FVarId :=
   | .mdata _ b | .proj _ _ b => strayImpl ivs b
   | _ => none
 
-/-- `a < b` / `a ≤ b` where `a` reads the word at `[RSP]` (`readLE _ (… regs 4 …) _`) and `b` is a literal or `2 ^ k`
-with `k ≤ 46`: the hand-written form of `ErrorfAmd64.RetLow`. -/
-def isSpBound (e : Expr) : Bool :=
-  let f := e.getAppFn
-  if (f.isConstOf ``LT.lt || f.isConstOf ``LE.le) && e.getAppNumArgs == 4 then
-    let lhs := e.getArg! 2
-    let rhs := e.getArg! 3
-    let readsSp := lhs.getAppFn.constName? == some `Janus.Arm64.Memory.readLE &&
-      (lhs.find? fun x => x.getAppFn.constName? == some `Janus.Amd64.State.regs &&
-        x.getAppNumArgs == 2 && (x.getArg! 1).nat? == some 4).isSome
-    let small := match rhs.nat? with
-      | some n => n ≤ 2 ^ 46
-      | none => rhs.getAppFn.isConstOf ``HPow.hPow && rhs.getAppNumArgs == 6 &&
-          (rhs.getArg! 4).nat? == some 2 && (match (rhs.getArg! 5).nat? with | some k => k ≤ 46 | none => false)
-    readsSp && small
-  else false
+/-- `e` is a read of the memory word at the entry `RSP` (`Memory.readLE m (… State.regs s 4 …) n`, the saved return
+address `[RSP]`), in any form. -/
+def isSpRead (e : Expr) : Bool :=
+  e.getAppFn.constName? == some `Janus.Arm64.Memory.readLE && e.getAppNumArgs ≥ 3 &&
+    ((e.getArg! 1).find? fun x => x.getAppFn.constName? == some `Janus.Amd64.State.regs &&
+      x.getAppNumArgs == 2 && ((x.getArg! 1).nat? == some 4 ||
+        (x.getArg! 1).constName?.any (·.getString! == "regSP"))).isSome
+
+/-- The framework's standard ABI predicates are opaque to the analysis below (see `abiPredicates`). -/
+def abiNames : List Name :=
+  [`Janus.Contracts.CallOK64, `Janus.Contracts.StackRoom64,
+   `Janus.GoABI.CallSetup, `Janus.GoABI.RetAddr, `Janus.GoABI.StackWritable, `Janus.GoABI.StackGuardOK,
+   `Janus.Amd64.GoABI.CallSetup, `Janus.Amd64.GoABI.RetAddr, `Janus.Amd64.GoABI.StackWritable,
+   `Janus.Amd64.GoABI.StackGuardOK]
+
+/-- by EXACT full name (a name the framework already declares cannot be redeclared by a proof file), never by a
+prefix or a last component: a proof's own `def Janus.Sneak.CallSetup` is not an ABI predicate -/
+def isAbiName (n : Name) : Bool := abiNames.contains n
+
+/-- Does the definition `c` read the word at `[RSP]`, directly or through the definitions it uses (transitively)?
+Memoised per constant (`cache`), so the cost is one traversal of each definition, not of each use; the ABI predicates
+and the core library (`Init`/`Std`/`Lean`) are opaque. A definition under analysis counts as not reading (cycles). -/
+partial def constReadsSp (cache : IO.Ref (Std.HashMap Name Bool)) (c : Name) : MetaM Bool := do
+  if let some r := (← cache.get)[c]? then return r
+  if isAbiName c then return false
+  let env ← getEnv
+  if let some mi := env.getModuleIdxFor? c then
+    let m := env.header.moduleNames[mi.toNat]!
+    if m.getRoot == `Init || m.getRoot == `Std || m.getRoot == `Lean then
+      cache.modify (·.insert c false); return false
+  cache.modify (·.insert c false)
+  let some (.defnInfo d) := env.find? c | return false
+  let mut r := (d.value.find? isSpRead).isSome
+  if !r then
+    for u in d.value.getUsedConstants do
+      if ← constReadsSp cache u then r := true; break
+  cache.modify (·.insert c r)
+  return r
+
+/-- Does the conjunct `e` read the word at `[RSP]`: itself (any spelling, under binders, in arithmetic or an existential) or
+through a definition it mentions (alias, framework predicate that is not one of the ABI predicates)? Semantic, not
+syntactic. -/
+def mentionsSpWord (cache : IO.Ref (Std.HashMap Name Bool)) (e : Expr) : MetaM Bool := do
+  if (e.find? isSpRead).isSome then return true
+  for u in e.getUsedConstants do
+    if ← constReadsSp cache u then return true
+  return false
+
+/-- `c` is (an application of) one of the framework's standard ABI preconditions: they say `[RSP]` is the return address (a
+word below `2^47`), which every consumer legitimately assumes of its caller. A top-level precondition conjunct that is one
+of these is allowed without unfolding; every other conjunct must not read the word at `[RSP]`. -/
+def isAbiPredicate (c : Expr) : Bool :=
+  c.getAppFn.constName?.any isAbiName
+
+/-- the conjuncts of a precondition body (`A ∧ B ∧ …`), under the `fun s =>` binder -/
+partial def conjuncts (e : Expr) : List Expr :=
+  match e with
+  | .mdata _ b => conjuncts b
+  | _ => if e.isAppOfArity ``And 2 then conjuncts (e.getArg! 0) ++ conjuncts (e.getArg! 1) else [e]
+
+/-- The precondition argument of every `Ensures p entry args pre post` in `ty`. -/
+partial def ensuresPres (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
+  let acc := if (e.getAppFn.constName?.any fun n => n == `Janus.GoABI.Ensures || n == `Janus.Amd64.GoABI.Ensures) && e.getAppNumArgs == 5 then acc.push (e.getArg! 3) else acc
+  match e with
+  | .app f a => ensuresPres a (ensuresPres f acc)
+  | .lam _ d b _ | .forallE _ d b _ => ensuresPres b (ensuresPres d acc)
+  | .letE _ ty v b _ => ensuresPres b (ensuresPres v (ensuresPres ty acc))
+  | .mdata _ b | .proj _ _ b => ensuresPres b acc
+  | _ => acc
 
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
 Round 14 (V2): with `main` (the default; every theorem that is not a `Witness.nonvacuous`/`Witness.returns`)
@@ -1724,10 +1777,23 @@ the runtime implementation must also be a variable of the statement (`concreteRu
 `impl` is a runtime variable even when no contract mentions it. -/
 def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) := do
   let env ← getEnv
-  -- `ErrorfAmd64.RetLow` ([RSP] < 2^46) is a fact a consumer proves from its own call site's pushed return address;
-  -- a statement that assumes it (or states it of the caller) makes an unconstrained caller's return address a hypothesis
-  if ((ty.find? fun e => e.isConstOf `Janus.Contracts.ErrorfAmd64.RetLow).isSome || (ty.find? isSpBound).isSome) then
-    return some "mentions `ErrorfAmd64.RetLow` or states `[RSP] < 2^k` (k ≤ 46) by hand (the saved return address `[RSP]` is below `2^46`): a consumer discharges it inside its proof from the return address its own `call` pushes (a code address of the extracted program), it must not appear in a theorem's statement, where a caller would have to assume it"
+  -- a bound on the caller's return address: any top-level precondition that reads the memory word at the entry `RSP`
+  -- (`[RSP]`; `ErrorfAmd64.RetLow` is one) weakens the guarantee without the reader seeing it. A consumer proves such facts
+  -- inside its proof from the return address its own `call` pushes. Hypotheses (contract statements) are not scanned.
+  -- (the statement's binders and `fun s => …` become free variables: no loose bound variable reaches `whnf`)
+  let spCache ← IO.mkRef ({} : Std.HashMap Name Bool)
+  let spHit ← Meta.forallTelescope ty fun _ stmt => do
+    for pre in ensuresPres stmt do
+      let bad ← Meta.lambdaTelescope pre fun _ body => do
+        for c in conjuncts body do
+          unless isAbiPredicate c do
+            if ← mentionsSpWord spCache c then return true
+        return false
+      if bad then return true
+    return false
+  do
+    if spHit then
+       return some "the precondition constrains the memory word at the entry `RSP` (the saved return address `[RSP]`, e.g. `ErrorfAmd64.RetLow`, in any form: alias, arithmetic, existential): a theorem must not assume a bound on its caller's return address; a consumer discharges such a fact inside its proof from the return address its own `call` pushes (a code address of the extracted program)"
   Meta.forallTelescope ty fun xs body => do
     let bound : Std.HashSet FVarId := xs.foldl (fun s x => s.insert x.fvarId!) {}
     let mut rtVars : Std.HashSet FVarId := {}

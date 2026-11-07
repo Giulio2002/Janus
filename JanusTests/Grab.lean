@@ -35,7 +35,7 @@ example (s st : State) (hfr : MemFrame s.mem st.mem []) (h : st.regs 3 = 5#64) :
 def seg : Segment := ⟨"f", 0x1000, [0xf100001f, 0x54000060, 0xd2800021, 0x14000002, 0xd2800041, 0x91000422, 0xd65f03c0]⟩
 def P : Program := { segments := [seg], stubs := [], exitAddr := 0 }
 
-/-- warning: positional `rename_i` after `janus_run` re-binds names silently when a callee's contract gains or reorders a conjunct: select the hypothesis by content with `janus_grab c as h`, `janus_grab 112 as h` or `janus_grab fr f i as h`
+/-- warning: positional `rename_i`/`next x`/`case _ x` after `janus_run` re-binds names silently when a callee's contract gains or reorders a conjunct: select the hypothesis by content with `janus_grab c as h`, `janus_grab 112 as h` or `janus_grab fr f i as h`
 
 Note: This linter can be disabled with `set_option linter.janusRenameI false`
 -/
