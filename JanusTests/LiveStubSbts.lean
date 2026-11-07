@@ -71,6 +71,26 @@ theorem rt_smallA (st : Nat) : True := by
       janus_live_sbts 16 0 hokC16
   trivial
 
+
+/-! ### n > 32 with ANY caller buffer (FV-J2: wrappers always pass a stack buffer) -/
+
+def okB : Nat → List Nat → Prop := fun a args => a = 0x64000 ∧ ∃ buf ptr, args = [buf, ptr, 48]
+def linkedB : Program := P.link [sbtsSeg 0x64000 48 48]
+theorem hokB : ∀ args, okB 0x64000 args → ∃ buf ptr, args = [buf, ptr, 48] := fun _ h => h.2
+
+set_option maxHeartbeats 4000000 in
+theorem sbBig48 (st : Nat) : RtLiveContract linkedB 0x64000 4096 (toyR [] okB) (slicebytetostringSpec st) slicebytetostringLive := by
+  janus_live_sbts_big 48 48 hokB
+
+-- red team: the big variant is for n > 32 only (for n <= 32 a non-nil buffer is used, not a fresh block)
+set_option maxHeartbeats 4000000 in
+theorem rt_big_small (st : Nat) : True := by
+  fail_if_success
+    have : RtLiveContract (P.link [sbtsSeg 0x65000 16 16]) 0x65000 4096 (toyR [] (fun a args => a = 0x65000 ∧ ∃ buf ptr, args = [buf, ptr, 16]))
+        (slicebytetostringSpec st) slicebytetostringLive := by
+      janus_live_sbts_big 16 16 (fun _ h => h.2)
+  trivial
+
 end JanusTests.LiveStubSbts.Arm
 
 namespace JanusTests.LiveStubSbts.Amd
@@ -133,6 +153,17 @@ theorem rt_smallA (st : Nat) : True := by
     have : RtLiveContract64 linkedC 0x4661000 4096 (toyR [] okC) (slicebytetostringSpec st) slicebytetostringLive := by
       janus64_live_sbts 16 0 hokC16
   trivial
+
+
+/-! ### n > 32 with ANY caller buffer -/
+
+def okB : Nat → List Nat → Prop := fun a args => a = 0x4664000 ∧ ∃ buf ptr, args = [buf, ptr, 48]
+def linkedB : Janus.Amd64.Program := P.link [sbtsSeg64 0x4664000 48 48]
+theorem hokB : ∀ args, okB 0x4664000 args → ∃ buf ptr, args = [buf, ptr, 48] := fun _ h => h.2
+
+set_option maxHeartbeats 4000000 in
+theorem sbBig48 (st : Nat) : RtLiveContract64 linkedB 0x4664000 4096 (toyR [] okB) (slicebytetostringSpec st) slicebytetostringLive := by
+  janus64_live_sbts_big 48 48 hokB
 
 end JanusTests.LiveStubSbts.Amd
 

@@ -19,8 +19,8 @@ set_option maxHeartbeats 2000000 in
 `[p, p + K)`) meets the live contract of `sp`/`ls`. -/
 theorem alloc_copy_finish64 {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr : Nat}
     {sp : RtSpec} {ls : LiveSpec} {K A : Nat} {wsf : Nat → List Wr}
-    {L : List (Nat × Nat)} {b : Nat} {s fin : State}
-    (hrw : sp.rtWrites = true) (hwr : sp.writes (argWords64 s sp.nargs) s.mem = [])
+    {L : List (Nat × Nat)} {b : Nat} {s fin : State} {W : List (Nat × Nat)}
+    (hrw : sp.rtWrites = true) (hwr : sp.writes (argWords64 s sp.nargs) s.mem = W)
     (hA3 : A % 16 = 0) (hA1 : K ≤ A) (hA2 : A ≤ 64 * K) (hKpos : 0 < K)
     (hcost : ls.cost (argWords64 s sp.nargs) s.mem = K)
     (hfresh : ∀ r0, ls.fresh (argWords64 s sp.nargs) s.mem r0 (fin.regs 3).toNat (fin.regs 1).toNat = [(r0, r0 + K)])
@@ -61,7 +61,7 @@ theorem alloc_copy_finish64 {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat
       hrip h4 h5 h14 (by simpa using h0) (by simp) (by simp) hx hfs hdf hmx hx87 hfw
   · refine ⟨fun a k hout => ?_, fun a k w => ?_⟩
     · simp only [hrw, rtIf_true, hwr, List.append_nil, outside_append] at hout
-      have hHB := outside_toyRt_heap_bump hout.1
+      have hHB := outside_toyRt_heap_bump hout.1.1
       rw [hmem]
       refine Janus.Arm64.Memory.readLE_congr (fun i hi => ?_)
       rw [hbytes (a + i) (by omega), hbump (a + i) (by omega)]
@@ -145,13 +145,65 @@ macro_rules
       subst hgs hgl
       open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janus.Contracts.Toy in
         refine Janus.Contracts.LiveStubAmd64.alloc_copy_finish64 (by decide) (K := $n) (A := $A)
-          (wsf := fun p => Janus.Contracts.LiveStub.copyWrites s.mem p (s.regs 3).toNat $n) rfl
+          (W := []) (wsf := fun p => Janus.Contracts.LiveStub.copyWrites s.mem p (s.regs 3).toNat $n) rfl
           (by simp [slicebytetostringSpec, hargs, hargs3, arg, bufWrites]) (by decide) (by decide) (by decide) (by decide)
           hK ?hfr ?hkp ?hws ?hpost pre ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
       case hfr => intro r0; simp [Janus.Contracts.slicebytetostringLive, hargs, Janus.Contracts.arg, Janus.Contracts.range0, Janus.Amd64.Tactic.setRegF]
       case hkp => intro r0; simp [Janus.Contracts.slicebytetostringLive, hargs, Janus.Contracts.arg, Janus.Contracts.range0, Janus.Amd64.Tactic.setRegF]
       case hws => intro p w hw; have := Janus.Contracts.LiveStub.copyWrites_sub s.mem p (s.regs 3).toNat $n w hw; omega
-      case hpost => intro p hp hend hacc; exact Janus.Contracts.LiveStub.sbts_hpost hargs3 (by decide) (by simp [Janus.Amd64.Tactic.setRegF]) hp hend (by omega) hacc
+      case hpost => intro p hp hend hacc; exact Janus.Contracts.LiveStub.sbts_hpost hargs3 (by decide) (Or.inl rfl) (by simp [Janus.Amd64.Tactic.setRegF]) hp hend (by omega) hacc
+      all_goals first | rfl | (simp [Janus.Amd64.Tactic.retAddrOf, Janus.Amd64.Tactic.setRegF, Janus.Contracts.Toy.BUMP]; done) | (simp; done) | ((try simp only [Janus.Contracts.LiveStub.readLE_mod_of_le, Nat.reducePow, Nat.reduceLeDiff]); rfl)))
+
+/-- The `n > 32` variant of `janus64_live_sbts`: `hok : ∀ args, ok addr args → ∃ buf ptr, args = [buf, ptr, n]` takes ANY caller buffer `buf`
+(real Go copies into a fresh block whenever `n > 32`; the buffer is a frame range only). `32 < n`, `n` a size class. -/
+syntax "janus64_live_sbts_big " term:max term:max term:max : tactic
+set_option hygiene false in
+macro_rules
+  | `(tactic| janus64_live_sbts_big $n $A $hok) => `(tactic| (
+      intro L b s hpc pre
+      have pre0 := pre
+      have ⟨⟨hra, hal, h3, h4, h5⟩, _⟩ := pre
+      obtain ⟨hc1, hspec, hc3, hc4, hc5, hokx, hinvx, hcostx, hLsx, hWsx⟩ := pre0
+      obtain ⟨buf, ptr, hargs⟩ := $hok _ hokx
+      have hargs3 : argWords64 s 3 = [buf, ptr, $n] := hargs
+      have e1 : (s.regs 3).toNat = ptr := by
+        have h1 := congrArg (fun l => l.getD 1 0) hargs3
+        simpa [argWords64, wordsFrom, Janus.Amd64.GoABI.argReg, Janus.Amd64.GoABI.intArgRegs] using h1
+      subst e1
+      have hrs : Janus.Contracts.roundupsize $n true = $n := by decide
+      have hK : Janus.Contracts.slicebytetostringLive.cost (argWords64 s 3) s.mem = $n := by
+        simp only [Janus.Contracts.slicebytetostringLive, hargs3, Janus.Contracts.arg, List.getD_cons_succ, List.getD_cons_zero]
+        exact hrs
+      have hKb : $n ≤ b := by
+        have h := hcostx
+        simp only [Janus.Contracts.slicebytetostringLive, Janus.Contracts.slicebytetostringSpec, hargs3, Janus.Contracts.arg,
+          List.getD_cons_succ, List.getD_cons_zero, hrs] at h
+        exact h
+      simp only [Janus.Contracts.slicebytetostringSpec, hargs3, Janus.Contracts.arg, List.getD_cons_succ, List.getD_cons_zero] at hspec
+      obtain ⟨-, ⟨hsa, hsb⟩, -⟩ := hspec
+      have hread := hsb (by decide)
+      have hacB' := Janus.Contracts.LiveSat.bump_acc hinvx
+      have hheap := Janus.Contracts.LiveStub.toy_heap_acc (ob := $n) (g := (s.regs 14).toNat) (L' := L) (tys := _) hinvx hKb
+      have hbump := Janus.Contracts.LiveStub.toy_heap_bound (ob := $n) (g := (s.regs 14).toNat) (L' := L) (tys := _) hinvx hKb
+      have hap := Janus.Contracts.LiveSatAmd64.bump_apart64 hWsx
+      have hapH := Janus.Contracts.LiveStubAmd64.toy_heap_apart64 (ob := $n) (g := (s.regs 14).toNat) (L := L) (tys := _)
+        hinvx hKb hWsx
+      open Janus.Contracts.Toy in
+        simp only [BUMP, Nat.reducePow] at hheap hacB' hbump hapH
+      generalize hgs : Janus.Contracts.slicebytetostringSpec _ = spX at *
+      generalize hgl : Janus.Contracts.slicebytetostringLive = lsX at *
+      change Janus.Amd64.Tactic.ReachesRet _ _ s _
+      janus64_run
+      subst hgs hgl
+      open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janus.Contracts.Toy in
+        refine Janus.Contracts.LiveStubAmd64.alloc_copy_finish64 (by decide) (K := $n) (A := $A)
+          (W := Janus.Contracts.bufWrites buf 32) (wsf := fun p => Janus.Contracts.LiveStub.copyWrites s.mem p (s.regs 3).toNat $n) rfl
+          (by simp only [slicebytetostringSpec, hargs3, arg, List.getD_cons_zero]) (by decide) (by decide) (by decide) (by decide)
+          hK ?hfr ?hkp ?hws ?hpost pre ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+      case hfr => intro r0; simp [Janus.Contracts.slicebytetostringLive, hargs, Janus.Contracts.arg, Janus.Contracts.range0, Janus.Amd64.Tactic.setRegF]
+      case hkp => intro r0; simp [Janus.Contracts.slicebytetostringLive, hargs, Janus.Contracts.arg, Janus.Contracts.range0, Janus.Amd64.Tactic.setRegF]
+      case hws => intro p w hw; have := Janus.Contracts.LiveStub.copyWrites_sub s.mem p (s.regs 3).toNat $n w hw; omega
+      case hpost => intro p hp hend hacc; exact Janus.Contracts.LiveStub.sbts_hpost hargs3 (by decide) (Or.inr (by decide)) (by simp [Janus.Amd64.Tactic.setRegF]) hp hend (by omega) hacc
       all_goals first | rfl | (simp [Janus.Amd64.Tactic.retAddrOf, Janus.Amd64.Tactic.setRegF, Janus.Contracts.Toy.BUMP]; done) | (simp; done) | ((try simp only [Janus.Contracts.LiveStub.readLE_mod_of_le, Nat.reducePow, Nat.reduceLeDiff]); rfl)))
 
 namespace Janus.Contracts.LiveStubSbtsSatAmd64
