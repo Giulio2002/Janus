@@ -61,7 +61,7 @@ check() {
   if [ "$2" = 0 ]; then printf '  %-40s ok       %s\n' "$1" "$3"
   else printf '  %-40s FAILED   %s   <-- BROKEN\n' "$1" "$3"; broken+=("$1"); fi
 }
-v() { out="$("$J" verify --allow-no-witness --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
+v() { out="$("$J" verify --audit-only --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"; }
 
 
 # The sections are independent: each runs as a parallel block (same rows, same checks; the output is
@@ -166,8 +166,8 @@ check G1_gc_removes_links_not_targets $? "planted links in result/consumer/trust
 # collections that delete the temporary trees of a running verification (no grace, 0.036 s age)
 ( for i in $(seq 1 400); do JANUS_CACHE_TMP_HOURS=0.00001 "$J" cache gc --grace 0s --max off >/dev/null 2>&1; sleep 0.2; done ) &
 gcpid=$!
-out="$("$J" verify --allow-no-witness --janus-root "$root" --proof $A/V1a_contract_H_true.lean "$W/NewPair" 2>&1)"; row G2_attack_under_gc_hammer blocked
-out="$("$J" verify --allow-no-witness --janus-root "$root" --proof examples/proofs/NewPair.lean "$W/NewPair" 2>&1)"
+out="$("$J" verify --audit-only --janus-root "$root" --proof $A/V1a_contract_H_true.lean "$W/NewPair" 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"; row G2_attack_under_gc_hammer blocked
+out="$("$J" verify --audit-only --janus-root "$root" --proof examples/proofs/NewPair.lean "$W/NewPair" 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"
 grep -qE '^(Verified|Cached: Verified|Invalid|Error)' <<<"$out"; check G2_ctl_verdict_under_gc_hammer $? "a verification with its run trees deleted ends with a verdict: $(grep -m1 -E '^(Verified|Cached|Invalid|Error)' <<<"$out" | cut -c1-70)"
 kill "$gcpid" 2>/dev/null; wait "$gcpid" 2>/dev/null
 v examples/proofs/NewPair.lean "$W/NewPair"; row G2_ctl_after_hammer Verified

@@ -2,14 +2,14 @@
 # Round-15 regression rows (docs/SOUNDNESS.md "Non-vacuity is required for contract-assuming main theorems"):
 # `janus verify` rejects a MAIN theorem that assumes runtime contracts unless a kernel-checked non-vacuity
 # witness for THAT theorem is verified in the same run; every report states the status; --allow-no-witness
-# opts out loudly; a theorem without contract hypotheses is verified and reported "NOT SHOWN".
+# is inert (UP3); --audit-only is not a verification; a theorem without contract hypotheses is verified and reported "NOT SHOWN".
 #   N1  main alone                              -> blocked (stage non-vacuity)
 #   N2  main + Witness.nonvacuous (+ returns)   -> verified, "shown by"
 #   N3  main + only Witness.returns             -> blocked (a concrete run does not state the contract hypotheses)
 #   N4  main + a weaker witness (a conjunct of the precondition left out, plain and as an applied lambda) -> blocked
 #   N5  main + a witness under another name (`alt`), or stated as an applied lambda (`lam`) -> verified, "shown by"
 #   N6  a second main theorem with a hypothesis no witness exhibits -> blocked, the first stays verified
-#   N7  --allow-no-witness                      -> verified, "non-vacuity NOT shown (opted out)"
+#   N7  --allow-no-witness (inert) -> blocked; N7b --audit-only -> 'Audit-only', no Verified line, no verified.json
 #   N8  a theorem without contract hypotheses   -> verified, "Non-vacuity: NOT SHOWN" (no contract)
 # Exits 1 if a row differs. Uses a private temporary cache.
 set -u
@@ -86,9 +86,15 @@ echo "== N6: a witness supports the theorems it instantiates, not another main t
 run $F "$W/NewPair" -- correctness otherMain Witness.nonvacuous
 row correctness Verified 'Non-vacuity: shown by'
 row otherMain blocked 'Stage: non-vacuity'
-echo "== N7: --allow-no-witness"
+echo "== N7: --allow-no-witness is inert (UP3): a contract-assuming theorem without a verified witness is still rejected"
 run $F "$W/NewPair" --allow-no-witness -- correctness
-row correctness Verified 'non-vacuity NOT shown (opted out)'
+row correctness blocked 'Stage: non-vacuity' 'does not bypass'
+run $F "$W/NewPair" --allow-no-witness -- correctness Witness.nonvacuous
+row correctness Verified 'Non-vacuity: shown by'
+echo "== N7b: --audit-only is not a verification: 'Audit-only', no Verified line, no verified.json"
+run $F "$W/NewPair" --audit-only -- correctness
+row correctness blocked 'Audit-only:' 'NOT A VERIFICATION'
+[ ! -e "$W/NewPair/verified.json" ] && ! grep -q '^Verified:' <<<"$all" || broken+=(audit-only-wrote-report)
 echo "== N8: a theorem without contract hypotheses"
 run examples/proofs/Add.lean "$W/Add" -- correctness
 row correctness Verified 'Non-vacuity: NOT SHOWN' 'assumes no runtime contract'

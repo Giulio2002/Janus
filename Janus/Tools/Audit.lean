@@ -1853,6 +1853,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
     let bound : Std.HashSet FVarId := xs.foldl (fun s x => s.insert x.fvarId!) {}
     let mut rtVars : Std.HashSet FVarId := {}
     let mut sizeVars : Array (String × FVarId × Nat) := #[]  -- U-ICALL-STACK: variables used as nargs/stack/above
+    let mut appSizes : Array (Array (String × Sum Nat FVarId)) := #[]  -- U-ICALL-STACK joint check: per contract, its nargs/stack/above
     let mut icallFns : Array FVarId := #[]  -- U-ICALL: the callee-address variables of the abstract-callee contracts
     let mut icallFree : Array Expr := #[]  -- U-ICALL: the `P` and `keep` arguments, checked once `rtVars` is complete
     -- the implementation variables no recognised contract mentions (round 14)
@@ -1893,6 +1894,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
       -- constrains beyond a numeral lower bound (checked once the premises are known); anything else could make the contract
       -- hold vacuously.
       let bnames := forallBinderNames ci.type #[]
+      let mut thisSizes : Array (String × Sum Nat FVarId) := #[]
       let mut nargsV : Option Nat := none
       for i in [0:bnames.size] do
         if bnames[i]! == `nargs then nargsV := ← icallNatValue? args[i]!
@@ -1903,13 +1905,17 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
         let limit := if nm == "nargs" then 64 else 2 ^ 47
         match (← icallNatValue? a) with
         | some n =>
+          thisSizes := thisSizes.push (nm, .inl n)
           let low := if nm == "stack" then 8 else if nm == "above" then 8 + 8 * (nargsV.getD 0) else 0
           if n < low || (nm != "nargs" && n ≥ limit) || (nm == "nargs" && n > limit) then
             return some s!"assumes the runtime contract {c} with the {nm} `{(← Meta.ppExpr a).pretty 10000}` = {n}, outside the satisfiable range ({if nm == "nargs" then "at most 64" else if nm == "stack" then "8 ≤ stack < 2^47" else s!"{low} ≤ above < 2^47"}): the call precondition would be unsatisfiable, so the hypothesis would hold vacuously (U-ICALL-STACK)"
         | none =>
-          if isVar a then sizeVars := sizeVars.push (nm, a.fvarId!, limit)
+          if isVar a then
+            sizeVars := sizeVars.push (nm, a.fvarId!, limit)
+            thisSizes := thisSizes.push (nm, .inr a.fvarId!)
           else
             return some s!"assumes the runtime contract {c} with the {nm} `{(← Meta.ppExpr a).pretty 10000}`, which is neither a closed numeral term nor a variable of the statement: its value could make the call precondition unsatisfiable (U-ICALL-STACK)"
+      appSizes := appSizes.push thisSizes
       -- Spec binding: the spec (and live data) a contract carries must describe the function it is stated at
       if let some (prog, fn) := contractAddrOf? app then
         unless prog.isConstOf `Extracted.program do
@@ -2104,6 +2110,84 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
           else pure false
         unless lowerBound || belowFree do
           return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}) about the {what} `{(← v.getUserName)}` of a runtime contract: such a size may be constrained only by a numeral lower bound (`c ≤ {(← v.getUserName)}`) within the satisfiable range; an equality or upper bound can pin it to a value that makes the call precondition unsatisfiable, and the contract would hold vacuously (U-ICALL-STACK)"
+    -- U-ICALL-STACK (UP3, red team n11 N10-N18, N60-N65): a size variable `v` (and every bounding variable `w` of a
+    -- `v ≤ w` premise) occurs NOWHERE ELSE in the statement of a main theorem: not in a non-Prop binder (`PLift (k = 7)`,
+    -- `PProd`, `Fin w → …`, a structure, a def-wrapped type: the type mentions `v`), not in the precondition (or the
+    -- entry/arguments) of the conclusion, where it is an assumption (`Ensures … (fun _ => k = 7)`, a `let` copy of it).
+    -- Uniform: no list of wrappers, any occurrence is a possible pin. The POST of an `Ensures` is the theorem's obligation,
+    -- not an assumption, so a size may be mentioned there (it only strengthens the theorem); a size may occur in other
+    -- contract hypotheses (one size shared by several calls); a `w` may not (`onlyLowerBounded`).
+    if main then
+      let mut wVars : Std.HashSet FVarId := {}
+      for (_, t) in premises do
+        let t' := t.consumeMData
+        if (t'.isAppOfArity ``LE.le 4 || t'.isAppOfArity ``LT.lt 4) && (t'.getArg! 0).isConstOf ``Nat then
+          if let .fvar w := (t'.getArg! 3).consumeMData then
+            if !sizeVarIds.contains w && (t'.getArg! 2).hasAnyFVar (sizeVarIds.contains ·) then
+              wVars := wVars.insert w
+      let mut guarded : Array FVarId := sizeVarIds
+      for w in wVars do guarded := guarded.push w
+      let stripPost (e : Expr) : Expr := e.replace fun sub =>
+        if (sub.getAppFn.constName?.any fun n => n == `Janus.GoABI.Ensures || n == `Janus.Amd64.GoABI.Ensures) && sub.getAppNumArgs == 5 then
+          some (mkAppN sub.getAppFn (sub.getAppArgs.set! 4 (mkConst ``True)))
+        else none
+      for x in xs do
+        let t ← instantiateMVars (← Meta.inferType x)
+        if ← Meta.isProp t then continue
+        if let some g := guarded.find? (fun g => t.hasAnyFVar (· == g) && x.fvarId! != g) then
+          return some s!"has the non-Prop binder `{(← x.fvarId!.getUserName)} : {(← Meta.ppExpr t).pretty 10000}` whose type mentions `{(← g.getUserName)}`, a size (or the variable bounding a size) of a runtime contract: such a binder (`PLift`, `PProd`, `Fin`, `Subtype`, a structure, a def-wrapped type) could pin the size to a value that makes the call precondition unsatisfiable, and the contract would hold vacuously (U-ICALL-STACK)"
+      for c in concl do
+        let c ← instantiateMVars c
+        let c' := stripPost c
+        if let some g := guarded.find? (fun g => c'.hasAnyFVar (· == g)) then
+          return some s!"mentions `{(← g.getUserName)}`, a size (or the variable bounding a size) of a runtime contract, in the precondition, entry or arguments of its conclusion `{(← Meta.ppExpr c').pretty 10000}`: there it is an assumption that can pin the size to a value that makes the call precondition unsatisfiable, and the contract would hold vacuously; a size may occur only in its contract hypotheses, its allowed premises and the post-condition (U-ICALL-STACK)"
+      -- joint satisfiability: the least solution of `stack ≥ 8`, `above ≥ 8 + 8·nargs` over the numeral lower bounds
+      -- of the premises must meet the upper bounds (`nargs ≤ 64`, every other size `< 2^47`) and the literals
+      let mut lo : Std.HashMap FVarId Nat := {}
+      let mut hi : Std.HashMap FVarId Nat := {}
+      for (what, v, limit) in sizeVars do
+        hi := hi.insert v (min (hi.getD v (2 ^ 47)) (if what == "nargs" then limit else limit - 1))
+      for (_, t) in premises do
+        let t' := t.consumeMData
+        let isLT := t'.isAppOfArity ``LT.lt 4
+        if (t'.isAppOfArity ``LE.le 4 || isLT) && (t'.getArg! 0).isConstOf ``Nat then
+          if let .fvar v := (t'.getArg! 3).consumeMData then
+            if sizeVarIds.contains v then
+              if let some n ← icallNatValue? (t'.getArg! 2) then
+                lo := lo.insert v (max (if isLT then n + 1 else n) (lo.getD v 0))
+      let val (lo : Std.HashMap FVarId Nat) : Sum Nat FVarId → Nat
+        | .inl k => k
+        | .inr v => lo.getD v 0
+      let mut converged := false
+      for _ in [0:300] do
+        let mut changed := false
+        for sz in appSizes do
+          let need := 8 + 8 * (match sz.find? (·.1 == "nargs") with | some (_, n) => val lo n | none => 0)
+          for (nm, e) in sz do
+            if nm == "above" then
+              match e with
+              | .inl k =>
+                if k < need then
+                  return some s!"assumes a runtime contract whose `above` = {k} is below 8 + 8·nargs = {need} (with the least nargs the premises allow): the caller-frame precondition is unsatisfiable, and the contract would hold vacuously (U-ICALL-STACK, joint)"
+              | .inr v =>
+                if lo.getD v 0 < need then
+                  lo := lo.insert v need
+                  changed := true
+            else if nm == "stack" then
+              match e with
+              | .inr v =>
+                if lo.getD v 0 < 8 then
+                  lo := lo.insert v 8
+                  changed := true
+              | .inl _ => pure ()
+        for (v, h) in hi.toList do
+          if lo.getD v 0 > h then
+            return some s!"assumes runtime contracts whose sizes are jointly unsatisfiable: the variable `{(← v.getUserName)}` must be at least {lo.getD v 0} (numeral lower bounds, `stack ≥ 8`, `above ≥ 8 + 8·nargs`) but at most {h} (`nargs ≤ 64`, every other size `< 2^47`): the call precondition is unsatisfiable, and the contract would hold vacuously (U-ICALL-STACK, joint)"
+        if !changed then
+          converged := true
+          break
+      if !converged then
+        return some "assumes runtime contracts whose size arguments feed each other (`above ≥ 8 + 8·nargs` through a shared variable) without a solution (U-ICALL-STACK, joint)"
     -- U-ICALL red team B1/B2: the callee address `fn` of an abstract-callee contract appears only inside contract
     -- hypotheses (and the statement's own body); any other premise mentioning it (`fn = Extracted.entry`, `fn = 0x100000`,
     -- an inequality, …) would pin the abstract callee to code the statement chooses
@@ -2997,9 +3081,115 @@ def contractMains (env : Environment) (proofMod : Name) (self : Name) : Array Na
     | none => acc
   all.qsort Name.lt
 
-/-- Round 14 (W2): check the shape of a witness theorem (see the section comment); the matched main
-theorem on success. -/
-def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmType : Expr) :
+/-- UP3: bring a proof term to the head form `Exists.intro w h` / `And.intro a b` the witness walk reads, looking through what the
+elaborator and the tactics wrap a proof in. Steps (at most `fuel`): metadata, `let` (zeta), beta, projections of constructor
+applications, the casts `Eq.mpr`/`Eq.mp`/`cast`/`id`/`Eq.rec`/`Eq.ndrec`/`Eq.recOn`/`Eq.casesOn`/`HEq`-free `Eq.subst`/`▸` (the cast
+value is the proof of the same sizes), `Exists.casesOn`/`And.casesOn`/`And.rec`-style eliminations (reduced by whnf when their
+major premise is a constructor), and the unfolding of a constant (a theorem or definition, by its kernel value; instances of a
+lemma). Returns the head form, or the head symbol it got stuck on. -/
+partial def proofHead (val : Expr) (fuel : Nat := 400) : MetaM (Except String Expr) := do
+  if fuel == 0 then return .error "the proof term is too deep to read (400 unfolding steps)"
+  let val := (← instantiateMVars val).consumeMData
+  if val.isAppOfArity ``Exists.intro 4 || val.isAppOfArity ``And.intro 4 then return .ok val
+  let f := val.getAppFn
+  let args := val.getAppArgs
+  let castArg? : Option Nat :=
+    match f with
+    | .const c _ =>
+      if c == ``Eq.mpr || c == ``Eq.mp || c == ``cast then (if args.size ≥ 4 then some 3 else none)
+      else if c == ``id then (if args.size ≥ 2 then some 1 else none)
+      else if c == ``Eq.rec || c == ``Eq.ndrec then (if args.size ≥ 6 then some 3 else none)
+      else if c == ``Eq.recOn || c == ``Eq.casesOn then (if args.size ≥ 6 then some 5 else none)
+      else if c == ``Eq.subst || c == ``Eq.substr then (if args.size ≥ 8 then some 7 else none)
+      else if c == ``Eq.symm || c == ``Eq.trans then none
+      else none
+    | _ => none
+  if let some i := castArg? then
+    let v := args[i]!
+    let rest := args.extract (i + 1) args.size
+    return ← proofHead (mkAppN v rest) (fuel - 1)
+  -- beta / zeta / projection / iota
+  let w ← Meta.whnfCore val
+  if w != val then return ← proofHead w (fuel - 1)
+  -- unfold a head constant to its kernel value (theorems too)
+  if let .const c ls := f then
+    if let some ci := (← getEnv).find? c then
+      match ci with
+      | .thmInfo _ | .defnInfo _ =>
+        let v? := match ci with | .thmInfo t => some t.value | .defnInfo d => some d.value | _ => none
+        if let some v := v? then
+          let v := v.instantiateLevelParams ci.levelParams ls
+          return ← proofHead (v.beta args) (fuel - 1)
+      | _ => pure ()
+    -- a recursor / casesOn / matcher on a constructor: let the evaluator reduce it
+    let w' ← Meta.withTransparency .all (Meta.whnf val)
+    if w' != val then return ← proofHead w' (fuel - 1)
+    return .error s!"stuck at the constant `{c}`"
+  match f with
+  | .fvar _ => return .error "stuck at a local hypothesis"
+  | .lam .. => return .error "stuck at a lambda"
+  | _ =>
+    let w' ← Meta.withTransparency .all (Meta.whnf val)
+    if w' != val then return ← proofHead w' (fuel - 1)
+    return .error "stuck at a term of an unknown form"
+
+/-- UP3 (red team n11, WIT1): the sizes a non-vacuity witness INSTANTIATES for a runtime contract. A contract whose call
+precondition is unsatisfiable at its sizes (`stack = 7 < 8`, `above < 8 + 8·nargs`, `nargs > 64`, a size ≥ 2^47) is vacuously
+inhabited (`exfalso`), so a witness that instantiates it shows nothing. The check reads the PROOF TERM of the witness
+(`proofHead` sees through lemmas, casts, lets): it walks the statement and the proof together (`∃` → the `Exists.intro` witness,
+`∧` → `And.intro`), so the sizes are the values the proof really supplies, whatever route they took (a literal, a `def`, a `let`,
+a pin through the witness's own `∃`), and each size of each contract in a leaf must evaluate (`icallNatValue?`) into the
+satisfiable range. A position the walk cannot read is rejected, naming the contract, the position and the stuck term. -/
+partial def witnessSizes (env : Environment) (ty val : Expr) (pos : String := "witness") : MetaM (Option String) := do
+  let ty := (← instantiateMVars ty).consumeMData
+  let apps := contractApps env ty
+  if apps.isEmpty then return none
+  let names := ", ".intercalate (apps.toList.map fun a => match a.getAppFn with | .const c _ => c.toString | _ => "?")
+  if ty.isAppOfArity ``Exists 2 || ty.isAppOfArity ``And 2 then
+    let h ← proofHead val
+    match h with
+    | .error why =>
+      return some s!"cannot read the sizes this witness instantiates for the runtime contract(s) {names} at position `{pos}` (statement `{(← Meta.ppExpr ty).pretty 160}`): the proof term {why}; state the contracts' instantiation as an explicit `Exists.intro`/`⟨…⟩` or a lemma whose value is one (U-ICALL-STACK, witness)"
+    | .ok h =>
+      if ty.isAppOfArity ``Exists 2 then
+        unless h.isAppOfArity ``Exists.intro 4 do
+          return some s!"the proof at position `{pos}` is not an `Exists.intro` for the `∃` carrying {names}"
+        return ← witnessSizes env (Expr.headBeta (mkApp (ty.getArg! 1) (h.getArg! 2))) (h.getArg! 3) (pos ++ " ∃")
+      else
+        unless h.isAppOfArity ``And.intro 4 do
+          return some s!"the proof at position `{pos}` is not an `And.intro` for the `∧` carrying {names}"
+        if let some m ← witnessSizes env (ty.getArg! 0) (h.getArg! 2) (pos ++ " ∧.1") then return some m
+        return ← witnessSizes env (ty.getArg! 1) (h.getArg! 3) (pos ++ " ∧.2")
+  -- a leaf: every contract application in it
+  for app in apps do
+    let .const c _ := app.getAppFn | continue
+    let some ci := env.find? c | continue
+    let bnames := forallBinderNames ci.type #[]
+    let args := app.getAppArgs
+    -- UP3 (WIT5-P): the call-site property of an abstract-callee contract must not be (reducibly) `False`: the call
+    -- precondition would be unsatisfiable. A numeric/syntactic pre-filter only; the principled check (a kernel-checked
+    -- inhabitation obligation per contract instance) is designed in NOTES-UP3.md.
+    if c == `Janus.Contracts.ICall.ICallContract || c == `Janus.Contracts.ICall.ICallContract64 then
+      if args.size > 8 then
+        let pBody ← Meta.lambdaTelescope args[8]! fun _ b => do pure (← Meta.whnfR b).consumeMData
+        if pBody.isConstOf ``False then
+          return some s!"instantiates the runtime contract {c} (position `{pos}`) with the call-site property P = `fun _ => False`: its call precondition is unsatisfiable, the contract is vacuously inhabited, and the witness would show nothing (U-ICALL-STACK, witness)"
+    let mut nargsV : Nat := 0
+    for j in [0:bnames.size] do
+      if bnames[j]! == `nargs && j < args.size then nargsV := (← icallNatValue? args[j]!).getD 0
+    for j in [0:bnames.size] do
+      let nm := bnames[j]!.toString
+      unless (nm == "stack" || nm == "d" || nm == "nargs" || nm == "above") && j < args.size do continue
+      match (← icallNatValue? args[j]!) with
+      | none =>
+        return some s!"instantiates the runtime contract {c} (position `{pos}`) with the {nm} `{(← Meta.ppExpr args[j]!).pretty 200}`, which does not evaluate to a closed natural number: the sizes the witness supplies must (U-ICALL-STACK, witness)"
+      | some n =>
+        let low := if nm == "stack" then 8 else if nm == "above" then 8 + 8 * nargsV else 0
+        if n < low || (nm != "nargs" && n ≥ 2 ^ 47) || (nm == "nargs" && n > 64) then
+          return some s!"instantiates the runtime contract {c} (position `{pos}`) with the {nm} = {n}, outside the satisfiable range ({if nm == "nargs" then "at most 64" else if nm == "stack" then "8 ≤ stack < 2^47" else if nm == "d" then "d < 2^47" else s!"8 + 8·nargs = {low} ≤ above < 2^47"}): its call precondition is unsatisfiable there, the contract is vacuously inhabited, and the witness would show nothing (U-ICALL-STACK, witness)"
+  return none
+
+def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmType : Expr) (thmVal : Expr) :
     MetaM (Except String (Name × Array Name)) := do
   let cands0 := mainCandidates env proofMod thm
   -- further main theorems of the module that assume runtime contracts (`full_write` next to `correctness`):
@@ -3013,6 +3203,7 @@ def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmTyp
     unless (thmType.consumeMData.isAppOfArity ``Exists 2) do
       return .error "is not of the form `∃ …, …` (a state and runtime exhibiting the main theorem's hypotheses)"
     withConjs thmType fun wconjs => do
+      if let some m ← witnessSizes env thmType thmVal then return .error m
       let mut whys : Array String := #[]
       let mut ok : Array Name := #[]
       for c in cands do
@@ -3111,7 +3302,7 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     let (matchedMain, matchedMains, matchedModules) ← match role with
       | .main => pure ("", #[], #[])
       | _ => do
-        match ← runCore envA (Meta.MetaM.run' (checkWitness envA proofModN thmN role ci.type)) with
+        match ← runCore envA (Meta.MetaM.run' (checkWitness envA proofModN thmN role ci.type (match ci with | .thmInfo t => t.value | .defnInfo d => d.value | _ => ci.type))) with
         | .ok (c, cs) =>
           let modOf := fun (n : Name) => match envA.getModuleIdxFor? n with
             | some i => modNames[i.toNat]!.toString

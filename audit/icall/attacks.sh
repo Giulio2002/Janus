@@ -10,7 +10,7 @@ bad=0
 for f in "$root"/audit/icall/attacks/*.lean; do
   n="$(basename "$f" .lean)"
   want="$(grep -o 'Expected: [A-Za-z ()]*' "$f" | head -1 | sed 's/Expected: //')"
-  out="$("$J" verify "$EX" --proof "$f" --theorem Proof.correctness --janus-root "$JR" --binary "$BIN" --allow-no-witness --no-result-cache 2>&1)"
+  out="$("$J" verify "$EX" --proof "$f" --theorem Proof.correctness --janus-root "$JR" --binary "$BIN" --audit-only --no-result-cache 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"
   if printf '%s' "$out" | grep -q '^Verified:'; then got=Verified; else got=rejected; fi
   case "$want" in Verified*) w=Verified ;; *) w=rejected ;; esac
   if [ "$got" = "$w" ]; then echo "ROW ok   $n: $got"; else echo "ROW BAD  $n: wanted $w, got $got"; printf '%s\n' "$out" | tail -4; bad=1; fi

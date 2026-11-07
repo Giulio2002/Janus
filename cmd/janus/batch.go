@@ -73,7 +73,7 @@ func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
 	if len(pos) != 1 {
 		return jsonFailure(stdout, flags["json"], usageErr("verify-batch takes exactly one requests file"))
 	}
-	res, err := verifyBatch(pos[0], opts["janus-root"], flags["fresh"], flags["unsafe-no-sandbox"], flags["allow-path-deps"], flags["json"], flags["asl"], flags["allow-no-witness"], flags["allow-unchecked-provenance"], diagFlags{FullErrors: flags["full-errors"], KeepWorkspace: flags["keep-workspace"]}, stdout, stderr)
+	res, err := verifyBatch(pos[0], opts["janus-root"], flags["fresh"], flags["unsafe-no-sandbox"], flags["allow-path-deps"], flags["json"], flags["asl"], false, flags["allow-unchecked-provenance"], diagFlags{FullErrors: flags["full-errors"], KeepWorkspace: flags["keep-workspace"]}, stdout, stderr)
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], err)
 	}

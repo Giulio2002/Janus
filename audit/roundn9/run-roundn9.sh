@@ -23,8 +23,8 @@ mapfile -t tg < <(scripts/example-targets.sh ErrWrap)
 "$J" extract artifacts/examples-amd64 "$(example_symbol ErrWrap)" "$W/ErrWrap64" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
 broken=()
 P=Proof
-all="$("$J" verify --allow-no-witness --janus-root "$root" --proof "$R/attacks/RetLowAlias64.lean" "$W/ErrWrap64" \
-  --theorem $P.b1 --theorem $P.b2 --theorem $P.b3 --theorem $P.b4 --theorem $P.b5 --theorem $P.b6 --theorem $P.b7 --theorem $P.b8 --theorem $P.b9 --theorem $P.b10 --theorem $P.b11 2>&1)"
+all="$("$J" verify --audit-only --janus-root "$root" --proof "$R/attacks/RetLowAlias64.lean" "$W/ErrWrap64" \
+  --theorem $P.b1 --theorem $P.b2 --theorem $P.b3 --theorem $P.b4 --theorem $P.b5 --theorem $P.b6 --theorem $P.b7 --theorem $P.b8 --theorem $P.b9 --theorem $P.b10 --theorem $P.b11 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"
 printf '%s\n' "$all" > "$W/RetLowAlias64.txt"
 blk() { awk -v n="=== $P.$1:" 'index($0,n)==1{p=1;print;next} /^=== /{p=0} p' <<<"$all"; }
 row() { # NAME blocked pattern

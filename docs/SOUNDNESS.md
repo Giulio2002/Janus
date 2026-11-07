@@ -2497,12 +2497,14 @@ for exactly that theorem** is verified in the same run:
   the environment); state it as a named `theorem` under `Witness`.
 * **Report.** Every report (text and `verified.json`) carries `nonVacuity`: `shown` (+ `nonVacuityWitness`),
   `not-shown` (a theorem with no contract hypothesis and no witness in the run: still verified),
-  `opted-out`, or `witness` (the report is itself a witness). Text line: "Non-vacuity: shown by W" /
+  `audit-only` (--audit-only: not a verification), or `witness` (the report is itself a witness). Text line: "Non-vacuity: shown by W" /
   "NOT SHOWN".
-* **Opt-out.** `--allow-no-witness` (`verify`, `verify-batch`) verifies the theorem anyway and marks it
-  "non-vacuity NOT shown (opted out)" in text and JSON. The status is computed after the run from the
-  verified reports of that run and is never stored in the result cache, so a cache hit gets the same
-  policy and the same marking as a fresh run; the opt-out does not make cache hits count differently.
+* **No opt-out (UP3).** `--allow-no-witness` (`verify`, `verify-batch`) is still parsed but INERT: a theorem that
+  assumes contracts is "verified" only together with a verified `Witness.nonvacuous`, in every path (single,
+  multi-theorem, batch). The rejection says so. `verify --audit-only` checks the proof and the statement audit for
+  testing the auditor (the audit rounds use it): it prints `Audit-only:` (never `Verified:`), writes no
+  `verified.json` and reports status `audit-only` (`"status": "audit-only"` in `--json`/`--results`). The status is
+  computed after the run from the verified reports of that run and is never stored in the result cache.
   `verify-batch`: the witness must be a request of the same batch and extraction.
 * Residual: a witness shows satisfiability by a concrete (toy) runtime, not by the real one (V3).
 
@@ -2557,3 +2559,20 @@ The "Runtime contracts assumed" line (and `contractHyps`) prints the spec and li
 `Janus.Contracts.RtContract@runtime.growslice[growsliceSpec]`,
 `Janus.Contracts.RtLiveContract@runtime.growslice[growsliceSpec/growsliceLive]`. Rows: `audit/roundspecbind`
 (round 15b's q1-q4, p1, s15 plus `SpecBind.lean` / `SpecBind64.lean`).
+
+
+## UP3: the sizes of a runtime contract occur nowhere else (red team n11)
+
+Round n11 found statements the size audit (U-ICALL-STACK) accepted although the contract would hold vacuously: a size `k`
+(or a bounding variable `w` of a premise `k ≤ w`) pinned through the `Ensures` PRECONDITION or a `let` copy of it
+(`fun _ => k = 7`, `w < 8`), through a non-Prop binder (`PLift (k = 7)`, `PProd`, `Fin w → Fin 0`), or sizes that are
+jointly unsatisfiable (`nargs = n` with `above = n`; `1 ≤ n` with `above = 8`; `63 ≤ n` with `above = 48`).
+Defense in depth, on top of the mandatory non-vacuity witness (above):
+* A size variable and every `w` bounding one occur in a main theorem ONLY in the contract hypotheses (a size; never `w`), the
+  allowed premise shapes (`c ≤ v`, `c < v`, `v (+ c) ≤ w`, `X ≤ w`) and the POST of an `Ensures`. They occur in no other premise, in
+  no non-Prop binder type (any wrapper: the check is occurrence of the variable, not a list of wrappers), and not in the entry,
+  arguments or precondition of the conclusion (lets included). A post may mention them: it is an obligation, it only strengthens
+  the theorem.
+* Joint satisfiability: the least solution of `stack ≥ 8`, `above ≥ 8 + 8·nargs` over the premises' numeral lower bounds must
+  meet `nargs ≤ 64` and every other size `< 2^47`, across all contracts of the statement (a variable shared between roles
+  included); a diverging system is rejected. Rows: audit/roundup3 (55, both modes).

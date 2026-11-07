@@ -87,11 +87,15 @@ func TestNonVacuityWrongOrReturnsOnlyWitnessFails(t *testing.T) {
 	}
 }
 
-func TestNonVacuityOptOutAndNoContract(t *testing.T) {
-	outs, _ := runNV(t, true, nvMain("P.correctness", "C@f"))
+func TestNonVacuityAuditOnlyAndNoContract(t *testing.T) {
+	outs, dir := runNV(t, true, nvMain("P.correctness", "C@f"))
 	r := outs[0].Report
-	if outs[0].Err != nil || r.NonVacuity != nvOptedOut || !strings.Contains(nonVacuityLine(r), "non-vacuity NOT shown (opted out)") {
-		t.Errorf("opt-out: %+v", outs[0])
+	if outs[0].Err != nil || r.NonVacuity != nvAuditOnly || !strings.Contains(nonVacuityLine(r), "NOT a verification") {
+		t.Errorf("audit-only: %+v", outs[0])
+	}
+	// audit-only is not a verification: no report a consumer could take for one
+	if _, err := os.Stat(filepath.Join(dir, "verified.json")); err == nil {
+		t.Error("audit-only left a verified.json")
 	}
 	outs, _ = runNV(t, false, nvMain("P.correctness"))
 	r = outs[0].Report
@@ -106,8 +110,11 @@ func TestNonVacuitySingleAndBatch(t *testing.T) {
 		t.Error("single contract main without witness accepted")
 	}
 	r := nvMain("P.correctness", "C@f")
-	if err := nonVacuitySingle(dir, r, true); err != nil || r.NonVacuity != nvOptedOut {
-		t.Error("single opt-out")
+	if err := nonVacuitySingle(dir, r, true); err != nil || r.NonVacuity != nvAuditOnly {
+		t.Error("single audit-only")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "verified.json")); err == nil {
+		t.Error("single audit-only left a verified.json")
 	}
 	m := &consumerRequest{Report: nvMain("P.correctness", "C@f")}
 	w := &consumerRequest{Report: nvWit("P.Witness.nonvacuous", "P.correctness", "witness-nonvacuous")}
@@ -144,5 +151,26 @@ func TestNonVacuityMatchedMains(t *testing.T) {
 	mains := map[string]bool{"P.full_write": true}
 	if !witnessSupportsAny(w, mains) || witnessSupportsAny(w, map[string]bool{"P.third": true}) {
 		t.Error("witnessSupportsAny")
+	}
+}
+
+// UP3: --allow-no-witness never reaches the policy (only --audit-only does), so no flag turns a contract-assuming theorem
+// without a verified Witness.nonvacuous into a verified one; a rejection says so.
+func TestAllowNoWitnessIsInert(t *testing.T) {
+	for _, f := range []string{"verify.go", "batch.go"} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src := string(b)
+		for _, bad := range []string{`flags["allow-no-witness"]`, `opts["allow-no-witness"]`} {
+			if strings.Contains(src, bad) {
+				t.Errorf("%s reads the allow-no-witness flag (%s): it must stay inert", f, bad)
+			}
+		}
+	}
+	_, _, _, d := nonVacuityVerdict(nvMain("P.correctness", "C@f"), nil, false)
+	if d == nil || !strings.Contains(d.Msg, "does not bypass") {
+		t.Errorf("rejection must say the flag does not bypass: %+v", d)
 	}
 }

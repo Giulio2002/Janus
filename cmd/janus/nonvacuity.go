@@ -6,7 +6,10 @@ package main
 // is witness-nonvacuous and whose matchedMain is THIS theorem. The auditor (Janus/Tools/Audit.lean,
 // checkWitness) does the semantic matching: the witness must be an `∃ …` that exhibits a state
 // and runtime satisfying the main theorem's whole precondition, contract hypotheses included.
-// Every report states the status; --allow-no-witness opts out loudly. See docs/SOUNDNESS.md.
+// Every report states the status. There is NO opt-out for a theorem that assumes contracts: --allow-no-witness is
+// accepted for compatibility and changes nothing. The only non-strict mode is --audit-only, which is not a
+// verification: it checks the proof and the statement audit (for testing the auditor itself), prints "Audit-only",
+// writes no verified.json and reports status "audit-only". See docs/SOUNDNESS.md.
 
 import (
 	"fmt"
@@ -18,14 +21,14 @@ import (
 const (
 	nvShown    = "shown"
 	nvNotShown = "not-shown"
-	nvOptedOut = "opted-out"
+	nvAuditOnly = "audit-only"
 	nvWitness  = "witness"
 )
 
 // nonVacuityVerdict computes the status of reps[i] (a verified main or witness report) against the
 // verified reports of the same run. It returns the status, the witness names, and a diagnostic when
 // the policy rejects the theorem.
-func nonVacuityVerdict(r *verifiedReport, peers []*verifiedReport, allow bool) (status, witness, returns string, d *diag) {
+func nonVacuityVerdict(r *verifiedReport, peers []*verifiedReport, auditOnly bool) (status, witness, returns string, d *diag) {
 	if strings.HasPrefix(r.Role, "witness-") {
 		return nvWitness, "", "", nil
 	}
@@ -50,17 +53,17 @@ func nonVacuityVerdict(r *verifiedReport, peers []*verifiedReport, allow bool) (
 	if len(r.ContractHyps) == 0 {
 		return nvNotShown, "", returns, nil
 	}
-	if allow {
-		return nvOptedOut, "", returns, nil
+	if auditOnly {
+		return nvAuditOnly, "", returns, nil
 	}
-	msg := fmt.Sprintf("%s assumes runtime contracts (%s) but no kernel-checked non-vacuity witness for it was verified in this run: nothing shows that its precondition, those contracts and this program are jointly satisfiable, so the theorem could be vacuous.",
+	msg := fmt.Sprintf("%s assumes runtime contracts (%s) but no kernel-checked non-vacuity witness for it was verified in this run: nothing shows that its precondition, those contracts and this program are jointly satisfiable, so the theorem could be vacuous. A theorem that assumes contracts is verified ONLY together with a verified Witness.nonvacuous; --allow-no-witness does not bypass this and is ignored.",
 		termSafe(r.Theorem), termSafe(strings.Join(r.ContractHyps, ", ")))
 	if returns != "" {
 		msg += fmt.Sprintf(" %s (a Witness.returns) was verified, but a concrete run does not state that the contract hypotheses hold of its runtime; it does not show non-vacuity.", termSafe(returns))
 	}
 	return "", "", "", &diag{Invalid: true, Stage: "non-vacuity", Msg: msg,
 		Next: "Add a named theorem in the proof's Witness namespace (conventionally Witness.nonvacuous) of the form `∃ impl … s, <the main theorem's whole precondition, contract hypotheses included>` and verify it in the same run (--theorem " +
-			witnessHint(r.Theorem) + "). The auditor matches witnesses by their statement, not their name, but an anonymous `example` cannot be referenced and is not accepted: state it as a named theorem. Or pass --allow-no-witness to accept the verdict WITHOUT non-vacuity (it is then marked 'non-vacuity NOT shown (opted out)')."}
+			witnessHint(r.Theorem) + "). The auditor matches witnesses by their statement, not their name, but an anonymous `example` cannot be referenced and is not accepted: state it as a named theorem. (--audit-only checks the proof and the statement audit without claiming a verification; it prints \"Audit-only\" and writes no verified.json.)"}
 }
 
 // supports: the witness report p is an instance of the main theorem r. The witness may sit in a module of its
@@ -108,8 +111,8 @@ func nonVacuityLine(r *verifiedReport) string {
 			s += "; fires: " + termSafe(r.NonVacuityReturns)
 		}
 		return s
-	case nvOptedOut:
-		return "  Non-vacuity: NOT SHOWN (opted out with --allow-no-witness): non-vacuity NOT shown (opted out) -- this theorem assumes runtime contracts and nothing shows its hypotheses are jointly satisfiable"
+	case nvAuditOnly:
+		return "  Non-vacuity: NOT SHOWN (--audit-only: NOT a verification) -- this theorem assumes runtime contracts and nothing shows its hypotheses are jointly satisfiable"
 	case nvWitness:
 		return "  Non-vacuity: this is a witness (it is not a correctness claim)"
 	case nvNotShown:
@@ -142,6 +145,14 @@ func applyNonVacuity(outdir string, outs []thmOutcome, allow bool) {
 			continue
 		}
 		setNonVacuity(o.Report, st, w, ret)
+		if st == nvAuditOnly {
+			// not a verification: no report is left behind that a consumer could take for one
+			_ = os.Remove(filepath.Join(outdir, verifiedDir, o.Theorem+".json"))
+			if i == 0 {
+				_ = os.Remove(filepath.Join(outdir, "verified.json"))
+			}
+			continue
+		}
 		var werr error
 		if len(outs) == 1 {
 			werr = writeReport(filepath.Join(outdir, "verified.json"), o.Report)
@@ -166,6 +177,10 @@ func nonVacuitySingle(outdir string, r *verifiedReport, allow bool) error {
 		return d
 	}
 	setNonVacuity(r, st, w, ret)
+	if st == nvAuditOnly {
+		_ = os.Remove(filepath.Join(outdir, "verified.json"))
+		return nil
+	}
 	return writeReport(filepath.Join(outdir, "verified.json"), r)
 }
 

@@ -43,7 +43,7 @@ row() { # NAME expect(blocked|Verified) pattern...
 run() { # file art thm...
   local f=$1 art=$2; shift 2
   local targs=(); for t in "$@"; do targs+=(--theorem "$P.$t"); done
-  all="$("$J" verify --allow-no-witness --janus-root "$root" --proof "$R/attacks/$f" "$W/$art" "${targs[@]}" 2>&1)"
+  all="$("$J" verify --audit-only --janus-root "$root" --proof "$R/attacks/$f" "$W/$art" "${targs[@]}" 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"
   printf '%s\n' "$all" > "$W/$f.txt"
 }
 NOTDATA='where it takes `Extracted.dataAddr.'
@@ -72,7 +72,7 @@ chk a10 "$W/ErrorfRet64b.lean.txt" 'constrains the memory word at the entry'
 echo "== amd64: relying on R15 across the call (the stub's return jumps through R15, so the contract leaves it arbitrary)"
 sed 's/^  (s'"'"'.regs 0).toNat = iWrap ∧ ∃ d, (s'"'"'.regs 3).toNat = d/  s'"'"'.regs 15 = s.regs 15 ∧ (s'"'"'.regs 0).toNat = iWrap ∧ ∃ d, (s'"'"'.regs 3).toNat = d/' examples/proofs-amd64/ErrWrap/Proof.lean > "$W/ErrWrapR15.lean"
 grep -qF "s'.regs 15 = s.regs 15" "$W/ErrWrapR15.lean" || { echo "r15 mutation did not apply"; exit 1; }
-all="$("$J" verify --allow-no-witness --janus-root "$root" --proof "$W/ErrWrapR15.lean" "$W/ErrWrap64" --theorem "$P.correctness" 2>&1)"
+all="$("$J" verify --audit-only --janus-root "$root" --proof "$W/ErrWrapR15.lean" "$W/ErrWrap64" --theorem "$P.correctness" 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"
 printf '%s\n' "$all" > "$W/ErrWrapR15.txt"
 chk r15 "$W/ErrWrapR15.txt" 'Lean rejected'
 echo

@@ -51,7 +51,7 @@ row() {
   return 0
 }
 # v PROOF ARTIFACT [THEOREM]
-v() { out="$("$J" verify --allow-no-witness --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
+v() { out="$("$J" verify --audit-only --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"; }
 
 # The --fresh rows (each a cold kernel replay of the framework) are independent: they run as
 # parallel blocks (-j N, scripts/lib/parallel.sh); output is printed in this order.
