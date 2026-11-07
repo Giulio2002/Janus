@@ -54,4 +54,22 @@ run_elab rejects "(fun s m => Janus.Contracts.ICall.RtPreserves64 R2 s m ∧ m.r
 -- a separate premise of the same shape is rejected: the contract itself must carry the assumption
 run_elab rejects "(Janus.Contracts.ICall.RtPreserves64 R2)" "(hp : ∀ s m, Janus.Contracts.ICall.RtPreserves64 R2 s m) → "
 
+-- U-ICALL-STACK (amd64): the shape of the Format statement (a stack VARIABLE with only a numeral lower bound, nargs 1..5, frame 80,
+-- `RtPreserves64 R2`), and the rejected spellings of the sizes
+def sstmt (nargs stack above extra : String) : String :=
+  "∀ (impl : List Janus.Amd64.Segment) (fn k : Nat) (rt : List (Nat × Nat)) (R : Janus.Contracts.ICall.Res) (R2 : Janus.Contracts.RtInv), " ++ extra ++
+  "Janus.Contracts.ICall.ICallContract64 (Extracted.program.link impl) fn (" ++ nargs ++ ") (" ++ stack ++ ") (" ++ above ++
+  ") rt (fun _ => []) R (fun _ => True) (Janus.Contracts.ICall.RtPreserves64 R2) → True"
+def saccepts (n s a : String) (extra : String := "") : TermElabM Unit := do
+  if let some m ← audit (sstmt n s a extra) then throwError "sizes ({n}, {s}, {a}) {extra} rejected: {m}"
+def srejects (n s a : String) (extra : String := "") : TermElabM Unit := do
+  if (← audit (sstmt n s a extra)).isNone then throwError "sizes ({n}, {s}, {a}) {extra} accepted"
+run_elab saccepts "1" "k" "80" "(h : 4568 ≤ k) → "
+run_elab saccepts "5" "k" "80" "(h : 4568 ≤ k) → "
+run_elab saccepts "4" "k" "80" "(h : 4568 ≤ k) → "
+run_elab srejects "5" "k" "47" "(h : 4568 ≤ k) → "
+run_elab srejects "4" "2 ^ 48" "80"
+run_elab srejects "4" "0" "80"
+run_elab srejects "4" "k" "80" "(h : k = 2 ^ 48) → "
+
 end ICallPreservesAudit64

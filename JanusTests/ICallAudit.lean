@@ -82,4 +82,100 @@ run_elab prejects "(fun s m => Janus.Contracts.ICall.RtPreserves R2 s m ∧ m.re
 -- a separate premise of the same shape is rejected: the contract itself must carry the assumption
 run_elab prejects "(Janus.Contracts.ICall.RtPreserves R2)" "(hp : ∀ s m, Janus.Contracts.ICall.RtPreserves R2 s m) → "
 
+
+/-! ### U-ICALL-STACK: the size arguments of an abstract-callee contract (red team B12, B18, B19)
+
+`nargs`, the stack size and the caller-frame size are EITHER a closed term that evaluates to a natural number below 2^47
+(nargs: 2^44), whatever its spelling (`2 ^ 48`, `2 ^ 47 * 2`, `Nat.pow 2 48`, a `let`, a def-wrapped constant), OR a variable that no
+premise constrains except a numeral lower bound. -/
+
+def bigStack : Nat := 2 ^ 48
+def smallStack : Nat := 4096
+
+def sstmt (nargs stack above extra : String) : String :=
+  "∀ (impl : List Janus.Segment) (fn k : Nat) (rt : List (Nat × Nat)) (R : Janus.Contracts.ICall.Res), " ++ extra ++
+  "Janus.Contracts.ICall.ICallContract (Extracted.program.link impl) fn (" ++ nargs ++ ") (" ++ stack ++ ") (" ++ above ++ ")" ++
+  " rt (fun _ => []) R (fun _ => True) → True"
+
+def saccepts (nargs stack above : String) (extra : String := "") : TermElabM Unit := do
+  if let some m ← audit (sstmt nargs stack above extra) then throwError "sizes ({nargs}, {stack}, {above}) {extra} rejected: {m}"
+
+def srejects (nargs stack above : String) (extra : String := "") : TermElabM Unit := do
+  if (← audit (sstmt nargs stack above extra)).isNone then throwError "sizes ({nargs}, {stack}, {above}) {extra} accepted"
+
+-- accepted
+run_elab saccepts "4" "16" "48"
+run_elab saccepts "4" "2 ^ 20" "48"
+run_elab saccepts "4" "JanusTests.ICallAudit.smallStack" "48"
+run_elab saccepts "4" "k" "48"
+run_elab saccepts "4" "k" "48" "(hk : 4104 ≤ k) → "
+run_elab saccepts "4" "k" "48" "(hk : 4104 < k) → "
+-- rejected: the numeral, as an expression, a `Nat.pow`, a product, a `let`, a def-wrapped constant
+run_elab srejects "4" "281474976710656" "48"
+run_elab srejects "4" "2 ^ 48" "48"
+run_elab srejects "4" "2 ^ 47 * 2" "48"
+run_elab srejects "4" "Nat.pow 2 48" "48"
+run_elab srejects "4" "(let s := 2 ^ 48; s)" "48"
+run_elab srejects "4" "JanusTests.ICallAudit.bigStack" "48"
+run_elab srejects "4" "2 ^ 47" "48"
+-- the frame size and the argument count are covered too
+run_elab srejects "4" "16" "2 ^ 48"
+run_elab srejects "4" "16" "JanusTests.ICallAudit.bigStack"
+run_elab srejects "2 ^ 45" "16" "48"
+-- rejected: a variable pinned (B19), bounded above, bounded below by a huge numeral, or tied to another term
+run_elab srejects "4" "k" "48" "(hk : k = 281474976710656) → "
+run_elab srejects "4" "k" "48" "(hk : k = 2 ^ 48) → "
+run_elab srejects "4" "k" "48" "(hk : k ≤ 5) → "
+run_elab srejects "4" "k" "48" "(hk : 2 ^ 48 ≤ k) → "
+run_elab srejects "4" "k" "48" "(hk : k = JanusTests.ICallAudit.bigStack) → "
+run_elab srejects "4" "k" "48" "(j : Nat) → (hj : j = 2 ^ 48) → (hk : k = j) → "
+-- the whole satisfiable range, not only the upper bound (red team V09-V14): stack >= 8, nargs <= 64, above >= 8 + 8 nargs
+run_elab srejects "4" "0" "48"
+run_elab srejects "4" "7" "48"
+run_elab saccepts "4" "8" "48"
+run_elab srejects "4" "16" "39"
+run_elab saccepts "4" "16" "40"
+run_elab saccepts "64" "16" "520"
+run_elab srejects "64" "16" "519"
+run_elab srejects "65" "16" "600"
+run_elab srejects "4" "16" "k" "(hk : k < 8) → "
+run_elab srejects "n" "16" "48" "(n : Nat) → (hn : n ≥ 2 ^ 46) → "
+run_elab saccepts "4" "16" "k" "(hk : 40 ≤ k) → "
+
+-- other contract families (red team F01-F11): the same rule for the `stack` argument of RtContract, RtLiveContract, NewobjectContract, …
+def fstmt (stack extra : String) : String :=
+  "∀ (impl : List Janus.Segment) (k : Nat) (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady), " ++ extra ++
+  "Janus.Contracts.NewobjectContract (Extracted.program.link impl) (Extracted.program.contractAddr \"runtime.newobject\") rt (" ++ stack ++ ") H → True"
+
+def faccepts (stack : String) (extra : String := "") : TermElabM Unit := do
+  if let some m ← audit (fstmt stack extra) then throwError "NewobjectContract stack {stack} {extra} rejected: {m}"
+
+def frejects (stack : String) (extra : String := "") : TermElabM Unit := do
+  if (← audit (fstmt stack extra)).isNone then throwError "NewobjectContract stack {stack} {extra} accepted"
+
+run_elab faccepts "4096"
+run_elab faccepts "k"
+run_elab frejects "0"
+run_elab frejects "2 ^ 48"
+run_elab frejects "k" "(hk : k ≥ 2 ^ 48) → "
+run_elab frejects "k" "(hk : k = 0) → "
+
+-- rejected: an expression that is neither a closed numeral nor a variable
+run_elab srejects "4" "(k + 1)" "48"
+run_elab srejects "4" "(fn + 1)" "48"
+
+-- the `RtLiveContract` / `NewobjectLiveContract` / `MemmoveLive` shapes of the Scan and UnmarshalText statements (literal 4096; the
+-- memmove family's `d`)
+def lstmt (body : String) : String :=
+  "∀ (impl : List Janus.Segment) (R : Janus.Contracts.RtInv) (k : Nat), " ++ body ++ " → True"
+def laccepts (b : String) : TermElabM Unit := do
+  if let some m ← audit (lstmt b) then throwError "{b} rejected: {m}"
+def lrejects (b : String) : TermElabM Unit := do
+  if (← audit (lstmt b)).isNone then throwError "{b} accepted"
+run_elab laccepts "Janus.Contracts.NewobjectLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr \"runtime.newobject\") 4096 R"
+run_elab laccepts "Janus.Contracts.MemmoveLive (Extracted.program.link impl) (Extracted.program.contractAddr \"runtime.memmove\") 4096 R"
+run_elab laccepts "Janus.Contracts.MemmoveLive (Extracted.program.link impl) (Extracted.program.contractAddr \"runtime.memmove\") k R"
+run_elab lrejects "Janus.Contracts.NewobjectLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr \"runtime.newobject\") 0 R"
+run_elab lrejects "Janus.Contracts.MemmoveLive (Extracted.program.link impl) (Extracted.program.contractAddr \"runtime.memmove\") (2 ^ 48) R"
+
 end JanusTests.ICallAudit

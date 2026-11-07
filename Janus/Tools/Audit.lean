@@ -952,6 +952,11 @@ partial def binderDomains : Expr → Array Expr → Array Expr
   | .mdata _ b, acc => binderDomains b acc
   | _, acc => acc
 
+partial def forallBinderNames : Expr → Array Name → Array Name
+  | .forallE n _ b _, acc => forallBinderNames b (acc.push n)
+  | .mdata _ b, acc => forallBinderNames b acc
+  | _, acc => acc
+
 /-- Round 14: the PINNED runtime-contract predicates, as (defining module, short name). A premise counts as a
 runtime contract only if its head constant is DEFINED in the module listed here (looked up in the environment's
 constant-to-module map, so a proof or consumer module that declares `namespace Janus.Contracts` and its own
@@ -1493,6 +1498,27 @@ def isStubAddrLit (e : Expr) : Bool :=
     e.getAppNumArgs == 2 && (e.getArg! 0).consumeMData.isConstOf `Extracted.program &&
     (match (e.getArg! 1).consumeMData with | .lit (.strVal _) => true | _ => false)
 
+/-- U-ICALL-STACK: the natural number a closed term denotes, after instantiating metavariables, zeta-reducing `let`s, folding
+literal arithmetic (`2 ^ 48`, `2 ^ 47 * 2`, `Nat.pow 2 48`) and unfolding definitions (a def-wrapped constant): `none` for a term
+that is not a closed natural number (a variable, an application of an unknown function). -/
+partial def icallNatValue? (e : Expr) : MetaM (Option Nat) := do
+  let e ← instantiateMVars e
+  if e.hasLooseBVars then return none
+  let e ← Meta.zetaReduce e
+  let e := e.consumeMData
+  if e.hasFVar then
+    -- a `let`-bound local: its value
+    if let .fvar v := e then
+      if let some val := (← v.getDecl).value? then return ← icallNatValue? val
+    return none
+  if let some n := e.rawNatLit? then return some n
+  if let some n ← (Meta.evalNat e).run then return some n
+  let e' ← Meta.withTransparency .all (Meta.whnf e)
+  if e'.consumeMData != e then
+    if let some n := e'.consumeMData.rawNatLit? then return some n
+    if let some n ← (Meta.evalNat e').run then return some n
+  return none
+
 /-- The abstract-callee contracts (U-ICALL): `ICallContract`, `ICallContract64`. -/
 def isICallContract (c : Name) : Bool :=
   c == `Janus.Contracts.ICall.ICallContract || c == `Janus.Contracts.ICall.ICallContract64
@@ -1826,6 +1852,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
   Meta.forallTelescope ty fun xs body => do
     let bound : Std.HashSet FVarId := xs.foldl (fun s x => s.insert x.fvarId!) {}
     let mut rtVars : Std.HashSet FVarId := {}
+    let mut sizeVars : Array (String × FVarId × Nat) := #[]  -- U-ICALL-STACK: variables used as nargs/stack/above
     let mut icallFns : Array FVarId := #[]  -- U-ICALL: the callee-address variables of the abstract-callee contracts
     let mut icallFree : Array Expr := #[]  -- U-ICALL: the `P` and `keep` arguments, checked once `rtVars` is complete
     -- the implementation variables no recognised contract mentions (round 14)
@@ -1857,6 +1884,32 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
       let args := app.getAppArgs
       if args.size < doms.size then
         return some s!"applies the runtime contract {c} partially (round 10 V1)"
+      -- U-ICALL-STACK (red team B12, B18, B19, V01-V15, F01-F11): contract argument well-formedness. The arguments named
+      -- `stack` (`d` in the memequal/memhash/memmove/typed-copy families), `nargs` and `above` (every contract family: ICallContract[64], RtContract[64], RtLiveContract[64],
+      -- NewobjectContract[64], NewobjectLiveContract[64], …) gate the satisfiability of the call precondition (`CallOK`: a stack
+      -- window `[SP - stack, SP + 8 + 8·nargs)` that fits in the address space; `stack ≥ 8`; the caller frame `above ≥ 8 + 8·nargs`).
+      -- Each is EITHER a closed term that evaluates (literals, `^`, `*`, `let`s, unfolded definitions) into the satisfiable range
+      -- (8 ≤ stack < 2^47; nargs ≤ 64; 8 + 8·nargs ≤ above < 2^47), OR a variable of the statement that no theorem premise
+      -- constrains beyond a numeral lower bound (checked once the premises are known); anything else could make the contract
+      -- hold vacuously.
+      let bnames := forallBinderNames ci.type #[]
+      let mut nargsV : Option Nat := none
+      for i in [0:bnames.size] do
+        if bnames[i]! == `nargs then nargsV := ← icallNatValue? args[i]!
+      for i in [0:bnames.size] do
+        let nm := bnames[i]!.toString
+        unless nm == "stack" || nm == "d" || nm == "nargs" || nm == "above" do continue
+        let a := args[i]!.consumeMData
+        let limit := if nm == "nargs" then 64 else 2 ^ 47
+        match (← icallNatValue? a) with
+        | some n =>
+          let low := if nm == "stack" then 8 else if nm == "above" then 8 + 8 * (nargsV.getD 0) else 0
+          if n < low || (nm != "nargs" && n ≥ limit) || (nm == "nargs" && n > limit) then
+            return some s!"assumes the runtime contract {c} with the {nm} `{(← Meta.ppExpr a).pretty 10000}` = {n}, outside the satisfiable range ({if nm == "nargs" then "at most 64" else if nm == "stack" then "8 ≤ stack < 2^47" else s!"{low} ≤ above < 2^47"}): the call precondition would be unsatisfiable, so the hypothesis would hold vacuously (U-ICALL-STACK)"
+        | none =>
+          if isVar a then sizeVars := sizeVars.push (nm, a.fvarId!, limit)
+          else
+            return some s!"assumes the runtime contract {c} with the {nm} `{(← Meta.ppExpr a).pretty 10000}`, which is neither a closed numeral term nor a variable of the statement: its value could make the call precondition unsatisfiable (U-ICALL-STACK)"
       -- Spec binding: the spec (and live data) a contract carries must describe the function it is stated at
       if let some (prog, fn) := contractAddrOf? app then
         unless prog.isConstOf `Extracted.program do
@@ -1905,14 +1958,6 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
           if i == 1 && !isVar a && !isStubAddrLit a then
             return some s!"assumes the abstract-callee contract {c} at the address `{(← Meta.ppExpr a).pretty 10000}`, which is neither a variable of the statement (a dynamic callee: the address is a parameter of the theorem, linked to the call by the itab word) nor `Extracted.program.contractAddr \"name\"` (a static call to a non-extracted function the extraction lists as a `--contract` stub); an extracted function's address, `Extracted.entry` and a numeral are never accepted (U-ICALL)"
           if i == 1 && isVar a then icallFns := icallFns.push a.fvarId!
-          -- the stack and caller-frame sizes: a numeral of 2^47 or more pins the contract to a state that cannot exist
-          -- (no stack window of that size fits below 2^48), so the hypothesis would hold vacuously (U-ICALL red team B12)
-          if i == 3 || i == 4 then
-            let big : Bool := match a.consumeMData.rawNatLit? with
-              | some n => decide (n ≥ 2 ^ 47)
-              | none => match a.consumeMData.nat? with | some n => decide (n ≥ 2 ^ 47) | none => false
-            if big then
-              return some s!"assumes the abstract-callee contract {c} with the {if i == 3 then "stack" else "frame"} size `{(← Meta.ppExpr a).pretty 10000}`, a numeral of 2^47 or more: no such window fits in the address space, so the hypothesis would hold vacuously (U-ICALL)"
           if i == 6 || i == 8 then
             icallFree := icallFree.push a
             continue
@@ -2009,6 +2054,28 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
     for a in icallFree do
       if a.hasAnyFVar (rtVars.contains ·) then
         return some s!"has an abstract-callee contract whose call-site property or kept ranges `{(← Meta.ppExpr a).pretty 10000}` mention a runtime variable of a contract hypothesis: they may mention only the statement's own variables (U-ICALL)"
+    -- U-ICALL-STACK: a variable used as a size is constrained by no premise except a numeral lower bound (`c ≤ k`, `c < k`, c ≤ limit)
+    for (what, v, limit) in sizeVars do
+      for (x, t) in premises do
+        unless t.hasAnyFVar (· == v) do continue
+        let t' := t.consumeMData
+        let isContractHyp := match t'.getAppFn with
+          | .const c _ => isRuntimeContract env c
+          | _ => false
+        if isContractHyp then continue
+        let lowerBound ← do
+          if (t'.isAppOfArity ``LE.le 4 || t'.isAppOfArity ``LT.lt 4) && (t'.getArg! 0).isConstOf ``Nat then
+            match (t'.getArg! 3).consumeMData with
+            | .fvar w =>
+              if w == v then
+                match (← icallNatValue? (t'.getArg! 2)) with
+                | some n => pure (decide (n < limit))
+                | none => pure false
+              else pure false
+            | _ => pure false
+          else pure false
+        unless lowerBound do
+          return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}) about the {what} `{(← v.getUserName)}` of a runtime contract: such a size may be constrained only by a numeral lower bound (`c ≤ {(← v.getUserName)}`) within the satisfiable range; an equality or upper bound can pin it to a value that makes the call precondition unsatisfiable, and the contract would hold vacuously (U-ICALL-STACK)"
     -- U-ICALL red team B1/B2: the callee address `fn` of an abstract-callee contract appears only inside contract
     -- hypotheses (and the statement's own body); any other premise mentioning it (`fn = Extracted.entry`, `fn = 0x100000`,
     -- an inequality, …) would pin the abstract callee to code the statement chooses
