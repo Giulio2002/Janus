@@ -455,6 +455,20 @@ func TestConsumerVerify(t *testing.T) {
 	needLeanSlow(t)
 	useTestCache(t)
 	pkg := consumerCopy(t, "toml")
+	// The olean store of the (process-wide, content-keyed) test cache is shared by every consumer test running in
+	// parallel, and a module of the proofs' import closure is keyed by its source and extraction, not by the package
+	// path: when another test (TestConsumerGit, TestConsumerResultCache, ...) had already compiled the same Max.lean
+	// against the same extraction, this test's Max came from the store and "Rebuilt" lacked it. A comment unique to
+	// this test makes its modules' keys its own, so what this test asserts about what is rebuilt cannot depend on
+	// which other test ran first; the sharing it is about (Spec, reused across the two extractions) is within the test.
+	for _, f := range []string{"ConsumerExample/Add.lean", "ConsumerExample/Max.lean"} {
+		fp := filepath.Join(pkg, f)
+		b, err := os.ReadFile(fp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, fp, string(b)+"\n-- unique to "+t.Name()+" in "+pkg+"\n")
+	}
 	add := mustExtract(t, "example.com/basic.Add")
 	max := mustExtract(t, "example.com/basic.Max")
 	verify := func(outdir, proof, thm string, extra ...string) (int, string, string) {
