@@ -1856,6 +1856,7 @@ def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM
   -- declarations of the module being elaborated (no module index yet: tests)
   let local_ := env.constants.map₂.foldl (init := (#[] : Array Name)) fun acc n ci =>
     match ci with | .thmInfo _ => if n.isInternal then acc else acc.push n | _ => acc
+  let mut dbg : Array String := #[]
   for n in cands ++ local_ do
     let some ci := env.find? n | continue
     let st ← Meta.saveState
@@ -1869,6 +1870,7 @@ def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM
           let x ← Meta.mkFreshExprMVar (b.getArg! 0)
           b := (← instantiateMVars (Expr.headBeta (mkApp (b.getArg! 1) x))).consumeMData
         else break
+      if b.getAppFn.isConstOf pre then dbg := dbg.push s!"{n}: head ok, {b.getAppNumArgs} args"
       if b.getAppFn.isConstOf pre && b.getAppNumArgs == 6 then
         let ba := b.getAppArgs
         let mut all := true
@@ -1881,7 +1883,8 @@ def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM
     if ok then
       let axs ← collectAxioms n
       if axs.all fun a => a == ``propext || a == ``Classical.choice || a == ``Quot.sound then return .ok n
-  return .error s!"no kernel-checked theorem of the proof module states `∃ s, {pre.getString!} nargs stack above rt P s` for this contract at some instantiation of the statement's variables"
+      dbg := dbg.push s!"{n}: unifies but axioms {axs}"
+  return .error s!"no kernel-checked theorem of the proof module states `∃ s, {pre.getString!} nargs stack above rt P s` for this contract at some instantiation of the statement's variables (candidates: {dbg})"
 
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
 Round 14 (V2): with `main` (the default; every theorem that is not a `Witness.nonvacuous`/`Witness.returns`)

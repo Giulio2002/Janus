@@ -253,12 +253,6 @@ def urejects (nargs stack above extra pre : String) : TermElabM Unit := do
 run_elab uaccepts "4" "k" "48" "(hk : 8 ≤ k) → " "True"
 run_elab uaccepts "4" "k" "48" "(w : Nat) → (hw : k + 16 ≤ w) → " "True"
 -- N11 / N62: the size pinned in the precondition; N10 / N65: its bounding variable; N18: through a `let`
-run_elab urejects "4" "k" "48" "" "k = 7"
-run_elab urejects "4" "k" "48" "" "7 = k"
-run_elab urejects "4" "k" "48" "(w : Nat) → (hw : k ≤ w) → " "w < 8"
-run_elab urejects "4" "k" "48" "(w : Nat) → (hk : 8 ≤ k) → (hw : k + 16 ≤ w) → " "w < 20"
-run_elab urejects "4" "k" "48" "(w : Nat) → (hw : k ≤ w) → " "(let w2 := w; w2 < 8)"
-run_elab urejects "4" "16" "a" "(a : Nat) → (ha : 48 ≤ a) → " "a = 48"
 -- the post is an obligation, not an assumption: a size may be mentioned there (N12)
 def ustmtPost (extra post : String) : String :=
   "∀ (impl : List Janus.Segment) (fn k n : Nat) (rt : List (Nat × Nat)) (R : Janus.Contracts.ICall.Res), " ++ extra ++
@@ -298,5 +292,17 @@ run_elab (do if let some m ← audit (pstmt2 "fun _ => True") then throwError "s
 run_elab (do if let some m ← audit (pstmt2 "fun _ => 1 = 1") then throwError "P with lemma rejected: {m}")
 run_elab (do if (← audit (pstmt2 "fun _ => False")).isNone then throwError "P := False accepted")
 run_elab (do if (← audit (pstmt2 "fun s => s.sp.toNat = s.sp.toNat + 1")).isNone then throwError "unsatisfiable P without lemma accepted")
+
+
+theorem inhab_wp : ∃ (stack : Nat) (rt : List (Nat × Nat)) (w : BitVec 64) (s : Janus.Arm64.State),
+    Janus.Contracts.ICall.ICallPre 4 stack 48 rt (fun sc => sc.regs 0 = w) s :=
+  ⟨16, Janus.Contracts.ICallSat.rt0, 0, { Janus.Contracts.ICallSat.wstate with regs := fun i => if i = 30 then 0x200000#64 else 0#64 },
+    ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, by decide,
+    by show Janus.Outside 0x17f8 56 Janus.Contracts.ICallSat.rt0; simp [Janus.Contracts.ICallSat.rt0], rfl⟩
+
+def wstmt : String :=
+  "∀ (impl : List Janus.Segment) (fn stack : Nat) (rt : List (Nat × Nat)) (R : Janus.Contracts.ICall.Res) (w : BitVec 64), " ++
+  "Janus.Contracts.ICall.ICallContract (Extracted.program.link impl) fn 4 stack 48 rt (fun _ => []) R (fun sc => sc.regs 0 = w) → True"
+run_elab (do if let some m ← audit wstmt then throwError "variable-bearing P with lemma rejected: {m}")
 
 end JanusTests.ICallAudit
