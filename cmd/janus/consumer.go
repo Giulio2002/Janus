@@ -477,6 +477,7 @@ type consumerWS struct {
 	sb                  *sandbox
 	tc                  *toolchain
 	lock                *fileLock
+	serialBuild         bool     // U-SILENT-DEP: `lake build` runs with one job (the serial retry of a build killed for memory)
 	memOwn              [][2]int // job-log ranges of per-request builds killed for memory (already attributed)
 	temp                bool
 	dg                  diagFlags         // --full-errors / --keep-workspace (diagflags.go): output only
@@ -967,7 +968,11 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 		}
 	}
 	if len(args) > 0 && args[0] == "build" {
-		env = lakeBuildEnv(env)
+		if ws.serialBuild {
+			env = append(env, "LEAN_NUM_THREADS=1")
+		} else {
+			env = lakeBuildEnv(env)
+		}
 	}
 	cmd := ws.sb.commandOverlay(ws.Root, []string{ws.Dir}, nil, ws.protected(false), append([]string{ws.lake}, args...), env)
 	var out bytes.Buffer
@@ -1375,13 +1380,17 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			continue
 		}
 		seenRel[r.rel] = true
+		// U-SILENT-DEP: the Lake build compiles lakeJobs() modules at once inside ONE memory scope; several big modules together
+		// can exceed it, the kernel kills one, and the only symptom is a missing olean later. A build killed for memory is
+		// retried once with a single job (serial), and a build that is still killed names the module(s) it was compiling.
 		mark := memMark()
-		_, out, berr := ws.run("build", "--no-ansi", r.rel)
+		out, berr, kill := lakeBuildGuarded(ws, r.rel, &mark)
 		buildOut.WriteString(out)
 		buildOut.WriteString("\n")
-		if _, _, kill := memSince(mark); kill != nil {
+		if kill != nil {
 			ws.memOwn = append(ws.memOwn, [2]int{mark, memMark()})
 			d := memLimitDiag(currentGuard(), *kill, berr)
+			d.Msg += unfinishedNote(out)
 			for _, q := range reqs {
 				if q.rel == r.rel {
 					q.Err = d
@@ -1996,4 +2005,64 @@ func (ws *consumerWS) exportOwnOleans(ob *ownBuild) {
 		}
 		_ = copyTree(p.lib, dst)
 	}
+}
+
+// lakeBuildGuarded runs `lake build rel` in the workspace. When the guard killed it for memory and it ran with several jobs, the
+// build is repeated once with one job: the modules of the closure are then compiled one at a time, each alone in the scope. The
+// output of both runs is returned (the first one is kept for the module names); kill is the event of the LAST run when it was
+// killed too. *mark is moved to the start of the run whose kill is returned.
+func lakeBuildGuarded(ws *consumerWS, rel string, mark *int) (string, error, *memEvent) {
+	return guardedBuild(func(serial bool) (string, error) {
+		ws.serialBuild = serial
+		defer func() { ws.serialBuild = false }()
+		_, out, err := ws.run("build", "--no-ansi", rel)
+		return out, err
+	}, lakeJobs(), mark, func(note string) { fmt.Fprint(os.Stderr, note) })
+}
+
+// guardedBuild is the retry policy of lakeBuildGuarded, with the build and the job count as parameters (testable).
+func guardedBuild(run func(serial bool) (string, error), jobs int, mark *int, note func(string)) (string, error, *memEvent) {
+	out, err := run(false)
+	_, _, kill := memSince(*mark)
+	if kill == nil || jobs <= 1 {
+		return out, err, kill
+	}
+	note(fmt.Sprintf("Note: the Lake build was killed for memory with %d concurrent modules (peak %s, limit %s)%s; retrying with one module at a time.\n",
+		jobs, fmtBytes(kill.Peak), fmtBytes(kill.Limit), unfinishedNote(out)))
+	*mark = memMark()
+	out2, err2 := run(true)
+	_, _, kill2 := memSince(*mark)
+	return out + "\n" + out2, err2, kill2
+}
+
+var (
+	lakeStartRE = regexp.MustCompile(`(?m)^\S*\s*\[\d+/\d+\] Building (\S+)`)
+	lakeDoneRE  = regexp.MustCompile(`(?m)^\S*\s*\[\d+/\d+\] (?:Built|Replayed|Compiled|Fetched) (\S+)`)
+)
+
+// unfinishedModules are the modules a Lake log shows as started ("Building M") and not finished ("Built M"), in order: what was
+// being compiled when the build died.
+func unfinishedModules(out string) []string {
+	done := map[string]bool{}
+	for _, m := range lakeDoneRE.FindAllStringSubmatch(out, -1) {
+		done[m[1]] = true
+	}
+	var res []string
+	seen := map[string]bool{}
+	for _, m := range lakeStartRE.FindAllStringSubmatch(out, -1) {
+		if !done[m[1]] && !seen[m[1]] {
+			seen[m[1]] = true
+			res = append(res, m[1])
+		}
+	}
+	return res
+}
+
+// unfinishedNote names the modules a killed build was compiling (empty when the log shows none).
+func unfinishedNote(out string) string {
+	ms := unfinishedModules(out)
+	if len(ms) == 0 {
+		return ""
+	}
+	return " while compiling " + strings.Join(ms, ", ")
 }
