@@ -130,3 +130,20 @@ state `s_c` at the callee's entry with the contract's call precondition (tied va
 show that the caller's path reaches the call with those arguments. A contract that is vacuous ONLY at the arguments of a call no witness run
 takes (an `R` empty only at the caller's real argument values, pinned by the `Ensures` precondition) is accepted (audit/roundup3/known-accepted/KA1).
 Universal pins, size pins, `P`/`keep` pins and an empty `R` are rejected. Post-release: optional `Steps`-prefix reachability witnesses.
+
+# FROZEN (step 2): U-WITNESS-CALLSITE — arm64 WriteTo VERIFIED (correctness + nonvacuous, commit after c109a5cc's parent; head below)
+For EVERY contract hypothesis `c` of the main theorem, `Witness.nonvacuous` must contain (inside the same `∃ … ,` conjunction, i.e. next to the hypotheses
+and the Returns run) the conjunct, with the contract's OWN instantiated entry and arguments:
+
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 <entry of c> ∧ <family pre of c, as in the contract's Summary> s_c)
+    -- arm64 State = Janus.Arm64.State, `.pc`; amd64: Janus.Amd64.State, `.rip`
+    -- ICallContract[64] fn nargs stack above rt keep R P pres:  s_c.pc = BitVec.ofNat 64 fn ∧ ICallPre[64] nargs stack above rt P s_c
+    -- other families: the `pre` argument of the Summary the contract definition unfolds to (the auditor reads it generically; write the family's own Pre def)
+Proof in the witness: `⟨wsCall, rfl, wsCall_pre⟩` with a closed `def wsCall : State` (at the callee entry) and `theorem wsCall_pre : ICallPre … wsCall` (the stock
+callee states in Janus/Contracts/ICallSat[Amd64].lean `wstate`/`wstate_pre` show how; set the argument registers P needs). Worked example: examples/proofs/WriteTo.lean
+(`wsCall`, `wsCall_pre`, the conjunct before the `Returns`). The untied inhabitation lemma (U-ICALL-INHABITED) is DROPPED (only literal `P := False` is still rejected at statement level).
+Order of conjuncts in the witness does not matter; the auditor matches `s_c.pc = …` and `pre s_c` on the flattened conjuncts with one state. A contract that does not unfold to a `Summary` is rejected.
+Timing (cold framework, --no-result-cache, one machine at load ~50): arm64 WriteTo verify correctness+nonvacuous = 5m06s; NOT comparable with the sweep baseline (11.4 s arm64 / 10.6 s amd64): the framework cache was cold. WARM before/after still to measure.
+## HANDOVER delta for UP3b (supersedes "Step 2 design" above)
+Done: step 2 as frozen above; limitation documented (NOTES, docs/SOUNDNESS.md), audit/roundup3/known-accepted/KA1 (md only; no executable row).
+Remaining: (2) upgrade examples: WriteTo amd64, CountThenWrite both ISAs, every contract-bearing example; record WARM timing; (3) regressions: the Add-based RT rows now fail ONLY at the witness (U-WITNESS-CALLSITE / pins make pre uninhabited): needs a verify-level runner variant with a witness-bearing Add proof per row (statement-only rows stay Verified in --audit-only: N10 N11 N18 N62 N65 and the six removed ICallAudit pins); add R01 (rows2) and WIT rows with expected reasons; controls verify; (4) corpus (fv/wrun once FV-WRUN is done) zero false rejects — watch "does not unfold to a Summary" rejections; (5) `check-merge` + SAT (commands above); Go tests via gotest lane. Head: see `git log -1` on agent/up3-vacuity.
