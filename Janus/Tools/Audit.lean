@@ -2261,7 +2261,8 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
           break
       if !converged then
         return some "assumes runtime contracts whose size arguments feed each other (`above ≥ 8 + 8·nargs` through a shared variable) without a solution (U-ICALL-STACK, joint)"
-    -- UP3: an author-chosen call-site property `P` needs a kernel-checked inhabitation lemma (stock `fun _ => True` does not)
+    -- UP3: a call-site property `P := False` is rejected outright; any other author-chosen `P` is held honest by the tied
+    -- call-site conjunct of the witness (U-WITNESS-CALLSITE), which replaces the untied inhabitation lemma
     if main then
       for app in apps do
         let .const c _ := app.getAppFn | continue
@@ -2269,11 +2270,8 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
         let args := app.getAppArgs
         if args.size < 9 then continue
         let pBody ← Meta.lambdaTelescope args[8]! fun _ b => do pure (← Meta.whnfR b).consumeMData
-        if pBody.isConstOf ``True then continue
-        match ← inhabitationLemma env c args with
-        | .ok _ => pure ()
-        | .error m =>
-          return some s!"assumes the abstract-callee contract {c} with the call-site property `{(← Meta.ppExpr args[8]!).pretty 10000}`, which is not `fun _ => True`: {m}. A call-site property chosen by the statement can be unsatisfiable (`fun _ => False`), which makes the contract's call precondition unsatisfiable and the hypothesis vacuous; state and prove the lemma (any name) in the proof module (U-ICALL-INHABITED)"
+        if pBody.isConstOf ``False then
+          return some s!"assumes the abstract-callee contract {c} with the call-site property `fun _ => False`: its call precondition is unsatisfiable and the hypothesis holds vacuously (U-ICALL-INHABITED)"
     -- U-ICALL red team B1/B2: the callee address `fn` of an abstract-callee contract appears only inside contract
     -- hypotheses (and the statement's own body); any other premise mentioning it (`fn = Extracted.entry`, `fn = 0x100000`,
     -- an inequality, …) would pin the abstract callee to code the statement chooses
@@ -3061,6 +3059,43 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
         if (← instantiateMVars m) != m then continue
         unless ← inhabSafe env t do
           return some s!"the main theorem{which} has a binder of type `{(← Meta.ppExpr t).pretty 200}`, which no conjunct of the witness exhibits and which is not a type with an element by construction (an empty type makes the main theorem vacuous): state the witness's value for it in the premises (round 14, rt-auditv2)"
+      -- U-WITNESS-CALLSITE (UP3): for EVERY contract hypothesis `c` of the main theorem the witness exhibits, at the same
+      -- instantiation, a state at the callee's entry satisfying the contract's Summary precondition:
+      -- `∃ s_c, s_c.pc = <entry> ∧ <pre> s_c` (`rip` on amd64). Read generically off the contract's definition (it unfolds to a
+      -- `Summary p entry pre post`). A size/P/keep pin makes that pre uninhabited; an empty R is refuted because the witness
+      -- also proves the contract for a concrete implementation, which with an inhabited pre must return related by R.
+      -- The caller's path to the call is NOT demanded (not a vacuity matter).
+      for h in hyps do
+        let h ← instantiateMVars h
+        let .const c _ := h.getAppFn | continue
+        unless isRuntimeContract (← getEnv) c do continue
+        let mut u := h
+        let mut found := false
+        for _ in [0:6] do
+          if u.getAppFn.isConstOf `Janus.Tactic.Summary || u.getAppFn.isConstOf `Janus.Amd64.Tactic.Summary then found := true; break
+          match ← Meta.unfoldDefinition? u with
+          | some u2 => u := u2.consumeMData
+          | none => break
+        unless found && u.getAppNumArgs == 4 do
+          return some s!"the contract hypothesis `{c}` does not unfold to a `Summary`, so the witness cannot be required to exhibit its call-site state (U-WITNESS-CALLSITE)"
+        let entry := u.getArg! 1
+        let pre := u.getArg! 2
+        let arm := u.getAppFn.isConstOf `Janus.Tactic.Summary
+        let stT := if arm then mkConst `Janus.Arm64.State else mkConst `Janus.Amd64.State
+        let expected ← Meta.withLocalDeclD `s_c stT fun x => do
+          let pcE ← if arm then Meta.mkAppM `Janus.Arm64.State.pc #[x] else Meta.mkAppM `Janus.Amd64.State.rip #[x]
+          let ent ← Meta.mkAppM ``BitVec.ofNat #[mkNatLit 64, entry]
+          let eq ← Meta.mkEq pcE ent
+          let body ← Meta.mkAppM ``And #[eq, (mkApp pre x).headBeta]
+          Meta.mkAppM ``Exists #[← Meta.mkLambdaFVars #[x] body]
+        let ok ← wconjs.anyM fun w => do
+          let w ← instantiateMVars w
+          if w.isAppOfArity ``Exists 2 then
+            -- compare modulo definitional unfolding of the family pre
+            defEqTry expected w
+          else pure false
+        unless ok do
+          return some s!"the witness does not exhibit a call-site state for the contract hypothesis `{(← Meta.ppExpr h).pretty 200}`: it must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr expected).pretty 400}` (a state at the callee's entry satisfying the contract's call precondition; U-WITNESS-CALLSITE)"
       -- U-WITNESS-RUN (UP3): the witness must also state the RUN: the unfolded conclusion's final `Returns`-style claim
       -- (`Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')`) at the SAME instantiation the premises fixed. A
       -- vacuous contract, an unsatisfiable pre or an empty `R` admits no such run through the call, so a witness that only exhibits

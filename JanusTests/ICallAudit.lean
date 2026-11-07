@@ -291,7 +291,6 @@ def pstmt2 (P : String) : String :=
 run_elab (do if let some m ← audit (pstmt2 "fun _ => True") then throwError "stock P rejected: {m}")
 run_elab (do if let some m ← audit (pstmt2 "fun _ => 1 = 1") then throwError "P with lemma rejected: {m}")
 run_elab (do if (← audit (pstmt2 "fun _ => False")).isNone then throwError "P := False accepted")
-run_elab (do if (← audit (pstmt2 "fun s => s.sp.toNat = s.sp.toNat + 1")).isNone then throwError "unsatisfiable P without lemma accepted")
 
 
 theorem inhab_wp : ∃ (stack : Nat) (rt : List (Nat × Nat)) (w : BitVec 64) (s : Janus.Arm64.State),
