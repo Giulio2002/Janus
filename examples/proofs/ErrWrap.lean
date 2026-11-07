@@ -46,6 +46,7 @@ def fmtAddr : Nat :=
 local macro "adrFmt" : term => `(janus_eval% fmtAddr)
 local macro "adrEvData" : term => `(janus_eval% evData)
 local macro "adrTInt" : term => `(janus_eval% tInt)
+local macro "adrTErr" : term => `(janus_eval% tErr)
 local macro "adrQ1" : term => `(janus_eval% Extracted.dataAddr.«.rodata#4de38626»)
 local macro "adrQ2" : term => `(janus_eval% Extracted.dataAddr.«.rodata#df6f96c5»)
 
@@ -106,7 +107,7 @@ theorem correctness (impl : List Segment) (R : RtInv)
   have hsp56 : (s.sp - 56#64).toNat = s.sp.toNat - 56 := by
     rw [BitVec.toNat_sub_of_le (by simp only [BitVec.le_def, BitVec.toNat_ofNat]; omega)]; rfl
   have facts : ∀ M : Memory, MemFrame s.mem M [(s.sp.toNat - 4208, s.sp.toNat)] →
-      M.readLE (s.sp.toNat - 56) 8 = 864000 → M.readLE (s.sp.toNat - 48) 8 = adrEvData →
+      M.readLE (s.sp.toNat - 56) 8 = adrTErr → M.readLE (s.sp.toNat - 48) 8 = adrEvData →
       M.readLE (s.sp.toNat - 40) 8 = adrTInt → M.readLE (s.sp.toNat - 32) 8 = adrQ1 →
       M.readLE (s.sp.toNat - 24) 8 = adrTInt → M.readLE (s.sp.toNat - 16) 8 = adrQ2 →
       ArgsOK (Env.mk tErr iErr tInt iWrap) 26 fmtNum 4294967296 M adrFmt 26 (s.sp.toNat - 56) 3 3 ∧
@@ -175,7 +176,7 @@ theorem correctness (impl : List Segment) (R : RtInv)
   have key : ∀ S : State, MemFrame s.mem S.mem [(s.sp.toNat - 4208, s.sp.toNat)] → S.regs 28 = s.regs 28 →
       S.sp.toNat + 112 = s.sp.toNat → (S.regs 30).toNat % 4 = 0 → (S.regs 30).toNat < 2 ^ 48 →
       S.regs 0 = (BitVec.ofNat 64 adrFmt) → S.regs 1 = 26#64 → S.regs 2 = s.sp - 56#64 → S.regs 3 = 3#64 → S.regs 4 = 3#64 →
-      S.mem.readLE (s.sp.toNat - 56) 8 = 864000 → S.mem.readLE (s.sp.toNat - 48) 8 = adrEvData →
+      S.mem.readLE (s.sp.toNat - 56) 8 = adrTErr → S.mem.readLE (s.sp.toNat - 48) 8 = adrEvData →
       S.mem.readLE (s.sp.toNat - 40) 8 = adrTInt → S.mem.readLE (s.sp.toNat - 32) 8 = adrQ1 →
       S.mem.readLE (s.sp.toNat - 24) 8 = adrTInt → S.mem.readLE (s.sp.toNat - 16) 8 = adrQ2 →
       (CallOK S 4096 5 ∧ StackRoom S 4096 5 ∧
@@ -224,7 +225,7 @@ theorem correctness (impl : List Segment) (R : RtInv)
       · exact Or.inr (Or.inl (Outside.of_sub hO3 (by omega) (by omega)))
   have post_facts : ∀ (M m1 : Memory), MemFrame M m1 (R.rt ++ [(s.sp.toNat - 112 - 4096, s.sp.toNat - 112 - 8), (s.sp.toNat - 112 + 8, s.sp.toNat - 112 + 8 + 8 * 5)]) →
       MemFrame s.mem M [(s.sp.toNat - 4208, s.sp.toNat)] →
-      M.readLE (s.sp.toNat - 56) 8 = 864000 → M.readLE (s.sp.toNat - 48) 8 = adrEvData →
+      M.readLE (s.sp.toNat - 56) 8 = adrTErr → M.readLE (s.sp.toNat - 48) 8 = adrEvData →
       M.readLE (s.sp.toNat - 40) 8 = adrTInt → M.readLE (s.sp.toNat - 32) 8 = adrQ1 →
       M.readLE (s.sp.toNat - 24) 8 = adrTInt → M.readLE (s.sp.toNat - 16) 8 = adrQ2 →
       M.readLE (s.sp.toNat - 120) 8 = (s.regs 29).toNat → M.readLE (s.sp.toNat - 112) 8 = ret →
