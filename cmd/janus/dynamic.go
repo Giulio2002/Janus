@@ -28,8 +28,10 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -556,4 +558,81 @@ func contractHints(names []string, entry string, parents map[string]map[string]b
 		}
 	}
 	return uniq(hints), uniq(indirect)
+}
+
+// implSpan is a code range of an extraction (an extracted function) and implStubAt the address of a stub.
+type implSpan struct {
+	Name   string
+	Lo, Hi uint64
+}
+type implStubAt struct {
+	Name string
+	Addr uint64
+}
+
+// implApartable fails when `Janus.ImplApart Extracted.program impl` is unsatisfiable for EVERY runtime implementation `impl`
+// because of the extraction alone: two extracted functions overlap, or a stub address (the entry of a function the extraction
+// treats as a stub, or a trap) lies inside an extracted function. A statement that assumes `ImplApart Extracted.program impl` is then
+// vacuous, caught only much later by the witness requirement (U-IMPLAPART-LINT: runtime.osyield pulled in because a contract flag
+// such as growslice or concatstring2 was left out). The message names the function and suggests the --contract flag. It is
+// applied by `verify` only to a proof that mentions ImplApart: many extractions legitimately contain a trap stub inside a
+// runtime function (INT3 padding) and are fine as long as no statement assumes ImplApart.
+func implApartable(entry string, spans []implSpan, stubs []implStubAt) error {
+	hint := func(name string) string {
+		if name == entry {
+			return "The overlap involves the selected function itself; select another function."
+		}
+		return fmt.Sprintf("%s is most likely a runtime function reached because a runtime call was not covered by a framework contract: leave it out with --contract '%s' and extract again (see docs/RUNTIME-CONTRACTS.md for the contracts, e.g. runtime.growslice, runtime.concatstring2, runtime.newobject).", name, name)
+	}
+	for i, a := range spans {
+		for _, st := range stubs {
+			if st.Addr >= a.Lo && st.Addr < a.Hi {
+				return &diag{Invalid: true, Msg: fmt.Sprintf("the proof assumes `ImplApart Extracted.program impl`, but the extracted function %s [%#x, %#x) contains the address %#x of the stub %s: the assumption is false for every runtime implementation, so every statement that uses it is vacuous.",
+					a.Name, a.Lo, a.Hi, st.Addr, st.Name), Stage: "extraction", Next: hint(a.Name)}
+			}
+		}
+		for _, b := range spans[i+1:] {
+			if a.Lo < b.Hi && b.Lo < a.Hi {
+				return &diag{Invalid: true, Msg: fmt.Sprintf("the proof assumes `ImplApart Extracted.program impl`, but the extracted functions %s [%#x, %#x) and %s [%#x, %#x) overlap: the assumption is false for every runtime implementation, so every statement that uses it is vacuous.",
+					a.Name, a.Lo, a.Hi, b.Name, b.Lo, b.Hi), Stage: "extraction", Next: hint(b.Name)}
+			}
+		}
+	}
+	return nil
+}
+
+// implApartableIdentity applies implApartable to an extraction's identity.
+func implApartableIdentity(id *Identity) error {
+	var spans []implSpan
+	for _, f := range id.Functions {
+		a, err := strconv.ParseUint(strings.TrimPrefix(f.Address, "0x"), 16, 64)
+		if err != nil {
+			continue
+		}
+		n := uint64(f.Bytes)
+		if n == 0 {
+			n = 4 * uint64(f.Words)
+		}
+		spans = append(spans, implSpan{f.Name, a, a + n})
+	}
+	var stubs []implStubAt
+	for _, s := range id.Stubs {
+		if a, err := strconv.ParseUint(strings.TrimPrefix(s.Address, "0x"), 16, 64); err == nil {
+			stubs = append(stubs, implStubAt{s.Name, a})
+		}
+	}
+	return implApartable(id.Symbol, spans, stubs)
+}
+
+var implApartUseRE = regexp.MustCompile(`\bImplApart\s+(?:\(\s*)?Extracted\.program\b`)
+var leanBlockCommentRE = regexp.MustCompile(`(?s)/-.*?-/`)
+var leanLineCommentRE = regexp.MustCompile(`--[^\n]*`)
+
+// proofAssumesImplApart reports whether the Lean source uses `ImplApart Extracted.program …` outside comments and docstrings (the
+// one premise on a runtime implementation that the auditor allows). A proof stated over `link impl` without it (or one that only
+// mentions ImplApart in prose) is not subject to the U-IMPLAPART-LINT check.
+func proofAssumesImplApart(src []byte) bool {
+	s := leanBlockCommentRE.ReplaceAll(src, nil)
+	s = leanLineCommentRE.ReplaceAll(s, nil)
+	return implApartUseRE.Match(s)
 }

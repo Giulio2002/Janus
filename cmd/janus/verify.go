@@ -615,6 +615,13 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			Stage: "proof selection", Next: "Pass --proof path/to/Proof.lean (default: <outdir>/Proof.lean)."}
 	}
 
+	// U-IMPLAPART-LINT: a proof that assumes ImplApart about an extraction for which it is unsatisfiable is vacuous; say so now
+	if proofAssumesImplApart(proofSrc) && cr.Identity != nil {
+		if ierr := implApartableIdentity(cr.Identity); ierr != nil {
+			return ierr
+		}
+	}
+
 	// 2. Toolchain, sandbox and the trusted Janus library build. The independent steps run at
 	// once (J1): the memory-guard probe, the sandbox self-test, the toolchain query and the
 	// framework readiness check (which hashes the framework build and the auditor).
