@@ -149,6 +149,33 @@ run_elab srejects "4" "k" "48" "(w : Nat) → (hw : k + 48 ≤ w) → (hp : w = 
 run_elab srejects "4" "k" "w" "(w : Nat) → (hw : k + 48 ≤ w) → "
 run_elab srejects "w" "k" "48" "(w : Nat) → (hw : k + 48 ≤ w) → "
 run_elab srejects "4" "w" "48" "(w : Nat) → (hw : w + 48 ≤ w) → "
+-- ADVERSARIAL rows for the below-bounded-variable relaxation (all must be REJECTED). Controls: the 15 real examples + saccepts above.
+-- chain pin: m pinned, m <= k, stack k
+run_elab srejects "4" "k" "48" "(m : Nat) → (hm : m = 2 ^ 48) → (hk : m ≤ k) → "
+run_elab srejects "4" "k" "48" "(m : Nat) → (hm : m = 281474976710656) → (hk : m + 1 ≤ k) → "
+-- pinned through an alias
+run_elab srejects "4" "k" "48" "(m a : Nat) → (ha : a = 2 ^ 48) → (hm : m = a) → (hk : m ≤ k) → "
+-- pinned through an existential (premise mentioning the pin is not an `X ≤ w` shape)
+run_elab srejects "4" "k" "48" "(m : Nat) → (hm : ∃ z, z = 2 ^ 48 ∧ m = z) → (hk : m ≤ k) → "
+run_elab srejects "4" "k" "48" "(m : Nat) → (hk : m ≤ k) → (hm : ∃ z, m ≤ z ∧ z ≤ 5) → "
+-- two lower-bounding variables, one of them pinned
+run_elab srejects "4" "k" "48" "(m n : Nat) → (hn : n = 2 ^ 48) → (hm : m ≤ k) → (hn2 : n ≤ k) → "
+-- pinning by two inequalities
+run_elab srejects "4" "k" "48" "(m : Nat) → (h1 : m ≤ k) → (h2 : k ≤ m) → "
+run_elab srejects "4" "k" "48" "(h : (2 ^ 48 ≤ k ∧ k ≤ 2 ^ 48)) → "
+run_elab srejects "4" "k" "48" "(m : Nat) → (h1 : k + 48 ≤ m) → (h2 : m ≤ k + 48) → "
+run_elab srejects "4" "k" "48" "(m : Nat) → (h1 : k + 48 ≤ m) → (h2 : m + 1 ≤ k + 49) → "
+-- the bounding variable bounded from above through another variable
+run_elab srejects "4" "k" "48" "(m j : Nat) → (h1 : k ≤ m) → (h2 : m ≤ j) → (h3 : j = 5) → "
+run_elab srejects "4" "k" "48" "(m j : Nat) → (h1 : k ≤ m) → (h2 : j ≤ m) → (h3 : m ≤ j) → "
+-- the bounding variable is a size variable of the same or another contract argument
+run_elab srejects "k" "k" "48" "(h : k + 1 ≤ k) → "
+-- `above` and `nargs` families
+run_elab srejects "4" "16" "k" "(m : Nat) → (hm : m = 2 ^ 48) → (hk : m ≤ k) → "
+run_elab srejects "4" "16" "k" "(m : Nat) → (h1 : m ≤ k) → (h2 : k ≤ m) → "
+run_elab srejects "n" "16" "48" "(n m : Nat) → (hm : m = 2 ^ 46) → (hn : m ≤ n) → "
+run_elab srejects "n" "16" "48" "(n m : Nat) → (h1 : m ≤ n) → (h2 : n ≤ m) → "
+-- `d` family (NewobjectContract stack)
 -- the whole satisfiable range, not only the upper bound (red team V09-V14): stack >= 8, nargs <= 64, above >= 8 + 8 nargs
 run_elab srejects "4" "0" "48"
 run_elab srejects "4" "7" "48"
@@ -197,5 +224,11 @@ run_elab laccepts "Janus.Contracts.MemmoveLive (Extracted.program.link impl) (Ex
 run_elab laccepts "Janus.Contracts.MemmoveLive (Extracted.program.link impl) (Extracted.program.contractAddr \"runtime.memmove\") k R"
 run_elab lrejects "Janus.Contracts.NewobjectLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr \"runtime.newobject\") 0 R"
 run_elab lrejects "Janus.Contracts.MemmoveLive (Extracted.program.link impl) (Extracted.program.contractAddr \"runtime.memmove\") (2 ^ 48) R"
+
+-- adversarial rows for the below-bounded-variable relaxation, `d` family
+run_elab frejects "k" "(m : Nat) → (hm : m = 2 ^ 48) → (hk : m ≤ k) → "
+run_elab frejects "k" "(m : Nat) → (h1 : m ≤ k) → (h2 : k ≤ m) → "
+run_elab frejects "k" "(m n : Nat) → (hn : n = 2 ^ 48) → (hm : m ≤ k) → (hn2 : n ≤ k) → "
+run_elab frejects "k" "(m : Nat) → (hm : ∃ z, z = 2 ^ 48 ∧ m = z) → (hk : m ≤ k) → "
 
 end JanusTests.ICallAudit
