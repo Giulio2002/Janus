@@ -31,6 +31,7 @@ sym() {
     NewPairSC) echo example.com/rtmisc/sc.NewPair ;;
     Three|List|Chain) echo "example.com/rtmisc/live.$1" ;;
     Cons|Push|CopyBytes|Zero) echo "example.com/rtmisc/stubdemo.$1" ;;
+    BoxAfterNew) echo example.com/rtmisc/boxdemo.BoxAfterNew ;;
     SoftAdd|SoftMul|SoftDiv) echo "example.com/rtmisc/softf.${1#Soft}" ;;
     KeepAlive) echo runtime.KeepAlive ;;
     *) echo "example.com/rtmisc.$1" ;;
@@ -41,6 +42,7 @@ bin() {
     NewPairSC) echo "artifacts/examples-rtmisc-sc-$1" ;;
     Three|List|Chain) echo "artifacts/examples-rtmisc-live-$1" ;;
     Cons|Push|CopyBytes|Zero) echo "artifacts/examples-rtmisc-stubdemo-$1" ;;
+    BoxAfterNew) echo "artifacts/examples-rtmisc-boxdemo-$1" ;;
     SoftAdd|SoftMul|SoftDiv|KeepAlive) echo "artifacts/examples-rtmisc-softf-$1" ;;
     *) echo "artifacts/examples-rtmisc-$1" ;;
   esac
@@ -54,6 +56,7 @@ args() {
       --contract runtime.gcWriteBarrier2 ;;
     List|Cons) printf '%s\n' --contract runtime.newobject --contract runtime.gcWriteBarrier1 ;;
     Push) printf '%s\n' --contract runtime.growslice ;;
+    BoxAfterNew) printf '%s\n' --contract runtime.newobject --contract runtime.convTstring --contract runtime.convT64 ;;
     CopyBytes) printf '%s\n' --contract runtime.memmove ;;
     Zero) printf '%s\n' --contract runtime.memclrNoHeapPointers ;;
     Chain) printf '%s\n' --contract runtime.memmove --contract runtime.makeslice --contract runtime.gcWriteBarrier2 ;;

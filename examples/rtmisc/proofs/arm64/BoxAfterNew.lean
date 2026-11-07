@@ -1,11 +1,11 @@
 import Extracted
 
 /-!
-# `BoxAfterNew(s string, v uint64) (*boxNode, any, any)` (arm64)
+# `BoxAfterNew(s string, v uint64) (*Node, any, any)` (arm64)
 
 ```go
-type boxNode struct{ A, B uint64 }
-func BoxAfterNew(s string, v uint64) (*boxNode, any, any) { return &boxNode{v, v + 1}, s, v }
+type Node struct{ A, B uint64 }
+func BoxAfterNew(s string, v uint64) (*Node, any, any) { return &Node{v, v + 1}, s, v }
 ```
 
 Three runtime calls in a row, each a **live** contract over the same runtime `R` (`Janus.Contracts.Live`):
@@ -18,7 +18,7 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
 
 namespace Proof
 
-abbrev tNode : Nat := Extracted.dataAddr.«type:basic.boxNode#23ba07d2»
+abbrev tNode : Nat := Extracted.dataAddr.«type:boxdemo.Node#dac8e17d»
 abbrev tStr : Nat := Extracted.dataAddr.«type:string#f88732b8»
 abbrev tU64 : Nat := Extracted.dataAddr.«type:uint64#703ad2db»
 

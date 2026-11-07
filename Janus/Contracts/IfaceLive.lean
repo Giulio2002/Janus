@@ -77,6 +77,40 @@ theorem convT64Live_small (a : List Nat) (m : Memory) (r0 r1 r2 : Nat) (h : arg 
   have h' := h; simp [arg] at h'
   simp [convT64Live, liveAdds, arg, h']
 
+/-- The precondition of both boxing specs is `True`, and they read and write nothing besides `rt`: pre-lemmas (`↓`), so that a callee-precondition proof does not
+first normalise the (large) call-site state in the argument words (the step budget of `janus64_run` ran out on the
+third call of `examples/proofs-amd64/BoxAfterNew`). -/
+@[janus_exec ↓, janus_post ↓, janus64_exec ↓, janus64_post ↓] theorem convTstringSpec_pre (a : List Nat) (m : Memory) :
+    convTstringSpec.pre a m = True := eq_true trivial
+
+@[janus_exec ↓, janus_post ↓, janus64_exec ↓, janus64_post ↓] theorem convT64Spec_pre (a : List Nat) (m : Memory) :
+    convT64Spec.pre a m = True := eq_true trivial
+
+@[janus_exec ↓, janus_post ↓, janus64_exec ↓, janus64_post ↓] theorem convTstringSpec_reads (a : List Nat) (m : Memory) :
+    convTstringSpec.reads a m = [] := rfl
+
+@[janus_exec ↓, janus_post ↓, janus64_exec ↓, janus64_post ↓] theorem convTstringSpec_writes (a : List Nat) (m : Memory) :
+    convTstringSpec.writes a m = [] := rfl
+
+@[janus_exec ↓, janus_post ↓, janus64_exec ↓, janus64_post ↓] theorem convT64Spec_reads (a : List Nat) (m : Memory) :
+    convT64Spec.reads a m = [] := rfl
+
+@[janus_exec ↓, janus_post ↓, janus64_exec ↓, janus64_post ↓] theorem convT64Spec_writes (a : List Nat) (m : Memory) :
+    convT64Spec.writes a m = [] := rfl
+
+/-- Closed forms of the argument words at the specs' own counts, as pre-lemmas (`↓`): the state in the argument is then never
+visited. (`argWords64 s convT64Spec.nargs` is otherwise unfolded after its large call-site state argument has been simplified:
+on the third live call of `examples/proofs-amd64/BoxAfterNew` the `R.ok addr (argWords64 …)` part of the callee
+precondition took 200 s and ran out of the simp step budget; with these lemmas it takes 5 ms.) -/
+@[janus_exec ↓, janus_post ↓] theorem argWords_convT64 (s : Janus.Arm64.State) :
+    argWords s convT64Spec.nargs = [(s.regs 0).toNat] := rfl
+@[janus_exec ↓, janus_post ↓] theorem argWords_convTstring (s : Janus.Arm64.State) :
+    argWords s convTstringSpec.nargs = [(s.regs 0).toNat, (s.regs 1).toNat] := rfl
+@[janus64_exec ↓, janus64_post ↓] theorem argWords64_convT64 (s : Janus.Amd64.State) :
+    argWords64 s convT64Spec.nargs = [(s.regs 0).toNat] := rfl
+@[janus64_exec ↓, janus64_post ↓] theorem argWords64_convTstring (s : Janus.Amd64.State) :
+    argWords64 s convTstringSpec.nargs = [(s.regs 0).toNat, (s.regs 3).toNat] := rfl
+
 attribute [janus_exec, janus_post, janus64_exec, janus64_post] convTstringSpec convT64Spec
   convTstringLive convT64Live BoxWords' BoxHolds'
 

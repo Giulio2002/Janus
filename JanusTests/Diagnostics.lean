@@ -146,7 +146,7 @@ example (x : W64) :
 
 
 -- `set_option janus.calls.trace true`: the outcome of each part of the callee's precondition is reported
--- (here the residual part that is not proved).
+-- (here the residual part that is not proved, with the simp time spent on it).
 /-- info: janus.calls.trace [residual, not proved]:
   BitVec.toNat x = 0 -/
 #guard_msgs (substring := true) in

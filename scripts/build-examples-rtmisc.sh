@@ -9,6 +9,8 @@
 #       (Janus/Contracts/Live.lean).
 #   artifacts/examples-rtmisc-stubdemo-{arm64,amd64}  ./stubdemo/cmd: Cons, the example of the generic
 #       live-contract stubs (Janus/Contracts/LiveStub.lean), in a binary of its own.
+#   artifacts/examples-rtmisc-boxdemo-{arm64,amd64}  ./boxdemo/cmd: BoxAfterNew, the live boxing example
+#       (Janus/Contracts/IfaceLive.lean: newobject, convTstring, convT64), in a binary of its own.
 #   artifacts/examples-rtmisc-softf-{arm64,amd64}  ./softcmd: the soft-float (-d=softfloat) and
 #       runtime.KeepAlive examples of Janus.Contracts.SoftFloat, in a binary of their own.
 # Separate binaries, so that no other example's addresses change.
@@ -33,6 +35,8 @@ GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -o "$root/artifacts/e
 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-rtmisc-live-amd64" ./live/cmd
 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-rtmisc-stubdemo-arm64" ./stubdemo/cmd
 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-rtmisc-stubdemo-amd64" ./stubdemo/cmd
+GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-rtmisc-boxdemo-arm64" ./boxdemo/cmd
+GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-rtmisc-boxdemo-amd64" ./boxdemo/cmd
 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -gcflags=example.com/rtmisc/softf=-d=softfloat \
   -o "$root/artifacts/examples-rtmisc-softf-arm64" ./softcmd
 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -buildvcs=false -gcflags=example.com/rtmisc/softf=-d=softfloat \
