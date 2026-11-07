@@ -24,14 +24,24 @@ one() { # ISA NAME
   local nth=${#th[@]}; nth=$((nth/2)); local ok; ok=$(grep -c 'AUDIT-STAGE-OK' "$log")
   # the dev hook always ends in "Invalid: AUDIT-STAGE-OK <thm>" (never a verification): success = one AUDIT-STAGE-OK line per theorem
   if [ "$ok" -ge "$nth" ]; then printf '%s\t%s\tok\t%.1fs\n' $i $n "$dt"
-  else printf '%s\t%s\tREJECT\t%s\n' $i $n "$(grep -v 'AUDIT-STAGE-OK' "$log" | grep -m1 -iE 'audit|rejected|error|Invalid|requires|FAIL' | cut -c1-300)"; fi
+  else printf '%s\t%s\tREJECT\t%s\n' $i $n "$(grep -v 'AUDIT-STAGE-OK' "$log" | grep -m1 -E '^Invalid|^janus|rror' | cut -c1-400)"; fi
 }
+# JANUS_SWEEP_JOBS (default 3) audits run at once; JANUS_SWEEP_ALL=1 audits every example proof, else only those that mention a pinned
+# runtime contract (the only ones the call-site rule can concern)
+export -f one example_symbol runtime_symbol; export out root J isa
 names=("$@")
+mkdir -p "$out/tmp"; : > "$out/tmp/list"
+cands() { # directory-style proof files -> names that mention a contract
+  grep -lE "(Contract|Live|Memmove|Memequal|Access[12]|Assign|Delete|Iter|Memhash|Strhash|Rand|Equal|Ifaceeq|Efaceeq|Cmpstring|Typed|Memclr|Pool|Lock|Soft|KeepAlive|Sched|Gopanic|Goexit|Deferreturn|Morestack|Errorf|ConvT|AssertE2I|TypeAssert|Interface|Cgo|Checkptr|Wb|Defer|Gorecover|Chash|Fhash|Interhash|Nilinterhash|Typehash|Clear|MakeSmall|MakeMap|BulkBarrier)" "$@" 2>/dev/null
+}
 if [ "$isa" != amd64 ]; then
-  if [ ${#names[@]} -gt 0 ]; then L=("${names[@]}"); else L=($(ls examples/proofs/*.lean | xargs -n1 basename | sed 's/\.lean$//')); fi
-  for n in "${L[@]}"; do one arm64 "$n"; done
+  if [ ${#names[@]} -gt 0 ]; then L=("${names[@]}"); elif [ "${JANUS_SWEEP_ALL:-}" = 1 ]; then L=($(ls examples/proofs/*.lean | xargs -n1 basename | sed 's/\.lean$//'));
+  else L=($(cands examples/proofs/*.lean | xargs -n1 basename | sed 's/\.lean$//')); fi
+  for n in "${L[@]}"; do echo "arm64 $n" >> "$out/tmp/list"; done
 fi
 if [ "$isa" != arm64 ]; then
-  if [ ${#names[@]} -gt 0 ]; then L=("${names[@]}"); else L=($(ls examples/proofs-amd64)); fi
-  for n in "${L[@]}"; do one amd64 "$n"; done
+  if [ ${#names[@]} -gt 0 ]; then L=("${names[@]}"); elif [ "${JANUS_SWEEP_ALL:-}" = 1 ]; then L=($(ls examples/proofs-amd64));
+  else L=($(cands examples/proofs-amd64/*/Proof.lean | xargs -n1 dirname | xargs -n1 basename)); fi
+  for n in "${L[@]}"; do echo "amd64 $n" >> "$out/tmp/list"; done
 fi
+xargs -P "${JANUS_SWEEP_JOBS:-3}" -L1 bash -c 'one "$@"' _ < "$out/tmp/list"

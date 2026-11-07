@@ -1,0 +1,43 @@
+import Extracted
+
+/-! KA1 (known-accepted limitation): the Ensures pre pins `¬ R` at SPECIFIC argument values (1, 2, 3, 4), a call no witness run takes. ACCEPTED: the witness exhibits a call-site state at other arguments (P: X0 = 9)
+Expected-verdict: Verified
+Expected-reason: known-accepted (docs/SOUNDNESS.md "UP3: known limitation")
+The proof is `Add`'s; the hypotheses are never used. -/
+open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts.ICall Janus.Contracts
+
+namespace Proof
+
+def Pk : State → Prop := fun sc => sc.regs 0 = 9
+
+theorem correctness (impl : List Segment) (fn : Nat) (rt : List (Nat × Nat)) (R : Res) (x y : BitVec 64)
+    (hc : ICallContract (Extracted.program.link impl) fn 4 16 48 rt (fun _ => []) R (fun sc => sc.regs 0 = 9)) :
+    Ensures (Extracted.program.link impl) Extracted.entry [x, y] (fun _ => ∀ n e1 e2, ¬ R 1 2 3 4 n e1 e2)
+      (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by
+  intro ret hret s hs _
+  janus_intro hs
+  janus_run
+
+namespace Witness
+open Janus.Contracts.EqHashModel (codeIn_link Summary.of_codeIn)
+open Janus.Contracts.ICallSat (impl A0 rt0)
+
+def RK : Res := fun a _ c _ n e1 e2 => a = 9 ∧ n = c ∧ e1 = 0 ∧ e2 = 0
+
+def ret : Nat := 0x1000
+def sp0 : Nat := 0x200000
+def g0 : Nat := 0x300000
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then 3 else if i = 1 then 4 else if i = 28 then BitVec.ofNat 64 g0
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩,
+    mem := ⟨fun _ => 0, [⟨sp0 - 64, 104, true⟩, ⟨g0, 0x100, false⟩]⟩ }
+
+theorem hc : ICallContract (Extracted.program.link impl) A0 4 16 48 rt0 (fun _ => []) RK (fun sc => sc.regs 0 = 9) := by
+  have h := Janus.Contracts.ICallSat.impl_okP (nargs := 4) (stack := 16) (above := 48)
+    (P := fun sc => sc.regs 0 = 9) (fun _ _ => True) (fun _ => trivial)
+  sorry
+
+end Witness
