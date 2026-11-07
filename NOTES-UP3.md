@@ -124,3 +124,9 @@ Add-based RT rows (never call the contract) are only closed by this step: with i
 5. check-merge: `/srv/janus-ops/bin/heavy-run -s 2 -- memcap -m 96G scripts/check-merge.sh -j 2` then `python3 -I audit/round9/sat_check.py /srv/janus-up3` (last: contracts=247 witnessed=251 open=0 missing=0). Also run the Go non-vacuity tests via the gotest lane (`go test ./cmd/janus -run 'NonVacuity|AllowNoWitness'` hangs ~11 min in TestMain when run alone). Report head, timings, rows to main; do NOT merge.
 ## Commands cheat sheet
 Build: `memcap -m 24G lake build Janus.Tools.Audit janus-audit JanusTests.ICallAudit` then `go build -o bin/janus ./cmd/janus`; verify one example: `JANUS_CACHE_DIR=<dir> bin/janus verify artifacts/<Name> --proof examples/proofs/<Name>.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous --janus-root /srv/janus-up3` (artifacts/<Name> comes from scripts/verify-examples.sh; artifacts/examples-arm64 copied from integ/n11). Heavy jobs one at a time, memcap, load<62, MemAvailable>=60G, df / >=70G.
+
+**Known limitation (UP3, accepted for the release): path reachability is not required.** The witness exhibits, per contract hypothesis, a
+state `s_c` at the callee's entry with the contract's call precondition (tied variables), and a returning run of the whole theorem. It does not
+show that the caller's path reaches the call with those arguments. A contract that is vacuous ONLY at the arguments of a call no witness run
+takes (an `R` empty only at the caller's real argument values, pinned by the `Ensures` precondition) is accepted (audit/roundup3/known-accepted/KA1).
+Universal pins, size pins, `P`/`keep` pins and an empty `R` are rejected. Post-release: optional `Steps`-prefix reachability witnesses.

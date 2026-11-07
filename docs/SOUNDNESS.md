@@ -2576,3 +2576,9 @@ Defense in depth, on top of the mandatory non-vacuity witness (above):
 * Joint satisfiability: the least solution of `stack ≥ 8`, `above ≥ 8 + 8·nargs` over the premises' numeral lower bounds must
   meet `nargs ≤ 64` and every other size `< 2^47`, across all contracts of the statement (a variable shared between roles
   included); a diverging system is rejected. Rows: audit/roundup3 (55, both modes).
+
+**Known limitation (UP3, accepted for the release): path reachability is not required.** The witness exhibits, per contract hypothesis, a
+state `s_c` at the callee's entry with the contract's call precondition (tied variables), and a returning run of the whole theorem. It does not
+show that the caller's path reaches the call with those arguments. A contract that is vacuous ONLY at the arguments of a call no witness run
+takes (an `R` empty only at the caller's real argument values, pinned by the `Ensures` precondition) is accepted (audit/roundup3/known-accepted/KA1).
+Universal pins, size pins, `P`/`keep` pins and an empty `R` are rejected. Post-release: optional `Steps`-prefix reachability witnesses.
