@@ -220,14 +220,15 @@ type earlyReplay struct {
 }
 
 // earlyReplayMarker names a passing early replay of module mod in exactly this context: the
-// toolchain, and the pins of the libraries the replay reads (the framework build, the trusted
+// toolchain (tcID is toolchain.cacheID, which covers the version AND the bytes of lean and leanchecker, never the version
+// string alone), and the pins of the libraries the replay reads (the framework build, the trusted
 // build and, for the proof module, the proof's build). The trusted modules read nothing of the
 // proof's directory in any run that is accepted: closureCheck requires every module of the
 // audited closure, Extracted's and JanusTrusted's included, to come from the framework, the
 // trusted build or the toolchain.
-func earlyReplayMarker(tcVersion, mod string, libs ...*pinnedLib) string {
+func earlyReplayMarker(tcID, mod string, libs ...*pinnedLib) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "janus-early-replay-v3\n%q\n%q\n", tcVersion, mod)
+	fmt.Fprintf(h, "janus-early-replay-v3\n%q\n%q\n", tcID, mod)
 	for _, l := range libs {
 		fmt.Fprintf(h, "%q %q\n", l.who, pinsDigest(l.want))
 	}
