@@ -64,3 +64,4 @@ import JanusTests.AccSub64
 import JanusTests.CallPre64
 import JanusTests.DataWritable
 import JanusTests.StrAt
+import JanusTests.DischFast
