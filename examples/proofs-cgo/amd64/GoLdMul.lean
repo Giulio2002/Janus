@@ -197,9 +197,9 @@ theorem go_spec (a b r : BitVec 64) :
     janus64_simp [h32, h80]
     obtain ⟨hdA, hdB, hdR, -⟩ := hKeep
     try simp only [Shared, outside_cons, outside_nil, and_true] at hdA hdB hdR
-    refine ⟨by omega, ⟨?_, by omega, by omega, by omega, by omega⟩, by omega,
-      ⟨haa, by omega, by omega, by omega, by omega⟩, by omega, ⟨hba, by omega, by omega, by omega, by omega⟩,
-      by omega, ⟨hra, by omega, by omega, by omega, by omega⟩, hx87, hfcw⟩
+    refine ⟨by janus_omega, ⟨?_, by janus_omega, by janus_omega, by janus_omega, by janus_omega⟩, by janus_omega,
+      ⟨haa, by janus_omega, by janus_omega, by janus_omega, by janus_omega⟩, by janus_omega, ⟨hba, by janus_omega, by janus_omega, by janus_omega, by janus_omega⟩,
+      by janus_omega, ⟨hra, by janus_omega, by janus_omega, by janus_omega, by janus_omega⟩, hx87, hfcw⟩
     janus64_disch
   rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, x87, zh, kr, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
   simp only [E, frameA, frameB, frameR, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
