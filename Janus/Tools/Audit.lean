@@ -1826,6 +1826,35 @@ partial def ensuresPres (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
   | .mdata _ b | .proj _ _ b => ensuresPres b acc
   | _ => acc
 
+/-- The theorems of the non-trusted modules (and of the module being elaborated) whose statement mentions `ICallPre`/`ICallPre64`
+and whose axioms are among propext / Classical.choice / Quot.sound: the candidate inhabitation lemmas. Computed in the FULL
+environment (the statement audit later runs in a clean environment that does not contain the proof module). -/
+def inhabCandidates (env : Environment) : MetaM (Array (Name × Expr)) := do
+  let pres := #[`Janus.Contracts.ICall.ICallPre, `Janus.Contracts.ICall.ICallPre64]
+  let modNames := env.header.moduleNames
+  let mut names : Array Name := #[]
+  names := env.const2ModIdx.fold (init := names) fun acc n idx =>
+    match modNames[idx.toNat]? with
+    | some m =>
+      if !trustedModule m && !n.isInternal then
+        match env.find? n with
+        | some (.thmInfo ci) => if ci.type.getUsedConstants.any pres.contains then acc.push n else acc
+        | _ => acc
+      else acc
+    | none => acc
+  names := env.constants.map₂.foldl (init := names) fun acc n ci =>
+    match ci with
+    | .thmInfo t => if !n.isInternal && t.type.getUsedConstants.any pres.contains then acc.push n else acc
+    | _ => acc
+  let mut out : Array (Name × Expr) := #[]
+  for n in names do
+    let some ci := env.find? n | continue
+    let axs ← collectAxioms n
+    if axs.all fun a => a == ``propext || a == ``Classical.choice || a == ``Quot.sound then out := out.push (n, ci.type)
+  return out
+
+initialize inhabRef : IO.Ref (Array (Name × Expr)) ← IO.mkRef #[]
+
 /-- UP3 (honesty of the call-site property): an `ICallContract[64]` whose `P` is anything but `fun _ => True` is a hypothesis
 with an AUTHOR-CHOSEN predicate; `P := False` (or any unsatisfiable `P`) makes the contract's call precondition unsatisfiable, so
 the hypothesis holds vacuously. The proof module must contain a kernel-checked theorem
@@ -1834,6 +1863,8 @@ unifies with the statement's contract at SOME instantiation of the statement's v
 not be unsatisfiable for every instantiation). Found by statement among the theorems of the non-trusted modules, whose axioms
 must be among propext / Classical.choice / Quot.sound. Returns the names of the lemmas tried when none matches. -/
 def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM (Except String Name) := do
+  let cands0 ← inhabRef.get
+  let cands0 ← if cands0.isEmpty then inhabCandidates env else pure cands0
   let pre := if c == `Janus.Contracts.ICall.ICallContract then `Janus.Contracts.ICall.ICallPre else `Janus.Contracts.ICall.ICallPre64
   -- the statement's own variables become mvars: the instantiation is existential
   let args ← args.mapM instantiateMVars
@@ -1843,25 +1874,12 @@ def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM
   let tgt := args.map fun a => (a.abstract (fvs.map Expr.fvar)).instantiateRev mvs
   -- ICallContract p fn nargs stack above rt keep R P preserves
   let want := #[tgt[2]!, tgt[3]!, tgt[4]!, tgt[5]!, tgt[8]!]
-  let modNames := env.header.moduleNames
-  let cands := env.const2ModIdx.fold (init := (#[] : Array Name)) fun acc n idx =>
-    match modNames[idx.toNat]? with
-    | some m =>
-      if !trustedModule m && !n.isInternal then
-        match env.find? n with
-        | some (.thmInfo _) => acc.push n
-        | _ => acc
-      else acc
-    | none => acc
-  -- declarations of the module being elaborated (no module index yet: tests)
-  let local_ := env.constants.map₂.foldl (init := (#[] : Array Name)) fun acc n ci =>
-    match ci with | .thmInfo _ => if n.isInternal then acc else acc.push n | _ => acc
   let mut dbg : Array String := #[]
-  for n in cands ++ local_ do
-    let some ci := env.find? n | continue
+  for (n, cty) in cands0 do
     let st ← Meta.saveState
     let ok ← try
-      let ty := ci.instantiateTypeLevelParams (← Meta.mkFreshLevelMVars ci.levelParams.length)
+      let lps := (collectLevelParams {} cty).params
+      let ty := cty.instantiateLevelParams lps.toList (← lps.toList.mapM fun _ => Meta.mkFreshLevelMVar)
       let (_, _, b) ← Meta.forallMetaTelescope ty
       let mut b := (← instantiateMVars b).consumeMData
       -- peel the `∃`s
@@ -1880,11 +1898,9 @@ def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM
       else pure false
     catch _ => pure false
     st.restore
-    if ok then
-      let axs ← collectAxioms n
-      if axs.all fun a => a == ``propext || a == ``Classical.choice || a == ``Quot.sound then return .ok n
-      dbg := dbg.push s!"{n}: unifies but axioms {axs}"
+    if ok then return .ok n
   return .error s!"no kernel-checked theorem of the proof module states `∃ s, {pre.getString!} nargs stack above rt P s` for this contract at some instantiation of the statement's variables (candidates: {dbg})"
+
 
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
 Round 14 (V2): with `main` (the default; every theorem that is not a `Witness.nonvacuous`/`Witness.returns`)
@@ -3324,6 +3340,7 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     let auditImports : Array Import :=
       #[{ module := `Extracted }, { module := trusted.toName }, { module := proofModN }]
     let (envA, cleanState) ← (auditEnv auditImports (pre?.map (·.1)) : IO _)
+    inhabRef.set (← runCore envA (Meta.MetaM.run' (inhabCandidates envA)))
     -- 1. kind and module
     let some ci := envA.find? thmN | fail s!"the proof does not define {thm}"
     let kind := match ci with
