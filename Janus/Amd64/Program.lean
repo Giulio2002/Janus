@@ -65,6 +65,18 @@ def DataLoaded (p : Program) (m : Memory) : Prop :=
       && r.base + r.size ≤ 2 ^ 48 && !r.writable) = true ∧
     ∀ i (h : i < d.bytes.length), (m.bytes (d.base + i)).toNat = d.bytes[i]
 
+/-- `DataLoaded` for a memory whose bytes read the data as `Janus.dataSegByte` does (see `Janus.Program.DataLoaded_of_dataSegByte`). -/
+theorem DataLoaded_of_dataSegByte {p : Program} {m : Memory} (hp : Janus.DataSegsDisjoint p.data)
+    (hreg : ∀ d ∈ p.data, (m.regions.any fun r => r.base ≤ d.base && d.base + d.bytes.length ≤ r.base + r.size
+      && r.base + r.size ≤ 2 ^ 48 && !r.writable) = true)
+    (hlt : ∀ d ∈ p.data, ∀ b ∈ d.bytes, b < 256)
+    (hb : ∀ a n, Janus.dataSegByte p.data a = some n → (m.bytes a).toNat = n % 256) : p.DataLoaded m := by
+  intro d hd
+  refine ⟨hreg d hd, fun i hi => ?_⟩
+  have h := hb _ _ (Janus.dataSegByte_of_mem hp hd hi)
+  rw [h]
+  exact Nat.mod_eq_of_lt (hlt d hd _ (List.getElem_mem hi))
+
 def stubAt (p : Program) (pc : Nat) : Option Janus.Stub := p.stubs.find? (·.addr = pc)
 
 /-- `p` called with return address `ret`: the same code, stubs and data, with the run ending
