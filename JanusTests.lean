@@ -5,6 +5,7 @@ import JanusTests.GoABI
 import JanusTests.Bridge
 import JanusTests.LiveStub
 import JanusTests.LiveStubSlice
+import JanusTests.LiveStubMemmoveUpto
 import JanusTests.LiveStubGrow
 import JanusTests.LiveStubGrowMulti
 import JanusTests.LiveStubConvT

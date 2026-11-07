@@ -64,6 +64,10 @@ import Janus.Contracts.LiveStubAmd64
 import Janus.Contracts.LiveStubMem
 import Janus.Contracts.LiveStubSlice
 import Janus.Contracts.LiveStubSliceAmd64
+import Janus.Contracts.LiveStubMemmoveUpto
+import Janus.Contracts.LiveStubMemmoveUptoAmd64
+import Janus.Contracts.MemmoveUptoSat
+import Janus.Contracts.MemmoveUptoSatAmd64
 import Janus.Contracts.LiveStubGrow
 import Janus.Contracts.LiveStubGrowAmd64
 import Janus.Contracts.InternalCall
