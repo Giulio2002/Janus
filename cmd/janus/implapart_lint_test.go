@@ -52,3 +52,23 @@ func TestImplApartableIdentity(t *testing.T) {
 		t.Errorf("arm64 identity: disjoint rejected: %v", err)
 	}
 }
+
+// The lint applies only to a proof that really uses `ImplApart Extracted.program impl` (a premise), not to prose or to a proof stated
+// over `link impl` alone.
+func TestProofAssumesImplApart(t *testing.T) {
+	yes := []string{"theorem t (impl : List Segment) (hI : ImplApart Extracted.program impl) : True := trivial",
+		"(hI : Janus.Amd64.ImplApart Extracted.program impl)", "  (hI : ImplApart (Extracted.program) impl)"}
+	no := []string{"theorem t (impl : List Segment) : Ensures (Extracted.program.link impl) Extracted.entry [] (fun _ => True) (fun _ _ => True) := sorry",
+		"-- the ImplApart Extracted.program impl premise is not used here\ntheorem t : True := trivial",
+		"/-- ImplApart Extracted.program impl is the one premise -/\ntheorem t : True := trivial"}
+	for _, s := range yes {
+		if !proofAssumesImplApart([]byte(s)) {
+			t.Errorf("must apply: %q", s)
+		}
+	}
+	for _, s := range no {
+		if proofAssumesImplApart([]byte(s)) {
+			t.Errorf("must not apply: %q", s)
+		}
+	}
+}

@@ -28,6 +28,7 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -621,4 +622,17 @@ func implApartableIdentity(id *Identity) error {
 		}
 	}
 	return implApartable(id.Symbol, spans, stubs)
+}
+
+var implApartUseRE = regexp.MustCompile(`\bImplApart\s+(?:\(\s*)?Extracted\.program\b`)
+var leanBlockCommentRE = regexp.MustCompile(`(?s)/-.*?-/`)
+var leanLineCommentRE = regexp.MustCompile(`--[^\n]*`)
+
+// proofAssumesImplApart reports whether the Lean source uses `ImplApart Extracted.program …` outside comments and docstrings (the
+// one premise on a runtime implementation that the auditor allows). A proof stated over `link impl` without it (or one that only
+// mentions ImplApart in prose) is not subject to the U-IMPLAPART-LINT check.
+func proofAssumesImplApart(src []byte) bool {
+	s := leanBlockCommentRE.ReplaceAll(src, nil)
+	s = leanLineCommentRE.ReplaceAll(s, nil)
+	return implApartUseRE.Match(s)
 }

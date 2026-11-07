@@ -616,7 +616,7 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	}
 
 	// U-IMPLAPART-LINT: a proof that assumes ImplApart about an extraction for which it is unsatisfiable is vacuous; say so now
-	if bytes.Contains(proofSrc, []byte("ImplApart")) && cr.Identity != nil {
+	if proofAssumesImplApart(proofSrc) && cr.Identity != nil {
 		if ierr := implApartableIdentity(cr.Identity); ierr != nil {
 			return ierr
 		}
