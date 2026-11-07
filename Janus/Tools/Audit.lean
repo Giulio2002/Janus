@@ -2055,6 +2055,18 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
       if a.hasAnyFVar (rtVars.contains ·) then
         return some s!"has an abstract-callee contract whose call-site property or kept ranges `{(← Meta.ppExpr a).pretty 10000}` mention a runtime variable of a contract hypothesis: they may mention only the statement's own variables (U-ICALL)"
     -- U-ICALL-STACK: a variable used as a size is constrained by no premise except a numeral lower bound (`c ≤ k`, `c < k`, c ≤ limit)
+    let sizeVarIds := sizeVars.map (·.2.1)
+    -- A variable `w` that only BOUNDS FROM BELOW: every premise mentioning it has the shape `X ≤ w` / `X < w` (Nat) with `X` free of `w`.
+    -- Nothing can pin such a `w` from above, so `v + k ≤ w` (k a numeral) or `v ≤ w` holds for every size `v` by the choice of `w`
+    -- (the frame/stack bound `d` of the memhash/memequal/memmove/typed-copy families next to the callee's own bound `d'`; the
+    -- same reasoning as `depthBound`). `w` may not itself be a size or a runtime variable.
+    let onlyLowerBounded (w : FVarId) : Bool :=
+      bound.contains w && !rtVars.contains w && !sizeVarIds.contains w &&
+        premises.all fun (_, p) =>
+          let p' := p.consumeMData
+          !p'.hasAnyFVar (· == w) ||
+            ((p'.isAppOfArity ``LE.le 4 || p'.isAppOfArity ``LT.lt 4) && (p'.getArg! 0).isConstOf ``Nat &&
+              (p'.getArg! 3).consumeMData == .fvar w && !(p'.getArg! 2).hasAnyFVar (· == w))
     for (what, v, limit) in sizeVars do
       for (x, t) in premises do
         unless t.hasAnyFVar (· == v) do continue
@@ -2074,7 +2086,23 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
               else pure false
             | _ => pure false
           else pure false
-        unless lowerBound do
+        -- `v ≤ w`, `v < w`, `v + k ≤ w`, `v + k < w` with `w` bounded below only (see `onlyLowerBounded`) and `k` a numeral below the limit
+        let belowFree ← do
+          if (t'.isAppOfArity ``LE.le 4 || t'.isAppOfArity ``LT.lt 4) && (t'.getArg! 0).isConstOf ``Nat then
+            match (t'.getArg! 3).consumeMData with
+            | .fvar w =>
+              if w == v || !onlyLowerBounded w then pure false
+              else
+                let l := (t'.getArg! 2).consumeMData
+                if l == .fvar v then pure true
+                else if l.isAppOfArity ``HAdd.hAdd 6 && (l.getArg! 4).consumeMData == .fvar v then
+                  match (← icallNatValue? (l.getArg! 5)) with
+                  | some k => pure (decide (k < limit))
+                  | none => pure false
+                else pure false
+            | _ => pure false
+          else pure false
+        unless lowerBound || belowFree do
           return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}) about the {what} `{(← v.getUserName)}` of a runtime contract: such a size may be constrained only by a numeral lower bound (`c ≤ {(← v.getUserName)}`) within the satisfiable range; an equality or upper bound can pin it to a value that makes the call precondition unsatisfiable, and the contract would hold vacuously (U-ICALL-STACK)"
     -- U-ICALL red team B1/B2: the callee address `fn` of an abstract-callee contract appears only inside contract
     -- hypotheses (and the statement's own body); any other premise mentioning it (`fn = Extracted.entry`, `fn = 0x100000`,
