@@ -108,6 +108,17 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (fn1 fn2 stack : Nat)
     ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, (by unfold SPAligned; decide),
     by decide, by decide, by decide, by decide, by simp [tabA, rt0], by simp [s0, sp0, rt0]⟩
 
+/-- The theorem fires: the concrete call of `CountThenWrite` (the concrete writer serves the itab) returns, and its results are the ones
+`correctness` describes. -/
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    ∃ c a1 a2 a3 e1 e2, R0 0x600000 a1 a2 a3 c e1 e2 ∧
+        ((c = 0 ∧ s'.regs 0 = 0 ∧ s'.regs 3 = 0 ∧ s'.regs 1 = 0) ∨
+         (c ≠ 0 ∧ ∃ n f1 f2, R0 0x600000 0x500000 3 3 n f1 f2 ∧ s'.regs 0 = n ∧ s'.regs 3 = f1 ∧ s'.regs 1 = f2)) :=
+  correctness impl A0 A0 16 rt0 R0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc1 hc2 ret hret s0 setup
+    ⟨by decide, (by unfold CodePtrOK64; decide), (by unfold CodePtrOK64; decide), by decide,
+    ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, (by unfold SPAligned; decide),
+    by decide, by decide, by decide, by decide, by simp [tabA, rt0], by simp [s0, sp0, rt0]⟩
+
 end Witness
 
 end Proof

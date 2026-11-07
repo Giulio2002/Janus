@@ -103,6 +103,14 @@ theorem nonvacuous : ∃ (impl : List Segment) (fn stack : Nat) (rt : List (Nat 
     by decide, ⟨by decide, by decide⟩, (by unfold Janus.Spec.Disjoint; decide), ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
     by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩
 
+/-- The theorem fires: the concrete call of `WriteTo` (the concrete writer serves the itab) returns, and its results are the ones
+`correctness` describes. -/
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    ∃ n e1 e2, R0 0x600000 0x500000 3 3 n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 1 = e1 ∧ s'.regs 2 = e2 :=
+  correctness impl A0 16 rt0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc ret hret s0 setup
+    ⟨by decide, ⟨by decide, by decide⟩, (by unfold Janus.Spec.Disjoint; decide), ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
+    by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩
+
 end Witness
 
 end Proof
