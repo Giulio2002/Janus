@@ -1790,7 +1790,7 @@ func buildFailure(out string, r *consumerRequest, ws *consumerWS, pkg *consumerP
 	shown, logPath := out, ""
 	if ws.dg.FullErrors {
 		argv := append(append([]string{"env", "lean"}, fullLeanOpts...), filepath.Join(ws.Root, filepath.FromSlash(r.rel)))
-		if _, full, _ := ws.run(argv...); strings.TrimSpace(full) != "" {
+		if _, full, _ := ws.run(argv...); strings.TrimSpace(full) != "" && fullRerunUsable(out, full) {
 			shown = ws.mapper(pkg, r.cr.Extracted)(full)
 			shown = strings.ReplaceAll(shown, pkg.Root+string(filepath.Separator), displayPath(pkg.Root)+string(filepath.Separator))
 		}
@@ -1813,6 +1813,24 @@ func buildFailure(out string, r *consumerRequest, ws *consumerWS, pkg *consumerP
 			Next: "Fix the proof. It must import Extracted and prove " + r.Theorem + ".", Details: shown}
 	}
 	return withFullOutput(d, logPath)
+}
+
+// missingOleanRE is Lean's complaint about an import whose olean was never produced.
+var missingOleanRE = regexp.MustCompile(`(?m)error: object file '[^']*' of module \S+ does not exist`)
+
+// fullRerunUsable reports whether the --full-errors rerun of the proof module (`lake env lean` on it alone) may replace
+// the build's own output as what is shown. It may not when the rerun only trips over a module the failed build never
+// produced ("object file ... of module M does not exist"): that message is an artifact of the rerun, it hides the
+// build's real failure (the module that was killed or rejected), which is only in the build's output. Nor may it when
+// the build reported Lean errors and the rerun reports none.
+func fullRerunUsable(buildOut, full string) bool {
+	if missingOleanRE.MatchString(full) && !missingOleanRE.MatchString(buildOut) {
+		return false
+	}
+	if len(leanErrors(buildOut)) > 0 && len(leanErrors(full)) == 0 {
+		return false
+	}
+	return true
 }
 
 func lastLines(s string, n int) string {
@@ -1897,6 +1915,9 @@ func (ws *consumerWS) tryLakeFree(pkg *consumerPkg, ob *ownBuild, reqs []*consum
 	ob.ensureAll(rels, order)
 	for _, m := range order {
 		if _, eerr := ob.ensure(m, rels[m]); eerr != nil {
+			// Never fall back silently: the Lake path rebuilds the closure, and when it fails too its output can hide
+			// why janus's own compile failed (fv-uint256 SetFromDecimal: hours lost to an unnamed module).
+			fmt.Fprintf(os.Stderr, "Note: janus's own compile of the proof closure failed, taking the Lake path: %v\n%s\n", eerr, ownBuildErrors(ob))
 			return false, true, nil
 		}
 	}
@@ -1904,6 +1925,29 @@ func (ws *consumerWS) tryLakeFree(pkg *consumerPkg, ob *ownBuild, reqs []*consum
 		r.module = m
 	}
 	return true, true, nil
+}
+
+// ownBuildErrors names every module whose own compile failed (sorted) with its diagnostic message.
+func ownBuildErrors(ob *ownBuild) string {
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
+	var names []string
+	for m := range ob.errs {
+		names = append(names, m)
+	}
+	sort.Strings(names)
+	var parts []string
+	for _, m := range names {
+		msg := fmt.Sprint(ob.errs[m])
+		if d, ok := ob.errs[m].(*diag); ok {
+			msg = d.Msg
+		}
+		parts = append(parts, m+": "+msg)
+	}
+	if len(parts) == 0 {
+		return "(no module error recorded)"
+	}
+	return strings.Join(parts, "\n")
 }
 
 // leanLibCovers reports whether Lake would build module m as part of a [[lean_lib]] of the lakefile.toml: the
