@@ -49,4 +49,47 @@ theorem a4 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : B
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
   intro ret hret s hs hp; exact hp.elim
 
+/-- C2 (U-SBTS-LIVE): the LIVE contract of `slicebytetostring` with the extraction's own address. -/
+theorem c2 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (h : RtLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring") 4096 R
+      (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s») slicebytetostringLive) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
+/-- A5: the live contract with a forged address numeral. -/
+theorem a5 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (h : RtLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring") 4096 R
+      (slicebytetostringSpec 4096) slicebytetostringLive) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
+/-- A6: the live contract with an address the statement chooses (a variable). -/
+theorem a6 (impl : List Segment) (st : Nat) (R : RtInv) (a b : BitVec 64)
+    (h : RtLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring") 4096 R
+      (slicebytetostringSpec st) slicebytetostringLive) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
+/-- A9: the spec of `slicebytetostring` with the live data of another runtime function. -/
+theorem a9 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (h : RtLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring") 4096 R
+      (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s») growsliceLive) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
+/-- A7: the live data of `slicebytetostring` with the spec of another runtime function (`growslice`), at the address of
+`slicebytetostring`. -/
+theorem a7 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (h : RtLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring") 4096 R
+      growsliceSpec slicebytetostringLive) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
+/-- A8: the same with the boxing spec (`convTstring`). -/
+theorem a8 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (h : RtLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring") 4096 R
+      convTstringSpec slicebytetostringLive) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
 end Proof

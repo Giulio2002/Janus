@@ -1252,6 +1252,9 @@ def frameworkSpecs : List Name :=
    `slicecopySpec, `typedslicecopySpec, `wbZeroSpec, `wbMoveSpec,
    -- the live boxing contracts (`Janus.Contracts.IfaceLive`: `convTstring`, `convT64`) and their live data
    `convTstringSpec, `convT64Spec, `convTstringLive, `convT64Live,
+   -- the live data of `slicebytetostring` (`RtLiveContract … (slicebytetostringSpec st) slicebytetostringLive`; `st` is
+   -- checked as for the plain contract: `frameworkSpecsStatic`)
+   `slicebytetostringLive,
    -- the live data of the growslice specs (`LiveSpec`: cost, fresh and kept objects), the second description
    -- argument of `RtLiveContract` (round 15)
    `growsliceLive, `growsliceNoAliasLive, `growsliceBufLive, `growsliceBufNoAliasLive].map (`Janus.Contracts ++ ·)
@@ -1358,7 +1361,8 @@ def specRuntimeNames : List (String × List String) :=
 def liveSpecOf : List (String × String) :=
   [("growsliceLive", "growsliceSpec"), ("growsliceNoAliasLive", "growsliceNoAliasSpec"),
    ("growsliceBufLive", "growsliceBufSpec"), ("growsliceBufNoAliasLive", "growsliceBufNoAliasSpec"),
-   ("convTstringLive", "convTstringSpec"), ("convT64Live", "convT64Spec")]
+   ("convTstringLive", "convTstringSpec"), ("convT64Live", "convT64Spec"),
+   ("slicebytetostringLive", "slicebytetostringSpec")]
 
 /-- The short name of a constant of `Janus.Contracts` (`none` for any other). -/
 def contractsShort? (c : Name) : Option String :=
@@ -1428,7 +1432,7 @@ def contractAddrOf? (app : Expr) : Option (Expr × String) :=
 `growsliceSpec/growsliceLive`; empty for a contract without them). -/
 def specLabel (app : Expr) : String :=
   let parts := app.getAppArgs.filterMap fun a =>
-    match specInfo? a with
+    match specInfo? a <|> specStaticInfo? a with
     | some (l, _) => some l
     | none => (liveInfo? a).map (·.1)
   "/".intercalate parts.toList

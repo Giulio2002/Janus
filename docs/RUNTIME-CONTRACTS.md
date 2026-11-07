@@ -840,6 +840,17 @@ witnesses for both shapes of both contracts, on both ISAs: `Janus/Contracts/Ifac
 `janus_live_convtstring`, `janus_live_convtstring_empty`, `janus_live_convt64`, `janus_live_convt64_small`
 (`janus64_…`) are in `LiveStubConvT[Amd64].lean`. The single-call `ConvT*` stay for functions that box once and
 need the itab/equality model; a path that calls them after a live call is still unprovable.
+**Live `slicebytetostring`** (U-SBTS-LIVE). The auditor accepts `RtLiveContract[64] … (contractAddr "runtime.slicebytetostring") 4096 R
+(slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s») slicebytetostringLive` (`slicebytetostringLive` is in `frameworkSpecs`
+and `liveSpecOf`; the address `st` is checked exactly as for the plain `RtContract`). The result `(r0, n)` is described by `StrAt`
+(`n = 0`; `n = 1` the static table; `2 ≤ n ≤ 32` the caller's 32-byte buffer; else a fresh block of `rt`); the live data say the
+fresh block (and only it) joins the live set (`fresh`), while the buffer or table bytes are `keep`t. Satisfiability witness for the
+empty string, both ISAs: `SbtsLiveSat[Amd64].lean` (`slicebytetostringLive_satisfiable`, `slicebytetostringLive64_satisfiable`), and the
+tactics `janus_live_sbts_empty` / `janus64_live_sbts_empty` (the `RET` stub at the contract address, request `buf = ptr = n = 0`).
+Red team: `audit/roundspecbind/attacks/SbtsAddr.lean` (c2 control; a5 forged address, a6 variable address, a7/a8/a9 another spec or
+other live data are rejected) and `JanusTests/LiveStubSbts.lean`. A stub for the non-empty shapes (copy into a fresh block) is not
+provided yet.
+
 **Known limitation (U14-ZEROVAL).** The static boxes (`&zeroVal`, `&staticuint64s[v]`) lie in `R.rt` and are not in the live set, so a *later* runtime call (which may write `R.rt`) does not keep them: their words are known in the call's own postcondition only. The allocated boxes are in the live set and `LiveFrame` preserves them across later calls. Pinning the statics needs `RtInv` to treat runtime read-only statics as immutable; not done.
 
 **Allocating calls need readiness** (round 10 V3). `ConvT`, `ConvTnoptr`, `ConvT16/32/64`,
