@@ -44,3 +44,29 @@ Example for fv-uint256 Format (7 uses `ICallContract … stack 96 rt (fun _ => [
 (an existing witness state of ErlpWit.lean gives it; the stack can be fixed to any value >= 8 the lemma's state supports).
 SAT gate (ii): `python3 -I audit/round9/sat_check.py` on this tree: `SAT contracts=247 witnessed=251 open=0 missing=0`, pinnedContracts allowlist (232 predicates) matches: every family used in contracts is witnessed satisfiable for some R.
 Tests: JanusTests/ICallAudit.lean U-ICALL-INHABITED rows (P:=True accepted; non-stock P with lemma accepted; P:=False and unsatisfiable P without lemma rejected).
+
+## U-WITNESS-RUN (user decision 2026-11-07): the tied returning-run witness is the gating witness
+**Dropped:** the "size/w not in the Ensures pre" half of the size rule (real frame facts: `8 ≤ stack`, `StackOK s (48 + stack) 40`). Kept: binder rule (PLift/PProd/Fin/…),
+joint-satisfiability fixpoint, witness-side size walk, U-ICALL-INHABITED. `--allow-no-witness` stays inert; `--audit-only` is test-only.
+
+**Rule (Audit.lean `matchNonvacuous`, no new role, no helper def):** `Witness.nonvacuous` (any name; role from its `∃` statement) must, in addition to a conjunct for every
+hypothesis and every unfolded-conclusion premise (return address, CallSetup, entry, each pre conjunct), contain as a conjunct the conclusion's FINAL claim at the same
+instantiation: for `Ensures`, `Returns ((Extracted.program.link impl).withExit ret) s (fun s' => ABIReturn s s' ∧ <post s s'>)` (for `EnsuresGo*`, the `GoReturns …`).
+It is found by unification against the main statement's unfolded body, so the same impl/R/R2/rt/sizes/s/ret instantiate hypotheses, pre and run. A witness proved by
+`exfalso` (unsatisfiable size, `P := False`, empty R, a pin in the pre) cannot supply a `Returns` of a program whose call is taken.
+**Canonical shape** (copy the main statement; ∀ → ∃; append the Returns conjunct):
+
+    theorem nonvacuous : ∃ (<all statement variables>) (ret : Nat) (s : State),
+        <every hypothesis> ∧ RetAddr (Extracted.program.link impl) ret ∧
+        CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [<args>] s ∧ (<the whole Ensures pre, as one conjunct group>) ∧
+        Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ <post s s'>
+      := ⟨…, hc, hret, setup, ⟨pre items⟩, correctness … hc ret hret s setup ⟨pre items⟩⟩
+
+Worked example: examples/proofs/WriteTo.lean (arm64; amd64 analogue examples/proofs-amd64/WriteTo/Proof.lean to follow the same pattern with `Returns`/`ABIReturn` of Janus.Amd64.GoABI).
+The old `Witness.returns` stays (informational; example sweep demands it) and is no longer needed for non-vacuity.
+
+**Contract exercise (design trade-off, NOT built):** the run conjunct proves the program returns with the contracts instantiated, but does not by itself show the run TAKES each call
+(a path avoiding the callee leaves its contract vacuous on the paths that call). Options: (a) accept: with a concrete callee the run witness normally calls it (WriteTo's only path does);
+(b) per-contract `CallsThrough` conjunct stated in Janus and proved by the run: requires a trace predicate of `Program.run` (a Run that records which stub/contract addresses were entered) in
+Janus core, i.e. a new definition plus a lemma per proof style: costly; (c) auditor-side: the witness' concrete state `s` is a closed term, and the auditor evaluates `Program.run` on it
+with a tracing evaluator (kernel-checked only in the sense of decide, not trusted): cheap but adds trusted evaluation. Recommendation: ship (a) now, add (b) for the sweep's multi-path rows later.

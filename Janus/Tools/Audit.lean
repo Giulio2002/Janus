@@ -2193,11 +2193,8 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
         if ← Meta.isProp t then continue
         if let some g := guarded.find? (fun g => t.hasAnyFVar (· == g) && x.fvarId! != g) then
           return some s!"has the non-Prop binder `{(← x.fvarId!.getUserName)} : {(← Meta.ppExpr t).pretty 10000}` whose type mentions `{(← g.getUserName)}`, a size (or the variable bounding a size) of a runtime contract: such a binder (`PLift`, `PProd`, `Fin`, `Subtype`, a structure, a def-wrapped type) could pin the size to a value that makes the call precondition unsatisfiable, and the contract would hold vacuously (U-ICALL-STACK)"
-      for c in concl do
-        let c ← instantiateMVars c
-        let c' := stripPost c
-        if let some g := guarded.find? (fun g => c'.hasAnyFVar (· == g)) then
-          return some s!"mentions `{(← g.getUserName)}`, a size (or the variable bounding a size) of a runtime contract, in the precondition, entry or arguments of its conclusion `{(← Meta.ppExpr c').pretty 10000}`: there it is an assumption that can pin the size to a value that makes the call precondition unsatisfiable, and the contract would hold vacuously; a size may occur only in its contract hypotheses, its allowed premises and the post-condition (U-ICALL-STACK)"
+      -- (the conclusion's precondition may legitimately mention a size: frame facts `8 ≤ stack`, `StackOK s (48 + stack) …`; pins there
+      -- are caught by the tied run witness, U-WITNESS-RUN, not syntactically)
       -- joint satisfiability: the least solution of `stack ≥ 8`, `above ≥ 8 + 8·nargs` over the numeral lower bounds
       -- of the premises must meet the upper bounds (`nargs ≤ 64`, every other size `< 2^47`) and the literals
       let mut lo : Std.HashMap FVarId Nat := {}
@@ -3021,7 +3018,7 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
   for (c, idx) in concls.toList.zip (List.range concls.size) do
     let st ← Meta.saveState
     let body ← unfoldToForall c
-    let (ms2, _, _) ← Meta.forallMetaTelescope body
+    let (ms2, _, lastConcl) ← Meta.forallMetaTelescope body
     let which := if concls.size > 1 then s!" (conjunct {idx + 1} of {concls.size})" else ""
     if ms2.isEmpty then
       return some s!"the conclusion of the main theorem{which} does not unfold to a `∀ ret, … → ∀ s, CallSetup … → pre s → …` statement"
@@ -3045,6 +3042,13 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
         if (← instantiateMVars m) != m then continue
         unless ← inhabSafe env t do
           return some s!"the main theorem{which} has a binder of type `{(← Meta.ppExpr t).pretty 200}`, which no conjunct of the witness exhibits and which is not a type with an element by construction (an empty type makes the main theorem vacuous): state the witness's value for it in the premises (round 14, rt-auditv2)"
+      -- U-WITNESS-RUN (UP3): the witness must also state the RUN: the unfolded conclusion's final `Returns`-style claim
+      -- (`Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')`) at the SAME instantiation the premises fixed. A
+      -- vacuous contract, an unsatisfiable pre or an empty `R` admits no such run through the call, so a witness that only exhibits
+      -- satisfiability (provable by `exfalso`) no longer matches.
+      let lastC ← instantiateMVars lastConcl
+      unless ← findConj lastC wconjs do
+        return some s!"the main theorem{which} is not exhibited as a RUN: the witness must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr lastC).pretty 300}` (a concrete run from the precondition state to the return with the post holding; U-WITNESS-RUN)"
       -- the pc premises: matched if the witness states them, else they must be about a state the other
       -- premises fixed
       for q in all.filter pcPrem do
