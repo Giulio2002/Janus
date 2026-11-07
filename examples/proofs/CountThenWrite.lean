@@ -43,4 +43,70 @@ theorem correctness (impl : List Segment) (fn1 fn2 stack : Nat) (rt : List (Nat 
   · exact ⟨_, _, _, _, _, _, by janus_assumption, Or.inl (by janus_assumption)⟩
   · exact ⟨_, _, _, _, _, _, by janus_assumption, Or.inr ⟨by janus_assumption, _, _, _, by janus_assumption, rfl, rfl, rfl⟩⟩
 
+/-! ## Non-vacuity witness
+
+A concrete writer (`Janus.Contracts.ICallSat`: A64 code at `0x100000` returning `(len, nil)`) serves both itab slots (`Count` and
+`Write`): it meets both contracts in the example's linked program (`Summary.of_codeIn`), the itab's `Fun[0]` and `Fun[1]` words are its
+address, and a call state of `CountThenWrite` satisfies the whole precondition. -/
+
+namespace Witness
+
+open Janus.Contracts.EqHashModel (codeIn_link Summary.of_codeIn)
+open Janus.Contracts.ICallSat (impl A0 rt0 R0)
+
+def ret : Nat := 0x1000
+def sp0 : Nat := 0x200000
+def g0 : Nat := 0x300000
+def tabA : Nat := 0x400000
+
+/-- The itab: `Fun[0]` (offset 24) and `Fun[1]` (offset 32) are the writer's address, little-endian; zero elsewhere. -/
+def bytes (a : Nat) : Byte :=
+  if tabA + 24 ≤ a ∧ a < tabA + 40 then BitVec.ofNat 8 ((A0 / 256 ^ ((a - (tabA + 24)) % 8)) % 256) else 0
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 tabA else if i = 1 then 0x600000 else if i = 2 then 0x500000
+      else if i = 3 then 3 else if i = 4 then 3 else if i = 28 then BitVec.ofNat 64 g0
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩,
+    mem := ⟨bytes, [⟨sp0 - 64, 112, true⟩, ⟨g0, 0x100, false⟩, ⟨tabA, 0x40, false⟩]⟩ }
+
+theorem hc1 : ICallContract (Extracted.program.link impl) A0 1 16 96 rt0 (fun _ => []) R0 (fun sc => sc.regs 0 = 0x600000) :=
+  Summary.of_codeIn (codeIn_link Extracted.program _ (by decide))
+    (Janus.Contracts.ICallSat.impl_okP (nargs := 1) (stack := 16) (above := 96) (P := fun sc => sc.regs 0 = 0x600000)
+      (fun _ _ => True) (fun _ => trivial))
+
+theorem hc2 : ICallContract (Extracted.program.link impl) A0 4 16 96 rt0 (fun _ => []) R0
+    (fun sc => sc.regs 0 = 0x600000 ∧ sc.regs 1 = 0x500000 ∧ sc.regs 2 = 3 ∧ sc.regs 3 = 3) :=
+  Summary.of_codeIn (codeIn_link Extracted.program _ (by decide))
+    (Janus.Contracts.ICallSat.impl_okP (nargs := 4) (stack := 16) (above := 96)
+      (P := fun sc => sc.regs 0 = 0x600000 ∧ sc.regs 1 = 0x500000 ∧ sc.regs 2 = 3 ∧ sc.regs 3 = 3)
+      (fun _ _ => True) (fun _ => trivial))
+
+theorem hret : RetAddr (Extracted.program.link impl) ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry
+    [BitVec.ofNat 64 tabA, 0x600000, 0x500000, 3, 3] s0 :=
+  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | _ | _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+
+theorem nonvacuous : ∃ (impl : List Segment) (fn1 fn2 stack : Nat) (rt : List (Nat × Nat)) (R1 R2 : Res) (ret : Nat) (s : State)
+    (tab w ptr len cap : BitVec 64),
+    ICallContract (Extracted.program.link impl) fn1 1 stack 96 rt (fun _ => []) R1 (fun sc => sc.regs 0 = w) ∧
+    ICallContract (Extracted.program.link impl) fn2 4 stack 96 rt (fun _ => []) R2
+      (fun sc => sc.regs 0 = w ∧ sc.regs 1 = ptr ∧ sc.regs 2 = len ∧ sc.regs 3 = cap) ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [tab, w, ptr, len, cap] s ∧
+    (8 ≤ stack ∧ CodePtrOK fn1 ∧ CodePtrOK fn2 ∧
+      Disjoint (tab.toNat + 24) 16 (s.sp.toNat - (48 + stack)) (96 + stack) ∧
+      GuardOK s 0 ∧ StackOK s (48 + stack) 48 ∧
+      tab.toNat + 40 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 16 false = true ∧
+      s.mem.readLE (tab.toNat + 24) 8 = fn1 ∧ s.mem.readLE (tab.toNat + 32) 8 = fn2 ∧
+      Outside (tab.toNat + 24) 16 rt ∧ Outside (s.sp.toNat - 56) 104 rt) :=
+  ⟨impl, A0, A0, 16, rt0, R0, R0, ret, s0, BitVec.ofNat 64 tabA, 0x600000, 0x500000, 3, 3, hc1, hc2, hret, setup,
+    by decide, ⟨by decide, by decide⟩, ⟨by decide, by decide⟩, (by unfold Janus.Spec.Disjoint; decide),
+    ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
+    by decide, by decide, by decide, by decide, by simp [tabA, rt0], by simp [s0, sp0, rt0]⟩
+
+end Witness
+
 end Proof
