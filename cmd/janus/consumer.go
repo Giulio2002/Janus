@@ -477,6 +477,7 @@ type consumerWS struct {
 	sb                  *sandbox
 	tc                  *toolchain
 	lock                *fileLock
+	serialBuild         bool     // U-SILENT-DEP: `lake build` runs with one job (the serial retry of a build killed for memory)
 	memOwn              [][2]int // job-log ranges of per-request builds killed for memory (already attributed)
 	temp                bool
 	dg                  diagFlags         // --full-errors / --keep-workspace (diagflags.go): output only
@@ -967,7 +968,11 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 		}
 	}
 	if len(args) > 0 && args[0] == "build" {
-		env = lakeBuildEnv(env)
+		if ws.serialBuild {
+			env = append(env, "LEAN_NUM_THREADS=1")
+		} else {
+			env = lakeBuildEnv(env)
+		}
 	}
 	cmd := ws.sb.commandOverlay(ws.Root, []string{ws.Dir}, nil, ws.protected(false), append([]string{ws.lake}, args...), env)
 	var out bytes.Buffer
@@ -1375,13 +1380,17 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			continue
 		}
 		seenRel[r.rel] = true
+		// U-SILENT-DEP: the Lake build compiles lakeJobs() modules at once inside ONE memory scope; several big modules together
+		// can exceed it, the kernel kills one, and the only symptom is a missing olean later. A build killed for memory is
+		// retried once with a single job (serial), and a build that is still killed names the module(s) it was compiling.
 		mark := memMark()
-		_, out, berr := ws.run("build", "--no-ansi", r.rel)
+		out, berr, kill := lakeBuildGuarded(ws, r.rel, &mark)
 		buildOut.WriteString(out)
 		buildOut.WriteString("\n")
-		if _, _, kill := memSince(mark); kill != nil {
+		if kill != nil {
 			ws.memOwn = append(ws.memOwn, [2]int{mark, memMark()})
 			d := memLimitDiag(currentGuard(), *kill, berr)
+			d.Msg += unfinishedNote(out)
 			for _, q := range reqs {
 				if q.rel == r.rel {
 					q.Err = d
@@ -1790,7 +1799,7 @@ func buildFailure(out string, r *consumerRequest, ws *consumerWS, pkg *consumerP
 	shown, logPath := out, ""
 	if ws.dg.FullErrors {
 		argv := append(append([]string{"env", "lean"}, fullLeanOpts...), filepath.Join(ws.Root, filepath.FromSlash(r.rel)))
-		if _, full, _ := ws.run(argv...); strings.TrimSpace(full) != "" {
+		if _, full, _ := ws.run(argv...); strings.TrimSpace(full) != "" && fullRerunUsable(out, full) {
 			shown = ws.mapper(pkg, r.cr.Extracted)(full)
 			shown = strings.ReplaceAll(shown, pkg.Root+string(filepath.Separator), displayPath(pkg.Root)+string(filepath.Separator))
 		}
@@ -1813,6 +1822,24 @@ func buildFailure(out string, r *consumerRequest, ws *consumerWS, pkg *consumerP
 			Next: "Fix the proof. It must import Extracted and prove " + r.Theorem + ".", Details: shown}
 	}
 	return withFullOutput(d, logPath)
+}
+
+// missingOleanRE is Lean's complaint about an import whose olean was never produced.
+var missingOleanRE = regexp.MustCompile(`(?m)error: object file '[^']*' of module \S+ does not exist`)
+
+// fullRerunUsable reports whether the --full-errors rerun of the proof module (`lake env lean` on it alone) may replace
+// the build's own output as what is shown. It may not when the rerun only trips over a module the failed build never
+// produced ("object file ... of module M does not exist"): that message is an artifact of the rerun, it hides the
+// build's real failure (the module that was killed or rejected), which is only in the build's output. Nor may it when
+// the build reported Lean errors and the rerun reports none.
+func fullRerunUsable(buildOut, full string) bool {
+	if missingOleanRE.MatchString(full) && !missingOleanRE.MatchString(buildOut) {
+		return false
+	}
+	if len(leanErrors(buildOut)) > 0 && len(leanErrors(full)) == 0 {
+		return false
+	}
+	return true
 }
 
 func lastLines(s string, n int) string {
@@ -1897,6 +1924,9 @@ func (ws *consumerWS) tryLakeFree(pkg *consumerPkg, ob *ownBuild, reqs []*consum
 	ob.ensureAll(rels, order)
 	for _, m := range order {
 		if _, eerr := ob.ensure(m, rels[m]); eerr != nil {
+			// Never fall back silently: the Lake path rebuilds the closure, and when it fails too its output can hide
+			// why janus's own compile failed (fv-uint256 SetFromDecimal: hours lost to an unnamed module).
+			fmt.Fprintf(os.Stderr, "Note: janus's own compile of the proof closure failed, taking the Lake path: %v\n%s\n", eerr, ownBuildErrors(ob))
 			return false, true, nil
 		}
 	}
@@ -1904,6 +1934,29 @@ func (ws *consumerWS) tryLakeFree(pkg *consumerPkg, ob *ownBuild, reqs []*consum
 		r.module = m
 	}
 	return true, true, nil
+}
+
+// ownBuildErrors names every module whose own compile failed (sorted) with its diagnostic message.
+func ownBuildErrors(ob *ownBuild) string {
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
+	var names []string
+	for m := range ob.errs {
+		names = append(names, m)
+	}
+	sort.Strings(names)
+	var parts []string
+	for _, m := range names {
+		msg := fmt.Sprint(ob.errs[m])
+		if d, ok := ob.errs[m].(*diag); ok {
+			msg = d.Msg
+		}
+		parts = append(parts, m+": "+msg)
+	}
+	if len(parts) == 0 {
+		return "(no module error recorded)"
+	}
+	return strings.Join(parts, "\n")
 }
 
 // leanLibCovers reports whether Lake would build module m as part of a [[lean_lib]] of the lakefile.toml: the
@@ -1952,4 +2005,64 @@ func (ws *consumerWS) exportOwnOleans(ob *ownBuild) {
 		}
 		_ = copyTree(p.lib, dst)
 	}
+}
+
+// lakeBuildGuarded runs `lake build rel` in the workspace. When the guard killed it for memory and it ran with several jobs, the
+// build is repeated once with one job: the modules of the closure are then compiled one at a time, each alone in the scope. The
+// output of both runs is returned (the first one is kept for the module names); kill is the event of the LAST run when it was
+// killed too. *mark is moved to the start of the run whose kill is returned.
+func lakeBuildGuarded(ws *consumerWS, rel string, mark *int) (string, error, *memEvent) {
+	return guardedBuild(func(serial bool) (string, error) {
+		ws.serialBuild = serial
+		defer func() { ws.serialBuild = false }()
+		_, out, err := ws.run("build", "--no-ansi", rel)
+		return out, err
+	}, lakeJobs(), mark, func(note string) { fmt.Fprint(os.Stderr, note) })
+}
+
+// guardedBuild is the retry policy of lakeBuildGuarded, with the build and the job count as parameters (testable).
+func guardedBuild(run func(serial bool) (string, error), jobs int, mark *int, note func(string)) (string, error, *memEvent) {
+	out, err := run(false)
+	_, _, kill := memSince(*mark)
+	if kill == nil || jobs <= 1 {
+		return out, err, kill
+	}
+	note(fmt.Sprintf("Note: the Lake build was killed for memory with %d concurrent modules (peak %s, limit %s)%s; retrying with one module at a time.\n",
+		jobs, fmtBytes(kill.Peak), fmtBytes(kill.Limit), unfinishedNote(out)))
+	*mark = memMark()
+	out2, err2 := run(true)
+	_, _, kill2 := memSince(*mark)
+	return out + "\n" + out2, err2, kill2
+}
+
+var (
+	lakeStartRE = regexp.MustCompile(`(?m)^\S*\s*\[\d+/\d+\] Building (\S+)`)
+	lakeDoneRE  = regexp.MustCompile(`(?m)^\S*\s*\[\d+/\d+\] (?:Built|Replayed|Compiled|Fetched) (\S+)`)
+)
+
+// unfinishedModules are the modules a Lake log shows as started ("Building M") and not finished ("Built M"), in order: what was
+// being compiled when the build died.
+func unfinishedModules(out string) []string {
+	done := map[string]bool{}
+	for _, m := range lakeDoneRE.FindAllStringSubmatch(out, -1) {
+		done[m[1]] = true
+	}
+	var res []string
+	seen := map[string]bool{}
+	for _, m := range lakeStartRE.FindAllStringSubmatch(out, -1) {
+		if !done[m[1]] && !seen[m[1]] {
+			seen[m[1]] = true
+			res = append(res, m[1])
+		}
+	}
+	return res
+}
+
+// unfinishedNote names the modules a killed build was compiling (empty when the log shows none).
+func unfinishedNote(out string) string {
+	ms := unfinishedModules(out)
+	if len(ms) == 0 {
+		return ""
+	}
+	return " while compiling " + strings.Join(ms, ", ")
 }
