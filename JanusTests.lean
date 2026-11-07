@@ -28,6 +28,7 @@ import JanusTests.Audit
 import JanusTests.BitVecLit
 import JanusTests.Errorf
 import JanusTests.Grab
+import JanusTests.RedTeamN9
 import JanusTests.AuditPerf
 import JanusTests.Float
 import JanusTests.Dynamic
