@@ -3082,18 +3082,21 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
         let pre := u.getArg! 2
         let arm := u.getAppFn.isConstOf `Janus.Tactic.Summary
         let stT := if arm then mkConst `Janus.Arm64.State else mkConst `Janus.Amd64.State
-        let expected ← Meta.withLocalDeclD `s_c stT fun x => do
-          let pcE ← if arm then Meta.mkAppM `Janus.Arm64.State.pc #[x] else Meta.mkAppM `Janus.Amd64.State.rip #[x]
-          let ent ← Meta.mkAppM ``BitVec.ofNat #[mkNatLit 64, entry]
-          let eq ← Meta.mkEq pcE ent
-          let body ← Meta.mkAppM ``And #[eq, (mkApp pre x).headBeta]
-          Meta.mkAppM ``Exists #[← Meta.mkLambdaFVars #[x] body]
-        let ok ← wconjs.anyM fun w => do
-          let w ← instantiateMVars w
-          if w.isAppOfArity ``Exists 2 then
-            -- compare modulo definitional unfolding of the family pre
-            defEqTry expected w
-          else pure false
+        -- `withConjs` has already opened the witness's `∃ s_c` as a local and flattened its body, so the state is a metavariable
+        -- matched against the conjuncts `s_c.pc = <entry>` and `<pre> s_c` (the same state for both)
+        let sm ← Meta.mkFreshExprMVar stT
+        let pcE ← if arm then Meta.mkAppM `Janus.Arm64.State.pc #[sm] else Meta.mkAppM `Janus.Amd64.State.rip #[sm]
+        let ent ← Meta.mkAppM ``BitVec.ofNat #[mkNatLit 64, entry]
+        let e1 ← Meta.mkEq pcE ent
+        let e2 := (mkApp pre sm).headBeta
+        let expected ← Meta.mkAppM ``And #[e1, e2]
+        let mut ok := false
+        for w in wconjs do
+          if ok then break
+          let st ← Meta.saveState
+          if ← defEqTry e1 (← instantiateMVars w) then
+            if ← findConj (← instantiateMVars e2) wconjs then ok := true
+          if !ok then st.restore
         unless ok do
           return some s!"the witness does not exhibit a call-site state for the contract hypothesis `{(← Meta.ppExpr h).pretty 200}`: it must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr expected).pretty 400}` (a state at the callee's entry satisfying the contract's call precondition; U-WITNESS-CALLSITE)"
       -- U-WITNESS-RUN (UP3): the witness must also state the RUN: the unfolded conclusion's final `Returns`-style claim
