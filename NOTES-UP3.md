@@ -90,3 +90,17 @@ Direct run in progress (task bf2yd23nn): `bin/janus verify artifacts/WriteTo --p
 6. check-merge: `scripts/check-merge.sh -j 2` under `/srv/janus-ops/bin/heavy-run -s 2 -- memcap -m 96G …`, plus `python3 -I audit/round9/sat_check.py /srv/janus-up3` (last: contracts=247 witnessed=251 open=0 missing=0). Timings to report.
 ## Environment facts
 artifacts/examples-arm64 copied from integ/n11 (untracked). `lake build Janus.Tools.Audit janus-audit` then `go build -o bin/janus ./cmd/janus` after every Audit.lean edit. Test row runner: audit/roundup3/run-roundup3.sh.
+
+# SHAPE FROZEN (step 1) — returning-run witness, arm64 WriteTo verified at commit after 17ec1188
+`janus verify artifacts/WriteTo --proof examples/proofs/WriteTo.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous --no-result-cache`:
+correctness verified, "Non-vacuity: shown by Proof.Witness.nonvacuous"; witness verified (axioms propext/Classical.choice/Quot.sound, kernel replay passed).
+Exact text to copy (examples/proofs/WriteTo.lean, `Witness.nonvacuous`): take the main theorem's binders as ∃, then
+    <every hypothesis> ∧ RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [<args>] s ∧
+    (<the whole Ensures pre, one parenthesised conjunction>) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ <post s s'>
+proved by ⟨…vars…, hc, hret, setup, ⟨pre items⟩, correctness <vars> hc ret hret s setup ⟨pre items⟩⟩ (the main theorem itself gives the run).
+amd64: same with Janus.Amd64.GoABI's Returns/ABIReturn. ALSO required for any non-stock ICallContract P: a lemma
+`theorem <any name> : ∃ (<vars>) (s : State), Janus.Contracts.ICall.ICallPre[64] nargs stack above rt P s` (see WriteTo inhabited_write).
+Timing: cold framework runs (7 min) are not comparable; warm before/after for WriteTo to be recorded next (baseline integ/n11 sweep arm64 11.4 s, amd64 10.6 s).
+Step 2 (call-reach conjunct) NOT yet built; until then Add-based rows with a never-called contract are not closed by the Returns conjunct.
