@@ -378,7 +378,9 @@ func TestRT04EnvSkipListIsPinned(t *testing.T) {
 			"JANUS_AUDIT_BIN", "JANUS_AUDIT_PREBUILT", "GOCACHE", "GOMODCACHE", "GOPATH", "GOTMPDIR", "GOENV",
 			// the gate's run-specific bookkeeping (INCR2, incr.go): a stamp, the load-derived sizing, the lakeguard's marker and checkout
 			"JANUS_GATE_RUN_ID", "JANUS_GATE_TREE0", "JANUS_GATE_AUTO_WHY", "JANUS_GATE_ROUNDS_LANES", "JANUS_GATE_AUTO_BUDGET", "JANUS_VERIFY_MEM_BUDGET_GIB",
-			"JANUS_ROUNDS_LANES", "JANUS_LAKEGUARD_PIN", "JANUS_LAKEGUARD_ROOT":
+			"JANUS_ROUNDS_LANES", "JANUS_LAKEGUARD_PIN", "JANUS_LAKEGUARD_ROOT",
+			// the directory of the content-keyed framework-build store: a cache location (an entry is MAC-checked, re-hashed, pin-checked and kernel-replayed like a compiled build)
+			"JANUS_FRAMEWORK_STORE":
 		default:
 			t.Errorf("unreviewed entry %s in incrEnvSkip", k)
 		}
