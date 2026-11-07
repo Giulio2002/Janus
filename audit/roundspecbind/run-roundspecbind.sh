@@ -77,7 +77,7 @@ row n1 blocked 'the contract of `runtime.newobject`, at the address of `runtime.
 row d1 blocked 'which is not Extracted.program; object names are looked up in the extracted program only'
 row i1 blocked 'about the runtime implementation `impl2`'
 echo "== arm64: SbtsAddr.lean (the address of runtime.staticuint64s in slicebytetostringSpec, U-SBTS-POST)"
-run SbtsAddr.lean FromBytes c1 a1 a2 a3 a4 c2 a5 a6 a7 a8 a9
+run SbtsAddr.lean FromBytes c1 a1 a2 a3 a4 c2 a5 a6 a7 a8 a9 c3 c4 a10 a11
 NOTSPEC='which is not one of the framework'"'"'s named runtime-function specs'
 row c1 Verified 'RtContract@runtime.slicebytetostring[slicebytetostringSpec]'
 row a1 blocked "$NOTSPEC" 'slicebytetostringSpec 4096'
@@ -90,6 +90,10 @@ row a6 blocked "$NOTSPEC" 'slicebytetostringSpec st'
 row a7 blocked 'with the spec `growsliceSpec`' "$SPEC runtime.growslice"
 row a8 blocked 'with the spec `convTstringSpec`' "$SPEC runtime.convTstring"
 row a9 blocked 'live data `growsliceLive`, which belong to the spec `growsliceSpec`'
+row c3 Verified 'RtContract@runtime.slicebytetostring[slicebytetostringSpecT]'
+row c4 Verified 'RtLiveContract@runtime.slicebytetostring[slicebytetostringSpecT/slicebytetostringLive]'
+row a10 blocked "$NOTSPEC" 'slicebytetostringSpecT 4096'
+row a11 blocked 'live data `growsliceLive`, which belong to the spec `growsliceSpec`'
 echo "== amd64: SpecBind64.lean"
 run SpecBind64.lean AppendPoint64 h1 h2 h3 h4
 row h1 Verified 'RtContract64@runtime.growslice[growsliceSpec]'

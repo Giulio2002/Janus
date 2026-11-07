@@ -241,6 +241,39 @@ def slicebytetostringSpec (st : Nat) : RtSpec where
   post rt a m0 r0 r1 _ m :=
     StrOut m r0 r1 (strBytes m0 (arg a 1) (arg a 2)) ∧ StrAt rt (arg a 0) st (arg a 1) r1 r0 m0
 
+/-- **`runtime.staticuint64s` holds the identity table**: `staticuint64s[b] = b` for `b < 256` (a `[256]uint64`, little endian), the
+fact behind the `n = 1` case of `slicebytetostring` (and `convT64` of a small value). A fact about the binary's initialised data
+(`Extracted.dataAddr.«runtime.staticuint64s»`), not of the call: a consumer discharges it from the extraction's data object. -/
+def StaticTable (st : Nat) (m : Memory) : Prop := ∀ b, b < 256 → m.readLE (st + 8 * b) 8 = b
+
+/-- With the table, the byte at `staticuint64s[b]` is `b`. -/
+theorem StaticTable.byte {st : Nat} {m : Memory} (h : StaticTable st m) {b : Nat} (hb : b < 256) :
+    (m.bytes (st + 8 * b)).toNat = b := by
+  have h1 := h b hb
+  have h2 : m.readLE (st + 8 * b) 8 = (m.bytes (st + 8 * b)).toNat + 256 * m.readLE (st + 8 * b + 1) 7 := rfl
+  omega
+
+/-- … so the one-byte result `&staticuint64s[b]` of `string(b)` holds `b`. -/
+theorem StaticTable.strBytes {st : Nat} {m : Memory} (h : StaticTable st m) {b : Nat} (hb : b < 256) :
+    strBytes m (st + 8 * b) 1 = [b] := by
+  simp [Janus.Spec.strBytes, h.byte hb]
+
+/-- **Red team**: without the table fact the `n = 1` result is not the string `[b]` (a memory of zeros: the entry `staticuint64s[1]`
+reads `0`). This is why the table is in the PRECONDITION of `slicebytetostringSpecT`. -/
+theorem sbts_n1_needs_table (st : Nat) : ¬ ∀ m : Memory, strBytes m (st + 8 * 1) 1 = [1] := by
+  intro h
+  have := h ⟨fun _ => 0, []⟩
+  simp [Janus.Spec.strBytes] at this
+
+/-- **`runtime.slicebytetostring` with the identity table in the precondition** (U-SBTS-STATIC): as `slicebytetostringSpec st`, and
+the call additionally requires `StaticTable st m` (the `n = 1` result is `&staticuint64s[b]`, whose byte is `b` only because the table
+holds). The contract of the real runtime is then not violated by a memory without the table. Prefer this spec; the plain one states
+the `n = 1` post as a memory fact its precondition does not give. Consumers discharge `StaticTable st m` from the extraction's data
+(`StaticTable` of the loaded `runtime.staticuint64s` object). -/
+def slicebytetostringSpecT (st : Nat) : RtSpec :=
+  { slicebytetostringSpec st with
+    pre := fun a m => (slicebytetostringSpec st).pre a m ∧ StaticTable st m }
+
 /-- **`runtime.slicebytetostringtmp(ptr, n)`**: the string `(ptr, n)` itself, nothing written.
 Words: `ptr, n`. -/
 def slicebytetostringtmpSpec : RtSpec where

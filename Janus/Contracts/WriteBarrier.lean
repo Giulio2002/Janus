@@ -123,7 +123,7 @@ namespace Janus.Contracts
 /- The specs unfold in the executors' simp sets, so that at a call `janus_run`/`janus64_run` see
 the precondition and postcondition of the spec itself. -/
 attribute [janus_exec, janus_post, janus64_exec, janus64_post] concatstringSpec concatstringsSpec
-  concatbyteSpec concatbytesSpec slicebytetostringSpec slicebytetostringtmpSpec stringtoslicebyteSpec
+  concatbyteSpec concatbytesSpec slicebytetostringSpec slicebytetostringSpecT slicebytetostringtmpSpec stringtoslicebyteSpec
   stringtosliceruneSpec slicerunetostringSpec intstringSpec decoderuneSpec countrunesSpec
   gostringnSpec gobytesSpec growsliceSpec growsliceNoAliasSpec growsliceBufSpec
   growsliceBufNoAliasSpec makeslicecopySpec moveSliceSpec moveSliceNoScanSpec moveSliceNoCapSpec

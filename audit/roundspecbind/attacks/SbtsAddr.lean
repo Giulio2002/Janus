@@ -92,4 +92,32 @@ theorem a8 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
   intro ret hret s hs hp; exact hp.elim
 
+/-- C3 (U-SBTS-STATIC): the plain contract with the identity table in its precondition, the extraction's own address. -/
+theorem c3 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (h : RtContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring") rt 4096 H
+      (slicebytetostringSpecT Extracted.dataAddr.«runtime.staticuint64s»)) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
+/-- C4: the live contract with the table spec. -/
+theorem c4 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (h : RtLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring") 4096 R
+      (slicebytetostringSpecT Extracted.dataAddr.«runtime.staticuint64s») slicebytetostringLive) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
+/-- A10: the table spec with a forged address numeral. -/
+theorem a10 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (h : RtLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring") 4096 R
+      (slicebytetostringSpecT 4096) slicebytetostringLive) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
+/-- A11: the table spec with the live data of another runtime function. -/
+theorem a11 (impl : List Segment) (R : RtInv) (a b : BitVec 64)
+    (h : RtLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring") 4096 R
+      (slicebytetostringSpecT Extracted.dataAddr.«runtime.staticuint64s») growsliceLive) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
 end Proof

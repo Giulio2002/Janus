@@ -135,3 +135,11 @@ theorem rt_smallA (st : Nat) : True := by
   trivial
 
 end JanusTests.LiveStubSbts.Amd
+
+/-! U-SBTS-STATIC: the identity table. -/
+namespace JanusTests.LiveStubSbts.Static
+open Janus Janus.Arm64 Janus.Contracts
+-- the byte of `staticuint64s[b]` is `b` given the table; a memory of zeros is a counterexample without it
+example (st : Nat) (m : Memory) (h : StaticTable st m) : Janus.Spec.strBytes m (st + 8 * 7) 1 = [7] := h.strBytes (by decide)
+example (st : Nat) : ¬ ∀ m : Memory, Janus.Spec.strBytes m (st + 8 * 1) 1 = [1] := sbts_n1_needs_table st
+end JanusTests.LiveStubSbts.Static
