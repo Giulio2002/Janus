@@ -1169,6 +1169,21 @@ def basicProps : List Name :=
   [``Eq, ``Ne, ``LE.le, ``LT.lt, ``GE.ge, ``GT.gt, ``Not, ``And, ``Or, ``Iff, ``True, ``False,
    ``Exists]
 
+/-- `set_option janus.simp.maxSteps N`: the step budget of the simplifier runs behind `janus_run`/`janus64_run` (default
+2000000). Raise it for a callee precondition whose normalisation is large; `janus.calls.trace` says when it was hit. -/
+register_option janus.simp.maxSteps : Nat := {
+  defValue := 2000000
+  descr := "simp step budget of the janus_run / janus64_run simplifier runs"
+}
+
+/-- `set_option janus.calls.trace true`: when `janus_run`/`janus64_run` proves the precondition of a callee's summary,
+report every part (conjunct) of it with its outcome: closed by the simplifier, closed by the closers, left over (with its
+residual goal), or failed with a simp error (and whether the simp step budget was hit). Off by default. -/
+register_option janus.calls.trace : Bool := {
+  defValue := false
+  descr := "report the outcome of each part of a callee summary's precondition (opt-in diagnostic)"
+}
+
 /-- Prove a callee precondition: split conjunctions, simplify each part with `clean` (the
 post simp set with the state hypotheses), close it with `closer`, and unfold named
 predicates (`GuardOK`, `StackOK`, …) up to `depth` times when that fails. Returns the parts
@@ -1186,8 +1201,18 @@ partial def provePreCore (clean : MVarId → TacticM (List MVarId)) (closer : TS
     let mut left := #[]
     for g' in gs do left := left ++ (← provePreCore clean closer g' depth)
     return left
-  let gs ← clean g
-  let some g := gs.head? | return #[]
+  let trace := janus.calls.trace.get (← getOptions)
+  let t0 ← IO.monoMsNow
+  let gs ← try clean g catch e =>
+    if trace then
+      let msg ← e.toMessageData.toString
+      let hit := (msg.splitOn "maximum number of steps").length > 1
+      throwError "janus.calls.trace: simplifying this part of the precondition failed after {(← IO.monoMsNow) - t0} ms ({if hit then "the simp step budget was hit" else "simp error"}):{indentExpr t}\n{e.toMessageData}"
+    else throw e
+  let t1 ← IO.monoMsNow
+  let some g := gs.head? | do
+    if trace then logInfo m!"janus.calls.trace [closed by simp]: {(toString (← ppExpr t)).take 200} ({t1 - t0} ms)"
+    return #[]
   let t ← instantiateMVars (← g.getType)
   if t.isAppOfArity ``And 2 then return ← provePreCore clean closer g depth
   -- `p → q` (`0 < n → m.accessible …`): assume `p`, prove `q` (the closers see the context)
@@ -1199,7 +1224,9 @@ partial def provePreCore (clean : MVarId → TacticM (List MVarId)) (closer : TS
       let rest ← Tactic.run g <| withoutRecover (evalTactic closer)
       pure rest.isEmpty
     catch _ => pure false
-  if ok then return #[]
+  if ok then
+    if trace then logInfo m!"janus.calls.trace [closed by closers]: {(toString (← ppExpr t)).take 200} (simp {t1 - t0} ms)"
+    return #[]
   saved.restore
   if depth > 0 then
     if let some c := t.getAppFn.constName? then
@@ -1216,6 +1243,7 @@ partial def provePreCore (clean : MVarId → TacticM (List MVarId)) (closer : TS
         if let some t' ← g.withContext (unfoldDefinition? t) then
           let g ← g.replaceTargetDefEq t'
           return ← provePreCore clean closer g (depth - 1)
+  if trace then logInfo m!"janus.calls.trace [residual, not proved]:{indentExpr t}\n(simp {t1 - t0} ms)"
   return #[t]
 
 /-! ## Callee postconditions -/

@@ -144,6 +144,19 @@ example (x : W64) :
   janus_intro hs
   janus_run calls [g_summary_strict]
 
+
+-- `set_option janus.calls.trace true`: the outcome of each part of the callee's precondition is reported
+-- (here the residual part that is not proved, with the simp time spent on it).
+/-- info: janus.calls.trace [residual, not proved]:
+  BitVec.toNat x = 0 -/
+#guard_msgs (substring := true) in
+example (x : W64) :
+    Ensures JanusTests.Tactic.callp 0x50000 [x] (fun s => StackOK s 16 0) (fun _ _ => True) := by
+  intro ret hret s hs ⟨hal, hb, ha, hw⟩
+  janus_intro hs
+  set_option janus.calls.trace true in
+  janus_run calls [g_summary_strict]
+
 /-- `str x2, [x0]; ldr x0, [x1]; ret`: the run succeeds, but the result is the read of `x1`
 after the store to `x0`, whose aliasing is unknown. -/
 def alias : Program where

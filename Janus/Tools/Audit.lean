@@ -1252,6 +1252,9 @@ def frameworkSpecs : List Name :=
    `slicecopySpec, `typedslicecopySpec, `wbZeroSpec, `wbMoveSpec,
    -- the live boxing contracts (`Janus.Contracts.IfaceLive`: `convTstring`, `convT64`) and their live data
    `convTstringSpec, `convT64Spec, `convTstringLive, `convT64Live,
+   -- the live data of `slicebytetostring` (`RtLiveContract … (slicebytetostringSpec st) slicebytetostringLive`; `st` is
+   -- checked as for the plain contract: `frameworkSpecsStatic`)
+   `slicebytetostringLive,
    -- the live data of the growslice specs (`LiveSpec`: cost, fresh and kept objects), the second description
    -- argument of `RtLiveContract` (round 15)
    `growsliceLive, `growsliceNoAliasLive, `growsliceBufLive, `growsliceBufNoAliasLive].map (`Janus.Contracts ++ ·)
@@ -1299,7 +1302,7 @@ def isErrorfLive (c : Name) : Bool :=
   c == `Janus.Contracts.Errorf.ErrorfLive || c == `Janus.Contracts.ErrorfAmd64.ErrorfLive
 
 /-- The specs that take the address of `runtime.staticuint64s` (see `isStaticAddr`). -/
-def frameworkSpecsStatic : List Name := [`slicebytetostringSpec].map (`Janus.Contracts ++ ·)
+def frameworkSpecsStatic : List Name := [`slicebytetostringSpec, `slicebytetostringSpecT].map (`Janus.Contracts ++ ·)
 
 def frameworkFmts : List Name := [`Janus.Float.binary32, `Janus.Float.binary64]
 
@@ -1338,7 +1341,8 @@ contract whose spec and live data are not each other's. -/
 /-- The runtime functions each allow-listed `RtSpec` constant (short name, in `Janus.Contracts`) describes. -/
 def specRuntimeNames : List (String × List String) :=
   [("concatstringsSpec", ["runtime.concatstrings"]), ("concatbytesSpec", ["runtime.concatbytes"]),
-   ("slicebytetostringSpec", ["runtime.slicebytetostring"]), ("slicebytetostringtmpSpec", ["runtime.slicebytetostringtmp"]),
+   ("slicebytetostringSpec", ["runtime.slicebytetostring"]), ("slicebytetostringSpecT", ["runtime.slicebytetostring"]),
+   ("slicebytetostringtmpSpec", ["runtime.slicebytetostringtmp"]),
    ("stringtoslicebyteSpec", ["runtime.stringtoslicebyte"]), ("stringtosliceruneSpec", ["runtime.stringtoslicerune"]),
    ("slicerunetostringSpec", ["runtime.slicerunetostring"]), ("intstringSpec", ["runtime.intstring"]),
    ("decoderuneSpec", ["runtime.decoderune"]), ("countrunesSpec", ["runtime.countrunes"]),
@@ -1358,7 +1362,8 @@ def specRuntimeNames : List (String × List String) :=
 def liveSpecOf : List (String × String) :=
   [("growsliceLive", "growsliceSpec"), ("growsliceNoAliasLive", "growsliceNoAliasSpec"),
    ("growsliceBufLive", "growsliceBufSpec"), ("growsliceBufNoAliasLive", "growsliceBufNoAliasSpec"),
-   ("convTstringLive", "convTstringSpec"), ("convT64Live", "convT64Spec")]
+   ("convTstringLive", "convTstringSpec"), ("convT64Live", "convT64Spec"),
+   ("slicebytetostringLive", "slicebytetostringSpec"), ("slicebytetostringLive", "slicebytetostringSpecT")]
 
 /-- The short name of a constant of `Janus.Contracts` (`none` for any other). -/
 def contractsShort? (c : Name) : Option String :=
@@ -1388,15 +1393,19 @@ def specStaticInfo? (a : Expr) : Option (String × List String) :=
   | .app (.const c _) _ =>
     match contractsShort? c with
     | some "slicebytetostringSpec" => some ("slicebytetostringSpec", ["runtime.slicebytetostring"])
+    | some "slicebytetostringSpecT" => some ("slicebytetostringSpecT", ["runtime.slicebytetostring"])
     | _ => none
   | _ => none
 
-/-- A live-data argument (`growsliceLive`): its short name and the spec it belongs to. -/
-def liveInfo? (a : Expr) : Option (String × String) :=
+/-- A live-data argument (`growsliceLive`): its short name and the specs it belongs to (`slicebytetostringLive`: the plain spec and
+the one with the identity table in its precondition). -/
+def liveInfo? (a : Expr) : Option (String × List String) :=
   match a.consumeMData with
   | .const c _ =>
     match contractsShort? c with
-    | some s => (liveSpecOf.find? (·.1 == s)).map fun (_, sp) => (s, sp)
+    | some s =>
+      let owners := (liveSpecOf.filter (·.1 == s)).map (·.2)
+      if owners.isEmpty then none else some (s, owners)
     | none => none
   | _ => none
 
@@ -1428,7 +1437,7 @@ def contractAddrOf? (app : Expr) : Option (Expr × String) :=
 `growsliceSpec/growsliceLive`; empty for a contract without them). -/
 def specLabel (app : Expr) : String :=
   let parts := app.getAppArgs.filterMap fun a =>
-    match specInfo? a with
+    match specInfo? a <|> specStaticInfo? a with
     | some (l, _) => some l
     | none => (liveInfo? a).map (·.1)
   "/".intercalate parts.toList
@@ -1779,9 +1788,9 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
               for j in [0:doms.size] do
                 if doms[j]!.consumeMData.isConstOf `Janus.Contracts.RtSpec then
                   if let some (lbl, _) := (specInfo? args[j]! <|> specStaticInfo? args[j]!) then
-                    if lbl == owner then okPair := true
+                    if owner.contains lbl then okPair := true
               unless okPair do
-                return some s!"assumes the runtime contract {c} with the live data `{live}`, which belong to the spec `{owner}`, not to the spec of this contract: a spec and live data of different runtime functions describe no real call (spec binding)"
+                return some s!"assumes the runtime contract {c} with the live data `{live}`, which belong to the spec `{" / ".intercalate owner}`, not to the spec of this contract: a spec and live data of different runtime functions describe no real call (spec binding)"
         if !specSeen then
           if let some (want, isPrefix) := contractFunction? c then
             unless (if isPrefix then fn.startsWith want else fn == want) do

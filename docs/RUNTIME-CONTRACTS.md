@@ -840,6 +840,21 @@ witnesses for both shapes of both contracts, on both ISAs: `Janus/Contracts/Ifac
 `janus_live_convtstring`, `janus_live_convtstring_empty`, `janus_live_convt64`, `janus_live_convt64_small`
 (`janus64_…`) are in `LiveStubConvT[Amd64].lean`. The single-call `ConvT*` stay for functions that box once and
 need the itab/equality model; a path that calls them after a live call is still unprovable.
+**Live `slicebytetostring`** (U-SBTS-LIVE). The auditor accepts `RtLiveContract[64] … (contractAddr "runtime.slicebytetostring") 4096 R
+(slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s») slicebytetostringLive` (`slicebytetostringLive` is in `frameworkSpecs`
+and `liveSpecOf`; the address `st` is checked exactly as for the plain `RtContract`). The result `(r0, n)` is described by `StrAt`
+(`n = 0`; `n = 1` the static table; `2 ≤ n ≤ 32` the caller's 32-byte buffer; else a fresh block of `rt`); the live data say the
+fresh block (and only it) joins the live set (`fresh`), while the buffer or table bytes are `keep`t. Satisfiability witness for the
+empty string, both ISAs: `SbtsLiveSat[Amd64].lean` (`slicebytetostringLive_satisfiable`, `slicebytetostringLive64_satisfiable`), and the
+tactics `janus_live_sbts_empty` / `janus64_live_sbts_empty` (the `RET` stub at the contract address, request `buf = ptr = n = 0`).
+Red team: `audit/roundspecbind/attacks/SbtsAddr.lean` (c2 control; a5 forged address, a6 variable address, a7/a8/a9 another spec or
+other live data are rejected) and `JanusTests/LiveStubSbts.lean`. Non-empty strings: `janus_live_sbts n A hok` / `janus64_live_sbts n A hok` (`LiveStubSbts[Amd64].lean`: the stub copies the `n` bytes at `ptr` into a fresh block of
+the toy allocator and returns `(block, n)`; `buf = 0`, `n` a size class — 16, 24, 32, 48, … — `n ≤ A ≤ 64 n`; satisfiability
+`slicebytetostringLive[64]_satisfiable_copy`). The empty string with ANY caller buffer (the real wrappers always pass a stack buffer): `janus_live_sbts_empty_buf` / `janus64_live_sbts_empty_buf` (`hok : ∀ args, ok a args → ∃ buf p, args = [buf, p, 0]`; the stub `MOV X1, X2; RET` / `MOV RBX, RCX; RET`; nothing written or allocated). Not witnessable on the toy runtime: `n = 1` (the result is the binary's static table, a fact
+about its data that no stub can establish for every memory) and the caller's-buffer case (`toyInv` holds heap blocks only, the
+buffer is on the stack): use `n = 0` or a size class `n ≥ 16`.
+
+**Known limitation (U14-ZEROVAL).** The static boxes (`&zeroVal`, `&staticuint64s[v]`) lie in `R.rt` and are not in the live set, so a *later* runtime call (which may write `R.rt`) does not keep them: their words are known in the call's own postcondition only. The allocated boxes are in the live set and `LiveFrame` preserves them across later calls. Pinning the statics needs `RtInv` to treat runtime read-only statics as immutable; not done.
 
 **Allocating calls need readiness** (round 10 V3). `ConvT`, `ConvTnoptr`, `ConvT16/32/64`,
 `ConvTstring`, `ConvTslice`, `TypeAssert` and `InterfaceSwitch` take a readiness predicate

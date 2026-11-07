@@ -146,6 +146,30 @@ for f, c, satmod in contracts:
     else:
         missing += 1
         print("  SAT MISSING %-22s %-20s no %s_satisfiable in %s (imported by Janus.lean)" % (c, f, w, satmod))
+# U-SBTS-STATIC: every spec the auditor allow-lists as a static-address runtime contract
+# (`frameworkSpecsStatic` of Janus/Tools/Audit.lean) needs a kernel-checked witness on each ISA: a
+# `theorem <x>_satisfiable` whose statement names the spec, quantifies over a state (`∃ … s`) and is about
+# `RtLiveContract` (arm64) / `RtLiveContract64` (amd64), in a module Janus.lean imports. A spec whose
+# precondition no state meets would make every consumer theorem vacuous (a spec added to the list without a witness
+# was not flagged by the Summary/`Contract`-name scan above).
+_as = os.path.join(root, "Janus", "Tools", "Audit.lean")
+_at = open(_as, encoding="utf-8").read() if os.path.isfile(_as) else ""
+_ms = re.search(r"def frameworkSpecsStatic\s*:\s*List Name\s*:=\s*\[(.*?)\]", _at, re.S)
+if _ms:
+    for spec in re.findall(r"`(\w+)", _ms.group(1)):
+        for isa, pat in (("arm64", r"RtLiveContract\b(?!64)"), ("amd64", r"RtLiveContract64\b")):
+            wit = [(m, nm) for nm, lst in sat.items() for m, stmt in lst
+                   if m in imports and re.search(r"\b%s\b" % re.escape(spec), stmt)
+                   and re.search(pat, stmt) and re.search(r"∃[^,]*\bs\b", stmt)]
+            if wit:
+                ok += 1
+                print("  SAT ok      %-26s %-6s static-address spec: %s_satisfiable (%s)" % (spec, isa, wit[0][1], wit[0][0]))
+            else:
+                missing += 1
+                print("  SAT MISSING %-26s %-6s static-address spec (frameworkSpecsStatic) has no *_satisfiable witness about it" % (spec, isa))
+else:
+    missing += 1
+    print("SAT MISSING frameworkSpecsStatic not found in Janus/Tools/Audit.lean (the static-spec witness check cannot run)")
 # the auditor's embedded allowlist equals the contract list of the tree
 audit_src = open(os.path.join(root, "Janus", "Tools", "Audit.lean"), encoding="utf-8").read() if os.path.isfile(os.path.join(root, "Janus", "Tools", "Audit.lean")) else ""
 mm = re.search(r"-- BEGIN pinnedContracts\n(.*?)-- END pinnedContracts", audit_src, re.S)

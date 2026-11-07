@@ -1417,7 +1417,8 @@ def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option
     let args : Array Term := #[⟨mkIdent set⟩] ++ cfg.args
     let sargs : Array (TSyntax `Lean.Parser.Tactic.simpLemma) ← args.mapM fun t =>
       `(Lean.Parser.Tactic.simpLemma| $t:term)
-    let stx ← `(tactic| simp (config := { maxSteps := 2000000 }) (disch := janus64_disch) only [$sargs,*])
+    let steps := Common.janus.simp.maxSteps.get (← getOptions)
+    let stx ← `(tactic| simp (config := { maxSteps := $(Lean.quote steps) }) (disch := janus64_disch) only [$sargs,*])
     let r ← mkSimpContext stx (eraseLocal := false)
     let mut ctx := r.ctx
     let mut thms := ctx.simpTheorems
