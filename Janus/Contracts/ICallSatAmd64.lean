@@ -31,9 +31,9 @@ def prog : Janus.Amd64.Program := { segments := impl, stubs := [], exitAddr := 0
 
 theorem link_eq : toy.link impl = prog := rfl
 
-theorem ret_of (pr : State → Janus.Arm64.Memory → Prop) (s : State) (hpr : pr s s.mem) (R : Nat → W64) (F : Flags) (h0 : R 0 = s.regs 1) (h3 : R 3 = 0) (h1 : R 1 = 0)
+theorem ret_of {nargs stack : Nat} (pr : State → Janus.Arm64.Memory → Prop) (s : State) (hpr : pr s s.mem) (R : Nat → W64) (F : Flags) (h0 : R 0 = s.regs 1) (h3 : R 3 = 0) (h1 : R 1 = 0)
     (h4 : R 4 = s.regs 4 + 8#64) (h5 : R 5 = s.regs 5) (h14 : R 14 = s.regs 14) :
-    ICallRetP64 4 16 rt0 (fun _ => []) R0 pr s { s with regs := R, flags := F, rip := retAddrOf s } := by
+    ICallRetP64 nargs stack rt0 (fun _ => []) R0 pr s { s with regs := R, flags := F, rip := retAddrOf s } := by
   refine ⟨R, F, s.xmm, s.ymmHi, s.mem, s.zmmHi, s.kreg, ?_, MemFrame.refl _ _, by simp, ?_, hpr⟩
   · simp only [retState64]
     congr 1
@@ -54,8 +54,8 @@ theorem ret_of (pr : State → Janus.Arm64.Memory → Prop) (s : State) (hpr : p
     · funext i; split <;> simp_all
   · exact ⟨h0, h3, h1⟩
 
-theorem impl_okP (pr : State → Janus.Arm64.Memory → Prop) (hpr : ∀ s, pr s s.mem) :
-    ICallContract64 (toy.link impl) A0 4 16 48 rt0 (fun _ => []) R0 (fun _ => True) pr := by
+theorem impl_okP {nargs stack above : Nat} {P : State → Prop} (pr : State → Janus.Arm64.Memory → Prop) (hpr : ∀ s, pr s s.mem) :
+    ICallContract64 (toy.link impl) A0 nargs stack above rt0 (fun _ => []) R0 P pr := by
   rw [link_eq]
   intro s hpc ⟨⟨hr, _, hst, _, hw⟩, _⟩
   have hacc : s.mem.accessible (s.regs 4).toNat 8 false = true :=
