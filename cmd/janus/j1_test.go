@@ -613,3 +613,42 @@ func TestRound15cSymlinkOleanRefused(t *testing.T) {
 		t.Fatal("a non-digest pin was put into the replay key")
 	}
 }
+
+// The marker is keyed on toolchain.cacheID, which covers the BYTES of lean and leanchecker: replacing the checker binary
+// under an unchanged version string (or replacing lean) must not reuse a recorded replay verdict.
+func TestEarlyReplayMarkerChangesWithCheckerBinary(t *testing.T) {
+	mkTC := func(leanBytes, checkerBytes string) *toolchain {
+		root := t.TempDir()
+		for p, b := range map[string]string{"bin/lean": leanBytes, "bin/leanchecker": checkerBytes, "lib/lean/Init.olean": "init"} {
+			writeBytes(t, filepath.Join(root, p), []byte(b))
+		}
+		return &toolchain{lean: filepath.Join(root, "bin", "lean"), leanchecker: filepath.Join(root, "bin", "leanchecker"),
+			sysroot: root, libDir: filepath.Join(root, "lib", "lean"), version: "Lean (version 4.0.0, same string)"}
+	}
+	fw := &pinnedLib{who: "fw", want: pins{"Janus.olean": "11"}}
+	marker := func(tc *toolchain) string { return earlyReplayMarker(tc.cacheID(), "Proof", fw) }
+	base := marker(mkTC("lean-1", "checker-1"))
+	if base != marker(mkTC("lean-1", "checker-1")) {
+		// the same bytes in another directory differ only through the paths in the stat walk, which are part of the ID
+		t.Log("note: the identity includes the toolchain's location")
+	}
+	tc := mkTC("lean-1", "checker-1")
+	same := marker(tc)
+	if same != marker(tc) {
+		t.Fatal("the marker is not stable for one toolchain")
+	}
+	if marker(mkTC("lean-1", "checker-2")) == base {
+		t.Error("a replaced leanchecker with the same version string kept the marker")
+	}
+	if marker(mkTC("lean-2", "checker-1")) == base {
+		t.Error("a replaced lean with the same version string kept the marker")
+	}
+	// the same toolchain directory with the checker rewritten in place
+	tc2 := mkTC("lean-1", "checker-1")
+	before := marker(tc2)
+	writeBytes(t, tc2.leanchecker, []byte("checker-evil"))
+	tc2b := &toolchain{lean: tc2.lean, leanchecker: tc2.leanchecker, sysroot: tc2.sysroot, libDir: tc2.libDir, version: tc2.version}
+	if marker(tc2b) == before {
+		t.Error("a checker rewritten in place kept the marker")
+	}
+}

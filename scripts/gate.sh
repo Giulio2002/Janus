@@ -232,6 +232,14 @@ case "$jobs_n" in ''|*[!0-9]*|0) echo "gate: -j needs a positive number (got '$j
 [ -n "$lanes_n" ] || lanes_n=$((jobs_n + 1))
 case "$lanes_n" in ''|*[!0-9]*|0) echo "gate: --lanes needs a positive number (got '$lanes_n')" >&2; exit 2 ;; esac
 export JANUS_JOBS=$jobs_n
+# The content-keyed store of the embedded framework build (cmd/janus/frameworkstore.go, docs/TESTING.md): the user cache, the Go tests'
+# fixture and every other cache of this host compile the same sources with the same toolchain once each (about 270 s of CPU a time);
+# with the store the first publishes an HMAC-authenticated copy keyed on the sources, lake manifest, toolchain identity and janus
+# binary, and the others restore it (any doubt: a full compile). The warm merge gate uses it; the COLD gate (--cold, the nightly) never
+# does, and --fresh never reads or writes it.
+if [ -z "$cold" ] && [ "${JANUS_ASL_CACHE:-}" != 0 ] && [ -z "${JANUS_FRAMEWORK_STORE+x}" ]; then
+  export JANUS_FRAMEWORK_STORE="${XDG_CACHE_HOME:-$HOME/.cache}/janus-framework-store"
+fi
 # Admission control of every pool (scripts/lib/pool.sh): no new item starts when MemAvailable would fall below
 # the floor (JANUS_GATE_MEM_FLOOR_GIB, default 30) plus one item's estimate (largest recorded peak x1.5, at least 4 GiB)
 _pk="$(autojobs_peak_gib "$sbfile")"
@@ -374,7 +382,10 @@ pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.
 pre_fixture_emb() { JANUS_TEST_FIXTURE_PART=embedded JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
 pre_fixture() { JANUS_TEST_FIXTURE_PART=checkout JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
 pre_stamp() { JANUS_ROOT="$root" JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
-pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
+# pre-warm verifies Add against the EMBEDDED framework (JANUS_ROOT unset: janus builds it itself in the user cache and records its
+# replay verdict there) from a private extraction directory, so it neither reads the checkout's build nor shares artifacts/Add with
+# pre-stamp (the checkout's --janus-root verification): the two run side by side instead of one after the other.
+pre_warm() { mkdir -p "$out/prewarm"; env -u JANUS_ROOT JANUS_EXAMPLES_ARTIFACTS="$out/prewarm" JANUS_EXAMPLES_SUMMARY="$out/prewarm/summary.txt" JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
 # From the moment the shared framework build (.lake/build) is finished nothing may write it (a lake that rebuilds a
 # module while another lane's verification has pinned its .olean fails that verification: "framework build changed after
 # the kernel replay"). pre-pin hashes the finished build and switches scripts/lib/lakeguard/lake on (it turns every

@@ -402,8 +402,14 @@ theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +ker
 theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [7#64] s0 :=
   ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
 
-theorem data : Extracted.program.DataLoaded mem0 := by
-  unfold Program.DataLoaded; decide +kernel
+theorem data : Extracted.program.DataLoaded mem0 :=
+  -- not `decide +kernel` over every byte (114 s: each byte scans the object list): the objects are disjoint and every
+  -- address reads as `dataSegByte` does (Janus/Program.lean)
+  Program.DataLoaded_of_dataSegByte (by unfold DataSegsDisjoint; decide +kernel) (by decide +kernel) (by decide +kernel) fun a n h => by
+    have h' : dbyte a = some n := h
+    show (BitVec.ofNat 8 ((dbyte a).getD _)).toNat = n % 256
+    rw [h']
+    simp
 
 set_option maxRecDepth 100000 in
 theorem pre : CPre [] (fun _ _ _ _ => True) s0 := by

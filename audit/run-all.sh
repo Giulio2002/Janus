@@ -18,6 +18,10 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/verdict.sh"
 memguard_self "$@"
 par_init "$@"
+# ALL_ROWS="base r1 root": only these row groups (default all); audit/run-rounds.sh runs them as the lanes alla, allb, allc.
+# base = the sandbox/statement/control rows, r1 = the ten R1 consumer-lakefile variants, root = the rows on a copy of the
+# framework build (C1, R1b forged lemma, R1 proof-overwrite).
+want() { [ -z "${ALL_ROWS:-}" ] || [[ " $ALL_ROWS " == *" $1 "* ]]; }
 J="$root/audit/bin/janus"
 # audit/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
 # JANUS_AUDIT_PREBUILT=1).
@@ -25,7 +29,7 @@ if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build Janus failed (fix the Lean library first)"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 
-W=audit/work
+W=audit/work${ALL_ROWS:+-$ALL_ROWS}   # a row group has its own work dir (the lanes alla..allc run at once)
 mkdir -p $W
 cp artifacts/examples-arm64 $W/examples-arm64
 # Fresh extractions of the attacked functions (independent of scripts/verify-examples.sh).
@@ -59,6 +63,7 @@ echo "attack                       expect   result"
 # F1/F2 fixes: these attacks are now rejected (Invalid) by the sandbox, the trusted janus-audit
 # (no proof initializers run), the axiom audit, the Extracted-identity check or the
 # trusted-only / mentions-Extracted statement rules.
+if want base; then
 for a in A1_instance A3_initialize A6_eval_io A9_namespace_shadow A5_skipkernel A7_private_shadow A10_exit; do
   par_run 'row "$a" blocked "$(v --proof audit/attacks/$a.lean $W/Add)"'
 done
@@ -116,10 +121,12 @@ par_run 'row B2_refuted ok "$(lake env lean audit/specs/B2_refuted.lean 2>&1 | l
 for n in Add Add256 Get; do
   par_run 'row "control:${n}_witness" Verified "$(v --proof audit/controls/${n}_witness.lean $W/$n)"'
 done
+fi
 
 # C1: a planted Extracted.olean in a janus-root copy's library dir. The verifier now compiles
 # Extracted into a private trusted dir placed first on LEAN_PATH, and rejects any stray
 # Extracted.olean elsewhere on the path (module identity), so the shadow is caught (blocked).
+if want root; then
 par_run 'C=$W/janus-root-copy
 rm -rf $C; mkdir -p $C
 cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean Janus JanusTests Oracle .lake $C/
@@ -127,12 +134,13 @@ cp audit/attacks/C1_fake_Extracted.lean $C/Extracted.lean
 (cd $C && lake env lean -o .lake/build/lib/lean/Extracted.olean Extracted.lean && rm Extracted.lean)
 row C1_shadow_library blocked "$("$J" verify --janus-root $C --proof audit/attacks/C1_proof.lean $W/Add 2>&1 | verdict_line)"
 rm -rf $C'
+fi
 
 # C2: the TOCTOU on a shared .janus-build no longer exists. Each verify uses a fresh private
 # work dir, the sandbox runs under --die-with-parent in a new PID namespace (no lingering
 # watcher survives), and every olean is hash-bound and re-checked after the audit and replay.
 # The honest proof verifies; there is no window to swap a fake pair into.
-par_run 'row C2_toctou_swap mitigated "$(v --proof examples/proofs/Add.lean $W/Add)"'
+want base && par_run 'row C2_toctou_swap mitigated "$(v --proof examples/proofs/Add.lean $W/Add)"'
 
 # R1: the compiled framework is pinned and read-only to untrusted builds, and the kernel replay
 # covers the theorem's whole non-core import closure. Before the fix a consumer lakefile could
@@ -167,6 +175,7 @@ r1() {
   local what; what=$(grep -m1 -E '^  (modified|unexpected|missing) ' <<<"$out" | sed 's/^  //; s/ (pinned.*//')
   printf '%s%s [%s]' "$(grep -m1 -E '^(Verified|Invalid)' <<<"$out" | cut -c1-90)" "${what:+ … $what}" "$(grep -m1 'Stage:' <<<"$out" | sed 's/.*Stage: //')"
 }
+if want r1; then
 # Each variant has its own package copy and workspace, so the rows run in parallel.
 par_run 'row R1a_ensures blocked "$(r1 ensures ensures Ensures R1.Ensures.claim)"'
 par_run 'row R1a_ensures_nosandbox blocked "$(r1 ensures-ns ensures Ensures R1.Ensures.claim --unsafe-no-sandbox)"'
@@ -178,9 +187,12 @@ par_run 'row R1c_inject blocked "$(r1 inject inject Inject R1.Inject.claim)"'
 par_run 'row R1c_inject_nosandbox blocked "$(r1 inject-ns inject Inject R1.Inject.claim --unsafe-no-sandbox)"'
 par_run 'row R1c_inject_dep blocked "$(r1 inject-dep none Plain R1.Plain.claim dep --allow-path-deps)"'
 par_run 'row R1c_inject_dep_nosandbox blocked "$(r1 inject-dep-ns none Plain R1.Plain.claim dep --allow-path-deps --unsafe-no-sandbox)"'
+fi
+
 # R1b forged lemma: a --janus-root copy whose Janus/GoABI.olean (sources untouched) carries a
 # `False` lemma added with debug.skipKernelTC. The olean is well-formed and it is the build the
 # pins are taken from, so only the kernel replay of the framework module catches it.
+if want root; then
 par_run 'F=$W/janus-root-forged
 rm -rf $F; mkdir -p $F/.lake $F/forge/Janus
 cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean Janus JanusTests Oracle $F/
@@ -202,6 +214,7 @@ for ns in "" --unsafe-no-sandbox; do
   if [ -z "$ns" ]; then row R1_proof_overwrite mitigated "$res"; else row R1_proof_overwrite_nosandbox blocked "$res"; fi
   rm -rf $O'
 done
+fi
 
 # ASL corollary forgeries (docs/ASL.md, audit/asl/attacks): proofs whose main theorem verifies
 # but which try to forge the --asl corollary. Each must print "Invalid: ASL corollary"; the honest
@@ -214,7 +227,8 @@ asl_v() { # asl_v PROOF [flags…]: the ASL verdict line and its stage
     printf '%s [%s]' "$(grep -m1 -E '^Invalid' <<<"$out" | cut -c1-100)" "$(grep -m1 'Stage: ASL' <<<"$out" | sed 's/.*Stage: //')"
   fi
 }
-if [ "${JANUS_AUDIT_ASL:-}" = 1 ]; then
+if ! want base; then :
+elif [ "${JANUS_AUDIT_ASL:-}" = 1 ]; then
   row ASL.control_Add Verified "$(asl_v --proof examples/proofs/Add.lean $W/Add)"
   for a in X1_shadow_toASL X3_plant_words X4_plant_corollary X5_elab_override X6_other_program X7_reserved_name; do
     row "ASL.$a" blocked "$(asl_v --proof audit/asl/attacks/$a.lean $W/Add)"
@@ -228,7 +242,7 @@ fi
 # runtime, byte for byte, on both ISAs (audit/rt-print/run.sh: every integer kind at the
 # boundaries and at random, bools, strings, pointers, slices, interfaces, and RTPRINT_N random
 # float64 and float32 bit patterns, with complex numbers built from them).
-par_run 'echo "RT-PRINT (audit/rt-print/run.sh: Janus.Spec.Print vs the Go 1.26 runtime):"
+want base && par_run 'echo "RT-PRINT (audit/rt-print/run.sh: Janus.Spec.Print vs the Go 1.26 runtime):"
 if rtp=$(audit/rt-print/run.sh 2>&1); then
   echo "  $(tail -1 <<<"$rtp")"
 else
@@ -236,7 +250,7 @@ else
   broken+=(rt-print)
 fi'
 
-par_run 'echo "model controls (audit/model/Model.lean):"
+want base && par_run 'echo "model controls (audit/model/Model.lean):"
 if lake env lean audit/model/Model.lean >/dev/null 2>&1; then
   echo "  Model.lean: all decide controls pass, including M1-M3 now faulting (blocked by F5)"
 else

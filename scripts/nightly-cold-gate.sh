@@ -80,7 +80,7 @@ if [ -z "$cached" ]; then
   run_gate cached -u JANUS_ASL_CACHE ASL_OBJ_CACHE=1 || exit 2   # the object cache is opt-in: only this run turns it on
   cached="$work/out-cached"
 fi
-run_gate cold JANUS_ASL_CACHE=0 ASL_OBJ_CACHE=0 || exit 2
+run_gate cold JANUS_ASL_CACHE=0 ASL_OBJ_CACHE=0 JANUS_FRAMEWORK_STORE=off || exit 2   # cold: every framework build is compiled, none restored
 echo "nightly-cold-gate: object cache: ON (cached run), OFF (cold run: JANUS_ASL_CACHE=0, ASL_OBJ_CACHE=0); a cached-run result is not merge evidence by itself"
 python3 -I "$cmp_py" compare "$cached" "$work/out-cold"
 rc_final=$?

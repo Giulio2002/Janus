@@ -641,6 +641,18 @@ attribute [janus_exec] execAddSubImm execAddSubShifted execAddSubExt execAddSubC
 @[janus_exec] theorem baseAddr_sp (s : State) (h : s.sp.toNat % 16 = 0) :
     baseAddr s 31 = .ok s.sp := by simp [baseAddr, h]
 
+/-- Stack-pointer arithmetic by multiples of 16 keeps the 16-byte alignment (`2 ^ 64` is a multiple of 16, so a wrap-around changes
+nothing). The side goal `(sp ± c).toNat % 16 = 0` of `baseAddr_sp` is closed by these (`dischargeSpAligned`, Core.lean) without `omega`. -/
+theorem bv_sub_aligned16 (a c : BitVec 64) (ha : a.toNat % 16 = 0) (hc : c.toNat % 16 = 0) :
+    (a - c).toNat % 16 = 0 := by
+  have := a.isLt; have := c.isLt
+  rw [BitVec.toNat_sub]; omega
+
+theorem bv_add_aligned16 (a c : BitVec 64) (ha : a.toNat % 16 = 0) (hc : c.toNat % 16 = 0) :
+    (a + c).toNat % 16 = 0 := by
+  have := a.isLt; have := c.isLt
+  rw [BitVec.toNat_add]; omega
+
 /-! ## Memory -/
 
 @[janus_exec] theorem load_ok (m : Memory) {a n : Nat} (h : m.accessible a n false = true) :

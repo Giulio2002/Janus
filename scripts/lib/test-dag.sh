@@ -53,14 +53,14 @@ out="$t/rerun/out"; eval "$(grep -m1 'rm -f "$out/.pinned" "$out/fw_hash0"' "$he
 ( : > "$out/.pinned"; cd "$t/rerun/root" && RERUN_LOG="$t/rerun/log" JANUS_REAL_LAKE="$t/rerun/real" JANUS_LAKEGUARD_ROOT="$(pwd -P)" JANUS_LAKEGUARD_PIN="$out/.pinned" "$here/lakeguard/lake" build X )
 [ "$(cat "$t/rerun/log")" = "build --no-build X" ] && ok "with a fresh pin the guard is armed (--no-build)" || bad "guard not armed after the pin: $(cat "$t/rerun/log")"
 
-# the two stages that verify artifacts/Add (pre-warm, pre-stamp) take the same theorems lock: they must be ordered, never concurrent
-{ dag_has pre-warm pre-stamp || dag_has pre-stamp pre-warm; } && ok "pre-warm and pre-stamp (both verify artifacts/Add) are ordered, not concurrent" || bad "pre-warm and pre-stamp can run at the same time (Add theorems lock collision)"
+# pre-warm (embedded framework, its own extraction dir) runs beside pre-stamp (the checkout, artifacts/Add): they share no resource
+! dag_has pre-warm pre-stamp && ! dag_has pre-warm pre-lake && ok "pre-warm waits for neither pre-stamp nor pre-lake (it reads neither the checkout's build nor artifacts/Add)" || bad "pre-warm waits for pre-stamp or pre-lake"
 
 un=$(dag_unordered); [ -z "$un" ] && ok "no two stages touching the same artifact, binary or lock (one writing) can run at once" || { bad "unordered resource users:"; echo "$un" | head -5; }
-# the check detects a missing edge: drop the pre-warm -> pre-stamp dependency and it must report the collision
-saved=${DAG_DEPS[pre-warm]}; DAG_DEPS[pre-warm]="pre-gobin pre-lake pre-ex-arm64"
-mut=$(dag_unordered); grep -q 'artifact:Add: pre-stamp (w) and pre-warm (w) are not ordered' <<<"$mut" && ok "the resource check catches the pre-stamp / pre-warm collision" || bad "the resource check missed a removed edge"
-DAG_DEPS[pre-warm]=$saved
+# the check detects a collision: if pre-warm used artifacts/Add again (as it did when it waited for pre-stamp) it must be reported
+saved=${DAG_RES[artifact:Add]}; DAG_RES[artifact:Add]="$saved w:pre-warm"
+mut=$(dag_unordered); grep -q 'artifact:Add: pre-stamp (w) and pre-warm (w) are not ordered' <<<"$mut" && ok "the resource check catches a pre-stamp / pre-warm collision on artifacts/Add" || bad "the resource check missed the collision"
+DAG_RES[artifact:Add]=$saved
 
 # the flake of `dag_closure X | grep -qx Y` under pipefail: a producer that is still writing when grep leaves gets SIGPIPE (141)
 # and the pipeline "fails" although Y is there. A slow producer makes it certain; dag_has must not be fooled.

@@ -942,9 +942,66 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
 
 /-! ## Discharger -/
 
+/-- A proof of `e.toNat % 16 = 0` for a 64-bit term `e` built from a hypothesis of exactly that form (found with reducible
+`isDefEq`) by adding or subtracting literals that are multiples of 16, or `none`. -/
+partial def alignedProof? (e : Expr) : MetaM (Option Expr) := do
+  let e ← withReducible (whnf e)   -- a projection of a state literal: `{ sp := s.sp - 64#64, .. }.sp`
+  let ty ← mkEq (← mkAppM ``HMod.hMod #[← mkAppM ``BitVec.toNat #[e], mkNatLit 16]) (mkNatLit 0)
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let dt ← instantiateMVars d.type
+    unless dt.isAppOfArity ``Eq 3 do continue
+    if ← withReducible (isDefEq dt ty) then return some d.toExpr
+  let step (lem : Name) : MetaM (Option Expr) := do
+    let a := e.getArg! 4; let c := e.getArg! 5
+    let hcTy ← mkEq (← mkAppM ``HMod.hMod #[← mkAppM ``BitVec.toNat #[c], mkNatLit 16]) (mkNatLit 0)
+    unless (← withDefault (whnf (← mkDecide hcTy))).isConstOf ``Bool.true do return none
+    let some ha ← alignedProof? a | return none
+    return some (← mkAppM lem #[a, c, ha, mkApp3 (mkConst ``of_decide_eq_true) hcTy (← synthInstance (← mkAppM ``Decidable #[hcTy])) (← mkEqRefl (mkConst ``Bool.true))])
+  if e.isAppOfArity ``HSub.hSub 6 then return ← step ``bv_sub_aligned16
+  if e.isAppOfArity ``HAdd.hAdd 6 then return ← step ``bv_add_aligned16
+  return none
+
+/-- The `baseAddr_sp` side condition `(sp ± literals).toNat % 16 = 0` (every `ldp`/`stp`/`ldr` off `sp`): from the alignment
+hypothesis `sp.toNat % 16 = 0` by `bv_sub_aligned16`/`bv_add_aligned16`, with the literal's divisibility by `decide`. It only changes
+the order of the proof search: when it does not apply (another shape, no such hypothesis) the discharger below runs as before. -/
+def dischargeSpAligned (g : MVarId) : MetaM Bool := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  let some (_, lhs, rhs) := t.eq? | return false
+  unless rhs.nat? == some 0 && lhs.isAppOfArity ``HMod.hMod 6 && (lhs.getArg! 5).nat? == some 16 do return false
+  let x := lhs.getArg! 4
+  unless x.isAppOfArity ``BitVec.toNat 2 do return false
+  let some pf ← alignedProof? (x.getArg! 1) | return false
+  g.assign pf
+  return true
+
+/-- A side condition `(x : BitVec w).toNat < c` with literals `c < 2 ^ w` (the `mod64_of_lt` goal of a 128-bit vector register,
+`(s.vregs 12).toNat < 2 ^ 64`, which every `stp d8, d9` / `ldp d8, d9` of a C epilogue tries) that no hypothesis can prove: the bit-vector's
+own bound is `2 ^ w`, and no local hypothesis mentions `x` (nor, for `f a`, the partial application `f`). `omega` would
+search the whole context for 2-4 s before failing; the answer is the same, so the discharger fails at once. -/
+def lowBoundHopeless (g : MVarId) : MetaM Bool := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  unless t.isAppOfArity ``LT.lt 4 do return false
+  let lhs := t.getArg! 2; let rhs := t.getArg! 3
+  unless lhs.isAppOfArity ``BitVec.toNat 2 do return false
+  let some w := (lhs.getArg! 0).nat? | return false
+  let some c := rhs.nat? | return false
+  -- only the 128-bit vector registers' low-64-bit side goal: narrower shapes (bounds on 32-bit views, ..) can be proved from facts about
+  -- other spellings of the same value, which the syntactic scan below cannot see
+  unless w == 128 && c == 2 ^ 64 do return false
+  let x := lhs.getArg! 1
+  let key := if x.isApp then x.appFn! else x
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    if (← instantiateMVars d.type).find? (· == key) |>.isSome then return false
+  return true
+
 def janusdischBody : TacticM Unit := withoutRecover do
   let g ← getMainGoal
   let t ← instantiateMVars (← g.getType)
+  if !t.hasMVar then
+    if ← dischargeSpAligned g then return
+    if ← lowBoundHopeless g then throwError "janus_disch: no hypothesis bounds this bit-vector below the literal"
   if (← isTracingEnabledFor `janus.disch) then
     let hs ← g.withContext do (← getLCtx).foldlM (init := #[]) fun acc d =>
       if d.isImplementationDetail then pure acc else pure (acc.push m!"{d.userName} : {d.type}")

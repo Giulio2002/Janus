@@ -86,7 +86,8 @@ verify_one() {
     incr_end "arm64:WrongAdd" arm64 "$wrc" "$(echo "$(date +%s.%N) - $wstart" | bc)" "${wspec[@]}"
     return 0
   fi
-  out="artifacts/$n"
+  out="${JANUS_EXAMPLES_ARTIFACTS:-artifacts}/$n"   # JANUS_EXAMPLES_ARTIFACTS: another parent dir for the extraction (the gate's pre-warm)
+  mkdir -p "$(dirname "$out")"
   mapfile -t extract_args < <(scripts/example-targets.sh "$n")
   bin/janus extract artifacts/examples-arm64 "$(example_symbol "$n")" "$out" "${extract_args[@]}" >/dev/null
   # The theorems of the proof file: correctness, further theorems (F64ToU64's `exact` and

@@ -70,6 +70,37 @@ structure DataSegment where
   bytes : List Nat
 deriving Repr, Inhabited
 
+/-! ### Witness memories for the read-only data
+
+A witness (`nonvacuous`) builds a concrete memory and has to show `Program.DataLoaded` for it. Brute force (`decide +kernel` over every byte of every
+object, each byte found by scanning the object list) cost 114 s for one Go runtime's data. The memories the witnesses build all read a byte of the
+data as "the first object holding the address" (`dataSegByte`); with the objects pairwise disjoint (one pass over the pairs), that byte IS the
+object's own byte (`dataSegByte_of_mem`), so `DataLoaded` follows from a statement per address instead of a computation per byte
+(`DataLoaded_of_dataSegByte`, here and in `Janus.Amd64.Program`). -/
+
+/-- The byte at `a` of the first data object that holds it (the memory a witness builds reads this). -/
+def dataSegByte (l : List DataSegment) (a : Nat) : Option Nat :=
+  l.findSome? fun d => if d.base ≤ a ∧ a < d.base + d.bytes.length then d.bytes[a - d.base]? else none
+
+/-- No two data objects overlap. -/
+def DataSegsDisjoint (l : List DataSegment) : Prop :=
+  l.Pairwise fun d e => d.base + d.bytes.length ≤ e.base ∨ e.base + e.bytes.length ≤ d.base
+
+theorem dataSegByte_of_mem {l : List DataSegment} (hp : DataSegsDisjoint l) {d : DataSegment} (hd : d ∈ l)
+    {i : Nat} (hi : i < d.bytes.length) : dataSegByte l (d.base + i) = some d.bytes[i] := by
+  induction l with
+  | nil => cases hd
+  | cons e rest ih =>
+    unfold DataSegsDisjoint at hp
+    rw [List.pairwise_cons] at hp
+    rcases List.mem_cons.mp hd with rfl | hd'
+    · simp [dataSegByte, hi]
+    · have hdisj := hp.1 d hd'
+      have hno : ¬ (e.base ≤ d.base + i ∧ d.base + i < e.base + e.bytes.length) := by omega
+      have := ih hp.2 hd'
+      simp only [dataSegByte, List.findSome?_cons, hno, ite_false] at this ⊢
+      exact this
+
 /-- A writable global variable as the linker laid it out (`janus extract --global SYM`): the
 symbol's address and size and its **link-time image**, the bytes of `.data`/`.noptrdata` the
 binary file holds for it (`init`), or none for `.bss`/`.noptrbss` (which the loader zeroes).
@@ -135,6 +166,19 @@ def DataLoaded (p : Program) (m : Arm64.Memory) : Prop :=
   ∀ d ∈ p.data, (m.regions.any fun r => r.base ≤ d.base && d.base + d.bytes.length ≤ r.base + r.size
       && r.base + r.size ≤ 2 ^ 48 && !r.writable) = true ∧
     ∀ i (h : i < d.bytes.length), (m.bytes (d.base + i)).toNat = d.bytes[i]
+
+/-- `DataLoaded` for a memory whose bytes read the data as `dataSegByte` does (modulo 256, as `BitVec.ofNat 8` does), with the data objects
+disjoint, every byte of them below 256, and every object inside a read-only region below `2^48`. See the header above. -/
+theorem DataLoaded_of_dataSegByte {p : Program} {m : Arm64.Memory} (hp : DataSegsDisjoint p.data)
+    (hreg : ∀ d ∈ p.data, (m.regions.any fun r => r.base ≤ d.base && d.base + d.bytes.length ≤ r.base + r.size
+      && r.base + r.size ≤ 2 ^ 48 && !r.writable) = true)
+    (hlt : ∀ d ∈ p.data, ∀ b ∈ d.bytes, b < 256)
+    (hb : ∀ a n, dataSegByte p.data a = some n → (m.bytes a).toNat = n % 256) : p.DataLoaded m := by
+  intro d hd
+  refine ⟨hreg d hd, fun i hi => ?_⟩
+  have h := hb _ _ (dataSegByte_of_mem hp hd hi)
+  rw [h]
+  exact Nat.mod_eq_of_lt (hlt d hd _ (List.getElem_mem hi))
 
 def stubAt (p : Program) (pc : Nat) : Option Stub := p.stubs.find? (·.addr = pc)
 

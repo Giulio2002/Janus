@@ -14,7 +14,8 @@
 #   pre-stamp      one verification of Add with --janus-root <checkout>: janus stamps the checkout's own framework build
 #                  (and may delete and rebuild modules whose files no longer match an OLD stamp), so every write janus can make to the
 #                  shared build happens BEFORE the pin; afterwards the stamp is fresh and a --janus-root verification only reads
-#   (pre-warm and pre-stamp both verify artifacts/Add, whose theorems lock admits one run at a time: pre-warm waits for pre-stamp)
+#   (pre-warm verifies the embedded framework from its own extraction directory: it needs neither the checkout's build nor pre-stamp,
+#   so it runs beside them; before, it shared artifacts/Add, whose theorems lock admits one run at a time, and waited for pre-stamp)
 #   pre-fixture-emb the go tests' framework fixture, embedded part (JANUS_TEST_FIXTURE_PART=embedded): the embedded framework's
 #                  build and replay verdict, built cold INSIDE the fixture directory. It reads neither this checkout's build nor the
 #                  user's cache (no seed: pre-stamp and pre-warm write that cache), so it needs nothing and starts at t=0
@@ -34,7 +35,7 @@ DAG_DEPS=(
   [pre-ex-amd64]="pre-gobin" [pre-rounds-bin]="pre-gobin pre-ex-amd64"
   [pre-stamp]="pre-gobin pre-lake pre-ex-arm64 pre-ex-amd64"
   [pre-pin]="pre-lake pre-stamp"
-  [pre-warm]="pre-gobin pre-lake pre-ex-arm64 pre-stamp"
+  [pre-warm]="pre-gobin pre-ex-arm64 pre-ex-amd64"
   [pre-fixture-emb]=""
   [pre-fixture]="pre-lake pre-stamp pre-pin pre-fixture-emb"
   [tree-x86]="pre-pin pre-gobin $_EX" [tree-asl]="pre-pin pre-gobin $_EX" [tree-aslv]="pre-pin pre-gobin $_EX" [tree-go]="pre-pin pre-gobin $_EX"
@@ -85,15 +86,16 @@ dag_check() {
 # replaces bin/janus while others run it). scripts/lib/test-dag.sh asserts it for every pair.
 declare -gA DAG_RES
 DAG_RES=(
-  [artifact:Add]="w:pre-stamp w:pre-warm w:verify"
+  [artifact:Add]="w:pre-stamp w:verify"
+  [prewarm-artifact]="w:pre-warm"
   [bin/janus]="w:pre-gobin w:pre-ex-amd64 r:pre-stamp r:pre-warm r:pre-rounds-bin r:verify r:rounds r:decoder r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
-  [framework-build]="w:pre-lake w:pre-stamp r:pre-pin r:pre-warm r:pre-fixture r:verify r:gotest r:rounds r:decoder r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
+  [framework-build]="w:pre-lake w:pre-stamp r:pre-pin r:pre-fixture r:verify r:gotest r:rounds r:decoder r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
   [audit/bin/janus-rounds]="w:pre-rounds-bin r:rounds"
   [audit/bin/janus-decode-gate]="w:pre-lake r:rounds"
   [go-test-fixture]="w:pre-fixture-emb w:pre-fixture r:gotest r:rtasl-go r:rounds"
   [examples-arm64]="w:pre-ex-arm64 r:pre-stamp r:pre-warm r:verify r:rounds r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
   [examples-amd64]="w:pre-ex-amd64 r:verify r:rounds r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
-  [user-cache-framework]="w:pre-stamp w:pre-warm"
+  [user-cache-framework]="w:pre-warm r:verify r:rounds"
   [user-cache-checkout-verdict]="w:pre-stamp r:pre-fixture"
 )
 

@@ -438,6 +438,37 @@ func removeCgroup(d string) error {
 
 // cgroupStats reads memory.peak and the OOM kill count of d, and the effective limit (the
 // smallest memory.max from d up to the root).
+// cgroupCPUUsec is the CPU time (microseconds, user+system) the cgroup d and its descendants have used (cpu.stat usage_usec).
+func cgroupCPUUsec(d string) int64 {
+	b, err := os.ReadFile(filepath.Join(d, "cpu.stat"))
+	if err != nil {
+		return 0
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		if f := strings.Fields(l); len(f) == 2 && f[0] == "usage_usec" {
+			v, _ := strconv.ParseInt(f[1], 10, 64)
+			return v
+		}
+	}
+	return 0
+}
+
+// jobCPUUsec: CPU time of guarded jobs that getrusage cannot see (see addJobCPU); read by cpuSeconds (timing.go).
+var jobCPUUsec atomic.Int64
+
+// addJobCPU records the CPU a guarded job used according to its cgroup, beyond what the process janus waited for already
+// counts in RUSAGE_CHILDREN (cmd.ProcessState's rusage: the same process and the descendants it reaped), so a job in a
+// systemd scope, which janus does not wait for the lean processes of, is counted once and a plain child is not counted twice.
+func addJobCPU(cmd *exec.Cmd, cgUsec int64) {
+	var seen int64
+	if cmd != nil && cmd.ProcessState != nil {
+		seen = cmd.ProcessState.UserTime().Microseconds() + cmd.ProcessState.SystemTime().Microseconds()
+	}
+	if cgUsec > seen {
+		jobCPUUsec.Add(cgUsec - seen)
+	}
+}
+
 func cgroupStats(d string) (peak, limit int64, killed bool) {
 	if b, err := os.ReadFile(filepath.Join(d, "memory.peak")); err == nil {
 		peak, _ = strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
@@ -776,6 +807,7 @@ func guardRunCtx(cmd *exec.Cmd, ctx context.Context) error {
 		}
 		cmd.SysProcAttr.UseCgroupFD, cmd.SysProcAttr.CgroupFD = true, fd
 		runErr := cmd.Run()
+		addJobCPU(cmd, cgroupCPUUsec(d))
 		peak, lim, killed := cgroupStats(d)
 		ev := memEvent{Label: label, Limit: lim, Peak: peak, Killed: killed}
 		recordMem(ev)
@@ -826,6 +858,7 @@ func guardRunCtx(cmd *exec.Cmd, ctx context.Context) error {
 			recordMem(ev)
 			return &memKillError{ev: ev, err: runErr}
 		}
+		addJobCPU(cmd, st.CPUUsec)
 		ev := memEvent{Label: label, Limit: st.Limit, Peak: st.Peak, Killed: st.Killed}
 		recordMem(ev)
 		if st.Killed && !cancelled() {
@@ -862,6 +895,9 @@ type supervisorStats struct {
 	Peak   int64 `json:"peak"`
 	Limit  int64 `json:"limit"`
 	Killed bool  `json:"killed"`
+	// CPUUsec is the scope's CPU time (cgroup cpu.stat usage_usec: the job and everything it ran), for the stage CPU
+	// accounting (timing.go): a job in a systemd scope is not janus's own child, so its CPU is not in getrusage.
+	CPUUsec int64 `json:"cpu_usec"`
 }
 
 func init() {
@@ -926,6 +962,7 @@ func superviseJob(args []string) int {
 	var st supervisorStats
 	if cg, err := ownCgroup(); err == nil {
 		st.Peak, st.Limit, st.Killed = cgroupStats(cg)
+		st.CPUUsec = cgroupCPUUsec(cg)
 	}
 	b, _ := json.Marshal(st)
 	_ = os.WriteFile(statsFile, b, 0o600)

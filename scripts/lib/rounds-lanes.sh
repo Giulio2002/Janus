@@ -17,4 +17,4 @@ rounds_lane_count() {
 
 # rounds_longest_first: the default lane order, longest first by measured time (the long cold consumer
 # lanes first so they start at once). Lanes not listed are appended by the caller.
-rounds_longest_first() { echo "r7c r7j all r5 r9 r10 r8 r7 r11 r6 rfw r2 r12 r3 r4"; }
+rounds_longest_first() { echo "r7c r7c1 r7c2 r7c3 r7j alla allb allc all r5 r9 r10 r8a r8b r8c r8 r7 r11 r6 rfw r2 r12 r3 r4"; }
