@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/arch/arm64/arm64asm"
 )
@@ -30,6 +31,10 @@ const (
 	maxDataSymbol = 4096
 	// Bounded window copied when no symbol covers the address, or the symbol is too large.
 	dataWindow = 256
+	// U-RODATA-REF bounds: rounds of pointer following, bytes added per extraction, longest string followed
+	refDepth     = 4
+	refBudget    = 1 << 16
+	maxRefString = 4096
 )
 
 // DataRef is one detected address computation or PC-relative load in extracted code.
@@ -239,6 +244,24 @@ func dataRefs(ws []uint32, base uint64) []DataRef {
 	return refs
 }
 
+// looksLikeText reports whether the n bytes at ptr are string-literal text: valid UTF-8 without control characters
+// other than tab, newline and carriage return. U-RODATA-REF follows a (pointer, length) pair only when its target is
+// text, so that the many other (address, small number) pairs of the read-only data (type descriptor fields, slices of
+// pointers) are not mistaken for string headers and copied; a string literal with control or invalid bytes is
+// therefore not followed (documented limitation).
+func looksLikeText(ts section, ptr, n uint64) bool {
+	p := ts.data[ptr-ts.Addr : ptr-ts.Addr+n]
+	if !utf8.Valid(p) {
+		return false
+	}
+	for _, c := range p {
+		if c < 0x20 && c != '\t' && c != '\n' && c != '\r' || c == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 func (b *Binary) sectionOf(addr uint64) (section, bool) {
 	for _, s := range b.sections {
 		if addr >= s.Addr && addr < s.End() {
@@ -336,6 +359,54 @@ func collectData(b *Binary, refs []DataRef, extra ...DataRef) ([]DataSeg, []Skip
 		sp.end = min(sp.end, sec.End())
 		if sp.end > sp.start {
 			spans = append(spans, sp)
+		}
+	}
+	// U-RODATA-REF: a copied read-only object may hold a string header (pointer, length) whose bytes are
+	// elsewhere in a read-only section (e.g. the 16-byte header of "<nil>"; the compiler puts the bytes in the
+	// string-literal area, which no instruction of the extracted code refers to). Copy those bytes too, so the
+	// extracted program's data covers them and a consumer proves them instead of assuming them. Transitive (a copied
+	// target is scanned in turn), at most refDepth rounds and refBudget added bytes.
+	{
+		added := 0
+		frontier := spans
+		for round := 0; round < refDepth && len(frontier) > 0; round++ {
+			var next []span
+			for _, sp := range frontier {
+				sec, ok := b.sectionOf(sp.start)
+				if !ok || sec.Writable || sec.Exec || sec.NoBits || sec.Name == ".gopclntab" {
+					continue
+				}
+				for a := (sp.start + 7) &^ 7; a+16 <= sp.end && a+16 <= sec.End(); a += 8 {
+					off := a - sec.Addr
+					ptr := binary.LittleEndian.Uint64(sec.data[off:])
+					n := binary.LittleEndian.Uint64(sec.data[off+8:])
+					if n == 0 || n > maxRefString {
+						continue
+					}
+					ts, ok := b.sectionOf(ptr)
+					if !ok || ts.Writable || ts.Exec || ts.NoBits || ts.Name == ".gopclntab" || ptr+n > ts.End() {
+						continue
+					}
+					if added+int(n) > refBudget || !looksLikeText(ts, ptr, n) {
+						continue
+					}
+					covered := false
+					for _, o := range spans {
+						if ptr >= o.start && ptr+n <= o.end {
+							covered = true
+							break
+						}
+					}
+					if covered {
+						continue
+					}
+					added += int(n)
+					t := span{name: fmt.Sprintf("%s+0x%x", ts.Name, ptr-ts.Addr), sec: ts.Name, start: ptr, end: ptr + n}
+					spans = append(spans, t)
+					next = append(next, t)
+				}
+			}
+			frontier = next
 		}
 	}
 	sort.SliceStable(spans, func(i, j int) bool {

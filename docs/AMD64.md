@@ -538,6 +538,7 @@ blockers` works on amd64 binaries, judging each x86asm-found instruction with `J
   discharged by `janus64_disch`: `decide` on closed goals (never `omega` from a possibly
   contradictory context), memory accessibility from local `accessible` facts, and `omega`.
 * `GoABI.DataLoaded.readLE` turns reads of copied `.rodata` into literals, through `listLE`
+* **String headers in copied `.rodata` (U-RODATA-REF, both ISAs, `cmd/janus/data.go`).** When a copied read-only object holds a (pointer, length) pair whose pointer lies in a read-only section and whose `length <= 4096` bytes are UTF-8 text without control characters (a string header, such as the 16-byte header of `"<nil>"`), the target bytes are copied too (transitively, at most 4 rounds and 64 KiB per extraction), so `Program.data` and `DataLoaded` cover them and a consumer proves them. Not followed: a pointer into a writable or code section, a zero or over-long length, and strings with control or invalid-UTF-8 bytes (the text test keeps type-descriptor fields and pointer tables out; a binary-valued string literal is still the consumer's assumption).
   of the data bytes, evaluated by `decide`; `janus64_data hd` does the same as `janus_data`
   (readability of each data segment and a rewrite rule evaluating loads at literal addresses).
 * `Janus.Amd64.TacticExt` (imported by `Janus`) extends the simp sets and adds the pieces the
