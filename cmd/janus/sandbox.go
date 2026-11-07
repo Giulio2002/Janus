@@ -196,6 +196,10 @@ func (s *sandbox) selfTest() error {
 	for _, p := range private {
 		script += "(echo x > " + shQuote(p) + ") 2>/dev/null; "
 	}
+	// Hermetic root (UP4): the result cache, the key files and the home cache must not exist inside.
+	for _, h := range hermeticProbePaths(tmp) {
+		script += "if [ -e " + shQuote(h) + " ]; then echo HOSTVISIBLE " + shQuote(h) + "; fi; "
+	}
 	script += "echo DONE"
 	cmd := s.command(probe, nil, []string{"/bin/sh", "-c", script}, os.Environ())
 	out, err := cmd.CombinedOutput()
@@ -210,6 +214,9 @@ func (s *sandbox) selfTest() error {
 	}
 	if !strings.Contains(string(out), "DONE") {
 		return fmt.Errorf("the sandbox did not run the probe: %s", strings.TrimSpace(string(out)))
+	}
+	if i := strings.Index(string(out), "HOSTVISIBLE"); i >= 0 {
+		return fmt.Errorf("the sandbox is not hermetic: %s", strings.TrimSpace(strings.SplitN(string(out)[i:], "\n", 2)[0]))
 	}
 	if strings.Contains(string(out), "LEAK") {
 		return fmt.Errorf("the sandbox did not make the filesystem read-only")
@@ -252,30 +259,25 @@ func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protec
 	writable := append([]string{workDir}, extraWritable...)
 	switch s.mode {
 	case "bwrap":
-		a := []string{
-			"--unshare-all", "--die-with-parent", "--new-session",
-			"--ro-bind", "/", "/",
-			"--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+		// HERMETIC (UP4): the sandbox starts from an EMPTY root and gets an allowlist of read-only
+		// binds (see hermeticSystemBwrap): the system runtime, the toolchain / LEAN_PATH /
+		// protected trees the caller names, the work directories, a private /tmp, /dev and /proc.
+		// $HOME, ~/.cache, every cache or key directory, /srv, /root and the rest of /etc do not exist
+		// inside, so proof code can neither read the HMAC keys nor behave differently because of a
+		// host file. The environment is allowlisted too (hermeticEnv): no tokens, no HOME.
+		a := []string{"--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL", "--clearenv"}
+		a = append(a, hermeticSystemBwrap()...)
+		a = append(a, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp")
+		for _, e := range hermeticEnv(env) {
+			k, v, _ := strings.Cut(e, "=")
+			a = append(a, "--setenv", k, v)
 		}
-		// Round 3, S2: `--ro-bind / /` also binds the host's live runtime sockets under /run
-		// (/run/docker.sock, the D-Bus system bus, containerd). A *read-only* bind does not stop
-		// a process connecting to a unix socket, and unix sockets are not confined by the network
-		// namespace, so untrusted proof code could reach a privileged daemon and escape. Overmount
-		// /run (and thus /var/run, a symlink to it) with an empty tmpfs; the cache re-bind below
-		// restores any janus dir that happens to live under /run.
-		if _, err := os.Stat("/run"); err == nil {
-			a = append(a, "--tmpfs", "/run")
-		}
-		// The private /tmp would hide any janus directory placed under /tmp (the cache can be
-		// there, e.g. in tests), so re-expose the cache read-only; the writable binds below
-		// then override the work dir. Source paths are resolved on the host.
-		if base := cacheRoot(); base != "" {
-			if _, err := os.Stat(base); err == nil {
-				a = append(a, "--ro-bind", base, base)
-			}
+		ro := append([]string{}, readOnly...)
+		if len(argv) > 0 && filepath.IsAbs(argv[0]) {
+			ro = append(ro, filepath.Dir(argv[0]))
 		}
 	ro:
-		for _, r := range readOnly {
+		for _, r := range ro {
 			for _, w := range writable {
 				if r == w || strings.HasPrefix(r, w+string(filepath.Separator)) {
 					continue ro // stays writable, as before
@@ -291,33 +293,22 @@ func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protec
 		for _, p := range protected {
 			a = append(a, "--ro-bind", p, p)
 		}
-		// The verification-result cache (entries and their HMAC key) is not even visible to
-		// sandboxed code: an empty tmpfs covers it, mounted last (resultcache.go).
-		if rc := resultCacheDir(); rc != "" {
-			if st, err := os.Stat(rc); err == nil && st.IsDir() {
-				a = append(a, "--tmpfs", rc)
-			}
-		}
-		for _, kf := range hiddenKeyFiles() {
-			a = append(a, "--ro-bind", "/dev/null", kf)
-		}
-		// So is the gate-private framework verdict store and its key (verdictstore.go).
-		for _, vd := range privateStoreDirs() {
-			if st, err := os.Stat(vd); err == nil && st.IsDir() {
-				a = append(a, "--tmpfs", vd)
-			}
-		}
-		a = append(a, "--chdir", workDir, "--")
+		// The root tmpfs itself (only mount points and symlinks live in it) becomes read-only.
+		a = append(a, "--remount-ro", "/", "--chdir", workDir, "--")
 		a = append(a, argv...)
 		cmd := s.newCmd(s.bwrap, a...)
-		cmd.Env = env
+		cmd.Env = os.Environ() // bwrap's own environment; the job's is set with --setenv
 		return cmd
 	case "unshare":
+		ro := append([]string{}, readOnly...)
+		if len(argv) > 0 && filepath.IsAbs(argv[0]) {
+			ro = append(ro, filepath.Dir(argv[0]))
+		}
 		args := []string{"-Umrnipf", "--map-root-user", "--mount-proc", "--",
-			"/bin/sh", "-c", unshareScript(workDir, writable, readOnly, protected), "janus-sandbox"}
+			"/bin/sh", "-c", unshareScript(workDir, writable, ro, protected), "janus-sandbox"}
 		args = append(args, argv...)
 		cmd := s.newCmd("unshare", args...)
-		cmd.Env = env
+		cmd.Env = hermeticEnv(env)
 		return cmd
 	default: // "none"
 		cmd := s.newCmd(argv[0], argv[1:]...)
@@ -327,33 +318,61 @@ func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protec
 	}
 }
 
-// unshareRefusedStatus is the exit status of the unshare sandbox script when it cannot make a
-// mount read-only; the self-test then refuses the fallback.
+// unshareRefusedStatus is the exit status of the unshare sandbox script when it cannot build the
+// hermetic root or make a mount read-only; the self-test then refuses the fallback.
 const unshareRefusedStatus = 97
 
+// unshareNewRoot picks the directory on which the unshare fallback mounts the tmpfs that becomes the
+// new root: an existing host directory that contains none of the paths to be bound. "" if none fits.
+func unshareNewRoot(paths []string) string {
+	for _, c := range []string{"/mnt", "/media", "/opt", "/boot", "/home", "/srv", "/var/tmp"} {
+		if st, err := os.Stat(c); err != nil || !st.IsDir() {
+			continue
+		}
+		ok := true
+		for _, p := range paths {
+			p = filepath.Clean(p)
+			if p == c || strings.HasPrefix(p, c+"/") || strings.HasPrefix(c, p+"/") {
+				ok = false
+			}
+		}
+		if ok {
+			return c
+		}
+	}
+	return ""
+}
+
 // unshareScript is the setup script of the unshare fallback, run as root of a new user, mount,
-// network, PID, IPC and UTS namespace (round 2, U1). It matches bubblewrap's confinement:
+// network, PID, IPC and UTS namespace. It builds the SAME hermetic root as the bwrap mode (UP4):
 //
-//  1. every mount visible in the namespace is remounted read-only (not only /: /boot,
-//     /run/user/…, /dev and any other rw mount too), keeping each mount's locked
-//     nosuid/nodev/noexec/atime flags, which a user namespace may not change. A mount that
-//     cannot be made read-only aborts the script with status 97 and the fallback is refused;
-//     mounts below /proc belong to the host procfs hidden by --mount-proc, and mount points
-//     shadowed by a later mount are not reachable, so both are skipped;
-//  2. /tmp and /dev/shm get private tmpfs mounts, so nothing written there reaches the host;
-//  3. the cache (read-only), the extra read-only dirs, the writable dirs and the protected
-//     trees are bound back in that order. Those under the host /tmp are bound from the hidden
-//     original through the shell's working directory (`cd /tmp` before the tmpfs mount;
-//     relative sources with --no-canonicalize resolve against it).
+//  1. a fresh tmpfs becomes the new root; the system runtime (hermeticSystemPaths, hermeticEtc), the
+//     extra read-only dirs, the writable dirs and the protected trees are bound into it (each bind
+//     remounted read-only unless writable, keeping the mount's locked flags), plus /dev nodes, a
+//     proc mount, a private /tmp and /dev/shm. Nothing else of the host is bound;
+//  2. pivot_root makes it the root and the old root is detached, so no host path (home, caches,
+//     key directories, /srv, /run sockets) is reachable any more;
+//  3. the proof runs with an empty capability set and no way to get one back (RT 9: no umount of
+//     a mask, no remount). Without setpriv or pivot_root the fallback is refused.
 //
-// $@ carries argv, so its elements need no quoting.
+// Any failure aborts with status 97 (fail-closed). $@ carries argv, so its elements need no quoting.
 func unshareScript(workDir string, writable, readOnly, protected []string) string {
 	var sb strings.Builder
 	w := func(line string) { sb.WriteString(line + "\n") }
+	all := append(append(append([]string{workDir}, writable...), readOnly...), protected...)
+	nr := unshareNewRoot(all)
 	w("set -e")
-	// remnt ro|rw TARGET MOUNTINFO-TARGET: change only the read-only flag of the mount at
-	// TARGET, passing its other per-mount flags back (the last mountinfo entry for it is the
-	// visible one).
+	w(fmt.Sprintf(`fail() { echo "janus-sandbox: $1" >&2; exit %d; }`, unshareRefusedStatus))
+	w(`command -v setpriv >/dev/null 2>&1 || fail "setpriv is needed to drop the namespace capabilities"`)
+	w(`command -v pivot_root >/dev/null 2>&1 || fail "pivot_root is needed to build the hermetic root"`)
+	if nr == "" {
+		w(`fail "no directory is available for the new root"`)
+		return sb.String()
+	}
+	// The job's PATH is restored just before exec; the setup uses the system one.
+	w(`JANUS_JOB_PATH=$PATH; PATH=/usr/sbin:/usr/bin:/sbin:/bin`)
+	// remnt ro|rw TARGET MOUNTINFO-TARGET: change only the read-only flag of the mount at TARGET,
+	// passing its other per-mount flags back (the last mountinfo entry for it is the visible one).
 	w("remnt() {")
 	w(`  o=""`)
 	w(`  while read -r _ _ _ _ mp opts _; do [ "$mp" = "$3" ] && o=$opts; done < /proc/self/mountinfo`)
@@ -361,35 +380,10 @@ func unshareScript(workDir string, writable, readOnly, protected []string) strin
 	w(`  mount -o "remount,bind,$1${o:+,$o}" "$2" "$2"`)
 	w("}")
 	w("mount --make-rprivate /")
-	w("while read -r _ _ _ _ mp _; do")
-	w(`  t=$(printf '%b' "$mp")`)
-	w(`  case "$t" in /proc/*) continue ;; esac`)
-	w(`  remnt ro "$t" "$mp" 2>/dev/null || {`)
-	w(`    mountpoint -q "$t" 2>/dev/null || continue`)
-	w(fmt.Sprintf(`    echo "janus-sandbox: cannot make the mount $t read-only" >&2; exit %d; }`, unshareRefusedStatus))
-	w("done < /proc/self/mountinfo")
-	w("if [ -d /tmp ]; then cd /tmp; mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp; fi")
-	w("if [ -d /dev/shm ]; then mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /dev/shm; fi")
-	// Round 3, S2: overmount /run with an empty tmpfs so the host's live runtime sockets
-	// (/run/docker.sock, the D-Bus system bus, containerd) are not reachable from untrusted
-	// proof code (a read-only remount does not stop a connect() to a unix socket). Skip it only
-	// when a path janus must bind back lives under /run, which the tmpfs would hide; those paths
-	// are normally under the home cache, not /run.
-	underRun := func(p string) bool {
-		p = filepath.Clean(p)
-		return p == "/run" || strings.HasPrefix(p, "/run/")
-	}
-	runSafe := !underRun(cacheRoot())
-	for _, p := range append(append(append([]string{}, writable...), readOnly...), protected...) {
-		if underRun(p) {
-			runSafe = false
-		}
-	}
-	if runSafe {
-		w("if [ -d /run ]; then mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run; fi")
-	}
-	// bind P (ro or rw); strict: failure aborts (set -e) instead of continuing.
-	bind := func(p string, rw, strict bool) {
+	q := shQuote(nr)
+	w("mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs " + q)
+	// bind P mode: a bind of the host path P at the same path in the new root.
+	bind := func(p string, rw bool) {
 		p = filepath.Clean(p)
 		st, err := os.Stat(p)
 		if err != nil {
@@ -399,63 +393,70 @@ func unshareScript(workDir string, writable, readOnly, protected []string) strin
 		if rw {
 			mode = "rw"
 		}
-		q := shQuote(p)
-		tail := " 2>/dev/null || true"
-		if strict {
-			tail = ""
+		dst := nr + p
+		if st.IsDir() {
+			w("mkdir -p " + shQuote(dst))
+		} else {
+			w("mkdir -p " + shQuote(filepath.Dir(dst)) + " && : > " + shQuote(dst))
 		}
-		src := q
-		if rel, ok := strings.CutPrefix(p, "/tmp/"); ok && rel != "" {
-			// recreate the mount point in the private tmpfs and bind the original from
-			// the hidden host /tmp (the working directory)
-			if st.IsDir() {
-				w("mkdir -p " + q + tail)
-			} else {
-				w("mkdir -p " + shQuote(filepath.Dir(p)) + " && : > " + q + tail)
+		w("mount --bind " + shQuote(p) + " " + shQuote(dst))
+		w("remnt " + mode + " " + shQuote(dst) + " " + shQuote(mountinfoEscape(dst)))
+	}
+	for _, p := range hermeticSystemPaths {
+		fi, err := os.Lstat(p)
+		if err != nil {
+			continue
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			if t, err := os.Readlink(p); err == nil {
+				w("ln -s " + shQuote(t) + " " + shQuote(nr+p))
 			}
-			src = shQuote("./" + rel)
+			continue
 		}
-		w("mount --no-canonicalize --bind " + src + " " + q + tail)
-		w("remnt " + mode + " " + q + " " + shQuote(mountinfoEscape(p)) + tail)
+		bind(p, false)
 	}
-	if base := cacheRoot(); base != "" {
-		bind(base, false, false)
+	for _, m := range hermeticMasked {
+		if st, err := os.Stat(m); err == nil && st.IsDir() {
+			w("mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs " + shQuote(nr+m))
+		}
 	}
+	for _, e := range hermeticEtc {
+		bind(e, false)
+	}
+	w("mkdir -p " + shQuote(nr+"/proc") + " " + shQuote(nr+"/dev") + " " + shQuote(nr+"/tmp") + " " + shQuote(nr+"/.old"))
+	w("mount -t proc proc " + shQuote(nr+"/proc"))
+	for _, d := range []string{"null", "zero", "full", "random", "urandom", "tty"} {
+		if _, err := os.Stat("/dev/" + d); err == nil {
+			w(": > " + shQuote(nr+"/dev/"+d) + " && mount --bind /dev/" + d + " " + shQuote(nr+"/dev/"+d))
+		}
+	}
+	w("ln -s /proc/self/fd " + shQuote(nr+"/dev/fd") + "; ln -s /proc/self/fd/0 " + shQuote(nr+"/dev/stdin") +
+		"; ln -s /proc/self/fd/1 " + shQuote(nr+"/dev/stdout") + "; ln -s /proc/self/fd/2 " + shQuote(nr+"/dev/stderr"))
+	w("mkdir -p " + shQuote(nr+"/dev/shm") + " && mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs " + shQuote(nr+"/dev/shm"))
+	w("mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs " + shQuote(nr+"/tmp"))
+	ro := append(append([]string{}, readOnly...), []string{}...)
 ro:
-	for _, r := range readOnly {
+	for _, r := range ro {
 		for _, wr := range writable {
 			if r == wr || strings.HasPrefix(r, wr+string(filepath.Separator)) {
 				continue ro // stays writable, as with bwrap
 			}
 		}
-		bind(r, false, false)
+		bind(r, false)
 	}
 	for _, wr := range writable {
-		bind(wr, true, false)
+		bind(wr, true)
 	}
 	for _, p := range protected {
-		// Protected trees must end up read-only: no "|| true" (set -e aborts otherwise).
-		bind(p, false, true)
+		bind(p, false)
 	}
-	// Hide the verification-result cache under an empty tmpfs, as bubblewrap does (strict: the
-	// script stops if it cannot).
-	if st, err := os.Stat(resultCacheDir()); err == nil && st.IsDir() {
-		w("mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs " + shQuote(filepath.Clean(resultCacheDir())))
-	}
-	for _, vd := range privateStoreDirs() {
-		if st, err := os.Stat(vd); err == nil && st.IsDir() {
-			w("mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs " + shQuote(filepath.Clean(vd)))
-		}
-	}
-	for _, kf := range hiddenKeyFiles() {
-		w("mount --bind /dev/null " + shQuote(kf))
-	}
+	w("remnt ro " + q + " " + shQuote(mountinfoEscape(nr)))
+	w("cd " + q)
+	w("pivot_root . .old")
+	w("cd /")
+	w("umount -l /.old")
 	w("cd " + shQuote(workDir))
-	// RT 9: the script runs as root of its user namespace, with every capability. The tmpfs that hides the
-	// result cache (and its HMAC key) is a mount of this namespace, so the proof could `umount` it and read the
-	// key of the ro-bound cache below. Run the proof with an empty capability set and no way to get one back:
-	// no mount, umount or remount is possible any more. Without setpriv the fallback is refused.
-	w(fmt.Sprintf(`command -v setpriv >/dev/null 2>&1 || { echo "janus-sandbox: setpriv is needed to drop the namespace capabilities" >&2; exit %d; }`, unshareRefusedStatus))
+	w(`PATH=$JANUS_JOB_PATH; unset JANUS_JOB_PATH`)
 	w(`exec setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "$@"`)
 	return sb.String()
 }
@@ -484,3 +485,87 @@ func hiddenKeyFiles() []string {
 }
 
 func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// hermeticSystemPaths are the host paths every sandboxed process may read (read-only): the system
+// runtime (libc, the dynamic loader, /bin/sh, git, coreutils). /usr/local and /usr/src are not part
+// of it; /etc contributes only hermeticEtc. A path that does not exist on the host is skipped.
+var hermeticSystemPaths = []string{"/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32"}
+
+// hermeticMasked are directories of hermeticSystemPaths that are covered by an empty tmpfs.
+var hermeticMasked = []string{"/usr/local", "/usr/src"}
+
+// hermeticEtc are the only /etc entries the sandbox sees: the dynamic loader's configuration and
+// the passwd/group/nsswitch/localtime files libc consults.
+var hermeticEtc = []string{"/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d", "/etc/alternatives",
+	"/etc/passwd", "/etc/group", "/etc/nsswitch.conf", "/etc/localtime"}
+
+// hermeticSystemBwrap is the bwrap argument list that builds the system part of the empty root.
+func hermeticSystemBwrap() []string {
+	var a []string
+	for _, p := range hermeticSystemPaths {
+		fi, err := os.Lstat(p)
+		if err != nil {
+			continue
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			if t, err := os.Readlink(p); err == nil {
+				a = append(a, "--symlink", t, p)
+			}
+			continue
+		}
+		a = append(a, "--ro-bind", p, p)
+	}
+	for _, m := range hermeticMasked {
+		if st, err := os.Stat(m); err == nil && st.IsDir() {
+			a = append(a, "--tmpfs", m)
+		}
+	}
+	for _, e := range hermeticEtc {
+		if _, err := os.Stat(e); err == nil {
+			a = append(a, "--ro-bind", e, e)
+		}
+	}
+	return a
+}
+
+// hermeticEnv is the allowlisted environment of a sandboxed process: PATH, the Lean/Lake/janus
+// toolchain variables, the locale, and a HOME that is the private /tmp. Nothing else (tokens, the
+// cache and key directories, user variables) crosses into the sandbox.
+func hermeticEnv(env []string) []string {
+	var out []string
+	for _, e := range env {
+		k, _, ok := strings.Cut(e, "=")
+		if !ok {
+			continue
+		}
+		switch {
+		case k == "PATH", k == "LANG", k == "TZ", k == "TERM", k == "JANUS_LEAN_SYSROOT",
+			strings.HasPrefix(k, "LEAN_"), strings.HasPrefix(k, "LAKE_"), strings.HasPrefix(k, "LC_"),
+			strings.HasPrefix(k, "GIT_"):
+			out = append(out, e)
+		}
+	}
+	return append(out, "HOME=/tmp")
+}
+
+// hermeticProbePaths are host paths that must NOT exist inside the sandbox (the self-test fails if one
+// does): the result cache and the key files, the user's cache and home, secrets in /etc. A path that is
+// an ancestor of (or inside) the probe directory is skipped, as it legitimately appears there.
+func hermeticProbePaths(probeDir string) []string {
+	cands := []string{filepath.Join(cacheRoot(), "v1", "result"), filepath.Join(cacheRoot(), "asl-cache.key"),
+		filepath.Join(cacheRoot(), "asl-cache-key"), "/etc/shadow", "/etc/ssh"}
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		cands = append(cands, filepath.Join(h, ".cache"), filepath.Join(h, ".ssh"), filepath.Join(h, ".bashrc"))
+	}
+	var out []string
+	for _, c := range cands {
+		if _, err := os.Lstat(c); err != nil {
+			continue
+		}
+		if c == probeDir || strings.HasPrefix(probeDir, c+"/") || strings.HasPrefix(c, probeDir+"/") {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}

@@ -974,7 +974,11 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 			env = lakeBuildEnv(env)
 		}
 	}
-	cmd := ws.sb.commandOverlay(ws.Root, []string{ws.Dir}, nil, ws.protected(false), append([]string{ws.lake}, args...), env)
+	var toolRO []string
+	if ws.tc != nil && ws.tc.sysroot != "" {
+		toolRO = append(toolRO, ws.tc.sysroot)
+	}
+	cmd := ws.sb.commandOverlay(ws.Root, []string{ws.Dir}, toolRO, ws.protected(false), append([]string{ws.lake}, args...), env)
 	var out bytes.Buffer
 	all := &lockedBuffer{}
 	cmd.Stdout = io.MultiWriter(&out, all)
