@@ -232,6 +232,14 @@ case "$jobs_n" in ''|*[!0-9]*|0) echo "gate: -j needs a positive number (got '$j
 [ -n "$lanes_n" ] || lanes_n=$((jobs_n + 1))
 case "$lanes_n" in ''|*[!0-9]*|0) echo "gate: --lanes needs a positive number (got '$lanes_n')" >&2; exit 2 ;; esac
 export JANUS_JOBS=$jobs_n
+# The content-keyed store of the embedded framework build (cmd/janus/frameworkstore.go, docs/TESTING.md): the user cache, the Go tests'
+# fixture and every other cache of this host compile the same sources with the same toolchain once each (about 270 s of CPU a time);
+# with the store the first publishes an HMAC-authenticated copy keyed on the sources, lake manifest, toolchain identity and janus
+# binary, and the others restore it (any doubt: a full compile). The warm merge gate uses it; the COLD gate (--cold, the nightly) never
+# does, and --fresh never reads or writes it.
+if [ -z "$cold" ] && [ "${JANUS_ASL_CACHE:-}" != 0 ] && [ -z "${JANUS_FRAMEWORK_STORE+x}" ]; then
+  export JANUS_FRAMEWORK_STORE="${XDG_CACHE_HOME:-$HOME/.cache}/janus-framework-store"
+fi
 # Admission control of every pool (scripts/lib/pool.sh): no new item starts when MemAvailable would fall below
 # the floor (JANUS_GATE_MEM_FLOOR_GIB, default 30) plus one item's estimate (largest recorded peak x1.5, at least 4 GiB)
 _pk="$(autojobs_peak_gib "$sbfile")"

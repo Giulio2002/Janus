@@ -572,6 +572,33 @@ func (fw *framework) build(dir, lake string, targets []string, stampPath string,
 				fw.Source, fw.Sha256[:12], displayPath(dir))
 		}
 	}
+	// The content-keyed store (frameworkstore.go): a cold embedded build is restored from an authentic entry for exactly these
+	// sources, toolchain and janus, and the entry is published after a compile. The key lock makes a second builder wait for the first.
+	var store *frameworkStore
+	var storeKeyHex string
+	if dir != fw.Dir && fw.Source == "embedded" {
+		if st, err := externalFrameworkStore(); err == nil && st != nil {
+			if tc := findToolchainDirect(lake, dir); tc != nil {
+				store, storeKeyHex = st, frameworkStoreKey(fw, tc)
+			}
+		}
+	}
+	if store != nil {
+		if err := os.MkdirAll(filepath.Join(store.dir, "fw"), 0o700); err == nil {
+			if klk, err := lockFileMode(filepath.Join(store.dir, "fw", storeKeyHex+".lock"), false, true); err == nil {
+				defer klk.unlock()
+				if _, err := os.Stat(filepath.Join(dir, ".lake", "build", "lib", "lean", "Janus.olean")); err != nil {
+					if store.restore(storeKeyHex, dir) && progress != nil {
+						fmt.Fprintf(progress, "Restored the Janus framework build from the framework store (key %s).\n", storeKeyHex[:12])
+					}
+				}
+			} else {
+				store = nil
+			}
+		} else {
+			store = nil
+		}
+	}
 	all := append([]string{}, baseTargets...)
 	seen := map[string]bool{}
 	for _, t := range all {
@@ -622,6 +649,9 @@ func (fw *framework) build(dir, lake string, targets []string, stampPath string,
 	}
 	if dir != fw.Dir {
 		touchUse(dir)
+	}
+	if store != nil {
+		store.publish(storeKeyHex, dir)
 	}
 	return nil
 }

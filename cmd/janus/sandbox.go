@@ -121,7 +121,7 @@ func detectSandbox(unsafeNoSandbox bool) (*sandbox, error) {
 // (fail-closed: nothing runs unconfined). It returns "" when no such directory is configured.
 func unshareTmpHint() string {
 	var bad []string
-	for _, p := range []string{cacheRoot(), os.Getenv("JANUS_VERDICT_CACHE")} {
+	for _, p := range append([]string{cacheRoot()}, privateStoreDirs()...) {
 		if p == "" {
 			continue
 		}
@@ -135,7 +135,7 @@ func unshareTmpHint() string {
 	if len(bad) == 0 {
 		return ""
 	}
-	return "; the cache or verdict store " + strings.Join(bad, ", ") + " is under /tmp, /dev/shm or /run, which the unshare fallback hides behind a private tmpfs, so it refuses (fail-closed): move JANUS_CACHE_DIR / JANUS_VERDICT_CACHE elsewhere"
+	return "; the cache or verdict store " + strings.Join(bad, ", ") + " is under /tmp, /dev/shm or /run, which the unshare fallback hides behind a private tmpfs, so it refuses (fail-closed): move JANUS_CACHE_DIR / JANUS_VERDICT_CACHE / JANUS_FRAMEWORK_STORE elsewhere"
 }
 
 // tryInstallBwrap installs bubblewrap with apt when running as root non-interactively. It is a
@@ -302,7 +302,7 @@ func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protec
 			a = append(a, "--ro-bind", "/dev/null", kf)
 		}
 		// So is the gate-private framework verdict store and its key (verdictstore.go).
-		if vd := verdictStoreDir(); vd != "" {
+		for _, vd := range privateStoreDirs() {
 			if st, err := os.Stat(vd); err == nil && st.IsDir() {
 				a = append(a, "--tmpfs", vd)
 			}
@@ -442,7 +442,7 @@ ro:
 	if st, err := os.Stat(resultCacheDir()); err == nil && st.IsDir() {
 		w("mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs " + shQuote(filepath.Clean(resultCacheDir())))
 	}
-	if vd := verdictStoreDir(); vd != "" {
+	for _, vd := range privateStoreDirs() {
 		if st, err := os.Stat(vd); err == nil && st.IsDir() {
 			w("mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs " + shQuote(filepath.Clean(vd)))
 		}
