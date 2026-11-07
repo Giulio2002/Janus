@@ -1,7 +1,7 @@
 import Extracted
 
 /-! Round n11 red team, row N33_P_false_by_design: P := False (the n10 design lets the statement choose P; same gap as N32 without w)
-Expected: Verified. The proof is `Add`'s; the hypotheses are never used, so only the audit decides. -/
+Expected: rejected (U-ICALL-INHABITED: P := False has no inhabitation lemma). The proof is `Add`'s; the hypotheses are never used, so only the audit decides. -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Contracts.ICall
 

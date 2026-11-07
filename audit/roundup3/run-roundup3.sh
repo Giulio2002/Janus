@@ -47,7 +47,7 @@ for f in "$R"/wit/*.lean; do
     out="$("$J" verify "$W/Add" --proof "$f" --theorem Proof.correctness --theorem Proof.Witness.nonvacuous --janus-root "$root" $fl --no-result-cache 2>&1)"
     if printf '%s' "$out" | grep -q '^=== Proof.correctness: verified' || printf '%s' "$out" | grep -q '^=== Proof.Witness.nonvacuous: verified'; then
       printf '%-34s %-20s ACCEPTED   <-- BROKEN\n' "$n" "${fl:-no-flag}"; bad=1
-    elif printf '%s' "$out" | grep -q 'instantiates the runtime contract'; then printf '%-34s %-20s rejected ok (witness sizes)\n' "$n" "${fl:-no-flag}"
+    elif printf '%s' "$out" | grep -qE 'instantiates the runtime contract|U-ICALL-INHABITED'; then printf '%-34s %-20s rejected ok (witness sizes)\n' "$n" "${fl:-no-flag}"
     else printf '%-34s %-20s rejected for ANOTHER reason   <-- BROKEN\n' "$n" "${fl:-no-flag}"; printf '%s\n' "$out" | head -8 | cut -c1-240 | sed 's/^/    /'; bad=1; fi
   done
 done

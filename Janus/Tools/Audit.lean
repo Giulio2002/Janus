@@ -1834,7 +1834,7 @@ unifies with the statement's contract at SOME instantiation of the statement's v
 not be unsatisfiable for every instantiation). Found by statement among the theorems of the non-trusted modules, whose axioms
 must be among propext / Classical.choice / Quot.sound. Returns the names of the lemmas tried when none matches. -/
 def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM (Except String Name) := do
-  let pre := if c == `Janus.Contracts.ICall.ICallContract then `Janus.Contracts.ICall.ICallPre else `Janus.Contracts.ICallAmd64.ICallPre64
+  let pre := if c == `Janus.Contracts.ICall.ICallContract then `Janus.Contracts.ICall.ICallPre else `Janus.Contracts.ICall.ICallPre64
   -- the statement's own variables become mvars: the instantiation is existential
   let args ← args.mapM instantiateMVars
   let fvs : Array FVarId := (args.foldl (fun st a => collectFVars st a) ({} : CollectFVars.State)).fvarIds

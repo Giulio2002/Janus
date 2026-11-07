@@ -28,7 +28,7 @@ Honesty is a statement property. Janus/Tools/Audit.lean `inhabitationLemma` (cal
 module (any name; found by statement, axioms limited to propext/Classical.choice/Quot.sound, checked with collectAxioms) of the form
 
     theorem <name> : ∃ (<vars…>), ∃ s, ICallPre nargs stack above rt P s            -- arm64   (Janus.Contracts.ICall.ICallPre)
-    theorem <name> : ∃ (<vars…>), ∃ s, ICallPre64 nargs stack above rt P s          -- amd64   (Janus.Contracts.ICallAmd64.ICallPre64)
+    theorem <name> : ∃ (<vars…>), ∃ s, ICallPre64 nargs stack above rt P s          -- amd64   (Janus.Contracts.ICall.ICallPre64)
 
 (any leading ∀/∃ binders are instantiated; the statement's own variables — sizes, rt, the variables P mentions — are existential: the contract may
 not be unsatisfiable for EVERY instantiation. nargs/stack/above/rt/P are unified with defeq against the statement's contract, up to those variables.)

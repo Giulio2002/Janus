@@ -74,6 +74,13 @@ theorem hc : ICallContract64 (Extracted.program.link impl) A0 4 16 56 rt0 (fun _
     (fun _ _ => True) (fun _ => trivial)
   exact Summary.of_codeIn64 (codeIn_link64 Extracted.program _ (by decide)) h
 
+/-- UP3 (U-ICALL-INHABITED): the call-site property of the contract of `correctness` is satisfiable at a call state. -/
+theorem inhabited_write : ∃ (stack : Nat) (rt : List (Nat × Nat)) (w ptr len cap : BitVec 64) (s : Janus.Amd64.State),
+    Janus.Contracts.ICall.ICallPre64 4 stack 56 rt (fun sc => sc.regs 0 = w ∧ sc.regs 3 = ptr ∧ sc.regs 1 = len ∧ sc.regs 7 = cap) s :=
+  ⟨16, Janus.Contracts.ICallSat.rt0, 0x600000, 0x500000, 3, 3, { Janus.Contracts.ICallSatAmd64.wstate with regs := fun i => if i = 4 then 0x1800#64 else if i = 0 then 0x600000#64 else if i = 3 then 0x500000#64 else if i = 1 then 3#64 else if i = 7 then 3#64 else 0#64 },
+    ⟨by decide, by decide, by decide, by decide, by decide⟩, by decide,
+    by show Janus.Contracts.Outside 0x1800 56 Janus.Contracts.ICallSat.rt0; simp [Janus.Contracts.ICallSat.rt0], rfl, rfl, rfl, rfl⟩
+
 theorem hret : RetAddr (Extracted.program.link impl) ret := RetAddr.of_check (by decide)
 
 theorem setup : CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry
