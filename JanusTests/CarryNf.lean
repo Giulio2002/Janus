@@ -81,28 +81,28 @@ example (x0 x1 y0 y1 : Nat) (hx0 : x0 < 18446744073709551616) (hx1 : x1 < 184467
     (hy0 : y0 < 18446744073709551616) (hy1 : y1 < 18446744073709551616) :
     (decide (18446744073709551616 ≤ x1 + y1 + (decide (18446744073709551616 ≤ x0 + y0)).toNat)).toNat =
       (x0 + 18446744073709551616 * x1 + (y0 + 18446744073709551616 * y1)) / 340282366920938463463374607431768211456 := by
-  janus_carry_simp
+  janus_carry_simp_b
   janus_carry
 
 /-- A `subs`/`sbcs` no-borrow flag `decide (b ≤ a)` is a floor. -/
 example (a b : Nat) (ha : a < 18446744073709551616) (hb : b < 18446744073709551616) (h : (decide (b ≤ a)).toNat = 1) :
     b ≤ a := by
-  janus_carry_simp at h
+  janus_carry_simp_b at h
   omega
 
 /-- `ngc` of a flag and negated flag tests become equations. -/
 example (c : Nat) (hc : c ≤ 1) (h : ¬ c = 0) : c = 1 := by
-  janus_carry_simp at h
+  janus_carry_simp_b at h
   exact h
 
 example (c : Nat) (hc : c ≤ 1) (h : ¬ (1 - c = 0)) : c = 0 := by
-  janus_carry_simp at h
+  janus_carry_simp_b at h
   omega
 
 example (c : Nat) (hc : c ≤ 1) :
     (18446744073709551616 - (0 % 18446744073709551616 + 18446744073709551615 % 18446744073709551616 + c) % 18446744073709551616) %
       18446744073709551616 = 1 - c := by
-  janus_carry_simp
+  janus_carry_simp_b
 
 /-- `mod_cases4`: two reductions of the operands and a final one. -/
 example (S E M : Nat) (h : S = E + 3 * M) (hE : E < M) : S % M = E :=
