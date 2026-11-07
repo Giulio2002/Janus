@@ -17,7 +17,7 @@ theorem addWithCarry_fst_toNat (a b : BitVec 64) (c : Bool) :
     (addWithCarry a b c).1.toNat = (a.toNat + b.toNat + c.toNat) % 2 ^ 64 := by
   simp only [addWithCarry, BitVec.toNat_ofNat]
 
-theorem addWithCarry_c (a b : BitVec 64) (c : Bool) :
+theorem addWithCarry_c64 (a b : BitVec 64) (c : Bool) :
     (addWithCarry a b c).2.c = decide (2 ^ 64 ≤ a.toNat + b.toNat + c.toNat) := by
   simp only [addWithCarry, BitVec.toNat_ofNat]
   by_cases h : 2 ^ 64 ≤ a.toNat + b.toNat + c.toNat

@@ -309,12 +309,23 @@ func TestCacheGCStressConsumerVerifies(t *testing.T) {
 		}
 	}()
 	start := time.Now()
-	for round := 0; round < 2; round++ {
+	// The merge gate runs ONE round of four concurrent verifications under the collector; the nightly gate (JANUS_NIGHTLY=1)
+	// runs the full two (the second round meets the entries the first left and the collector emptied, a stronger race).
+	// The shorter variant is announced as REDUCED-COVERAGE in the gate's report (scripts/gotest-shards.sh).
+	rounds := 1
+	if os.Getenv("JANUS_NIGHTLY") == "1" {
+		rounds = 2
+	} else {
+		t.Logf("REDUCED-COVERAGE: TestCacheGCStressConsumerVerifies ran 1 round of 4 concurrent verifications under the collector; JANUS_NIGHTLY=1 runs 2 rounds")
+	}
+	for round := 0; round < rounds; round++ {
 		var procs []*janusProc
 		for i, a := range [][]string{add, max, add, max} {
 			procs = append(procs, &janusProc{name: fmt.Sprintf("round %d verify#%d", round, i), args: a, wait: time.Duration(i) * 400 * time.Millisecond})
 		}
+		rt0 := time.Now()
 		runConcurrently(bin, env, procs)
+		t.Logf("round %d: 4 concurrent verifications under the collector: %.1fs", round, time.Since(rt0).Seconds())
 		for _, p := range procs {
 			if p.code != 0 || !strings.Contains(p.out, `"theorem"`) || strings.Contains(p.out, "is not a module") {
 				t.Errorf("%s failed under the collector (exit %d):\n%s", p.name, p.code, p.out)
@@ -323,7 +334,7 @@ func TestCacheGCStressConsumerVerifies(t *testing.T) {
 	}
 	stop.Store(true)
 	wg.Wait()
-	t.Logf("%d collections (%d leased entries skipped) during 8 verifications: %.1fs", gcRuns.Load(), gcSkipped.Load(), time.Since(start).Seconds())
+	t.Logf("%d collections (%d leased entries skipped) during %d verifications: %.1fs", gcRuns.Load(), gcSkipped.Load(), 4*rounds, time.Since(start).Seconds())
 	if gcRuns.Load() < 3 {
 		t.Errorf("only %d collections ran", gcRuns.Load())
 	}

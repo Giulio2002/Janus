@@ -66,7 +66,7 @@ if command -v qemu-aarch64 >/dev/null; then
 fi
 
 echo "== unit rows (go test)"
-(cd cmd/janus && memguard_run -n go-test -- go test -timeout 60m -run 'TestStubKind|TestRound6StatementNames' . >/dev/null 2>&1) ||
+(cd cmd/janus && . "$root/audit/lib/gotest-row.sh" && gotest_row round6-stubkind memguard_run -n go-test -- go test -timeout 60m -run 'TestStubKind|TestRound6StatementNames' .) ||
   { echo "  >>> TestStubKind/TestRound6StatementNames failed"; broken+=(gotest); }
 
 if [ ${#broken[@]} -gt 0 ]; then echo; echo "BROKEN: ${broken[*]}"; exit 1; fi

@@ -96,7 +96,7 @@ macro "janus_carry_disch" : tactic =>
 changes. Opt-in: `janus64_run` does not use it. -/
 macro "janus_carry_simp" loc:(Lean.Parser.Tactic.location)? : tactic =>
   `(tactic| simp (disch := janus_carry_disch) only [Janus.Amd64.subFlags_fst_toNat_ofNat, Janus.Amd64.borrow64_toNat, Janus.Amd64.borrow64_in_toNat, Nat.reducePow,
-      Janus.Arm64.addWithCarry_fst_toNat, Janus.Arm64.addWithCarry_c, Janus.Arm64.dec_le_div, Janus.Arm64.dec_add_div,
+      Janus.Arm64.addWithCarry_fst_toNat, Janus.Arm64.addWithCarry_c64, Janus.Arm64.dec_le_div, Janus.Arm64.dec_add_div,
       Janus.Arm64.ngc_flag, Janus.Arm64.flag_mod, Janus.Arm64.sbc_num, Janus.Arm64.not_sub_flag, Janus.Arm64.not_flag, Bool.toNat_false] $[$loc]?)
 
 end Janus.Tactic

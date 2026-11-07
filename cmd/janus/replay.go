@@ -31,8 +31,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // coreRoots are the module roots shipped with the Lean toolchain: trusted, never replayed.
@@ -399,16 +401,20 @@ func importGraph(rows [][]string) map[string][]string {
 	return g
 }
 
-// replayParallel bounds how many leanchecker processes one replay runs at once. Each process
-// replays one target (a module and its name-prefix descendants): leanchecker imports a separate
-// environment per target, and inside one process every import after the first copies the
-// already-mapped .olean files instead of mapping them, so one process per target is faster and
-// holds one environment at a time. A large closure (a Mathlib import) is still one process per
-// root, as before. At most two run at once (memory: each holds up to LEAN_NUM_THREADS environments).
+// replayParallel bounds how many leanchecker processes one replay of the modules of a proof closure runs
+// at once. Each process replays one target (a module and its name-prefix descendants): leanchecker imports
+// a separate environment per target, and inside one process every import after the first copies the
+// already-mapped .olean files instead of mapping them, so one process per target is faster and holds one
+// environment at a time. The targets are independent (a module's check depends only on its own bytes and
+// those of its imports), so they run concurrently: $JANUS_REPLAY_WORKERS (default 4, capped at
+// maxReplayWorkers), no more than the cores, and no more than the memory fits (replaySizing).
 func replayParallel() int {
-	n := runtime.NumCPU()
-	if n > 2 {
-		n = 2
+	n, _ := replaySizing(replayWorkers(), effectiveMemLimit(), guardLimitBytes(), currentHeadroom())
+	if c := runtime.NumCPU(); n > c {
+		n = c
+	}
+	if n < 1 {
+		n = 1
 	}
 	return n
 }
@@ -478,7 +484,17 @@ func (p *replayPlan) replay(checker string, run func(argv ...string) (string, er
 	}
 	outs := make([]string, len(targets))
 	errs := make([]error, len(targets))
-	sem := make(chan struct{}, replayParallel())
+	width := replayParallel()
+	if os.Getenv("JANUS_TIMINGS") != "" {
+		t0 := time.Now()
+		defer func() {
+			fmt.Fprintf(os.Stderr, "janus-timing: replay of %d target(s) at %d at once %.1fs\n", len(targets), width, time.Since(t0).Seconds())
+		}()
+	}
+	if batched := replayBatches(len(targets), width); batched > 0 {
+		return p.replayBatched(checker, run, targets, covers, batched)
+	}
+	sem := make(chan struct{}, width)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	for i, t := range targets {
@@ -519,6 +535,125 @@ func (p *replayPlan) replay(checker string, run func(argv ...string) (string, er
 		}
 	}
 	return "", nil
+}
+
+// replayBatches is the number of leanchecker processes that share nTargets targets (0: one process per
+// target). A process start, with the import of the proof's whole closure, costs seconds, which dominates
+// the replay of the many small modules of a proof; leanchecker replays several targets in one process, each
+// in its own task, so the targets are dealt out to a few processes ($JANUS_REPLAY_BATCH: the number of
+// processes, default the width, 0 or 1 target per process disables).
+func replayBatches(nTargets, width int) int {
+	n := width
+	if v, err := strconv.Atoi(os.Getenv("JANUS_REPLAY_BATCH")); err == nil {
+		if v <= 0 {
+			return 0
+		}
+		n = v
+	}
+	if n > nTargets/2 {
+		n = nTargets / 2
+	}
+	if n < 1 {
+		return 0
+	}
+	return n
+}
+
+// replayBatched replays targets with n leanchecker processes, each given an interleaved share of the
+// targets with -v. A process that exits 0 must have reported `replaying <m>` exactly once for every
+// module its targets cover (leanchecker may report more descendants of a target, which only adds checking);
+// anything else fails the replay, as does any process that fails. Passing targets are recorded as before.
+func (p *replayPlan) replayBatched(checker string, run func(argv ...string) (string, error), targets []string, covers map[string][]string, n int) (string, error) {
+	shares := make([][]string, n)
+	for i, t := range targets {
+		shares[i%n] = append(shares[i%n], t)
+	}
+	outs := make([]string, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for i := range shares {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			// the per-target locks of the share, taken in the order of their names (no two processes
+			// wait for each other)
+			type lk struct {
+				key string
+				t   string
+			}
+			var lks []lk
+			for _, t := range shares[i] {
+				lks = append(lks, lk{p.lockKey(covers[t]), t})
+			}
+			sort.Slice(lks, func(a, b int) bool { return lks[a].key < lks[b].key })
+			if p.cacheOn {
+				for _, l := range lks {
+					defer lockReplayKey(l.key)()
+				}
+			}
+			var todo []string
+			for _, t := range shares[i] {
+				if p.allCachedNow(covers[t]) {
+					mu.Lock()
+					p.cached = append(p.cached, covers[t]...)
+					mu.Unlock()
+					continue
+				}
+				todo = append(todo, t)
+			}
+			if len(todo) == 0 {
+				return
+			}
+			out, err := run(append([]string{checker, "-v"}, todo...)...)
+			if err != nil {
+				outs[i], errs[i] = out, err
+				return
+			}
+			got := map[string]int{}
+			for _, mm := range replayingLineRE.FindAllStringSubmatch(out, -1) {
+				got[mm[1]]++
+			}
+			for _, t := range todo {
+				for _, m := range covers[t] {
+					if got[m] != 1 {
+						outs[i], errs[i] = out, fmt.Errorf("the replay of %s did not report module %s exactly once (%d times)", t, m, got[m])
+						return
+					}
+				}
+			}
+			mu.Lock()
+			if p.done == nil {
+				p.done = map[string]bool{}
+			}
+			for _, t := range todo {
+				for _, m := range covers[t] {
+					p.done[m] = true
+				}
+			}
+			mu.Unlock()
+			for _, t := range todo {
+				p.record(covers[t])
+			}
+		}(i)
+	}
+	wg.Wait()
+	sort.Strings(p.cached)
+	for i := range shares {
+		if errs[i] != nil {
+			return outs[i], errs[i]
+		}
+	}
+	return "", nil
+}
+
+// lockKey is the name of the replay lock of a set of modules (see lockTarget).
+func (p *replayPlan) lockKey(mods []string) string {
+	h := sha256.New()
+	for _, m := range mods {
+		fmt.Fprintf(h, "%q %q\n", m, p.keys[m])
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // lockTarget takes an exclusive lock named by the cache keys of mods (with the cache on), so

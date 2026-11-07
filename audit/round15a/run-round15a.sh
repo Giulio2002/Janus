@@ -25,6 +25,7 @@ row() { # NAME reason
 }
 row ctl 'Stage: non-vacuity'; row plift 'non-Prop binder'; row sub 'non-Prop binder'
 row nonempty 'round 10 V1'; row inpre 'Stage: non-vacuity'; row inconc 'Stage: non-vacuity'
-memcap go test -count=1 -run 'TestRound15a' ./cmd/janus >/dev/null 2>&1 || broken+=("R1")
+. "$root/audit/lib/gotest-row.sh"
+gotest_row round15a-R1 memcap go test -count=1 -timeout 60m -run 'TestRound15a' ./cmd/janus || broken+=("R1")
 [ ${#broken[@]} -gt 0 ] && { echo "round 15a: BROKEN rows: ${broken[*]}"; exit 1; }
 echo "round 15a: all rows as expected"
