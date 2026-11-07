@@ -200,3 +200,66 @@ theorem slicebytetostringLive64_satisfiable_copy (st : Nat) : ∃ (impl : List J
     decide
 
 end Janus.Contracts.LiveStubSbtsSatAmd64
+
+namespace Janus.Contracts.LiveStubAmd64
+
+open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janus.Contracts.Toy
+
+/-- The amd64 twin of `LiveStub.ret_nomem_finish`: a stub that changes only registers meets the live contract of any runtime. -/
+theorem ret_nomem_finish64 {R : RtInv} {stack : Nat} {sp : RtSpec} {ls : LiveSpec} {L : List (Nat × Nat)} {b : Nat}
+    {s fin : State} (hc : ls.cost (argWords64 s sp.nargs) s.mem = 0)
+    (hf : ls.fresh (argWords64 s sp.nargs) s.mem (fin.regs 0).toNat (fin.regs 3).toNat (fin.regs 1).toNat = [])
+    (hk : ls.keep (argWords64 s sp.nargs) s.mem (fin.regs 0).toNat (fin.regs 3).toNat (fin.regs 1).toNat = [])
+    (hq : sp.post R.rt (argWords64 s sp.nargs) s.mem (fin.regs 0).toNat (fin.regs 3).toNat (fin.regs 1).toNat s.mem)
+    (hinv : R.inv b L (s.regs 14).toNat (view R.rt L s.mem))
+    (hrip : fin.rip = retAddrOf s) (h4 : fin.regs 4 = s.regs 4 + 8#64)
+    (h5 : fin.regs 5 = s.regs 5) (h14 : fin.regs 14 = s.regs 14) (hx : fin.xmm 15 = s.xmm 15)
+    (hfs : fin.fsBase = s.fsBase) (hdf : fin.df = s.df) (hmx : fin.mxcsr = s.mxcsr)
+    (hx87 : fin.x87 = s.x87) (hfw : fin.fpucw = s.fpucw) (hmem : fin.mem = s.mem) :
+    RtLivePost64 stack R sp ls L b s fin := by
+  refine ⟨fin.regs 0, fin.regs 3, fin.regs 1, fin.regs, fin.flags, fin.xmm, fin.ymmHi, fin.mem, fin.zmmHi, fin.kreg,
+    ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · exact Janus.Contracts.AllocSatAmd64.ret_of s fin [fin.regs 0, fin.regs 3, fin.regs 1]
+      hrip h4 h5 h14 (by simp) (by simp) (by simp) hx hfs hdf hmx hx87 hfw
+  · rw [hmem]; exact MemFrame.refl _ _
+  · rw [hmem]; exact hq
+  · rw [hmem]; exact LiveFrame.refl _ _ _
+  · simp [hf, FreshFrom]
+  · simp [liveAdds, hf, hk, LiveApart]
+  · simp only [liveAdds, hf, hk, hc, List.append_nil, Nat.sub_zero]; rw [hmem]; exact hinv
+
+end Janus.Contracts.LiveStubAmd64
+
+/-- The amd64 twin of `janus_live_sbts_empty_buf`: the stub `MOV RBX, RCX; RET` (`[0x48, 0x89, 0xcb, 0xc3]`) at the contract address;
+the empty string with any buffer (`RAX = buf`): `hok : ∀ args, ok a args → ∃ buf p, args = [buf, p, 0]`. -/
+syntax "janus64_live_sbts_empty_buf " term:max : tactic
+set_option hygiene false in
+macro_rules
+  | `(tactic| janus64_live_sbts_empty_buf $hok) => `(tactic| (
+      intro L b s hpc pre
+      obtain ⟨⟨hra, hal, h3, h4, h5⟩, hspec, -, -, -, hokx, hinv, -⟩ := pre
+      obtain ⟨buf, p, hargs⟩ := $hok _ hokx
+      have hargs3 : argWords64 s 3 = [buf, p, 0] := hargs
+      have e0 : (s.regs 0).toNat = buf := by
+        have h1 := congrArg (fun l => l.getD 0 0) hargs3
+        simpa [argWords64, wordsFrom, Janus.Amd64.GoABI.argReg, Janus.Amd64.GoABI.intArgRegs] using h1
+      have e2 : (s.regs 1).toNat = 0 := by
+        have h1 := congrArg (fun l => l.getD 2 0) hargs3
+        simpa [argWords64, wordsFrom, Janus.Amd64.GoABI.argReg, Janus.Amd64.GoABI.intArgRegs] using h1
+      simp only [Janus.Contracts.slicebytetostringSpec, hargs3, Janus.Contracts.arg, List.getD_cons_succ, List.getD_cons_zero] at hspec
+      obtain ⟨hbuf, -, -⟩ := hspec
+      change Janus.Amd64.Tactic.ReachesRet _ _ s _
+      janus64_run
+      refine Janus.Contracts.LiveStubAmd64.ret_nomem_finish64 ?_ ?_ ?_ ?_ hinv (by simp [Janus.Amd64.Tactic.retAddrOf])
+        (by simp [Janus.Amd64.Tactic.setRegF]) (by simp [Janus.Amd64.Tactic.setRegF]) (by simp [Janus.Amd64.Tactic.setRegF])
+        (by simp) (by simp) (by simp) (by simp) (by simp) (by simp) rfl
+      · simp [Janus.Contracts.slicebytetostringLive, hargs3, Janus.Contracts.arg, Janus.Contracts.SbtsLiveSat.roundupsize_zero']
+      · simp [Janus.Contracts.slicebytetostringLive, hargs3, Janus.Contracts.arg, Janus.Amd64.Tactic.setRegF, e2]
+      · simp [Janus.Contracts.slicebytetostringLive, hargs3, Janus.Contracts.arg, Janus.Contracts.range0, Janus.Amd64.Tactic.setRegF, e2]
+      · have hb48 : buf ≤ 2 ^ 48 := by
+          rcases hbuf with h | ⟨h, -⟩
+          · omega
+          · omega
+        simp only [Janus.Contracts.slicebytetostringSpec, hargs3, Janus.Contracts.arg, List.getD_cons_succ, List.getD_cons_zero,
+          Janus.Amd64.Tactic.setRegF]
+        simp [Janus.Spec.strBytes, Janus.Contracts.StrOut, Janus.Contracts.StrAt, e0, e2, hb48]))

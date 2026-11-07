@@ -9,6 +9,7 @@ import JanusTests.LiveStubGrow
 import JanusTests.LiveStubGrowMulti
 import JanusTests.LiveStubConvT
 import JanusTests.LiveStubSbts
+import JanusTests.LiveStubSbtsBuf
 import JanusTests.InternalCall
 import JanusTests.StubAlloc
 import JanusTests.Decode

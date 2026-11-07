@@ -1,4 +1,5 @@
 import Janus.Contracts.LiveStubConvT
+import Janus.Contracts.SbtsLiveSat
 
 /-!
 # `runtime.slicebytetostring` live, non-empty strings, at a program's own address (arm64)
@@ -222,3 +223,72 @@ theorem slicebytetostringLive_satisfiable_copy (st : Nat) : ∃ (impl : List Seg
     decide
 
 end Janus.Contracts.LiveStubSbtsSat
+
+namespace Janus.Contracts.LiveStub
+
+open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Toy
+
+/-- The return of a stub that changes only registers (no memory write, no allocation, cost `0`, nothing added to the live set)
+meets the live contract of any runtime `R`, when the spec's postcondition holds of the unchanged memory with the result
+registers as returned. -/
+theorem ret_nomem_finish {R : RtInv} {stack : Nat} {sp : RtSpec} {ls : LiveSpec} {L : List (Nat × Nat)} {b : Nat}
+    {s fin : State} (hc : ls.cost (argWords s sp.nargs) s.mem = 0)
+    (hf : ls.fresh (argWords s sp.nargs) s.mem (fin.regs 0).toNat (fin.regs 1).toNat (fin.regs 2).toNat = [])
+    (hk : ls.keep (argWords s sp.nargs) s.mem (fin.regs 0).toNat (fin.regs 1).toNat (fin.regs 2).toNat = [])
+    (hq : sp.post R.rt (argWords s sp.nargs) s.mem (fin.regs 0).toNat (fin.regs 1).toNat (fin.regs 2).toNat s.mem)
+    (hinv : R.inv b L (s.regs 28).toNat (view R.rt L s.mem))
+    (hpc : fin.pc = s.regs 30) (hsp : fin.sp = s.sp) (h18 : fin.regs 18 = s.regs 18)
+    (h28 : fin.regs 28 = s.regs 28) (h29 : fin.regs 29 = s.regs 29) (hdz : fin.dczid = s.dczid)
+    (htp : fin.tpidr = s.tpidr) (hfc : fin.fpcr = s.fpcr) (hfs : fin.fpsr = s.fpsr) (hmem : fin.mem = s.mem) :
+    RtLivePost stack R sp ls L b s fin := by
+  refine ⟨fin.regs 0, fin.regs 1, fin.regs 2, fin.regs, fin.flags, fin.vregs, fin.mem, fin.excl, fin.exclPass,
+    retStateX_eq hpc hsp h18 h28 h29 hdz htp hfc hfs ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · intro i hi
+    simp only [List.length_cons, List.length_nil] at hi
+    rcases i with _ | _ | _ | i
+    · rfl
+    · rfl
+    · rfl
+    · omega
+  · rw [hmem]; exact MemFrame.refl _ _
+  · rw [hmem]; exact hq
+  · rw [hmem]; exact LiveFrame.refl _ _ _
+  · simp [hf, FreshFrom]
+  · simp [liveAdds, hf, hk, LiveApart]
+  · simp only [liveAdds, hf, hk, hc, List.append_nil, Nat.sub_zero]; rw [hmem]; exact hinv
+
+end Janus.Contracts.LiveStub
+
+/-- `RtLiveContract linked a 4096 (toyR tys ok) (slicebytetostringSpec st) slicebytetostringLive` for the stub `MOV X1, X2; RET`
+(`[0xaa0203e1, 0xd65f03c0]`) placed at `a`, for the EMPTY string with ANY buffer `buf` (the real wrappers always pass a stack
+buffer): `hok : ∀ args, ok a args → ∃ buf p, args = [buf, p, 0]`. The result is `(buf, 0)`; nothing is written or allocated. -/
+syntax "janus_live_sbts_empty_buf " term:max : tactic
+set_option hygiene false in
+macro_rules
+  | `(tactic| janus_live_sbts_empty_buf $hok) => `(tactic| (
+      intro L b s hpc pre
+      have ⟨⟨h30a, h30b, _, _, _, _, _⟩, _⟩ := pre
+      obtain ⟨-, hspec, -, -, -, hokx, hinv, -⟩ := pre
+      obtain ⟨buf, p, hargs⟩ := $hok _ hokx
+      have hargs3 : argWords s 3 = [buf, p, 0] := hargs
+      have e0 : (s.regs 0).toNat = buf := by
+        have h1 := congrArg (fun l => l.getD 0 0) hargs3
+        simpa [argWords, wordsFrom] using h1
+      have e2 : (s.regs 2).toNat = 0 := by
+        have h1 := congrArg (fun l => l.getD 2 0) hargs3
+        simpa [argWords, wordsFrom] using h1
+      simp only [Janus.Contracts.slicebytetostringSpec, hargs3, Janus.Contracts.arg, List.getD_cons_succ, List.getD_cons_zero] at hspec
+      obtain ⟨hbuf, -, -⟩ := hspec
+      change Janus.Tactic.ReachesRet _ _ s _
+      janus_run
+      refine Janus.Contracts.LiveStub.ret_nomem_finish ?_ ?_ ?_ ?_ hinv rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
+      · simp [Janus.Contracts.slicebytetostringLive, hargs3, Janus.Contracts.arg, Janus.Contracts.SbtsLiveSat.roundupsize_zero']
+      · simp [Janus.Contracts.slicebytetostringLive, hargs3, Janus.Contracts.arg, Janus.Tactic.setReg, e2]
+      · simp [Janus.Contracts.slicebytetostringLive, hargs3, Janus.Contracts.arg, Janus.Contracts.range0, Janus.Tactic.setReg, e2]
+      · have hb48 : buf ≤ 2 ^ 48 := by
+          rcases hbuf with h | ⟨h, -⟩
+          · omega
+          · omega
+        simp only [Janus.Contracts.slicebytetostringSpec, hargs3, Janus.Contracts.arg, List.getD_cons_succ, List.getD_cons_zero,
+          Janus.Tactic.setReg]
+        simp [Janus.Spec.strBytes, Janus.Contracts.StrOut, Janus.Contracts.StrAt, e0, e2, hb48]))

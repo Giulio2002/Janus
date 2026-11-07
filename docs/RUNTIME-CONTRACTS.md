@@ -850,7 +850,7 @@ tactics `janus_live_sbts_empty` / `janus64_live_sbts_empty` (the `RET` stub at t
 Red team: `audit/roundspecbind/attacks/SbtsAddr.lean` (c2 control; a5 forged address, a6 variable address, a7/a8/a9 another spec or
 other live data are rejected) and `JanusTests/LiveStubSbts.lean`. Non-empty strings: `janus_live_sbts n A hok` / `janus64_live_sbts n A hok` (`LiveStubSbts[Amd64].lean`: the stub copies the `n` bytes at `ptr` into a fresh block of
 the toy allocator and returns `(block, n)`; `buf = 0`, `n` a size class — 16, 24, 32, 48, … — `n ≤ A ≤ 64 n`; satisfiability
-`slicebytetostringLive[64]_satisfiable_copy`). Not witnessable on the toy runtime: `n = 1` (the result is the binary's static table, a fact
+`slicebytetostringLive[64]_satisfiable_copy`). The empty string with ANY caller buffer (the real wrappers always pass a stack buffer): `janus_live_sbts_empty_buf` / `janus64_live_sbts_empty_buf` (`hok : ∀ args, ok a args → ∃ buf p, args = [buf, p, 0]`; the stub `MOV X1, X2; RET` / `MOV RBX, RCX; RET`; nothing written or allocated). Not witnessable on the toy runtime: `n = 1` (the result is the binary's static table, a fact
 about its data that no stub can establish for every memory) and the caller's-buffer case (`toyInv` holds heap blocks only, the
 buffer is on the stack): use `n = 0` or a size class `n ≥ 16`.
 
