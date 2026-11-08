@@ -84,4 +84,55 @@ theorem correctness (ptr len cap : BitVec 64) :
     (by simp [setRegF_apply]) (by simp [setRegF_apply]) (by simp [setRegF_apply, xorWords])
     (by simp [setRegF_apply]) (by simp [setRegF_apply]) rfl rfl (by simp [h_df])
 
+namespace Witness
+
+def ret : Nat := 0x200000
+def sp0 : Nat := 0x100000
+def g0 : Nat := 0x300000
+def tls0 : Nat := 0x400000
+def dat : Nat := 0x500000
+
+def bytes (a : Nat) : Byte :=
+  if a = sp0 + 2 then 0x20 else if a = sp0 + 10 then 0x50 else if a = sp0 + 16 then 2
+  else if a = sp0 + 24 then 2 else if a = dat then 5 else if a = dat + 8 then 6 else 0
+
+def s0 : Amd64.State :=
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 sp0 else if i = 14 then BitVec.ofNat 64 g0 else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := ⟨bytes, [⟨sp0 - 0x100, 0x200, true⟩, ⟨g0, 0x100, false⟩, ⟨tls0, 0x100, false⟩, ⟨dat, 0x100, false⟩]⟩,
+    fsBase := BitVec.ofNat 64 (tls0 + 8) }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry
+    [(0x500000 : BitVec 64), 2, 2] 1 s0 :=
+  ⟨rfl, by decide, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> decide,
+   ⟨by decide, by decide⟩, rfl⟩
+
+theorem hpre : Buffer s0 (0x500000 : BitVec 64) (8 * (2 : BitVec 64).toNat) false := by
+  unfold Buffer; decide
+
+/-- The theorem fires: `XorSlice` of the two words `5, 6` at `dat`. -/
+theorem returns : Returns (Extracted.program.withExit ret) s0
+    (fun s' => ABIReturn0 s0 s' ∧
+      (results0 s0 s' 3 1 = [xorWords s0.mem (0x500000 : BitVec 64).toNat (2 : BitVec 64).toNat] ∧
+        Janus.Spec.OnlyWrites s0.mem s'.mem ((s0.regs 4).toNat + 32) 8)) :=
+  correctness 0x500000 2 2 ret hret s0 setup hpre
+
+/-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : Amd64.State) (ptr len cap : BitVec 64),
+    RetAddr Extracted.program ret ∧
+    CallSetup0 (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap] 1 s ∧
+    Buffer s ptr (8 * len.toNat) false ∧
+    Returns (Extracted.program.withExit ret) s
+      (fun s' => ABIReturn0 s s' ∧
+        (results0 s s' 3 1 = [xorWords s.mem ptr.toNat len.toNat] ∧
+          Janus.Spec.OnlyWrites s.mem s'.mem ((s.regs 4).toNat + 32) 8)) :=
+  ⟨ret, s0, 0x500000, 2, 2, hret, setup, hpre, returns⟩
+
+end Witness
+
 end Proof

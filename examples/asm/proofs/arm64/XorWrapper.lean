@@ -113,4 +113,46 @@ theorem correctness (ptr len cap : BitVec 64) :
   janus_run calls [xor_summary]
   simp (disch := omega) only [xorWords_writeLE]
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def sp0 : Nat := 0x100000
+def dat : Nat := 0x300000
+
+def g0 : Nat := 0x200000
+
+def bytes (a : Nat) : Byte := if a = dat then 5 else if a = dat + 8 then 6 else 0
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 dat else if i = 1 then 2 else if i = 2 then 2
+      else if i = 28 then BitVec.ofNat 64 g0 else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩,
+    mem := ⟨bytes, [⟨sp0 - 0x100, 0x200, true⟩, ⟨dat, 0x100, false⟩, ⟨g0, 0x100, false⟩]⟩ }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry
+    [(0x300000 : BitVec 64), 2, 2] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩
+
+theorem hpre : StackOK s0 56 16 ∧ Ptr s0.mem (0x300000 : BitVec 64) (8 * (2 : BitVec 64).toNat) false ∧
+    Disjoint (0x300000 : BitVec 64).toNat (8 * (2 : BitVec 64).toNat) (s0.sp.toNat - 56) 72 := by
+  unfold Janus.Spec.StackOK Janus.Spec.Ptr Janus.Spec.Disjoint
+  refine ⟨⟨by decide, by decide, by decide, by decide⟩, ⟨by decide, by decide⟩, by decide⟩
+
+/-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (ptr len cap : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap] s ∧
+    (StackOK s 56 16 ∧ Ptr s.mem ptr (8 * len.toNat) false ∧
+      Disjoint ptr.toNat (8 * len.toNat) (s.sp.toNat - 56) 72) ∧
+    Returns (Extracted.program.withExit ret) s
+      (fun s' => ABIReturn s s' ∧ s'.regs 0 = xorWords s.mem ptr.toNat len.toNat) :=
+  ⟨ret, s0, 0x300000, 2, 2, hret, setup, hpre, correctness 0x300000 2 2 ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

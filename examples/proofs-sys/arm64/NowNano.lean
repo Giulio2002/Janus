@@ -201,4 +201,61 @@ theorem correctness (rt : List (Nat × Nat)) :
                  simp [BitVec.getLsbD_or, h63] at hbr; done)
   all_goals rw [g4 sec nsec hn (by assumption)]
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def sp0 : Nat := 0x100000
+def g0 : Nat := 0x200000
+
+def s0 : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 g0 else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩,
+    mem := ⟨fun _ => 0, [⟨sp0 - 0x800, 0x1000, true⟩, ⟨g0, 0x1000, false⟩, ⟨startNano, 8, false⟩,
+      ⟨timeLocal, 8, false⟩]⟩ }
+
+def k0 : Kern := {}
+def E0 : KEnv := ⟨[], 1024⟩
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
+  ⟨rfl, rfl, by intro i h; simp at h⟩
+
+set_option maxRecDepth 100000 in
+theorem pre : GuardOK s0 48 ∧ StackOK s0 1128 0 ∧ Outside (s0.sp.toNat - 1128) 1128 [] ∧
+    (s0.regs 28).toNat + 400 ≤ 2 ^ 48 ∧ s0.mem.accessible ((s0.regs 28).toNat + 392) 8 false = true ∧
+    s0.mem.readLE ((s0.regs 28).toNat + 392) 8 = 0 ∧
+    ((s0.regs 28).toNat + 400 ≤ s0.sp.toNat - 1128 ∨ s0.sp.toNat ≤ (s0.regs 28).toNat + 16) ∧
+    s0.mem.accessible startNano 8 false = true ∧ s0.mem.accessible timeLocal 8 false = true := by
+  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
+    by simp only [outside_nil], by decide, by decide, by decide, Or.inl (by decide), by decide, by decide⟩
+
+/-- The theorem fires: `NowNano()` returns the wall-clock reading in nanoseconds. -/
+theorem returns : ReturnsK (Extracted.program.withExit ret) E0
+    (fun s' k' => FFI.ABIReturnC s0 s' ∧ ∃ sec nsec msec mnsec, nsec < 10 ^ 9 ∧
+        k'.trace = k0.trace ++ [.clock 0 sec nsec, .clock 1 msec mnsec] ∧
+        k0.mono ≤ msec * 10 ^ 9 + mnsec ∧ k'.mono = msec * 10 ^ 9 + mnsec ∧
+        s'.regs 0 = BitVec.ofNat 64 (sec * 10 ^ 9 + nsec))
+    (fun _ _ => False) s0 k0 :=
+  correctness [] ret hret s0 k0 setup pre
+
+/-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
+theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (ret : Nat) (s : State) (k : Kern), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧
+    (GuardOK s 48 ∧ StackOK s 1128 0 ∧ Outside (s.sp.toNat - 1128) 1128 rt ∧
+      (s.regs 28).toNat + 400 ≤ 2 ^ 48 ∧ s.mem.accessible ((s.regs 28).toNat + 392) 8 false = true ∧
+      s.mem.readLE ((s.regs 28).toNat + 392) 8 = 0 ∧
+      ((s.regs 28).toNat + 400 ≤ s.sp.toNat - 1128 ∨ s.sp.toNat ≤ (s.regs 28).toNat + 16) ∧
+      s.mem.accessible startNano 8 false = true ∧ s.mem.accessible timeLocal 8 false = true) ∧
+    ReturnsK (Extracted.program.withExit ret) ⟨rt, 1024⟩
+      (fun s' k' => FFI.ABIReturnC s s' ∧ ∃ sec nsec msec mnsec, nsec < 10 ^ 9 ∧
+          k'.trace = k.trace ++ [.clock 0 sec nsec, .clock 1 msec mnsec] ∧
+          k.mono ≤ msec * 10 ^ 9 + mnsec ∧ k'.mono = msec * 10 ^ 9 + mnsec ∧
+          s'.regs 0 = BitVec.ofNat 64 (sec * 10 ^ 9 + nsec))
+      (fun _ _ => False) s k :=
+  ⟨[], ret, s0, k0, hret, setup, pre, returns⟩
+
+end Witness
+
 end Proof

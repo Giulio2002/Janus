@@ -55,4 +55,44 @@ theorem correctness (x y : BitVec 64) :
     apply BitVec.eq_of_toNat_eq
     simp [BitVec.toNat_add]
 
+namespace Witness
+
+def ret : Nat := 0x200000
+def sp0 : Nat := 0x100000
+def g0 : Nat := 0x300000
+def tls0 : Nat := 0x400000
+def dat : Nat := 0x500000
+
+def bytes (a : Nat) : Byte :=
+  if a = sp0 + 2 then 0x20 else if a = sp0 + 8 then 3 else if a = sp0 + 16 then 4 else 0
+
+def s0 : Amd64.State :=
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 sp0 else if i = 14 then BitVec.ofNat 64 g0 else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := ⟨bytes, [⟨sp0 - 0x100, 0x200, true⟩, ⟨g0, 0x100, false⟩, ⟨tls0, 0x100, false⟩, ⟨dat, 0x100, false⟩]⟩,
+    fsBase := BitVec.ofNat 64 (tls0 + 8) }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry [(3 : BitVec 64), 4] 1 s0 :=
+  ⟨rfl, by decide, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> decide,
+   ⟨by decide, by decide⟩, rfl⟩
+
+/-- The theorem fires: `AddAsm(3, 4)` returns `7`. -/
+theorem returns : Returns (Extracted.program.withExit ret) s0
+    (fun s' => ABIReturn0 s0 s' ∧ results0 s0 s' [(3 : BitVec 64), 4].length 1 = [(3 : BitVec 64) + 4]) :=
+  correctness 3 4 ret hret s0 setup trivial
+
+/-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : Amd64.State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup0 (Extracted.program.withExit ret) Extracted.entry [x, y] 1 s ∧ True ∧
+    Returns (Extracted.program.withExit ret) s
+      (fun s' => ABIReturn0 s s' ∧ results0 s s' [x, y].length 1 = [x + y]) :=
+  ⟨ret, s0, 3, 4, hret, setup, trivial, returns⟩
+
+end Witness
+
 end Proof
