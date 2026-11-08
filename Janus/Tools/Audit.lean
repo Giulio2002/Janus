@@ -3262,6 +3262,18 @@ partial def proofHead (val : Expr) (fuel : Nat := 400) : MetaM (Except String Ex
     let v := args[i]!
     let rest := args.extract (i + 1) args.size
     return ← proofHead (mkAppN v rest) (fuel - 1)
+  -- UP3b: an elimination `obtain ⟨w, h⟩ := core; …` (`Exists.rec`/`Exists.casesOn`/`And.rec`/`And.casesOn`) of a lemma whose proof is itself a
+  -- constructor application after unfolding: read the major premise to its head form, then apply the continuation to its components
+  if let .const c _ := f then
+    let elim? : Option (Nat × Nat × Nat) :=   -- (total args before extras, index of the major premise, index of the minor premise)
+      if c == ``Exists.rec then some (5, 4, 3) else if c == ``Exists.casesOn then some (5, 3, 4)
+      else if c == ``And.rec then some (5, 4, 3) else if c == ``And.casesOn then some (5, 3, 4) else none
+    if let some (n, imaj, imin) := elim? then
+      if args.size ≥ n then
+        if let .ok mh ← proofHead args[imaj]! (fuel - 1) then
+          let comps := mh.getAppArgs
+          if comps.size == 4 then
+            return ← proofHead (mkAppN (mkAppN args[imin]! #[comps[2]!, comps[3]!]) (args.extract n args.size)) (fuel - 1)
   -- beta / zeta / projection / iota
   let w ← Meta.whnfCore val
   if w != val then return ← proofHead w (fuel - 1)
