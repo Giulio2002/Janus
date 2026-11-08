@@ -74,3 +74,15 @@ def newmap():
     hMake_dead64 _ _ _⟩
 '''
     run('NewMap',st,ws,pre,conj('MakeSmallSite','runtime.makemap_small',None,'M H'),'⟨wsCall, '+PC_A+', wsCall_pre⟩',DM)
+def insertget():
+    st=HELP64+site('AssignSite','Assign','MapModel (BitVec 64) (BitVec 64)',FT,'RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 3).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 3).toNat f ∧\n    Contracts.Ready64 H M.priv [(s_c.regs 0).toNat, (s_c.regs 3).toNat, (s_c.regs 1).toNat] s_c',extra='(H : Contracts.RtReady) ')
+    st+='\n'+site('Access1Site','Access1','MapModel (BitVec 64) (BitVec 64)',FT,'RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 3).toNat f')
+    ws=wsdef('mapassign_fast64').replace('wsCall','wsCallA')+'\n'+wsdef('mapaccess1_fast64',pcx='BitVec.ofNat 64 cB').replace('wsCall','wsCallB')
+    pre=f'''theorem wsCallA_pre : AssignSite (MC ck64) HAssign AMap.empty wsCallA :=
+  ⟨{RT3%3}, trivial, by decide, mmem64_repC _, hAssign_mmem64 _ _ _⟩
+
+theorem wsCallB_pre : Access1Site (MC ck64) AMap.empty wsCallB :=
+  ⟨{RT3%3}, trivial, (isMap_of_ne (by decide)).2 (mmem64_repC _)⟩
+'''
+    run('InsertGet',st,ws,pre,[conj('AssignSite','runtime.mapassign_fast64',FT,'M H'),conj('Access1Site','runtime.mapaccess1_fast64',FT)],
+        ['⟨AMap.empty, wsCallA, '+PC_A+', wsCallA_pre⟩','⟨AMap.empty, wsCallB, '+PC_B+', wsCallB_pre⟩'],DM)

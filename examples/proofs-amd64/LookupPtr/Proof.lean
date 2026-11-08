@@ -119,15 +119,20 @@ theorem pre0 : pre (ME (BitVec 64)) mv AMap.empty s0 := by
   · unfold Janus.Spec.Disjoint; decide
   · simp only [ME_priv, priv0, outside_cons, outside_nil, and_true]; decide
 
-/-- All hypotheses of `correctness` are satisfiable together, with a non-nil map. -/
-theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec 64))
-    (ret : Nat) (s : State) (m p : BitVec 64) (f : AMap (BitVec 64) (BitVec 64)),
-    M.Laws ∧ Access1 (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.mapaccess1_fast64") M ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, p] s ∧
-    m.toNat ≠ 0 ∧ pre M m f s :=
-  ⟨implAt, ME _, ret, s0, mv, pv, AMap.empty, ME_laws _, model, hret, setup, by decide, pre0⟩
+theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with rip := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+
+/-- The precondition of `Access1`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def Access1Site (M : MapModel (BitVec 64) (BitVec 64)) (f : AMap (BitVec 64) (BitVec 64)) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 3).toNat f
+
+/-- The call state of the `runtime.mapaccess1_fast64` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSatAmd64`, at the contract address. -/
+def wsCall : Janus.Amd64.State := { mstate64 mmem64 (args 7#64 0) with rip := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : Access1Site (ME (BitVec 64)) AMap.empty wsCall :=
+  ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64 rfl _ 3 (by decide) mmem64_zenv mmem64_guard mmem64_ret), trivial, (isMap_of_ne (by decide)).2 (mmem64_rep _)⟩
 
 /-- So the guarantee is reached: the lookup in the empty map gives `0`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
@@ -135,6 +140,19 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
   refine (correctness implAt (ME _) (ME_laws _) model mv pv AMap.empty ret hret s0 setup pre0).mono ?_
   intro s' h
   exact ⟨h.1, by simpa [AMap.empty] using h.2⟩
+
+/-- All hypotheses of `correctness` are satisfiable together, with a non-nil map. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec 64))
+    (ret : Nat) (s : State) (m p : BitVec 64) (f : AMap (BitVec 64) (BitVec 64)),
+    M.Laws ∧ Access1 (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.mapaccess1_fast64") M ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, p] s ∧
+    m.toNat ≠ 0 ∧ pre M m f s ∧
+    (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess1_fast64") ∧ Access1Site M f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (s'.regs 0 = (f p).getD 0) :=
+  ⟨implAt, ME _, ret, s0, mv, pv, AMap.empty, ME_laws _, model, hret, setup, by decide, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, correctness implAt (ME _) (ME_laws _) model mv pv AMap.empty ret hret s0 setup pre0⟩
 
 end Witness
 
