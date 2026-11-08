@@ -118,3 +118,16 @@ theorem wsCall_pre : {nm} R0 Htrue [ID] wsCall := by
     go(isa,'Classify',RTPRE_PC[isa]+'\n'+st+'\n'+ws,[conj(isa,nm,'runtime.interfaceSwitch','R H cs','(cs : List Nat) ')],['⟨[ID], wsCall, rfl, wsCall_pre⟩'],[],
        'correctness implAt R0 R0_laws Htrue model ID td val ret hret s0 setup ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩',
        fix=('pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial, ⟨[ID]','⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩, ⟨[ID]'))
+
+def equal(isa):
+    a,b=('1','2') if isa=='arm64' else ('3','1')
+    nm='EfaceeqSite'
+    st=site(isa,nm,'Efaceeq','(R : IfaceModel) ',f'RTPre R 3 s_c ∧ EqOK R s_c.mem (s_c.regs 0).toNat (s_c.regs {a}).toNat (s_c.regs {b}).toNat')
+    ws=f'''/-- The call state of the `runtime.efaceeq` contract (U-WITNESS-CALLSITE): the stock witness state of `IfaceSat`, at the contract address. -/
+def wsCall : {ST[isa]} := {{ wstate (fun i => if i = 0 then BitVec.ofNat 64 TD else if i = {a} ∨ i = {b} then BitVec.ofNat 64 VAL else 0) with {PC[isa]} := BitVec.ofNat 64 cAddr }}
+
+theorem wsCall_pre : {nm} R0 wsCall :=
+  ⟨rtpre_pc _ (wstate_rtpre _ 3 (by decide)), fun _ => ⟨Or.inl rfl, rfl, by decide, by decide⟩⟩
+'''
+    go(isa,'Equal',RTPRE_PC[isa]+'\n'+st+'\n'+ws,[conj(isa,nm,'runtime.efaceeq','R')],['⟨wsCall, rfl, wsCall_pre⟩'],[],
+       'correctness implAt R0 R0_laws model td val td val ret hret s0 setup pre')
