@@ -29,3 +29,54 @@ def patch(path, defs, sites, st='s', has_returns_conj=False, retproof='returns')
     pr=''.join(f", {p}" for _,p in sites)+f", {retproof}"
     t=head+cj+" "+body[:-1]+pr+"⟩\n"
     open(path,'w').write(t+tail.lstrip('\n') if False else t+tail)
+
+def newobj(name, isa, ty):
+    if isa=='arm64':
+        path=f'examples/proofs/{name}.lean'
+        defs=f'''def cAddr : Nat := Extracted.program.contractAddr "runtime.newobject"
+
+/-- The call state at `runtime.newobject`'s entry (argument `{ty}`, callee `SP` 48 below). -/
+def wsCall : State :=
+  {{ regs := fun i => if i = 0 then BitVec.ofNat 64 tyA else if i = 28 then BitVec.ofNat 64 g0
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (sp0 - 48), pc := BitVec.ofNat 64 cAddr,
+    flags := ⟨false, false, false, false⟩, mem := s0.mem }}
+
+@[reducible] def nwSite (rt : List (Nat × Nat)) (H : RtReady) (s_c : State) : Prop :=
+  NewobjectPre 4096 s_c ∧ Ready H rt [(s_c.regs 0).toNat] s_c
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : nwSite rt H wsCall := by
+  have h := hH
+  have hpt : {ty} = tyA := by unfold tyA; decide
+  rw [hpt] at h
+  refine ⟨⟨⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩,
+    ⟨by decide, by decide⟩, by decide⟩, ?_⟩
+  exact h
+'''
+        c='(∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧\n      nwSite rt H s_c)'
+    else:
+        path=f'examples/proofs-amd64/{name}/Proof.lean'
+        defs=f'''def cAddr : Nat := Extracted.program.contractAddr "runtime.newobject"
+
+/-- The call state at `runtime.newobject`'s entry (argument `{ty}`, callee `SP` 32 below). -/
+def wsCall : Janus.Amd64.State :=
+  {{ regs := fun i => if i = 0 then BitVec.ofNat 64 tyA else if i = 4 then BitVec.ofNat 64 (sp0 - 32)
+      else if i = 14 then BitVec.ofNat 64 g0 else 0,
+    rip := BitVec.ofNat 64 cAddr, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := s0.mem }}
+
+@[reducible] def nwSite (rt : List (Nat × Nat)) (H : RtReady) (s_c : Janus.Amd64.State) : Prop :=
+  NewobjectPre64 4096 s_c ∧ Contracts.Ready64 H rt [(s_c.regs 0).toNat] s_c
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : nwSite rt H wsCall := by
+  have h := hH
+  have hpt : {ty} = tyA := by unfold tyA; decide
+  rw [hpt] at h
+  refine ⟨⟨⟨by decide, by decide, by decide, by decide, by decide⟩,
+    ⟨by decide, by decide⟩, by decide⟩, ?_⟩
+  exact h
+'''
+        c='(∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧\n      nwSite rt H s_c)'
+    patch(path,defs,[(c,'⟨wsCall, rfl, wsCall_pre⟩')])
