@@ -122,6 +122,28 @@ theorem pre0 : pre (MC ck64) HAssign mv kv AMap.empty s0 := by
   · unfold Janus.Spec.Disjoint; decide
   · simp only [MC_priv, priv0, outside_cons, outside_nil, and_true]; decide
 
+theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with rip := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+
+/-- The precondition of `Assign64Ptr`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def Assign64PtrSite (M : MapModel (BitVec 64) (BitVec (8 * 8))) (H : Contracts.RtReady) (f : AMap (BitVec 64) (BitVec (8 * 8))) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 3).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 3).toNat f ∧
+    Contracts.Ready64 H M.priv [(s_c.regs 0).toNat, (s_c.regs 3).toNat, (s_c.regs 1).toNat] s_c
+
+/-- The call state of the `runtime.mapassign_fast64ptr` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSatAmd64`, at the contract address. -/
+def wsCall : Janus.Amd64.State := { mstate64 mmem64 (args kv 0) with rip := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : Assign64PtrSite (MC ck64) HAssign AMap.empty wsCall :=
+  ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64 rfl _ 3 (by decide) mmem64_zenv mmem64_guard mmem64_ret), trivial, by decide, mmem64_repC _, hAssign_mmem64 _ _ _⟩
+
+/-- So the guarantee is reached: the map now holds `VAL ↦ 42`. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (MC ck64).Rep s'.mem MP (AMap.empty.set kv 42#64) :=
+  correctness implAt (MC _) (MC_laws _) HAssign model mv kv v AMap.empty ret hret s0 setup pre0
+    |>.mono fun _ h => ⟨h.1, h.2.1⟩
+
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec 64))
     (H : Contracts.RtReady) (ret : Nat) (s : State) (m k v : BitVec 64) (f : AMap (BitVec 64) (BitVec 64)),
@@ -129,14 +151,11 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec
       (Extracted.program.contractAddr "runtime.mapassign_fast64ptr") 8 M H ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, k, v] s ∧
-    pre M H m k f s :=
-  ⟨implAt, MC _, HAssign, ret, s0, mv, kv, v, AMap.empty, MC_laws _, model, hret, setup, pre0⟩
-
-/-- So the guarantee is reached: the map now holds `VAL ↦ 42`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (MC ck64).Rep s'.mem MP (AMap.empty.set kv 42#64) :=
-  correctness implAt (MC _) (MC_laws _) HAssign model mv kv v AMap.empty ret hret s0 setup pre0
-    |>.mono fun _ h => ⟨h.1, h.2.1⟩
+    pre M H m k f s ∧
+    (∃ (f : AMap (BitVec 64) (BitVec (8 * 8))) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapassign_fast64ptr") ∧ Assign64PtrSite M H f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (M.Rep s'.mem m.toNat (f.set k v) ∧ M.Env s'.mem (s.regs 14)) :=
+  ⟨implAt, MC _, HAssign, ret, s0, mv, kv, v, AMap.empty, MC_laws _, model, hret, setup, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, correctness implAt (MC _) (MC_laws _) HAssign model mv kv v AMap.empty ret hret s0 setup pre0⟩
 
 end Witness
 

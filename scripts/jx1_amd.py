@@ -86,3 +86,30 @@ theorem wsCallB_pre : Access1Site (MC ck64) AMap.empty wsCallB :=
 '''
     run('InsertGet',st,ws,pre,[conj('AssignSite','runtime.mapassign_fast64',FT,'M H'),conj('Access1Site','runtime.mapaccess1_fast64',FT)],
         ['⟨AMap.empty, wsCallA, '+PC_A+', wsCallA_pre⟩','⟨AMap.empty, wsCallB, '+PC_B+', wsCallB_pre⟩'],DM)
+def varfile(fn, site_name, ctr, M, ft, nargs, body, extra, pre_body, addr, cj_extra='M', rterm_override=None):
+    st=HELP64+site(site_name,ctr,M[0],ft,body,extra=extra)
+    ws=wsdef(addr.split('/')[-1],pcx='BitVec.ofNat 64 cAddr',args=M[2])
+    ws=ws.replace('mstate64 mmem64',f'mstate64 {M[3]}')
+    pre=f'theorem wsCall_pre : {site_name} {M[1]} AMap.empty wsCall :=\n  {pre_body}\n'
+    run(fn,st,ws,pre,conj(site_name,addr,ft,cj_extra),'⟨AMap.empty, wsCall, rfl, wsCall_pre⟩')
+RTV=RT3%3
+def has32():
+    varfile('Has32','Access1F32Site','Access1F32',('MapModel (BitVec 32) (BitVec (8 * 1))','(ME1 (BitVec 32))','(args kv 0)','mmem64'),
+      'AMap (BitVec 32) (BitVec (8 * 1))',3,'RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 3).toNat f','',
+      f'⟨{RTV}, trivial, (isMap_of_ne (by decide)).2 mmem64_rep1⟩','runtime.mapaccess1_fast32')
+def insertptr():
+    varfile('InsertPtr','Assign64PtrSite','Assign64Ptr',('MapModel (BitVec 64) (BitVec (8 * 8))','(MC ck64) HAssign','(args kv 0)','mmem64'),
+      'AMap (BitVec 64) (BitVec (8 * 8))',3,'RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 3).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 3).toNat f ∧\n    Contracts.Ready64 H M.priv [(s_c.regs 0).toNat, (s_c.regs 3).toNat, (s_c.regs 1).toNat] s_c','(H : Contracts.RtReady) ',
+      f'⟨{RTV}, trivial, by decide, mmem64_repC _, hAssign_mmem64 _ _ _⟩','runtime.mapassign_fast64ptr','M H')
+def makehint():
+    st=HELP64+'''/-- The precondition of `MakeMap`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def MakeMapSite (M : MapModel (BitVec 64) (BitVec 64)) (H : Contracts.RtReady) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 1).toNat = 0 ∧ Contracts.Ready64 H M.priv [(s_c.regs 0).toNat, (s_c.regs 3).toNat, 0] s_c
+'''
+    ws=wsdef('makemap',mem='mmem64Dead',args='(args 0 0)',pcx='BitVec.ofNat 64 cAddr')
+    pre='''theorem wsCall_pre : MakeMapSite (MC ck64) HMake wsCall :=
+  ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64Dead rfl _ 3 (by decide)
+      (show ZEnv mmem64Dead from mmem64_zenv.writeLE _ (by decide)) mmem64Dead_guard mmem64Dead_ret),
+    trivial, by decide, hMake_dead64 _ _ _⟩
+'''
+    run('MakeHint',st,ws,pre,conj('MakeMapSite','runtime.makemap',None,'M H'),'⟨wsCall, rfl, wsCall_pre⟩')
