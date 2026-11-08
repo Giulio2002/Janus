@@ -57,7 +57,7 @@ def lookup(): mapacc('Lookup','Access2Site','Access2','runtime.mapaccess2_fast64
 def clearmap(): mapacc('ClearMap','ClearSite','Clear','runtime.mapclear',PC_A,'ME (BitVec 64)',nargs=2,derive=DM)
 def lookupptr(): mapacc('LookupPtr','Access1Site','Access1','runtime.mapaccess1_fast64','rfl','ME (BitVec 64)',cA='cAddr')
 def insert():
-    st=HELP64+site('AssignSite','Assign','MapModel (BitVec 64) (BitVec 64)',FT,'RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 3).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 3).toNat f ∧\n    Ready64 H M.priv [(s_c.regs 0).toNat, (s_c.regs 3).toNat, (s_c.regs 1).toNat] s_c',extra='(H : Contracts.RtReady) ')
+    st=HELP64+site('AssignSite','Assign','MapModel (BitVec 64) (BitVec 64)',FT,'RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 3).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 3).toNat f ∧\n    Contracts.Ready64 H M.priv [(s_c.regs 0).toNat, (s_c.regs 3).toNat, (s_c.regs 1).toNat] s_c',extra='(H : Contracts.RtReady) ')
     pre=f'''theorem wsCall_pre : AssignSite (MC ck64) HAssign AMap.empty wsCall :=
   ⟨{RT3%3}, trivial, by decide, mmem64_repC _, hAssign_mmem64 _ _ _⟩
 '''
@@ -65,7 +65,7 @@ def insert():
 def newmap():
     st=HELP64+'''/-- The precondition of `MakeSmall`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
 @[reducible] def MakeSmallSite (M : MapModel (BitVec 64) (BitVec 64)) (H : Contracts.RtReady) (s_c : Janus.Amd64.State) : Prop :=
-  RTPre M 0 s_c ∧ Ready64 H M.priv [] s_c
+  RTPre M 0 s_c ∧ Contracts.Ready64 H M.priv [] s_c
 '''
     ws=wsdef('makemap_small',mem='mmem64Dead',args='(args 0 0)')
     pre='''theorem wsCall_pre : MakeSmallSite (MC ck64) HMake wsCall :=
