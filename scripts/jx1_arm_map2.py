@@ -106,3 +106,17 @@ def lookups():
     (isMap_of_ne (by decide)).2 (mmem_rep _), ⟨a, b, c⟩⟩
 '''
     go2('LookupS',st,ws,pre,conjF('Access1StrSite','runtime.mapaccess1_faststr',FT_S),STD)
+def inserts():
+    st=HELP+site('AssignStrSite','AssignStr','MapModel (Nat × Nat) (BitVec (8 * 8))',FT_S,4,extra_params='(H : RtReady) ',
+      body='RTPre M 4 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 1).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 1).toNat f ∧ StrIn s_c M.depth 4 ∧\n    StrOwned M (s_c.regs 2).toNat (s_c.regs 3).toNat ∧\n    Ready H M.priv [(s_c.regs 0).toNat, (s_c.regs 1).toNat, (s_c.regs 2).toNat, (s_c.regs 3).toNat] s_c')
+    ws='/-- The call state of the `mapassign_faststr` contract (U-WITNESS-CALLSITE): the stock witness state of `MapStrSat`, at the contract address. -/\ndef wsCall : State := { mstate mmem aargs with pc := BitVec.ofNat 64 cAddr }\n'
+    pre='''theorem wsCall_pre : AssignStrSite (MC ckStr) HAssignS AMap.empty wsCall := by
+  refine ⟨rtpre_pc _ (mstate_rtpre _ rfl rfl mmem rfl _ 4 (by decide) mmem_zenv mmem_guard), trivial, by decide,
+    mmem_repC _, ⟨by decide, by decide, ?_⟩, Or.inr (inPriv0 (by decide) (by decide)), ?_, ?_⟩
+  · simp only [calleeStack, outside_cons, outside_nil, and_true]
+    constructor <;> simp [wsCall, mstate, aargs, args, IfaceModel.wsp, SK]
+  · show (rtView priv0 mmem).readLE MP 8 = 0
+    rw [readLE_rtView0 (by decide) (by decide)]; decide
+  · exact Or.inr (Or.inr (by decide))
+'''
+    go2('InsertS',st,ws,pre,conjF('AssignStrSite','runtime.mapassign_faststr',FT_S,'M H'),STD)
