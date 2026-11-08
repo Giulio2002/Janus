@@ -19,7 +19,7 @@ def patch(path, defs, sites, st='s', has_returns_conj=False, retproof='returns',
     # returns statement
     rm=re.search(r'theorem returns :(.*?):=\n',retblk,re.S)
     stmt=rm.group(1)
-    conj=re.sub(r'\bs0\b',st,stmt).strip()
+    conj=re.sub(r'\bs0\b',st,stmt).strip().replace('link implAt','link impl')
     t=t[:nvd]+defs.rstrip()+"\n\n"+retblk.rstrip()+"\n\n"+t[nvd:]
     # nonvacuous: find ':=\n  ⟨' at the end
     k=t.rindex(':=\n  ⟨')
@@ -103,3 +103,68 @@ def runconj_auto(path, subst, link='(Extracted.program.link impl)', st='s'):
     for k,v in subst.items(): body=re.sub(r'\b'+re.escape(k)+r'\b',v,body)
     if st!='s': body=re.sub(r"\bs\b",st,body)
     return f"Returns ({link}.withExit ret) {st} fun s' => ABIReturn {st} s' ∧\n      ({body})"
+
+def rtzero(name, isa, spec, n, kind, sym, ):
+    """zero-operand Rt family (H0, stock wmem). kind: 'concat' | 'sbts' (pre: ⟨Or.inl, ⟨dec, simp⟩, absurd⟩)"""
+    arm = isa=='arm64'
+    path = f'examples/proofs/{name}.lean' if arm else f'examples/proofs-amd64/{name}/Proof.lean'
+    St = 'State' if arm else 'Janus.Amd64.State'
+    pcf = 'pc' if arm else 'rip'
+    pre = 'RtPre' if arm else 'RtPre64'
+    if arm:
+        regs="fun i => if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0"
+        extra="sp := BitVec.ofNat 64 (wsp - 64), pc := BitVec.ofNat 64 cAddr, flags := ⟨false, false, false, false⟩, mem := wmem }"
+        cok="⟨by decide, by decide, by decide, by decide, by decide, by decide, Memory.accessible_mono _ hw (by decide) (by decide)⟩"
+        wsd="argWords"
+    else:
+        regs="fun i => if i = 4 then BitVec.ofNat 64 (wsp - 64) else if i = 14 then BitVec.ofNat 64 wg else 0"
+        extra="rip := BitVec.ofNat 64 cAddr, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := wmem }"
+        cok="⟨by decide, by decide, by decide, by decide, Arm64.Memory.accessible_mono _ hw (by decide) (by decide)⟩"
+        wsd="argWords64"
+    argw = 'argWords' if arm else 'argWords64'
+    ws = 'wstate' 
+    if kind=='concat':
+        pretac=f"""  · intro x hx
+    rw [mem_strPairs_zero _ ha _ _ _ hx]
+    exact ⟨⟨by decide, by simp⟩, fun h => absurd (ha 0) h⟩"""
+        # structure: pre = ⟨Or.inl (ha 0), fun ...⟩
+        prepart=f"⟨Or.inl (ha 0), ?_⟩"
+        reads=f"""  · intro r hr
+    rw [mem_strPairs_zero _ ha _ _ _ hr]
+    exact outside_zero _"""
+        rest=f"{prepart}, ?_,"
+        tacs=pretac+"\n"+reads
+        spec_unfold=''
+    else:
+        rest="?_, ?_,"
+        tacs=f"""  · simp only [{spec_head(spec)}] at ha ⊢
+    rw [{rewr(kind)}]
+    exact ⟨Or.inl rfl, ⟨by decide, by simp⟩, fun h => absurd rfl h⟩
+  · simp only [{spec_head(spec)}] at ha ⊢
+    rw [{rewr2(kind)}]
+    simp [outside_zero]"""
+    defs=f'''def cAddr : Nat := Extracted.program.contractAddr "{sym}"
+
+/-- The call state at `{sym}`'s entry (all operands `0`; the stock witness memory). -/
+def wsCall : {St} :=
+  {{ regs := {regs},
+    {extra}
+
+@[reducible] def rpSite (rt : List (Nat × Nat)) (H : RtReady) (s_c : {St}) : Prop :=
+  {pre} rt 4096 H ({spec}) s_c
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : rpSite rtW H0 wsCall := by
+  have hw : wmem.accessible (wsp - 0x2000) 0x2100 true = true := by decide
+  have ha : ∀ j, arg ({argw} wsCall ({spec}).nargs) j = 0 := fun j => args_zero _ j (by decide)
+  refine ⟨{cok}, {rest} trivial, ready_intro rfl ha⟩
+{tacs}
+'''
+    if kind=='concat':
+        defs=defs.replace("refine ⟨"+cok+", "+rest+" trivial, ready_intro rfl ha⟩","refine ⟨"+cok+", "+rest+" trivial, ready_intro rfl ha⟩")
+    if 'def cAddr' in open(path).read(): defs=defs.split('\n',2)[2]
+    c=f'(∃ s_c : {St}, s_c.{pcf} = BitVec.ofNat 64 (Extracted.program.contractAddr "{sym}") ∧\n      rpSite rt H s_c)'
+    return path,defs,[(c,'⟨wsCall, rfl, wsCall_pre⟩')]
+def spec_head(spec): return spec.split()[0]
+def rewr(kind): return "ha 0, ha 1, ha 2"
+def rewr2(kind): return "ha 1, ha 2"
