@@ -120,3 +120,22 @@ def inserts():
   · exact Or.inr (Or.inr (by decide))
 '''
     go2('InsertS',st,ws,pre,conjF('AssignStrSite','runtime.mapassign_faststr',FT_S,'M H'),STD)
+def lookupstr():
+    FS2='AMap (Nat × Nat) (BitVec 64)'
+    st=site('Access2StrSite','Access2Str','MapModel (Nat × Nat) (BitVec 64)',FS2,2,
+      body='RTPre M 4 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 1).toNat f ∧\n    (s_c.regs 2).toNat + (s_c.regs 3).toNat ≤ 2 ^ 48 ∧ s_c.mem.accessible (s_c.regs 2).toNat (s_c.regs 3).toNat false = true ∧\n    Outside (s_c.regs 2).toNat (s_c.regs 3).toNat (calleeStack s_c M.depth 4)')
+    ws='''/-- The call state of the `mapaccess2_faststr` contract (U-WITNESS-CALLSITE): the stock witness state of `MapStrSat`, at the contract address. -/
+def wsCall : State :=
+  { regs := fun i => if i = 2 then BitVec.ofNat 64 VAL else if i = 3 then 8#64
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 wret else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 cAddr, flags := ⟨false, false, false, false⟩,
+    mem := EqHashModel.wmem }
+'''
+    pre='''theorem wsCall_pre : Access2StrSite MS0 AMap.empty wsCall := by
+  refine ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
+      ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, ?_⟩, trivial,
+      by simp [IsMap, wsCall], by decide, by decide, ?_⟩
+  · simp only [MS0, outside_cons, outside_nil, and_true]; decide
+  · simp only [calleeStack, MS0, outside_cons, outside_nil, and_true]; decide
+'''
+    go2('LookupStr',st,ws,pre,conjF('Access2StrSite','runtime.mapaccess2_faststr',FS2),STD)
