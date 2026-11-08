@@ -2582,3 +2582,9 @@ state `s_c` at the callee's entry with the contract's call precondition (tied va
 show that the caller's path reaches the call with those arguments. A contract that is vacuous ONLY at the arguments of a call no witness run
 takes (an `R` empty only at the caller's real argument values, pinned by the `Ensures` precondition) is accepted (audit/roundup3/known-accepted/KA1).
 Universal pins, size pins, `P`/`keep` pins and an empty `R` are rejected. Post-release: optional `Steps`-prefix reachability witnesses.
+
+## UP3b: what the witness rules guarantee (and total vs partial correctness)
+**`Ensures` (and `EnsuresResults`, `CEnsures`, the Go ABI variants) is TOTAL correctness for the modelled execution**: `Returns p s Q := ∃ fuel s', p.run fuel s = .ok (.returned s') ∧ Q s'`, so from every call state satisfying `pre` the program returns to the caller (it never faults, panics, diverges or exhausts the model) AND satisfies `ABIReturn s s' ∧ post s s'`. Divergence is not a way to satisfy the post: a non-returning run falsifies the statement.
+* **U-WITNESS-RUN** (the witness contains the hypotheses, the pre and `Returns … ABIReturn ∧ post`, supplied by the main theorem): the hypotheses are jointly satisfiable by concrete code and the precondition holds at a concrete state from which a real returning run, meeting the post, exists.
+* **U-WITNESS-CALLSITE** (for each contract hypothesis `∃ s_c, s_c.pc/.rip = entry ∧ <family pre> s_c`, at the same variables): every contract's call precondition is inhabited at the tied instantiation, so no contract hypothesis holds vacuously (`pre` empty, sizes pinned out of range, `P := False`, ...).
+* **KA1 (residual, accepted)**: the witness does not show that the caller's path reaches the call at those arguments. A contract vacuous only at the arguments of a call no witness run takes (`¬ R` at the caller's specific argument values) is accepted. Audit/roundup3/vrows/KA1.lean is the executable row.
