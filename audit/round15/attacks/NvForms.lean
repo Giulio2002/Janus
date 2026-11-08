@@ -69,6 +69,58 @@ the readiness predicate `H`, and proves the contract `hnew` for them. Below, a c
 state of `NewPair(3, 5)` satisfies the whole precondition, `H` included, and the call returns
 the object the theorem describes. -/
 
+theorem alt (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hnew : NewobjectContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b]
+      (fun s => GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
+        Outside (s.sp.toNat - 4144) 4168 rt ∧
+        H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem))
+      (fun s s' => ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+        s'.mem.accessible ptr 16 true = true ∧
+        s'.mem.readLE ptr 8 = a.toNat ∧ s'.mem.readLE (ptr + 8) 8 = b.toNat ∧
+        MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)])) :=
+  correctness impl rt H a b hnew
+
+theorem lam (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hnew : NewobjectContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b]
+      (fun s => GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
+        Outside (s.sp.toNat - 4144) 4168 rt ∧
+        H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem))
+      (fun s s' => ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+        s'.mem.accessible ptr 16 true = true ∧
+        s'.mem.readLE ptr 8 = a.toNat ∧ s'.mem.readLE (ptr + 8) 8 = b.toNat ∧
+        MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)])) :=
+  correctness impl rt H a b hnew
+
+theorem lamWeak (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hnew : NewobjectContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b]
+      (fun s => GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
+        Outside (s.sp.toNat - 4144) 4168 rt ∧
+        H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem))
+      (fun s s' => ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+        s'.mem.accessible ptr 16 true = true ∧
+        s'.mem.readLE ptr 8 = a.toNat ∧ s'.mem.readLE (ptr + 8) 8 = b.toNat ∧
+        MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)])) :=
+  correctness impl rt H a b hnew
+
+theorem weak (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hnew : NewobjectContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b]
+      (fun s => GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
+        Outside (s.sp.toNat - 4144) 4168 rt ∧
+        H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem))
+      (fun s s' => ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+        s'.mem.accessible ptr 16 true = true ∧
+        s'.mem.readLE ptr 8 = a.toNat ∧ s'.mem.readLE (ptr + 8) 8 = b.toNat ∧
+        MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)])) :=
+  correctness impl rt H a b hnew
+
 namespace Witness
 
 janus_alloc_witness types := [pairType]
@@ -124,18 +176,26 @@ theorem pre : GuardOK s0 0 ∧ StackOK s0 4144 24 ∧ Extracted.program.DataLoad
   ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩, dataLoaded,
     by simp only [rt, AllocW.rt, Janus.Contracts.AllocWitness.allocRt, AllocW.tys, outside_cons, outside_nil, List.map]; decide, hH⟩
 
-/-- The hypotheses are satisfiable: an allocator meeting the contract (`hnew`), runtime ranges,
-a readiness predicate, and a call state of `NewPair(3, 5)` that satisfies the precondition. -/
-theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
-    (s : State),
-    NewobjectContract (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
-    (GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
-      Outside (s.sp.toNat - 4144) 4168 rt ∧
-      H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) :=
-  ⟨impl, rt, H, ret, s0, hnew, hret, setup, pre⟩
+def cAddr : Nat := Extracted.program.contractAddr "runtime.newobject"
+
+/-- The call state at `runtime.newobject`'s entry (argument `pairType`, callee `SP` 48 below). -/
+def wsCall : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 tyA else if i = 28 then BitVec.ofNat 64 g0
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (sp0 - 48), pc := BitVec.ofNat 64 cAddr,
+    flags := ⟨false, false, false, false⟩, mem := s0.mem }
+
+@[reducible] def nwSite (rt : List (Nat × Nat)) (H : RtReady) (s_c : State) : Prop :=
+  NewobjectPre 4096 s_c ∧ Ready H rt [(s_c.regs 0).toNat] s_c
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : nwSite rt H wsCall := by
+  have h := hH
+  have hpt : pairType = tyA := by unfold tyA; decide
+  rw [hpt] at h
+  refine ⟨⟨⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩,
+    ⟨by decide, by decide⟩, by decide⟩, ?_⟩
+  exact h
 
 /-- The theorem fires: for this call and this allocator, `NewPair(3, 5)` returns a fresh object in
 `rt` holding 3 and 5. -/
@@ -146,6 +206,25 @@ theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s'
       MemFrame s0.mem s'.mem (rt ++ [(s0.sp.toNat - 4144, s0.sp.toNat + 24)]) :=
   correctness impl rt H 3 5 hnew ret hret s0 setup pre
 
+/-- The hypotheses are satisfiable: an allocator meeting the contract (`hnew`), runtime ranges,
+a readiness predicate, and a call state of `NewPair(3, 5)` that satisfies the precondition. -/
+theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
+    (s : State),
+    NewobjectContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
+    (GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
+      Outside (s.sp.toNat - 4144) 4168 rt ∧
+      H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
+      nwSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+      s'.mem.accessible ptr 16 true = true ∧
+      s'.mem.readLE ptr 8 = (3 : BitVec 64).toNat ∧ s'.mem.readLE (ptr + 8) 8 = (5 : BitVec 64).toNat ∧
+      MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)]) :=
+  ⟨impl, rt, H, ret, s0, hnew, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 /-! ## Round 15: what counts as a non-vacuity witness
 
@@ -156,6 +235,7 @@ auditor like `nonvacuous` (`alt`), also when the precondition is an applied lamb
 that leaves a conjunct of the precondition out (`weak`, `lamWeak`) does not instantiate the theorem;
 `otherMain` has one more hypothesis (`hz : a ≠ b`) that no witness here exhibits. -/
 
+
 theorem alt : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
     (s : State),
     NewobjectContract (Extracted.program.link impl)
@@ -164,8 +244,15 @@ theorem alt : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
     (GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside (s.sp.toNat - 4144) 4168 rt ∧
-      H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) :=
-  ⟨impl, rt, H, ret, s0, hnew, hret, setup, pre⟩
+      H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
+      nwSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+      s'.mem.accessible ptr 16 true = true ∧
+      s'.mem.readLE ptr 8 = (3 : BitVec 64).toNat ∧ s'.mem.readLE (ptr + 8) 8 = (5 : BitVec 64).toNat ∧
+      MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)]) :=
+  ⟨impl, rt, H, ret, s0, hnew, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 theorem lam : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
     (s : State),
@@ -175,8 +262,15 @@ theorem lam : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
     ((fun s : State => GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside (s.sp.toNat - 4144) 4168 rt ∧
-      H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) s) :=
-  ⟨impl, rt, H, ret, s0, hnew, hret, setup, pre⟩
+      H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) s) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
+      nwSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+      s'.mem.accessible ptr 16 true = true ∧
+      s'.mem.readLE ptr 8 = (3 : BitVec 64).toNat ∧ s'.mem.readLE (ptr + 8) 8 = (5 : BitVec 64).toNat ∧
+      MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)]) :=
+  ⟨impl, rt, H, ret, s0, hnew, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 theorem lamWeak : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
     (s : State),
@@ -186,8 +280,15 @@ theorem lamWeak : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtRead
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
     ((fun s : State => GuardOK s 0 ∧ StackOK s 4144 24 ∧
       Outside (s.sp.toNat - 4144) 4168 rt ∧
-      H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) s) :=
-  ⟨impl, rt, H, ret, s0, hnew, hret, setup, ⟨pre.1, pre.2.1, pre.2.2.2⟩⟩
+      H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) s) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
+      nwSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+      s'.mem.accessible ptr 16 true = true ∧
+      s'.mem.readLE ptr 8 = (3 : BitVec 64).toNat ∧ s'.mem.readLE (ptr + 8) 8 = (5 : BitVec 64).toNat ∧
+      MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)]) :=
+  ⟨impl, rt, H, ret, s0, hnew, hret, setup, ⟨pre.1, pre.2.1, pre.2.2.2⟩, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 theorem weak : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
     (s : State),
@@ -196,8 +297,15 @@ theorem weak : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) 
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
     (GuardOK s 0 ∧ StackOK s 4144 24 ∧ Outside (s.sp.toNat - 4144) 4168 rt ∧
-      H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) :=
-  ⟨impl, rt, H, ret, s0, hnew, hret, setup, ⟨pre.1, pre.2.1, pre.2.2.2⟩⟩
+      H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
+      nwSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+      s'.mem.accessible ptr 16 true = true ∧
+      s'.mem.readLE ptr 8 = (3 : BitVec 64).toNat ∧ s'.mem.readLE (ptr + 8) 8 = (5 : BitVec 64).toNat ∧
+      MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)]) :=
+  ⟨impl, rt, H, ret, s0, hnew, hret, setup, ⟨pre.1, pre.2.1, pre.2.2.2⟩, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 
