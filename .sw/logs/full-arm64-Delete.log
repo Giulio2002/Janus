@@ -1,0 +1,41 @@
+=== Proof.correctness: verified ===
+Verified: Proof.correctness
+  Module: example.com/basic (go1.26.0)
+  Entry: example.com/basic.Delete at 0xaae80
+  Binary: artifacts/examples-arm64 (SHA-256 27d22a5e74c1cbbe105dfa3e30229f13a3edaace504353238a9798d58bfec8c2)
+  Proof: examples/proofs/Delete.lean
+  Framework: directory (SHA-256 8bbf90825b94b272b1fbc0fd38793a852c6d9499fbce7393b205bfada4d42be3, 328 files, leanprover/lean4:v4.34.1)
+  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
+  Axioms: Classical.choice, Quot.sound, propext
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Amd64, Janus.Amd64.Bridge, Janus.Amd64.CABI, Janus.Amd64.CarryNorm, Janus.Amd64.Decode, Janus.Amd64.DecodeAVX, Janus.Amd64.DecodeCrypto, Janus.Amd64.DecodeEVEX, … and 316 more; 326 modules; 323 reused from the replay cache)
+  Lean: Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)
+  Role: main theorem (the runtime implementation is a variable of the statement, constrained only by the runtime contracts)
+  Runtime contracts assumed: Janus.Contracts.Map.Delete@runtime.mapdelete_fast64 (not extracted; the statement applies them as hypotheses)
+  Non-vacuity: shown by Proof.Witness.nonvacuous (kernel-checked witness: a concrete state and runtime satisfying the whole precondition, contract hypotheses included)
+  Report: .sw/art/arm64-Delete/verified/Proof.correctness.json
+  Statement:
+    Proof.correctness (impl : List Janus.Segment) (M : Janus.Spec.Map.MapModel (BitVec 64) (BitVec 64)) (hl : M.Laws) (hdel : Janus.Contracts.Map.Delete (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapdelete_fast64") M) (m k : BitVec 64) (f : Janus.Spec.Map.AMap (BitVec 64) (BitVec 64)) : Janus.GoABI.Ensures (Extracted.program.link impl) Extracted.entry [m, k] (fun s => Janus.Contracts.Map.CallerOK M s 48 0 ∧ M.Typ Proof.mapType ∧ Janus.Spec.Map.IsMap M s.mem m.toNat f) fun s s' => Janus.Spec.Map.IsMap M s'.mem m.toNat (f.erase k) ∧ M.Env s'.mem (s.regs 28)
+  Proof-local definitions used by the statement (part of its meaning):
+    Proof.mapType : Nat := Janus.Spec.adrpLdTarget (Extracted.entry + 32) (Janus.Spec.segWord Extracted.program "example.com/basic.Delete" 8) (Janus.Spec.segWord Extracted.program "example.com/basic.Delete" 9) 0
+  Report (also): .sw/art/arm64-Delete/verified.json
+=== Proof.Witness.nonvacuous: verified ===
+Verified: Proof.Witness.nonvacuous
+  Module: example.com/basic (go1.26.0)
+  Entry: example.com/basic.Delete at 0xaae80
+  Binary: artifacts/examples-arm64 (SHA-256 27d22a5e74c1cbbe105dfa3e30229f13a3edaace504353238a9798d58bfec8c2)
+  Proof: examples/proofs/Delete.lean
+  Framework: directory (SHA-256 8bbf90825b94b272b1fbc0fd38793a852c6d9499fbce7393b205bfada4d42be3, 328 files, leanprover/lean4:v4.34.1)
+  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
+  Axioms: Classical.choice, Quot.sound, propext
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Amd64, Janus.Amd64.Bridge, Janus.Amd64.CABI, Janus.Amd64.CarryNorm, Janus.Amd64.Decode, Janus.Amd64.DecodeAVX, Janus.Amd64.DecodeCrypto, Janus.Amd64.DecodeEVEX, … and 316 more; 326 modules; 323 reused from the replay cache)
+  Lean: Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)
+  Role: WITNESS, not a correctness claim: a concrete instance showing its hypotheses and precondition are satisfiable together, for the main theorem Proof.correctness (it uses a concrete runtime implementation; the main theorem must be verified separately)
+  Runtime contracts assumed: Janus.Contracts.Map.Delete@runtime.mapdelete_fast64 (not extracted; the statement applies them as hypotheses)
+  Non-vacuity: this is a witness (it is not a correctness claim)
+  Report: .sw/art/arm64-Delete/verified/Proof.Witness.nonvacuous.json
+  Statement:
+    Proof.Witness.nonvacuous : ∃ impl M ret s, M.Laws ∧ Janus.Contracts.Map.Delete (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapdelete_fast64") M ∧ Janus.GoABI.RetAddr (Extracted.program.link impl) ret ∧ Janus.GoABI.CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 Janus.Contracts.MapModel0.MP, 5] s ∧ (Janus.Contracts.Map.CallerOK M s 48 0 ∧ M.Typ Proof.mapType ∧ Janus.Spec.Map.IsMap M s.mem (BitVec.ofNat 64 Janus.Contracts.MapModel0.MP).toNat Janus.Spec.Map.AMap.empty) ∧ (∃ f s_c, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapdelete_fast64") ∧ Proof.Witness.DeleteSite M f s_c) ∧ Janus.GoABI.Returns ((Extracted.program.link impl).withExit ret) s fun s' => Janus.GoABI.ABIReturn s s' ∧ Janus.Spec.Map.IsMap M s'.mem (BitVec.ofNat 64 Janus.Contracts.MapModel0.MP).toNat (Proof.Witness.emp.erase 5) ∧ M.Env s'.mem (s.regs 28)
+  Proof-local definitions used by the statement (part of its meaning):
+    Proof.Witness.DeleteSite : Janus.Spec.Map.MapModel (BitVec 64) (BitVec 64) → Janus.Spec.Map.AMap (BitVec 64) (BitVec 64) → Janus.Arm64.State → Prop := fun M f s_c => Janus.Contracts.Map.RTPre M 3 s_c ∧ M.Typ (BitVec.toNat (s_c.regs 0)) ∧ Janus.Spec.Map.IsMap M s_c.mem (BitVec.toNat (s_c.regs 1)) f
+    Proof.mapType : Nat := Janus.Spec.adrpLdTarget (Extracted.entry + 32) (Janus.Spec.segWord Extracted.program "example.com/basic.Delete" 8) (Janus.Spec.segWord Extracted.program "example.com/basic.Delete" 9) 0
+    Proof.Witness.emp : Janus.Spec.Map.AMap (BitVec 64) (BitVec 64) := Janus.Spec.Map.AMap.empty

@@ -1,0 +1,48 @@
+=== Proof.correctness: verified ===
+Verified: Proof.correctness
+  Module: example.com/basic (go1.26.0)
+  Entry: example.com/basic.LookupS at 0x4a26a0
+  Binary: artifacts/examples-amd64 (SHA-256 b840cdc7c074eb191a1c54ff6ccc5a053d54f16d5499c8a5e087981ed48ca6f3)
+  Proof: examples/proofs-amd64/LookupS/Proof.lean
+  Framework: directory (SHA-256 3b9800d8688d7862a97cc9188c88e230c8aabae4a84624dc8c0629295fcbfaad, 328 files, leanprover/lean4:v4.34.1)
+  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
+  Axioms: Classical.choice, Quot.sound, propext
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Amd64, Janus.Amd64.Bridge, Janus.Amd64.CABI, Janus.Amd64.CarryNorm, Janus.Amd64.Decode, Janus.Amd64.DecodeAVX, Janus.Amd64.DecodeCrypto, Janus.Amd64.DecodeEVEX, … and 316 more; 326 modules; 323 reused from the replay cache)
+  Lean: Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)
+  Role: main theorem (the runtime implementation is a variable of the statement, constrained only by the runtime contracts)
+  Runtime contracts assumed: Janus.Contracts.MapStr.Access1Str64@runtime.mapaccess1_faststr (not extracted; the statement applies them as hypotheses)
+  Non-vacuity: shown by Proof.Witness.nonvacuous (kernel-checked witness: a concrete state and runtime satisfying the whole precondition, contract hypotheses included)
+  Report: artifacts/amd64/LookupS/verified/Proof.correctness.json
+  Statement:
+    Proof.correctness (impl : List Janus.Amd64.Segment) (M : Janus.Spec.Map.MapModel (Nat × Nat) (BitVec 64)) (hl : M.Laws) (hacc : Janus.Contracts.MapStr.Access1Str64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapaccess1_faststr") 8 M) (m kp kl : BitVec 64) (f : Janus.Spec.Map.AMap (Nat × Nat) (BitVec 64)) : Janus.Amd64.GoABI.Ensures (Extracted.program.link impl) Extracted.entry [m, kp, kl] (Proof.pre M m kp kl f) fun s s' => s'.regs 0 = (f (Janus.Contracts.MapStr.strKey s.mem kp.toNat kl.toNat)).getD 0
+  Proof-local definitions used by the statement (part of its meaning):
+    Proof.window : Janus.Spec.Map.MapModel (Nat × Nat) (BitVec 64) → Janus.Amd64.State → List (Nat × Nat) := fun M s => [(BitVec.toNat (s.regs 4) - (M.depth + 48), BitVec.toNat (s.regs 4) + 24)]
+    Proof.mapType : Nat := Janus.Amd64.Tactic.ripTarget Extracted.program (Extracted.entry + 28)
+    Proof.pre : Janus.Spec.Map.MapModel (Nat × Nat) (BitVec 64) → BitVec 64 → BitVec 64 → BitVec 64 → Janus.Spec.Map.AMap (Nat × Nat) (BitVec 64) → Janus.Amd64.State → Prop := fun M m kp kl f s => Janus.Contracts.MapAmd64.CallerOK M s 48 24 ∧ M.Typ Proof.mapType ∧ Janus.Spec.Map.IsMap M s.mem m.toNat f ∧ kp.toNat + kl.toNat ≤ 2 ^ 48 ∧ Janus.Arm64.Memory.accessible s.mem kp.toNat kl.toNat Bool.false = Bool.true ∧ Janus.Outside kp.toNat kl.toNat (Proof.window M s)
+  Notes (standard Lean meaning that may read unexpectedly; not errors):
+    - in Proof.window: Nat subtraction truncates at 0 (`a - b = 0` whenever `a ≤ b`): `BitVec.toNat (s.regs 4) - (M.depth + 48)`
+  Report (also): artifacts/amd64/LookupS/verified.json
+=== Proof.Witness.nonvacuous: verified ===
+Verified: Proof.Witness.nonvacuous
+  Module: example.com/basic (go1.26.0)
+  Entry: example.com/basic.LookupS at 0x4a26a0
+  Binary: artifacts/examples-amd64 (SHA-256 b840cdc7c074eb191a1c54ff6ccc5a053d54f16d5499c8a5e087981ed48ca6f3)
+  Proof: examples/proofs-amd64/LookupS/Proof.lean
+  Framework: directory (SHA-256 3b9800d8688d7862a97cc9188c88e230c8aabae4a84624dc8c0629295fcbfaad, 328 files, leanprover/lean4:v4.34.1)
+  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
+  Axioms: Classical.choice, Quot.sound, propext
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Amd64, Janus.Amd64.Bridge, Janus.Amd64.CABI, Janus.Amd64.CarryNorm, Janus.Amd64.Decode, Janus.Amd64.DecodeAVX, Janus.Amd64.DecodeCrypto, Janus.Amd64.DecodeEVEX, … and 316 more; 326 modules; 323 reused from the replay cache)
+  Lean: Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)
+  Role: WITNESS, not a correctness claim: a concrete instance showing its hypotheses and precondition are satisfiable together, for the main theorem Proof.correctness (it uses a concrete runtime implementation; the main theorem must be verified separately)
+  Runtime contracts assumed: Janus.Contracts.MapStr.Access1Str64@runtime.mapaccess1_faststr (not extracted; the statement applies them as hypotheses)
+  Non-vacuity: this is a witness (it is not a correctness claim)
+  Report: artifacts/amd64/LookupS/verified/Proof.Witness.nonvacuous.json
+  Statement:
+    Proof.Witness.nonvacuous : ∃ impl M ret s m kp kl f, M.Laws ∧ Janus.Contracts.MapStr.Access1Str64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapaccess1_faststr") 8 M ∧ Janus.Amd64.GoABI.RetAddr (Extracted.program.link impl) ret ∧ Janus.Amd64.GoABI.CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, kp, kl] s ∧ m.toNat ≠ 0 ∧ Proof.pre M m kp kl f s ∧ (∃ f s_c, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess1_faststr") ∧ Proof.Witness.Access1Str64Site M f s_c) ∧ Janus.Amd64.GoABI.Returns ((Extracted.program.link impl).withExit ret) s fun s' => Janus.Amd64.GoABI.ABIReturn s s' ∧ s'.regs 0 = (f (Janus.Contracts.MapStr.strKey s.mem kp.toNat kl.toNat)).getD 0
+  Proof-local definitions used by the statement (part of its meaning):
+    Proof.window : Janus.Spec.Map.MapModel (Nat × Nat) (BitVec 64) → Janus.Amd64.State → List (Nat × Nat) := fun M s => [(BitVec.toNat (s.regs 4) - (M.depth + 48), BitVec.toNat (s.regs 4) + 24)]
+    Proof.mapType : Nat := Janus.Amd64.Tactic.ripTarget Extracted.program (Extracted.entry + 28)
+    Proof.Witness.Access1Str64Site : Janus.Spec.Map.MapModel (Nat × Nat) (BitVec (8 * 8)) → Janus.Spec.Map.AMap (Nat × Nat) (BitVec (8 * 8)) → Janus.Amd64.State → Prop := fun M f s_c => Janus.Contracts.MapAmd64.RTPre M 4 s_c ∧ M.Typ (BitVec.toNat (s_c.regs 0)) ∧ Janus.Spec.Map.IsMap M s_c.mem (BitVec.toNat (s_c.regs 3)) f ∧ Janus.Contracts.MapStr.StrIn64 s_c M.depth 4
+    Proof.pre : Janus.Spec.Map.MapModel (Nat × Nat) (BitVec 64) → BitVec 64 → BitVec 64 → BitVec 64 → Janus.Spec.Map.AMap (Nat × Nat) (BitVec 64) → Janus.Amd64.State → Prop := fun M m kp kl f s => Janus.Contracts.MapAmd64.CallerOK M s 48 24 ∧ M.Typ Proof.mapType ∧ Janus.Spec.Map.IsMap M s.mem m.toNat f ∧ kp.toNat + kl.toNat ≤ 2 ^ 48 ∧ Janus.Arm64.Memory.accessible s.mem kp.toNat kl.toNat Bool.false = Bool.true ∧ Janus.Outside kp.toNat kl.toNat (Proof.window M s)
+  Notes (standard Lean meaning that may read unexpectedly; not errors):
+    - in Proof.window: Nat subtraction truncates at 0 (`a - b = 0` whenever `a ≤ b`): `BitVec.toNat (s.regs 4) - (M.depth + 48)`

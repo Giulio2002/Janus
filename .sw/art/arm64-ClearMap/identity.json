@@ -1,0 +1,60 @@
+{
+  "schema": 2,
+  "extractorVersion": "0.2.0",
+  "binary": "../../../artifacts/examples-arm64",
+  "binarySha256": "27d22a5e74c1cbbe105dfa3e30229f13a3edaace504353238a9798d58bfec8c2",
+  "goVersion": "go1.26.0",
+  "mainModule": "example.com/basic",
+  "goos": "linux",
+  "goarch": "arm64",
+  "symbolSource": "symtab",
+  "symbol": "example.com/basic.ClearMap",
+  "address": "0xab030",
+  "size": 80,
+  "maxFunctions": 64,
+  "functions": [
+    {
+      "name": "example.com/basic.ClearMap",
+      "address": "0xab030",
+      "size": 80,
+      "words": 18
+    }
+  ],
+  "stubs": [
+    {
+      "name": "runtime.morestack_noctxt.abi0",
+      "address": "0x897f0",
+      "kind": "morestack"
+    }
+  ],
+  "contractPatterns": [
+    "runtime.mapclear"
+  ],
+  "contracts": [
+    {
+      "name": "runtime.mapclear",
+      "address": "0x2b6f0",
+      "pinned": true
+    }
+  ],
+  "unresolvedBranches": [],
+  "data": [
+    {
+      "name": ".rodata+0x16300",
+      "address": "0xd6300",
+      "size": 256,
+      "section": ".rodata",
+      "sha256": "4a5376bfa38697883febffd67dc2b13943c475c6238422c2479fb29ea8c96c56"
+    }
+  ],
+  "dataReferences": [
+    {
+      "from": "0xab050",
+      "target": "0xd6300",
+      "kind": "adrp+add"
+    }
+  ],
+  "skippedData": [],
+  "extracted": "Extracted.lean",
+  "extractedSha256": "b9db325fcfceabcdb3add64b592d7e7022325c2b07a3d8a27ea859883e58941f"
+}
