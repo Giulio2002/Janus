@@ -160,3 +160,59 @@ theorem wsCall_pre : {nm} 64 wsCall :=
 '''
     go(isa,'EqFKey',pc_helpers(isa,ns,ns)+'\n'+st+'\n'+ws,[conj(isa,nm,'runtime.memequal','d')],['⟨wsCall, rfl, wsCall_pre⟩'],[],
        'correctness implAt 64 (model 64) k k ret hret s0 setup hpre')
+
+def hash_helpers(isa, ns):
+    s=ST[isa]; f=PC[isa]
+    return f'''theorem hpre_pc {{H : HashModel}} {{d n : Nat}} {{s : {s}}} (a : BitVec 64) (h : {ns}.HPre H d n s) :
+    {ns}.HPre H d n {{ s with {f} := a }} := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c, o1, o2, o3⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c, o1, o2, o3⟩
+'''
+def hashfkey(isa):
+    ns='Janus.Contracts.Hash' if isa=='arm64' else 'Janus.Contracts.HashAmd64'
+    mns='Janus.Contracts.Mem' if isa=='arm64' else 'Janus.Contracts.MemAmd64'
+    r0,r1=('0','1')
+    mx='s_c.fpcr = 0' if isa=='arm64' else 'GoMXCSR s_c'
+    stF=site(isa,'FhashSite','Fhash','(H : HashModel) (d : Nat) ',f'{ns}.HPre H d 2 s_c ∧ {mx} ∧ {mns}.Input s_c d 2 (s_c.regs 0).toNat 8').replace('FhashSite','FhashSite')
+    stS=site(isa,'StrhashSite','Strhash','(H : HashModel) (d : Nat) ',f'{ns}.HPre H d 2 s_c ∧ {mns}.StrInput s_c d 2 (s_c.regs 0).toNat')
+    if isa=='arm64':
+        wF='Janus.Contracts.MemSat.wstate hashArgs'; wS='Janus.Contracts.MemSat.wstate Janus.Contracts.MemSat.strArgs'
+        pF=f"⟨hpre_pc _ (wstate_hPre _ 2 (by decide)), rfl, input_pc _ (hashArgs_input 2 8 (by decide))⟩"
+        pS='''by
+  have h0 : ((Janus.Contracts.MemSat.wstate Janus.Contracts.MemSat.strArgs).regs 0).toNat = STR := by simp [Janus.Contracts.MemSat.wstate, Janus.Contracts.MemSat.strArgs, STR]
+  refine ⟨hpre_pc _ (wstate_hPre _ 2 (by decide)), strinput_pc _ ?_⟩
+  show Janus.Contracts.Mem.StrInput (Janus.Contracts.MemSat.wstate Janus.Contracts.MemSat.strArgs) 64 2 ((Janus.Contracts.MemSat.wstate Janus.Contracts.MemSat.strArgs).regs 0).toNat
+  rw [h0]; exact Janus.Contracts.MemSat.wstate_strInput _ 2'''
+        helpers=pc_helpers(isa,mns,mns).split('theorem input_pc')[1]
+        helpers='theorem input_pc'+helpers
+        helpers+=f'''
+theorem strinput_pc {{d n h : Nat}} {{s : State}} (a : BitVec 64) (h' : {mns}.StrInput s d n h) :
+    {mns}.StrInput {{ s with pc := a }} d n h := ⟨input_pc _ h'.1, input_pc _ h'.2⟩
+'''
+    else:
+        wF='Janus.Contracts.MemSatAmd64.wstate (Janus.Contracts.MemSatAmd64.args IfaceModel.VAL seed 0 0)'
+        wS='Janus.Contracts.MemSatAmd64.wstate (Janus.Contracts.MemSatAmd64.args STR seed 0 0)'
+        pF="⟨hpre_pc _ (wstate_hPre _ 2 (by decide)), by unfold GoMXCSR; decide, input_pc _ (by inp)⟩"
+        pS="⟨hpre_pc _ (wstate_hPre _ 2 (by decide)), strinput_pc _ (by inp)⟩"
+        helpers=pc_helpers(isa,mns,mns).split('theorem input_pc')[1]
+        helpers='theorem input_pc'+helpers
+        helpers+=f'''
+theorem strinput_pc {{d n h : Nat}} {{s : Janus.Amd64.State}} (a : BitVec 64) (h' : {mns}.StrInput s d n h) :
+    {mns}.StrInput {{ s with rip := a }} d n h := ⟨input_pc _ h'.1, input_pc _ h'.2⟩
+'''
+    ws=f'''/-- The call state of the `runtime.f64hash` contract (U-WITNESS-CALLSITE): the stock witness state of `HashSat`, at the contract address. -/
+def wsCallF : {ST[isa]} := {{ {wF} with {PC[isa]} := BitVec.ofNat 64 fAddr }}
+
+theorem wsCallF_pre : FhashSite H0 64 wsCallF :=
+  {pF}
+
+/-- The call state of the `runtime.strhash` contract (U-WITNESS-CALLSITE): the stock witness state of `HashSat`, at the contract address. -/
+def wsCallS : {ST[isa]} := {{ {wS} with {PC[isa]} := BitVec.ofNat 64 sAddr }}
+
+theorem wsCallS_pre : StrhashSite H0 64 wsCallS :=
+  {pS}
+'''
+    go(isa,'HashFKey',hash_helpers(isa,ns)+'\n'+helpers+'\n'+stF+'\n'+stS+'\n'+ws,
+       [conj(isa,'FhashSite','runtime.f64hash','H d'),conj(isa,'StrhashSite','runtime.strhash','H d')],
+       ['⟨wsCallF, rfl, wsCallF_pre⟩','⟨wsCallS, rfl, wsCallS_pre⟩'],[],
+       'correctness implAt H0 H0_laws 64 (modelF 64) (modelS 64) k h0 ret hret s0 setup hpre')
