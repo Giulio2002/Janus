@@ -178,3 +178,21 @@ theorem wsCallN_pre : IterNextSite (MEi (BitVec 64)) MP AMap.empty 0 [] wsCallN 
     cn=f'''(∃ (mp : Nat) (f : {FT}) (k : BitVec 64) (ks : List (BitVec 64)) (s_c : Janus.Amd64.State),
       s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapIterNext") ∧ IterNextSite M mp f k ks s_c)'''
     run('SumValues',st,ws,pre,[cs,cn],['⟨AMap.empty, wsCallS, rfl, wsCallS_pre⟩','⟨MP, AMap.empty, 0, [], wsCallN, rfl, wsCallN_pre⟩'])
+def lookupstr():
+    FS2='AMap (Nat × Nat) (BitVec 64)'
+    st=HELP64+site('Access2Str64Site','Access2Str64','MapModel (Nat × Nat) (BitVec 64)',FS2,
+      'RTPre M 4 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 3).toNat f ∧\n    (s_c.regs 1).toNat + (s_c.regs 7).toNat ≤ 2 ^ 48 ∧ s_c.mem.accessible (s_c.regs 1).toNat (s_c.regs 7).toNat false = true ∧\n    Outside (s_c.regs 1).toNat (s_c.regs 7).toNat (calleeStack s_c M.depth 4)')
+    ws='''/-- The call state of the `mapaccess2_faststr` contract (U-WITNESS-CALLSITE): the stock witness state of `MapStrSatAmd64`, at the contract address. -/
+def wsCall : Janus.Amd64.State :=
+  { regs := fun i => if i = 1 then BitVec.ofNat 64 VAL else if i = 7 then 8#64
+      else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 cAddr, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := Janus.Contracts.EqHashModel.wmem64 }
+'''
+    pre='''theorem wsCall_pre : Access2Str64Site MS0 AMap.empty wsCall := by
+  refine ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide,
+      by decide, rfl, rfl, by decide, ?_⟩, trivial, by simp [IsMap, wsCall], by decide, by decide, ?_⟩
+  · simp only [MS0, outside_cons, outside_nil, and_true]; decide
+  · simp only [Janus.Contracts.MapAmd64.calleeStack, MS0, outside_cons, outside_nil, and_true]; decide
+'''
+    run('LookupStr',st,ws,pre,conj('Access2Str64Site','runtime.mapaccess2_faststr',FS2),'⟨AMap.empty, wsCall, rfl, wsCall_pre⟩')
