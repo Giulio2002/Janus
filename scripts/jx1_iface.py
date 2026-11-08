@@ -22,11 +22,13 @@ RTPRE_PC={'arm64':'''theorem rtpre_pc {n : Nat} {R : IfaceModel} {s : State} (a 
 def conj(isa,site,addr,extra,bind=''):
     s=ST[isa]
     return f'''(∃ {bind}(s_c : {s}), s_c.{PC[isa]} = BitVec.ofNat 64 (Extracted.program.contractAddr "{addr}") ∧ {site} {extra} s_c)'''
-def go(isa,fn,sitedefs,conjs,terms,subs,rterm,extra_post_subs=()):
+def go(isa,fn,sitedefs,conjs,terms,subs,rterm,extra_post_subs=(),fix=None):
     path=P(isa,fn)
     body=post_of(isa,fn,extra_post_subs)
     patch(path, sitedefs, conjs, terms, [('s0','s'),('implAt','impl')], returns_term=rterm,
           rstmt_override="ABIReturn s s' ∧ ("+body+")")
+    if fix:
+        t=open(path).read(); assert fix[0] in t; open(path,'w').write(t.replace(fix[0],fix[1]))
 def site(isa,name,ctr,params,body):
     return f'''/-- The precondition of `{ctr}`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
 @[reducible] def {name} {params}(s_c : {ST[isa]}) : Prop :=
@@ -46,5 +48,52 @@ theorem wsCall_pre : {nm} R0 Htrue wsCall :=
     go(isa,'Box',rp+'\n'+st+'\n'+ws,[conj(isa,nm,'runtime.convT64','R H')],['⟨wsCall, rfl, wsCall_pre⟩'],[],
        'correctness implAt R0 R0_laws Htrue model 42#64 ret hret s0 setup ⟨pre, trivial⟩',
        [('x','(42#64)')])
-if __name__=='__main__':
-    for a in sys.argv[2:]: globals()[sys.argv[1]](a)
+
+def regs_arm(d): return 'fun i => '+' else '.join(d)+' else 0'
+def wsdef(isa, regs, mem, comment, extra_regs=()):
+    """regs: list of 'if i = k then v' items"""
+    if isa=='arm64':
+        items=regs+['if i = 28 then BitVec.ofNat 64 wg','if i = 30 then BitVec.ofNat 64 ret']
+        return f'''/-- {comment} -/
+def wsCall : State :=
+  {{ regs := fun i => {' else '.join(items)} else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 cAddr,
+    flags := ⟨false, false, false, false⟩, mem := {mem} }}
+'''
+    items=regs+['if i = 4 then BitVec.ofNat 64 wsp','if i = 14 then BitVec.ofNat 64 wg']
+    return f'''/-- {comment} -/
+def wsCall : Janus.Amd64.State :=
+  {{ regs := fun i => {' else '.join(items)} else 0,
+    rip := BitVec.ofNat 64 cAddr, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := {mem} }}
+'''
+def rtpre_refine(isa, env, n):
+    if isa=='arm64':
+        return f'⟨{env}, ⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩'
+    return f'⟨{env}, ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩'
+CLOSE='''  all_goals first
+    | decide +kernel
+    | (simp only [R0_priv, outside_cons, outside_nil, and_true]; decide +kernel)
+'''
+def ashasher(isa):
+    t='1' if isa=='arm64' else '3'
+    rd='Ready' if isa=='arm64' else 'Janus.Contracts.Ready64'
+    nm='TypeAssertSite'
+    body=f'''RTPre R 2 s_c ∧ TADescOK R s_c.mem (s_c.regs 0).toNat ∧ (s_c.regs {t}).toNat ≠ 0 ∧
+    ((s_c.regs {t}).toNat ≠ 0 → R.IsType (s_c.regs {t}).toNat ∧
+      (taCanFail s_c.mem (s_c.regs 0).toNat = true ∨
+        (R.itab (taInter s_c.mem (s_c.regs 0).toNat) (s_c.regs {t}).toNat).isSome)) ∧
+    {rd} H R.priv [(s_c.regs 0).toNat, (s_c.regs {t}).toNat] s_c'''
+    st=site(isa,nm,'TypeAssert','(R : IfaceModel) (H : Janus.Contracts.RtReady) ',body)
+    ws=wsdef(isa,['if i = 0 then BitVec.ofNat 64 desc',f'if i = {t} then td'],'mem1',
+      'The call state of the `runtime.typeAssert` contract (U-WITNESS-CALLSITE): `desc` and the type word `td`, in the witness memory.')
+    ws+=f'''
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : {nm} R0 Htrue wsCall := by
+  refine ⟨{rtpre_refine(isa,'mem1_env (wsCall.regs '+('28' if isa=='arm64' else '14')+')',2)},
+    by show TADescOK R0 mem1 (BitVec.ofNat 64 desc).toNat; rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt (by decide)]; exact mem1_desc,
+    ?_, fun _ => ⟨Or.inl rfl, Or.inl ?_⟩, trivial⟩
+{CLOSE}'''
+    go(isa,'AsHasher',RTPRE_PC[isa]+'\n'+st+'\n'+ws,[conj(isa,nm,'runtime.typeAssert','R H')],['⟨wsCall, rfl, wsCall_pre⟩'],[],
+       'correctness implAt R0 R0_laws Htrue model td val ret hret s0 setup ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩',
+       fix=('pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial, ⟨wsCall','⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩, ⟨wsCall'))
