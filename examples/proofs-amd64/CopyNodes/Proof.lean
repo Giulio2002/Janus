@@ -131,18 +131,53 @@ theorem pre : Pre rtW HA 0 0 0 0 s0 := by
     exact Arm64.Memory.accessible_mono _ hw (by decide) (by decide)
   · exact ⟨rfl, trivial⟩
 
-/-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
-    RtContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typedslicecopy")
-      rt 4096 H typedslicecopySpec ∧ RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0, 0, 0] s ∧
-    Pre rt H 0 0 0 0 s :=
-  ⟨implAt, rtW, HA, ret, s0, model, hret, setup, pre⟩
+/-- The call state at `runtime.typedslicecopy`'s entry (`typedslicecopy(node, 0, 0, 0, 0)`). -/
+def wsCall : Janus.Amd64.State :=
+  { regs := (wstate (args [NT, 0, 0, 0, 0])).regs, rip := BitVec.ofNat 64 cAddr,
+    flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := mem0 }
+
+@[reducible] def rpSite (rt : List (Nat × Nat)) (H : RtReady) (s_c : Janus.Amd64.State) : Prop :=
+  RtPre64 rt 4096 H typedslicecopySpec s_c
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : rpSite rtW HA wsCall := by
+  have ha : argWords64 wsCall typedslicecopySpec.nargs = [NT, 0, 0, 0, 0] := by decide
+  have hw : mem0.accessible (wsp - 0x2000) 0x2100 true = true := by decide
+  refine ⟨⟨by decide, by decide, by decide, by decide, Arm64.Memory.accessible_mono _ hw (by decide) (by decide)⟩, ?_, ?_, trivial, ?_⟩
+  · rw [ha]
+    show TypeOK wsCall.mem NT ∧ 0 < 2 ^ 63 ∧ 0 < 2 ^ 63 ∧ 0 + min 0 0 * typSize wsCall.mem NT ≤ 2 ^ 48 ∧
+      (0 < min 0 0 * typSize wsCall.mem NT → wsCall.mem.accessible 0 (min 0 0 * typSize wsCall.mem NT) true = true) ∧
+      Readable wsCall.mem 0 (min 0 0 * typSize wsCall.mem NT)
+    refine ⟨⟨by decide, by decide⟩, by decide, by decide, by decide, fun h => absurd h (by decide), ?_⟩
+    simp [Readable]
+  · rw [ha]; intro r hr
+    simp only [typedslicecopySpec, arg, List.mem_cons, List.not_mem_nil, or_false] at hr
+    rcases hr with rfl | rfl
+    · show Outside NT 16 _
+      simp only [calleeStack64, outside_cons, outside_nil, wsCall]; decide
+    · show Outside 0 (min 0 0 * typSize wsCall.mem NT) _
+      simp only [Nat.min_self, Nat.zero_mul, calleeStack64, outside_cons, outside_nil, wsCall]; decide
+  · exact ready_intro rfl ⟨ha, trivial⟩
 
 /-- The witness call returns: nothing is copied. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat = 0 :=
   (correctness implAt rtW HA 0 0 0 0 0 0 model ret hret s0 setup pre).mono fun _ h => ⟨h.1, by simpa using h.2.1⟩
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
+    RtContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typedslicecopy")
+      rt 4096 H typedslicecopySpec ∧ RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0, 0, 0] s ∧
+    Pre rt H 0 0 0 0 s ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.typedslicecopy") ∧
+      rpSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+      ((s'.regs 0).toNat = min (0 : BitVec 64).toNat (0 : BitVec 64).toNat ∧
+        (∀ i, i < 8 * min (0 : BitVec 64).toNat (0 : BitVec 64).toNat → s'.mem.bytes ((0 : BitVec 64).toNat + i) = s.mem.bytes ((0 : BitVec 64).toNat + i)) ∧
+        MemFrame s.mem s'.mem (rt ++ [((s.regs 4).toNat - 4152, (s.regs 4).toNat + 56),
+          ((0 : BitVec 64).toNat, (0 : BitVec 64).toNat + 8 * min (0 : BitVec 64).toNat (0 : BitVec 64).toNat)])) :=
+  ⟨implAt, rtW, HA, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt rtW HA 0 0 0 0 0 0 model ret hret s0 setup pre⟩
 
 end Witness
 

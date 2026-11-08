@@ -109,7 +109,7 @@ def runconj_auto(path, subst, link='(Extracted.program.link impl)', st='s'):
         j+=1
     body=t[i+len("(fun s s' =>"):j].strip()
     # the body is written with s (pre state) and s'
-    for k,v in subst.items(): body=re.sub(r'\b'+re.escape(k)+r'\b',v,body)
+    for k,v in subst.items(): body=re.sub(r'(?<![\w.])'+re.escape(k)+r'\b',v,body)
     if st!='s': body=re.sub(r"\bs\b",st,body)
     return f"Returns ({link}.withExit ret) {st} fun s' => ABIReturn {st} s' ∧\n      ({body})"
 
