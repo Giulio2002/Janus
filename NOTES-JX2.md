@@ -1,0 +1,4 @@
+# NOTES-JX2 (branch agent/jx2-examples)
+Setup: bin/artifacts symlinks to up3, .lake copy, .sw/ scratch. scripts/jx2-verify.sh ISA Name ; scripts/jx2-multi.sh ISA N1 N2..; scripts/jx2gen.py (patch: moves `returns` before nonvacuous, adds site conjuncts + Returns conjunct; newobj(); runconj_auto()).
+KEY LESSONS: (1) the Site wrapper `@[reducible] def xSite (rt) (H) (s_c)` MUST take rt/H (and other contract params) as arguments and the conjunct uses the BOUND vars `rt H` (not Witness constants). (2) The call-site pre must be ONE conjunct (wrapper). (3) Returns conjunct = main post at the witness's concrete values, from `correctness` statement (runconj_auto). (4) Expected conjuncts from full audit logs: /srv/janus-ops/work.up3c/all/logs/ISA-Name.log.
+DONE+verified both ISAs: MakeSlice NewPair MakeAdder AppendOne AppendPoint.
