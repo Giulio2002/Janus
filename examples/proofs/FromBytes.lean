@@ -75,18 +75,44 @@ theorem pre : Pre rtW H0 0 0 s0 := by
     exact Memory.accessible_mono _ hw (by decide) (by decide)
   · intro j; simp [arg, List.getD_eq_getElem?_getD]; rcases j with _ | _ | _ | j <;> simp
 
-/-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
-    RtContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring")
-      rt 4096 H (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s») ∧ RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0] s ∧ Pre rt H 0 0 s :=
-  ⟨implAt, rtW, H0, ret, s0, model, hret, setup, pre⟩
+/-- The call state at `runtime.slicebytetostring`'s entry (all operands `0`; the stock witness memory). -/
+def wsCall : State :=
+  { regs := (wstate (args [])).regs,
+    sp := BitVec.ofNat 64 (wsp - 64), pc := BitVec.ofNat 64 cAddr, flags := ⟨false, false, false, false⟩, mem := wmem }
+
+@[reducible] def rpSite (rt : List (Nat × Nat)) (H : RtReady) (s_c : State) : Prop :=
+  RtPre rt 4096 H (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s») s_c
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : rpSite rtW H0 wsCall := by
+  have hw : wmem.accessible (wsp - 0x2000) 0x2100 true = true := by decide
+  have ha : ∀ j, arg (argWords wsCall (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s»).nargs) j = 0 := fun j => args_zero _ j (by decide)
+  refine ⟨⟨by decide, by decide, by decide, by decide, by decide, by decide, Memory.accessible_mono _ hw (by decide) (by decide)⟩, ?_, ?_, trivial, ready_intro rfl ha⟩
+  · simp only [slicebytetostringSpec] at ha ⊢
+    rw [ha 0, ha 1, ha 2]
+    exact ⟨Or.inl rfl, ⟨by decide, by simp⟩, fun h => absurd rfl h⟩
+  · simp only [slicebytetostringSpec] at ha ⊢
+    unfold ReadsOutside
+    rw [ha 1, ha 2]
+    simp [outside_zero]
 
 /-- The witness call returns, with the conclusion of `correctness`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ StrOut s'.mem (s'.regs 0).toNat (s'.regs 1).toNat
       (strBytes s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
   correctness implAt rtW H0 0 0 0 model ret hret s0 setup pre
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
+    RtContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring")
+      rt 4096 H (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s») ∧ RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0] s ∧ Pre rt H 0 0 s ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.slicebytetostring") ∧
+      rpSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+    ABIReturn s s' ∧ StrOut s'.mem (s'.regs 0).toNat (s'.regs 1).toNat
+      (strBytes s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
+  ⟨implAt, rtW, H0, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 

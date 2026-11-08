@@ -15,7 +15,16 @@ def patch(path, defs, sites, st='s', has_returns_conj=False, retproof='returns',
     if d>=0 and t[d:ri].rstrip().endswith('-/'): ri=d
     retblk=t[ri:]; t=t[:ri].rstrip()+"\n"
     nv=t.index('theorem nonvacuous')
-    nvd=t.rfind('/--',0,nv)
+    nvd=nv
+    while True:
+        pre_=t[:nvd].rstrip('\n')
+        ls=pre_.rfind('\n')+1
+        line=pre_[ls:]
+        if line.startswith('set_option') and line.endswith(' in'): nvd=ls; continue
+        if pre_.endswith('-/'):
+            d=pre_.rfind('/--')
+            if d>=0 and '\ntheorem' not in pre_[d:] and '\ndef' not in pre_[d:]: nvd=d; continue
+        break
     # returns statement
     rm=re.search(r'theorem returns :(.*?):=\n',retblk,re.S)
     stmt=rm.group(1)
@@ -112,12 +121,12 @@ def rtzero(name, isa, spec, n, kind, sym, ):
     pcf = 'pc' if arm else 'rip'
     pre = 'RtPre' if arm else 'RtPre64'
     if arm:
-        regs="fun i => if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0"
+        regs="(wstate (args [])).regs"
         extra="sp := BitVec.ofNat 64 (wsp - 64), pc := BitVec.ofNat 64 cAddr, flags := ⟨false, false, false, false⟩, mem := wmem }"
         cok="⟨by decide, by decide, by decide, by decide, by decide, by decide, Memory.accessible_mono _ hw (by decide) (by decide)⟩"
         wsd="argWords"
     else:
-        regs="fun i => if i = 4 then BitVec.ofNat 64 (wsp - 64) else if i = 14 then BitVec.ofNat 64 wg else 0"
+        regs="(wstate (args [])).regs"
         extra="rip := BitVec.ofNat 64 cAddr, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := wmem }"
         cok="⟨by decide, by decide, by decide, by decide, Arm64.Memory.accessible_mono _ hw (by decide) (by decide)⟩"
         wsd="argWords64"
@@ -141,6 +150,7 @@ def rtzero(name, isa, spec, n, kind, sym, ):
     rw [{rewr(kind)}]
     exact ⟨Or.inl rfl, ⟨by decide, by simp⟩, fun h => absurd rfl h⟩
   · simp only [{spec_head(spec)}] at ha ⊢
+    unfold ReadsOutside
     rw [{rewr2(kind)}]
     simp [outside_zero]"""
     defs=f'''def cAddr : Nat := Extracted.program.contractAddr "{sym}"
@@ -163,6 +173,7 @@ theorem wsCall_pre : rpSite rtW H0 wsCall := by
     if kind=='concat':
         defs=defs.replace("refine ⟨"+cok+", "+rest+" trivial, ready_intro rfl ha⟩","refine ⟨"+cok+", "+rest+" trivial, ready_intro rfl ha⟩")
     if 'def cAddr' in open(path).read(): defs=defs.split('\n',2)[2]
+    if not arm: defs='open Janus.Contracts.Sat (mem_strPairs_zero outside_zero)\n\n'+defs
     c=f'(∃ s_c : {St}, s_c.{pcf} = BitVec.ofNat 64 (Extracted.program.contractAddr "{sym}") ∧\n      rpSite rt H s_c)'
     return path,defs,[(c,'⟨wsCall, rfl, wsCall_pre⟩')]
 def spec_head(spec): return spec.split()[0]
