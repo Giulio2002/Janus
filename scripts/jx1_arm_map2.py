@@ -75,3 +75,34 @@ def makehint():
 '''
     cj='''(∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makemap") ∧ MakeMapSite M H s_c)'''
     go('MakeHint',st,ws,pre,cj,'⟨wsCall, rfl, wsCall_pre⟩','correctness implAt (MC _) (MC_laws _) HMake model n ret hret s0 setup pre0')
+def auto_rterm(fn):
+    t=open(P+fn+'.lean').read()
+    r=t.index('theorem returns'); blk=t[r:t.index('end Witness',r)]
+    m=re.search(r'correctness .*?\b(pre0|pre)\b',blk,re.S)
+    return re.sub(r'\s+',' ',m.group(0))
+def go2(fn, st, ws, pre, conj_, term):
+    go(fn,st,ws,pre,conj_,term,auto_rterm(fn))
+STRPRE='obtain ⟨a, b, c⟩ := strIn_s\n'
+def strsite(name, ctr, vs, extra_p, body_extra, nargs=4):
+    return site(name,ctr,f'MapModel (Nat × Nat) (BitVec (8 * {vs}))','AMap (Nat × Nat) (BitVec (8 * 8))',4,extra_params=extra_p,body=body_extra)
+FT_S='AMap (Nat × Nat) (BitVec (8 * 8))'
+def deletes():
+    st=HELP+site('DeleteStrSite','DeleteStr','MapModel (Nat × Nat) (BitVec (8 * 8))',FT_S,4,
+      body='RTPre M 4 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 1).toNat f ∧ StrIn s_c M.depth 4')
+    ws='/-- The call state of the `mapdelete_faststr` contract (U-WITNESS-CALLSITE): the stock witness state of `MapStrSat`, at the contract address. -/\ndef wsCall : State := { mstate mmem sargs with pc := BitVec.ofNat 64 cAddr }\n'
+    pre='''theorem wsCall_pre : DeleteStrSite (ME (Nat × Nat)) AMap.empty wsCall := by
+  obtain ⟨a, b, c⟩ := strIn_s
+  exact ⟨rtpre_pc _ (mstate_rtpre _ rfl rfl mmem rfl _ 4 (by decide) mmem_zenv mmem_guard), trivial,
+    (isMap_of_ne (by decide)).2 (mmem_rep _), ⟨a, b, c⟩⟩
+'''
+    go2('DeleteS',st,ws,pre,conjF('DeleteStrSite','runtime.mapdelete_faststr',FT_S),STD)
+def lookups():
+    st=HELP+site('Access1StrSite','Access1Str','MapModel (Nat × Nat) (BitVec (8 * 8))',FT_S,4,
+      body='RTPre M 4 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 1).toNat f ∧ StrIn s_c M.depth 4')
+    ws='/-- The call state of the `mapaccess1_faststr` contract (U-WITNESS-CALLSITE): the stock witness state of `MapStrSat`, at the contract address. -/\ndef wsCall : State := { mstate mmem sargs with pc := BitVec.ofNat 64 cAddr }\n'
+    pre='''theorem wsCall_pre : Access1StrSite (ME (Nat × Nat)) AMap.empty wsCall := by
+  obtain ⟨a, b, c⟩ := strIn_s
+  exact ⟨rtpre_pc _ (mstate_rtpre _ rfl rfl mmem rfl _ 4 (by decide) mmem_zenv mmem_guard), trivial,
+    (isMap_of_ne (by decide)).2 (mmem_rep _), ⟨a, b, c⟩⟩
+'''
+    go2('LookupS',st,ws,pre,conjF('Access1StrSite','runtime.mapaccess1_faststr',FT_S),STD)
