@@ -170,19 +170,55 @@ theorem hpre : pre M0 WB 64 dst src s0 := by
     ⟨by decide, by decide⟩, ?_, trivial⟩ <;>
     simp only [window, callerWindow, treesType, outside_cons, outside_nil, and_true] <;> decide
 
-/-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (M : MemModel) (wb d ret : Nat) (s : State) (dst src : BitVec 64),
-    M.Laws ∧ TypedMemmove (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typedmemmove") M wb d ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [dst, src] s ∧
-    pre M wb d dst src s :=
-  ⟨implAt, M0, WB, 64, ret, s0, dst, src, M0_laws, model WB 64, hret, setup, hpre⟩
+def tmR : Nat → W64 := fun i => if i = 0 then BitVec.ofNat 64 Janus.Contracts.IfaceModel.TD
+  else if i = 1 then BitVec.ofNat 64 DST else if i = 2 then BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL else 0
+
+@[reducible] def tmSite (M : MemModel) (wb d : Nat) (s_c : State) : Prop :=
+  TPre M wb d 3 s_c ∧ TypeOK s_c.mem (s_c.regs 0).toNat ∧
+    Outside (s_c.regs 0).toNat 16 (calleeStack s_c d 3) ∧
+    Input s_c d 3 (s_c.regs 2).toNat (typSize s_c.mem (s_c.regs 0).toNat) ∧
+    Dest M s_c d 3 (s_c.regs 1).toNat (typSize s_c.mem (s_c.regs 0).toNat)
+
+theorem tmSite_stock : tmSite M0 WB 64 (MemSat.wstate tmR) := by
+  have h0 : ((MemSat.wstate tmR).regs 0).toNat = Janus.Contracts.IfaceModel.TD := by
+    simp [tmR, MemSat.wstate, Janus.Contracts.IfaceModel.TD]
+  have h1 : ((MemSat.wstate tmR).regs 1).toNat = DST := by simp [tmR, MemSat.wstate, DST]
+  have h2 : ((MemSat.wstate tmR).regs 2).toNat = Janus.Contracts.IfaceModel.VAL := by
+    simp [tmR, MemSat.wstate, Janus.Contracts.IfaceModel.VAL]
+  obtain ⟨ht1, ht2, ht3⟩ := MemSat.wstate_typ tmR 3
+  refine ⟨MemSat.wstate_tPre _ 3 (by decide), ?_, ?_, ?_, ?_⟩ <;> simp only [h0, MemSat.wstate_mem]
+  · exact ht1
+  · exact ht2
+  · rw [h2, ht3]; exact MemSat.wstate_input _ 3 _ _ (by decide) (by decide)
+  · rw [h1, ht3]; exact MemSat.wstate_dest _ 3 _ _ (by decide) (by decide)
+
+theorem tmSite_pc (M : MemModel) (wb d : Nat) (s : State) (x : BitVec 64) (h : tmSite M wb d s) :
+    tmSite M wb d { s with pc := x } := by
+  obtain ⟨⟨hE, ⟨g1, g2, g3⟩, hc, ho, hi, hw, h1, h2⟩, hr⟩ := h
+  exact ⟨⟨hE, ⟨g1, g2, g3⟩, hc, ho, hi, hw, h1, h2⟩, hr⟩
+
+def wsCall : State := { MemSat.wstate tmR with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : tmSite M0 WB 64 wsCall := tmSite_pc _ _ _ _ _ tmSite_stock
 
 /-- So the guarantee is reached: `DST + 128` receives the 128 bytes of `DST`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ Mem.Copied s0.mem s'.mem (DST + 128) DST 128 :=
   (correctness implAt M0 M0_laws WB 64 (model WB 64) dst src ret hret s0 setup hpre).mono
     fun _ h => ⟨h.1, h.2.1⟩
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (M : MemModel) (wb d ret : Nat) (s : State) (dst src : BitVec 64),
+    M.Laws ∧ TypedMemmove (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typedmemmove") M wb d ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [dst, src] s ∧
+    pre M wb d dst src s ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.typedmemmove") ∧
+      tmSite M wb d s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+      (Mem.Copied s.mem s'.mem dst.toNat src.toNat 128 ∧
+        MemFrame s.mem s'.mem (M.priv ++ window d s ++ [(dst.toNat, dst.toNat + 128)])) :=
+  ⟨implAt, M0, WB, 64, ret, s0, dst, src, M0_laws, model WB 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt M0 M0_laws WB 64 (model WB 64) dst src ret hret s0 setup hpre⟩
 
 end Witness
 
