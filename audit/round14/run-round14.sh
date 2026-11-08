@@ -88,7 +88,9 @@ row Witness.nonvacuous Verified 'Role: WITNESS'
 row Witness.returns Verified 'Role: WITNESS'
 row OneMember.Witness.nonvacuous blocked 'round 14, W2' 'conjunct 2 of 2'
 echo "== rt-auditv2: a witness cannot skip an empty binder, a pc premise, a pinned implementation, an exists-bound closed contract"
-for spec in "EmptyBinder 'binder of type'" "PcPremise 'program counter'"; do
+# (PcPremise: its main theorem has post `False` and an unsatisfiable pc premise, so no witness can carry the returning run or even a
+# call-site state tied to it; since UP3 the witness is refused for the missing call-site conjunct before the pc premise is reached)
+for spec in "EmptyBinder 'binder of type'" "PcPremise 'call-site state'"; do
   eval set -- $spec; f=$1; pat=$2
   all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/$f.lean "$W/NewPair" --theorem $P.correctness --theorem $P.Witness.nonvacuous 2>&1)"
   echo " ($f: a main theorem that is vacuous by an empty binder / unsatisfiable pc premise; its genuine witness must not verify)"

@@ -1089,6 +1089,8 @@ type consumerRequest struct {
 	closure  []string // consumer modules the theorem's environment imports
 	Report   *verifiedReport
 	Err      error
+
+	companionOf *int // verify-batch: index of the main request this theorem accompanies (its report is verified/<theorem>.json)
 }
 
 // prepare checks the request's selection and its extraction.
@@ -1805,6 +1807,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			MatchedModules:        r.audit.MatchedModules,
 			ContractHyps:          r.audit.ContractHyps,
 			Refutation:            r.audit.Refutation,
+			RunFree:               r.audit.RunFree,
 			OleanProvenance:       provenance,
 			Consumer: &consumerInfo{
 				Root: pkg.Root, Lakefile: pkg.Lakefile, Module: r.module, SnapshotSha256: pkg.Sha256,

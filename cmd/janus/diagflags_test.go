@@ -252,7 +252,7 @@ func TestKeepWorkspaceSingleFile(t *testing.T) {
 		return m
 	}
 	verify := func(extra ...string) (int, string, string) {
-		return runJanus(t, append([]string{"verify", add, "--proof", proof, "--janus-root", repoRoot}, extra...)...)
+		return runJanus(t, append([]string{"verify", add, "--proof", proof, "--janus-root", repoRoot}, append(append([]string{}, proofThms...), extra...)...)...)
 	}
 	strip := func(s string) string {
 		var keep []string
@@ -345,8 +345,10 @@ func TestDiagFlagsConsumer(t *testing.T) {
 		t.Fatal(err)
 	}
 	verify := func(extra ...string) (int, string, string) {
-		return runJanus(t, append([]string{"verify", add, "--proof", filepath.Join(pkg, rel), "--proof-root", pkg,
-			"--theorem", "ConsumerExample.Add.correctness"}, extra...)...)
+		// (a two-theorem run prints each theorem's failure in its stdout block: the "stderr" returned is stdout + stderr)
+		c, o, e := runJanus(t, append([]string{"verify", add, "--proof", filepath.Join(pkg, rel), "--proof-root", pkg,
+			"--theorem", "ConsumerExample.Add.correctness", "--theorem", "ConsumerExample.Add.Witness.nonvacuous"}, extra...)...)
+		return c, o, o + e
 	}
 	bad := strings.Replace(string(good), "  janus_run [addSpec]\n", "", 1)
 	if bad == string(good) {

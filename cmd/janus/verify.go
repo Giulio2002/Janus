@@ -98,6 +98,8 @@ type verifiedReport struct {
 	ContractHyps []string `json:"contractHyps,omitempty"`
 	// Refutation: the main theorem is a negation (UP3c); it claims no run, so no run-witness is required.
 	Refutation bool `json:"refutation,omitempty"`
+	// RunFree: the statement reaches no run claim (UP3c); nothing to witness.
+	RunFree bool `json:"runFree,omitempty"`
 	// Kernel are the extraction's `.syscall` stubs ("name @ address"): the SVC/SYSCALL
 	// instructions, environment reads and vDSO clock functions whose effect only the kernel
 	// semantics of Janus/Contracts/Syscall*.lean gives (WP-C). Traps are its `.trap` stubs.
@@ -146,6 +148,7 @@ type auditResult struct {
 	MatchedModules    []string   `json:"matchedModules"`      // the module declaring each of them
 	ContractHyps      []string   `json:"contractHyps"`        // round 14: the contracts the STATEMENT applies ("Contract@runtime.fn")
 	Refutation        bool       `json:"refutation"`          // UP3c: the main theorem is a negation (claims no run)
+	RunFree           bool       `json:"runFree"`             // UP3c: the statement claims nothing about running the program
 	Imports           [][]string `json:"imports"`             // [module, direct imports…] for every non-core module
 }
 
@@ -1302,6 +1305,7 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			MatchedModules:    ar.MatchedModules,
 			ContractHyps:      ar.ContractHyps,
 			Refutation:        ar.Refutation,
+			RunFree:           ar.RunFree,
 			Notes:             ar.Notes,
 		}
 		report.Kernel, report.Traps = cr.Identity.kernelLists()

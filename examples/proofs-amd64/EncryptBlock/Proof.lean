@@ -99,6 +99,49 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State) (nr : BitVec 64) (xk : BitVec 6
         Janus.Spec.OnlyWrites s.mem s'.mem dst.toNat 16) :=
   ⟨ret, s0, nr, xk, dst, src, hret, setup, hnr, hpre, correctness nr xk dst src hnr ret hret s0 setup hpre⟩
 
+/-- The FIPS-197 C.1 call state: `s0` with the 176 bytes of the expanded key of `000102...0f` at `xk`
+and the block `00112233...ff` at `src`. -/
+def ksNat : Nat := (List.range 44).foldr (fun i acc => (keyExpansion 4 10 (countKey 16)).getD i 0 + 2 ^ 32 * acc) 0
+
+def s1 : State := { s0 with mem := ((s0.mem.writeLE xk.toNat 176 ksNat).writeLE src.toNat 16 plainC) }
+
+theorem setup1 : CallSetup0 (Extracted.program.withExit ret) Extracted.entry [10#64, xk, dst, src] 0 s1 :=
+  ⟨rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> (simp only [List.getElem_cons_zero, List.getElem_cons_succ]; decide), by unfold FrameOK; decide, rfl⟩
+
+set_option maxRecDepth 100000 in
+theorem hpre1 : (fun s => Buffer s xk 176 false ∧ Buffer s src 16 false ∧ Buffer s dst 16 true ∧
+        Disjoint dst 16 (s.regs 4) 8 ∧
+        (∀ i, i < 44 → s.mem.readLE (xk.toNat + 4 * i) 4 = (keyExpansion 4 10 (countKey 16)).getD i 0) ∧
+        s.mem.readLE src.toNat 16 = plainC) s1 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+
+/-- The hypotheses of `corollaryAES128` (for the key `countKey 16`) hold together, and the call returns. -/
+theorem corollaryAES128 : ∃ (ret : Nat) (s : State) (key : Nat) (xk : BitVec 64) (dst : BitVec 64) (src : BitVec 64),
+    RetAddr Extracted.program ret ∧
+    CallSetup0 (Extracted.program.withExit ret) Extracted.entry [10#64, xk, dst, src] 0 s ∧
+    (Buffer s xk 176 false ∧ Buffer s src 16 false ∧ Buffer s dst 16 true ∧
+        Disjoint dst 16 (s.regs 4) 8 ∧
+        ∀ i, i < 44 → s.mem.readLE (xk.toNat + 4 * i) 4 = (keyExpansion 4 10 key).getD i 0) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn0 s s' ∧ s'.mem.readLE dst.toNat 16 = aes128 key (s.mem.readLE src.toNat 16)) :=
+  ⟨ret, s1, countKey 16, xk, dst, src, hret, setup1, (let ⟨a, b, c, d, e, _⟩ := hpre1; ⟨a, b, c, d, e⟩),
+    Proof.corollaryAES128 (countKey 16) xk dst src ret hret s1 setup1 (let ⟨a, b, c, d, e, _⟩ := hpre1; ⟨a, b, c, d, e⟩)⟩
+
+/-- The hypotheses of `corollaryFIPS197` hold together, and the call returns. -/
+theorem corollaryFIPS197 : ∃ (ret : Nat) (s : State) (xk : BitVec 64) (dst : BitVec 64) (src : BitVec 64),
+    RetAddr Extracted.program ret ∧
+    CallSetup0 (Extracted.program.withExit ret) Extracted.entry [10#64, xk, dst, src] 0 s ∧
+    (Buffer s xk 176 false ∧ Buffer s src 16 false ∧ Buffer s dst 16 true ∧
+        Disjoint dst 16 (s.regs 4) 8 ∧
+        (∀ i, i < 44 → s.mem.readLE (xk.toNat + 4 * i) 4 = (keyExpansion 4 10 (countKey 16)).getD i 0) ∧
+        s.mem.readLE src.toNat 16 = plainC) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn0 s s' ∧ s'.mem.readLE dst.toNat 16 = ofBytes [0x69, 0xc4, 0xe0, 0xd8, 0x6a, 0x7b, 0x04,
+        0x30, 0xd8, 0xcd, 0xb7, 0x80, 0x70, 0xb4, 0xc5, 0x5a]) :=
+  ⟨ret, s1, xk, dst, src, hret, setup1, hpre1, Proof.corollaryFIPS197 xk dst src ret hret s1 setup1 hpre1⟩
+
 end Witness
 
 end Proof

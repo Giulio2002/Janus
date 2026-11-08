@@ -37,18 +37,20 @@ row() {
   return 0
 }
 v() { out="$("$J" verify --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" 2>&1)"; }
+# UP3d: honest rows verify together with their Witness.nonvacuous
+vw() { out="$("$J" verify --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" --theorem Proof.correctness --theorem Proof.Witness.nonvacuous 2>&1)"; }
 
 echo "== F1: names with lookalike letters or «…» components imitating trusted constants"
 v F1a_homoglyph_extracted_program; row F1a_homoglyph_extracted_program blocked "shadows the Extracted namespace"
 v F1b_guillemet_extracted;         row F1b_guillemet_extracted         blocked "shadows the Extracted namespace"
 v F1c_homoglyph_ensures;           row F1c_homoglyph_ensures           blocked "lookalike letters"
-out="$("$J" verify --janus-root "$root" --proof audit/round5/attacks/E3d_field_named_def.lean $W/Add 2>&1)"
+out="$("$J" verify --janus-root "$root" --proof audit/round5/attacks/E3d_field_named_def.lean $W/Add --theorem Proof.correctness --theorem Proof.Witness.nonvacuous 2>&1)"
 row E3d_ascii_def_in_janus_namespace Verified 'Janus.Arm64.State.result : Janus.Arm64.State → BitVec 64 := fun s => s.regs 0'
 
 echo "== F2: out-of-range numerals at wrapping types (statement and disclosed defs)"
 v F2a_wrapped_numeral_hyp $W/Div; row F2a_wrapped_numeral_hyp blocked "out-of-range numeral"
 v F2b_wrapped_numeral_def;        row F2b_wrapped_numeral_def blocked "out-of-range numeral"
-v F2c_numeral_in_range;           row F2c_numeral_in_range Verified '(18446744073709551615 : BitVec (64 : Nat)) ≠ (0 : BitVec (64 : Nat))'
+vw F2c_numeral_in_range;          row F2c_numeral_in_range Verified '(18446744073709551615 : BitVec (64 : Nat)) ≠ (0 : BitVec (64 : Nat))'
 
 echo "== F3: stub classification by package (audit/round6/stubmod: module runtime.panicky)"
 ( cd audit/round6/stubmod && GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}" CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
@@ -58,7 +60,7 @@ if grep -qE 'code .* runtime\.panicky/lib\.Zero' <<<"$xo" && ! grep -qE 'stub .*
   echo "  F3 extraction                        ok       runtime.panicky/lib.Zero is code, not a panic stub"
 else echo "  F3 extraction: misclassified   <-- BROKEN"; echo "$xo" | sed 's/^/    /'; broken+=(F3-extract); fi
 v F3a_stub_by_module_path $W/StubAdd; row F3a_stub_by_module_path blocked
-v F3b_stubmod_returns $W/StubAdd;     row F3b_stubmod_returns Verified 'ABIReturn s s'"'"' ∧ s'"'"'.regs 0 = x + y'
+vw F3b_stubmod_returns $W/StubAdd;    row F3b_stubmod_returns Verified 'ABIReturn s s'"'"' ∧ s'"'"'.regs 0 = x + y'
 if command -v qemu-aarch64 >/dev/null; then
   q="$(qemu-aarch64 $W/stubmod 2>&1)"
   [ "$q" = 3 ] && echo "  F3 hardware (qemu-aarch64)           ok       Add(1, 2) returned 3" ||

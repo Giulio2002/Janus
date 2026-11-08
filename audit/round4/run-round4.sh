@@ -29,7 +29,7 @@ echo "== D1/D2: disclosed definition bodies round-trip, and are shown by verify 
 out="$("$J" verify --janus-root "$root" --proof audit/round4/attacks/D1_def_numeral_type.lean $W/Add 2>&1)"
 grep -m1 -E '^(Verified|Invalid)' <<<"$out" | cut -c1-140 | sed 's/^/  D1 /'
 grep -q 'out-of-range numeral' <<<"$out" || { echo "  >>> D1 (256 : BitVec 8) is no longer rejected as an out-of-range numeral"; broken+=(D1-wrap); }
-out="$("$J" verify --janus-root "$root" --proof audit/round4/attacks/D1b_def_numeral_type_inrange.lean $W/Add 2>&1)"
+out="$("$J" verify --janus-root "$root" --proof audit/round4/attacks/D1b_def_numeral_type_inrange.lean $W/Add --theorem Proof.correctness --theorem Proof.Witness.nonvacuous 2>&1)"
 grep -m1 -E '^(Verified|Invalid)' <<<"$out" | sed 's/^/  D1b /'
 grep -q 'Proof-local definitions used by the statement' <<<"$out" || { echo "  >>> D2 regressed: verify does not show definitions"; broken+=(D2-verify); }
 grep -q 'Proof.wide : Prop := (255 : BitVec' <<<"$out" || { echo "  >>> D1 regressed: disclosure hides the numeral type"; broken+=(D1); }

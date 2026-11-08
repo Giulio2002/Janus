@@ -96,6 +96,23 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State) (p : BitVec 64), RetAddr Extrac
     ABIReturn s s' ∧ (s'.regs 0).toNat = s.mem.readLE (p.toNat + 16) 8) :=
   ⟨ret, s0, p, hret, setup, hpre, correctness p ret hret s0 setup hpre⟩
 
+
+def sF : State := { s0 with regs := fun i => if i = 0 then 0 else s0.regs i }
+theorem setupF : CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] sF :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem hregF : ∀ r ∈ sF.mem.regions, 4096 ≤ r.base := by
+  simp only [sF, s0]; decide
+/-- The hypotheses of `faults` hold together (a nil pointer, every region above the first page), and the call faults. -/
+theorem faults : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧
+    (∀ r ∈ s.mem.regions, 4096 ≤ r.base) ∧
+    ((s.rip.toNat ≠ (Extracted.program.withExit ret).exitAddr ∧
+        (Extracted.program.withExit ret).stubAt s.rip.toNat = none ∧
+        ∃ w, (Extracted.program.withExit ret).fetch s.rip.toNat = some w ∧
+          ∃ a n, Janus.Amd64.step w s = .error (Fault.outsideAllocation a n) ∧ a < 4096) ∧
+      Faults (Extracted.program.withExit ret) s) :=
+  ⟨ret, sF, hret, setupF, hregF, Proof.faults ret hret sF setupF hregF⟩
+
 end Witness
 
 end Proof

@@ -100,7 +100,7 @@ func TestConcurrentVerify(t *testing.T) {
 	}
 	verifyArgs := func(n string, extra ...string) []string {
 		a := []string{"verify", arts[n], "--proof", filepath.Join(repoRoot, "examples", "proofs", n+".lean")}
-		return append(append(a, sb...), extra...)
+		return append(append(append(a, proofThms...), sb...), extra...)
 	}
 	env := cacheEnv(cache)
 	check := func(procs []*janusProc) {
@@ -174,7 +174,7 @@ func TestForeignFrameworkWriteDetected(t *testing.T) {
 	bin := buildJanusBinary(t)
 	add := mustExtract(t, "example.com/basic.Add")
 	env := cacheEnv(cache)
-	good := []string{"verify", add, "--proof", filepath.Join(repoRoot, "examples", "proofs", "Add.lean"), "--unsafe-no-sandbox"}
+	good := []string{"verify", add, "--proof", filepath.Join(repoRoot, "examples", "proofs", "Add.lean"), "--theorem", "Proof.correctness", "--theorem", "Proof.Witness.nonvacuous", "--unsafe-no-sandbox"}
 	p := []*janusProc{{name: "priming verify", args: good}}
 	runConcurrently(bin, env, p)
 	if p[0].code != 0 {
@@ -258,7 +258,7 @@ func TestConsumerAuditorLease(t *testing.T) {
 		art := mustExtract(t, "example.com/basic."+n)
 		procs = append(procs, &janusProc{name: fmt.Sprintf("consumer verify#%d %s", i, n), wait: time.Duration(i) * 300 * time.Millisecond,
 			args: []string{"verify", art, "--proof", filepath.Join(pkg, "ConsumerExample", n+".lean"), "--proof-root", pkg,
-				"--theorem", "ConsumerExample." + n + ".correctness"}})
+				"--theorem", "ConsumerExample." + n + ".correctness", "--theorem", "ConsumerExample." + n + ".Witness.nonvacuous"}})
 	}
 	runConcurrently(bin, env, procs)
 	stop.Store(true)

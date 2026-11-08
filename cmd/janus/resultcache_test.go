@@ -34,7 +34,7 @@ func TestResultCache(t *testing.T) {
 	}
 	verify := func(extra ...string) (string, string) {
 		t.Helper()
-		code, out, stderr := runJanus(t, append([]string{"verify", add, "--proof", proof, "--janus-root", repoRoot}, extra...)...)
+		code, out, stderr := runJanus(t, append([]string{"verify", add, "--proof", proof, "--janus-root", repoRoot}, append(append([]string{}, proofThms...), extra...)...)...)
 		if code != 0 {
 			t.Fatalf("verify %v: %d\n%s\n%s", extra, code, out, stderr)
 		}

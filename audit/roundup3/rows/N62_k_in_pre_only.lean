@@ -1,7 +1,7 @@
 import Extracted
 
 /-! Round n11 red team, row N62_k_in_pre_only: k pinned only in the Ensures precondition (fun _ => k = 7)
-Expected: rejected. The proof is `Add`'s; the hypotheses are never used, so only the audit decides. -/
+Expected: Verified (UP3d: the STATEMENT audit accepts it since the pin rules were dropped; the FULL verify rejects it, no tied witness can exist: run-verify-rows.sh). The proof is `Add`'s; the hypotheses are never used, so only the audit decides. -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Contracts.ICall
 

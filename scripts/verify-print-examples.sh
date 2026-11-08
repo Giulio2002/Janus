@@ -93,7 +93,7 @@ verify_one() {
   # of it), checked against the embedded framework and the checkout its lakefile depends on.
   local -a ispec=(--fw embedded --fw dir:. --pkg examples/proofs-print --proof "examples/proofs-print/PrintProofs/${isa^}/$n.lean"
     --art "$out" --arg "sym:example.com/print.$n" --arg "targets:$others" --arg thm:correctness --arg thm:full_output
-    --arg thm:Witness.nonvacuous --arg thm:Witness.returns)
+    --arg thm:Witness.nonvacuous --arg thm:Witness.full_output --arg thm:Witness.returns)
   [ -z "${JANUS_ROOT:-}" ] || ispec+=(--arg "janus-root:$JANUS_ROOT")
   if incr_begin "print:$target" print "${ispec[@]}"; then echo "$INCR_MSG" | tee "$lines/${isa}_$n"; return 0; fi
   : > "$out/verify.log"
@@ -103,7 +103,7 @@ verify_one() {
   # non-vacuity witness verified in the same call (docs/SOUNDNESS.md)
   if ! jv "$out" --proof "$snap/PrintProofs/${isa^}/$n.lean" --proof-root "$snap" \
       --theorem "Proof.correctness" --theorem "Proof.full_output" \
-      --theorem "Proof.Witness.nonvacuous" --theorem "Proof.Witness.returns" \
+      --theorem "Proof.Witness.nonvacuous" --theorem "Proof.Witness.full_output" --theorem "Proof.Witness.returns" \
       ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
     ok=0; echo "  $target: FAILED (see $out/verify.log)"
   fi

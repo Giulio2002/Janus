@@ -27,7 +27,8 @@ vrun() { # art proof flag thm...
   local art=$1 proof=$2 fl=$3; shift 3; local -a th=()
   for t in "$@"; do th+=(--theorem "$t"); done
   "$J" verify "$art" --proof "$proof" "${th[@]}" --janus-root "$root" $fl --no-result-cache > "$W/out.txt" 2>&1
-  local nv; nv=$(grep -c '^=== .*: verified' "$W/out.txt")
+  local nv  # one theorem: the run prints no `===` block, only `Verified:`
+  if [ "$#" -eq 1 ]; then nv=$(grep -c '^Verified: ' "$W/out.txt"); else nv=$(grep -c '^=== .*: verified' "$W/out.txt"); fi
   if [ "$nv" -ge "$#" ]; then echo verified; else echo rejected; fi
 }
 reason_of() { # the audit's reason for the rejection in $out: the witness theorem's when it failed, else the main theorem's
@@ -37,22 +38,36 @@ reason_of() { # the audit's reason for the rejection in $out: the witness theore
 }
 check_rejected() { # file label thm...
   local f=$1 n=$2; shift 2
-  local want; want="$(grep -m1 -o 'Expected-reason: .*' "$f" | sed 's/Expected-reason: //')"; [ -n "$want" ] || want='.'
+  local want; want="$(grep -m1 -o 'Expected-reason: .*' "$f" | sed 's/Expected-reason: //; s/ *-\/$//')"; [ -n "$want" ] || want='.'
   for fl in "" "--allow-no-witness"; do
-    local v; v=$(vrun "$W/Add" "$f" "$fl" "$@"); out="$(cat "$W/out.txt")"
+    local v; v=$(vrun "${ART:-$W/Add}" "$f" "$fl" "$@"); out="$(cat "$W/out.txt")"
     if [ "$v" = verified ]; then printf '%-34s %-20s VERIFIED   <-- BROKEN\n' "$n" "${fl:-no-flag}"; bad=1
     elif printf '%s' "$out" | grep -qE "$want"; then printf '%-34s %-20s rejected ok  [%s]\n' "$n" "${fl:-no-flag}" "$(reason_of)"
     else printf '%-34s %-20s rejected for ANOTHER reason (wanted /%s/)   <-- BROKEN\n' "$n" "${fl:-no-flag}" "$want"; printf '%s\n' "$out" | grep -m3 '^Invalid' | cut -c1-300 | sed 's/^/    /'; bad=1; fi
   done
 }
 echo "== rows (no witness: rejected under every flag)"
-for n in N10 N11 N13 N16 N17 N18 N50 N51 N52 N60 N62 N64 N65; do
+for n in N10 N11 N13 N16 N17 N18 N46 N50 N51 N52 N60 N62 N64 N65; do
   f=$(ls $R/rows/${n}_*.lean); check_rejected "$f" "$n" Proof.correctness
 done
 check_rejected $RT/rows2/R01_R_pinned_false_in_pre.lean R01 Proof.correctness
 for f in $R/vrows/PIN*.lean; do check_rejected "$f" "$(basename "$f" .lean)" Proof.correctness; done
 echo "== attackers (witness-bearing: rejected for the named reason)"
 for f in $R/vrows/ATT_*.lean $R/wit/WIT[1-6]_*.lean; do check_rejected "$f" "$(basename "$f" .lean)" Proof.correctness Proof.Witness.nonvacuous; done
+echo "== strict pairing (UP3d): Witness.nonvacuous <-> correctness, Witness.<X> <-> main <X>, nothing else"
+check_rejected $R/pair/PAIR1_missing_witness_extra.lean PAIR1 Proof.correctness Proof.extra Proof.Witness.nonvacuous
+check_rejected $R/pair/PAIR2_witness_extra_tied_to_correctness.lean PAIR2 Proof.correctness Proof.extra Proof.Witness.nonvacuous Proof.Witness.extra
+check_rejected $R/pair/PAIR3_nonvacuous_tied_to_extra.lean PAIR3 Proof.correctness Proof.extra Proof.Witness.nonvacuous Proof.Witness.extra
+check_rejected $R/pair/PAIR4_witness_name_pairs_no_main.lean PAIR4 Proof.correctness Proof.extra Proof.Witness.nonvacuous Proof.Witness.extra Proof.Witness.other
+v=$(vrun "$W/Add" $R/pair/PAIR_ok_control.lean "" Proof.correctness Proof.extra Proof.Witness.nonvacuous Proof.Witness.extra)
+if [ "$v" = verified ]; then printf '%-34s verified ok\n' PAIR_ok_control; else printf '%-34s REJECTED   <-- BROKEN\n' PAIR_ok_control; bad=1; fi
+echo "== Faults / fact-conjunct anchoring (UP3d, on LoadThird)"
+mapfile -t tgL < <(scripts/example-targets.sh LoadThird)
+"$J" extract artifacts/examples-arm64 "$(example_symbol LoadThird)" "$W/LoadThird" ${tgL[@]+"${tgL[@]}"} >/dev/null 2>&1 || { echo "extract LoadThird failed"; bad=1; }
+FT="Proof.correctness Proof.faults Proof.Witness.nonvacuous Proof.Witness.faults"
+v=$(vrun "$W/LoadThird" $R/pair/FLT_ok_control.lean "" $FT)
+if [ "$v" = verified ]; then printf '%-34s verified ok\n' FLT_ok_control; else printf '%-34s REJECTED   <-- BROKEN\n' FLT_ok_control; bad=1; fi
+for n in FLT1_false_premise FLT2_faults_untied_state FLT3_fact_other_state; do ART="$W/LoadThird" check_rejected $R/pair/$n.lean $n $FT; done
 echo "== controls (witness-bearing: must VERIFY)"
 for f in $R/ctl/*.lean; do
   n=$(basename "$f" .lean)
@@ -70,6 +85,11 @@ for n in C1_stub_control F01_live_stack4096 F08_newobj_live_ok W02_d_ok W03_d_va
   fi
   o="$("$J" verify "$art" --proof "$f" --theorem Proof.correctness --janus-root "$root" --audit-only --no-result-cache 2>&1)"
   if printf '%s' "$o" | grep -q '^Audit-only:'; then printf '%-34s statement audit ok\n' "$n"; else printf '%-34s REJECTED   <-- BROKEN\n' "$n"; printf '%s\n' "$o" | grep -m2 '^Invalid' | cut -c1-300 | sed 's/^/    /'; bad=1; fi
+done
+echo "== run-free control (hypothesis-free, no run claim): verifies, reported as run-free"
+for f in $R/vrows/RF*.lean; do
+  v=$(vrun "$W/Add" "$f" "" Proof.correctness); out="$(cat "$W/out.txt")"
+  if [ "$v" = verified ] && printf '%s' "$out" | grep -q 'run-free'; then printf '%-34s verified (run-free) ok\n' "$(basename "$f" .lean)"; else printf '%-34s NOT run-free-verified   <-- BROKEN\n' "$(basename "$f" .lean)"; bad=1; fi
 done
 echo "== known-accepted"
 if [ -f $R/vrows/KA1.lean ]; then

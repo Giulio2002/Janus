@@ -53,7 +53,7 @@ func nonVacuityVerdict(r *verifiedReport, peers []*verifiedReport, auditOnly boo
 	if auditOnly {
 		return nvAuditOnly, "", returns, nil
 	}
-	if len(r.ContractHyps) == 0 && r.Refutation {
+	if len(r.ContractHyps) == 0 && (r.Refutation || r.RunFree) {
 		return nvNotShown, "", returns, nil // a refutation claims no run
 	}
 	if len(r.ContractHyps) == 0 {
@@ -124,6 +124,12 @@ func nonVacuityLine(r *verifiedReport) string {
 	case nvWitness:
 		return "  Non-vacuity: this is a witness (it is not a correctness claim)"
 	case nvNotShown:
+		if r.RunFree {
+			return "  Non-vacuity: Verified (run-free: statement makes no claim about executing the program; hypothesis-free, nothing to witness)"
+		}
+		if r.Refutation {
+			return "  Non-vacuity: Verified (refutation: the statement is a negation, it claims no run)"
+		}
 		return "  Non-vacuity: NOT SHOWN (no witness for this theorem was verified; it assumes no runtime contract)"
 	}
 	return "  Non-vacuity: NOT SHOWN (not evaluated)"
@@ -192,20 +198,29 @@ func nonVacuitySingle(outdir string, r *verifiedReport, allow bool) error {
 	return writeReport(filepath.Join(outdir, "verified.json"), r)
 }
 
-// nonVacuityBatch is the policy for the requests of one batch group (one extraction): a witness
-// request of the same proof module supports a main request. A rejected request keeps no report.
+// nonVacuityBatch is the policy for the requests of one batch group (one extraction). A witness only supports
+// a main theorem of the SAME run, i.e. the same outdir (a request's "witnesses" share its outdir): another
+// request's witness of the same module does not vouch for this one. A rejected request keeps no report.
 func nonVacuityBatch(reqs []*consumerRequest, allow bool) {
-	var peers []*verifiedReport
-	for _, r := range reqs {
-		if r.Err == nil && r.Report != nil {
-			peers = append(peers, r.Report)
+	peersOf := func(of *consumerRequest) []*verifiedReport {
+		var peers []*verifiedReport
+		ao, _ := filepath.Abs(of.Outdir)
+		for _, r := range reqs {
+			if a, _ := filepath.Abs(r.Outdir); a == ao && r.Err == nil && r.Report != nil {
+				peers = append(peers, r.Report)
+			}
 		}
+		return peers
+	}
+	allPeers := map[*consumerRequest][]*verifiedReport{}
+	for _, r := range reqs {
+		allPeers[r] = peersOf(r)
 	}
 	for _, r := range reqs {
 		if r.Err != nil || r.Report == nil {
 			continue
 		}
-		st, w, ret, d := nonVacuityVerdict(r.Report, peers, allow)
+		st, w, ret, d := nonVacuityVerdict(r.Report, allPeers[r], allow)
 		if d != nil {
 			r.Err, r.Report = d, nil
 			continue

@@ -158,6 +158,42 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : N
   · exact (((equiv.sim impl).withExit ret).symm).returnsK hrun2
 
 
+/-- All hypotheses of `correctness` hold together (for `full_output`): the witness code at the three contract
+addresses, the ranges `wrt`, an admissible return address and a call state ready to print. -/
+theorem full_output : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : Nat) (s : State) (E : KEnv) (k : Kern),
+    Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024 ∧
+    Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024 ∧
+    MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove") ∧
+    RetAddr (P.link impl) ret ∧ CallSetup ((P.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 true.toNat] s ∧
+    (PrintReady ⟨PK, BI, BL, OW, DL⟩ rt 1088 16 256 s ∧ P.DataLoaded s.mem ∧ DataOutside P rt) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (P.contractAddr "runtime.lock2") ∧ CallOK s_c 1024 1 ∧
+      LockPre rt 0 s_c ∧ ¬ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (P.contractAddr "runtime.unlock2") ∧ CallOK s_c 1024 1 ∧
+      LockPre rt 1 s_c ∧ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (P.contractAddr "runtime.memmove") ∧ MemmovePre s_c) ∧
+    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC s s' ∧ ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.fmtBool true, [10#8]] es)
+      (fun _ _ => False) s k ∧
+    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC s s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.fmtBool true ++ [10#8]).length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.fmtBool true ++ [10#8])))
+      (fun _ _ => False) s k := by
+  obtain ⟨impl, rt, ret, s, E, k, h1, h2, h3, h4, h5, hp, hl2, hu2, hm2, hrun, hrun2⟩ := PrintFn.Bool.Witness.nonvacuous
+  refine ⟨impl, rt, ret, s, E, k, Lock2Contract.of_equiv equiv.symm impl rt 1024 h1, Unlock2Contract.of_equiv equiv.symm impl rt 1024 h2,
+    MemmoveContract.of_equiv equiv.symm impl h3, equiv.symm.retAddr impl h4, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · exact ⟨h5.pc, h5.lr, h5.args⟩
+  · rw [pk_eq, bi_eq, bl_eq, ow_eq, dl_eq]
+    exact ⟨hp.1, equiv.symm.dataLoaded hp.2.1, Janus.Print.DataOutside.of_equiv equiv.symm hp.2.2⟩
+  · obtain ⟨sc, hpc, hco, hlp, hn⟩ := hl2
+    refine ⟨sc, ?_, hco, hlp, hn⟩
+    rw [equiv.contractAddr]; exact hpc
+  · obtain ⟨sc, hpc, hco, hlp, hn⟩ := hu2
+    refine ⟨sc, ?_, hco, hlp, hn⟩
+    rw [equiv.contractAddr]; exact hpc
+  · obtain ⟨sc, hpc, hmv⟩ := hm2
+    refine ⟨sc, ?_, hmv⟩
+    rw [equiv.contractAddr]; exact hpc
+  · exact (((equiv.sim impl).withExit ret).symm).returnsK hrun
+  · exact (((equiv.sim impl).withExit ret).symm).returnsK hrun2
+
+
 /-- So the guarantee is reached: from the witness state, for every kernel, `println(true)` returns and the trace gains what the two writes may append. -/
 theorem returns (E : KEnv) (k : Kern) :
     ReturnsK ((Extracted.program.link implAt).withExit ret) E

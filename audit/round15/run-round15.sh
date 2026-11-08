@@ -2,7 +2,7 @@
 # Round-15 regression rows (docs/SOUNDNESS.md "Non-vacuity is required for contract-assuming main theorems"):
 # `janus verify` rejects a MAIN theorem that assumes runtime contracts unless a kernel-checked non-vacuity
 # witness for THAT theorem is verified in the same run; every report states the status; --allow-no-witness
-# is inert (UP3); --audit-only is not a verification; a theorem without contract hypotheses is verified and reported "NOT SHOWN".
+# is inert (UP3); --audit-only is not a verification; a theorem without contract hypotheses is verified with its tied witness.
 #   N1  main alone                              -> blocked (stage non-vacuity)
 #   N2  main + Witness.nonvacuous (+ returns)   -> verified, "shown by"
 #   N3  main + only Witness.returns             -> blocked (a concrete run does not state the contract hypotheses)
@@ -68,20 +68,22 @@ row Witness.nonvacuous Verified 'Non-vacuity: this is a witness'
 echo "== N3: Witness.returns alone does not show non-vacuity"
 run $F "$W/NewPair" -- correctness Witness.returns
 row correctness blocked 'Stage: non-vacuity' 'does not show non-vacuity'
-echo "== N4: a weaker witness is no witness"
-run $F "$W/NewPair" -- correctness Witness.weak
-row correctness blocked 'Stage: non-vacuity'
+echo "== N4: a weaker witness is no witness (the mains weak and lamWeak are the same statement as correctness; its witness leaves a conjunct out)"
+run $F "$W/NewPair" -- weak Witness.weak
+row weak blocked 'Stage: non-vacuity'
 row Witness.weak blocked 'round 14, W2' 'is not among the conjuncts of the witness'
-run $F "$W/NewPair" -- correctness Witness.lamWeak
-row correctness blocked 'Stage: non-vacuity'
+run $F "$W/NewPair" -- lamWeak Witness.lamWeak
+row lamWeak blocked 'Stage: non-vacuity'
 row Witness.lamWeak blocked 'round 14, W2' 'conjuncts are matched after beta-reduction'
-echo "== N5: any name, applied lambdas"
-run $F "$W/NewPair" -- correctness Witness.alt
-row correctness Verified 'Non-vacuity: shown by Proof.Witness.alt'
+echo "== N5: the witness of main X is Witness.X (any main name), also stated as an applied lambda; it never vouches for another main"
+run $F "$W/NewPair" -- correctness alt Witness.nonvacuous Witness.alt
+row alt Verified 'Non-vacuity: shown by Proof.Witness.alt'
 row Witness.alt Verified 'Role: WITNESS'
-run $F "$W/NewPair" -- correctness Witness.lam
-row correctness Verified 'Non-vacuity: shown by Proof.Witness.lam'
+run $F "$W/NewPair" -- correctness lam Witness.nonvacuous Witness.lam
+row lam Verified 'Non-vacuity: shown by Proof.Witness.lam'
 row Witness.lam Verified 'Role: WITNESS'
+run $F "$W/NewPair" -- correctness Witness.alt
+row correctness blocked 'Stage: non-vacuity'
 echo "== N6: a witness supports the theorems it instantiates, not another main theorem"
 run $F "$W/NewPair" -- correctness otherMain Witness.nonvacuous
 row correctness Verified 'Non-vacuity: shown by'
@@ -95,9 +97,8 @@ echo "== N7b: --audit-only is not a verification: 'Audit-only', no Verified line
 run $F "$W/NewPair" --audit-only -- correctness
 row correctness blocked 'Audit-only:' 'NOT A VERIFICATION'
 [ ! -e "$W/NewPair/verified.json" ] && ! grep -q '^Verified:' <<<"$all" || broken+=(audit-only-wrote-report)
-echo "== N8: a theorem without contract hypotheses"
-run examples/proofs/Add.lean "$W/Add" -- correctness
-row correctness Verified 'Non-vacuity: NOT SHOWN' 'assumes no runtime contract'
-echo
+echo "== N8: a theorem without contract hypotheses is verified with its tied witness (UP3c: every main theorem needs one) and reports no contracts"
+run examples/proofs/Add.lean "$W/Add" -- correctness Witness.nonvacuous
+row correctness Verified 'Non-vacuity: shown by Proof.Witness.nonvacuous' 'Runtime contracts assumed: none'
 if [ ${#broken[@]} -gt 0 ]; then echo "round 15: BROKEN rows: ${broken[*]}"; exit 1; fi
 echo "round 15: all rows as expected"

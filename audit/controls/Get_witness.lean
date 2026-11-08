@@ -40,32 +40,83 @@ theorem correctness (ptr len cap i : BitVec 64) (ret : Nat)
   · intro hi
     janus_run
 
-end Proof
+namespace Witness
 
-/-! ## Positive control (audit): a call with a readable g, a stack window and a 4-word slice. -/
-namespace AuditWitness
-open Janus Janus.Arm64 Janus.GoABI Janus.Spec
 def ret : Nat := 0x1000
+
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
-def mkS (i : BitVec 64) : State :=
-  { regs := fun r => if r = 0 then 0x3000 else if r = 1 then 4 else if r = 2 then 4
-      else if r = 3 then i else if r = 28 then 0x2000 else if r = 30 then BitVec.ofNat 64 ret
-      else 0,
-    sp := 0x10000, pc := BitVec.ofNat 64 Extracted.entry, flags := ⟨false, false, false, false⟩,
-    mem := ⟨fun _ => 0, [⟨0x10000 - 24, 40, true⟩, ⟨0x2000, 0x100, false⟩, ⟨0x3000, 32, false⟩]⟩ }
-theorem setup (i : BitVec 64) :
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0x3000, 4, 4, i] (mkS i) :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | _ | _ |  r <;> simp [mkS] at h ⊢ <;> omega⟩
-theorem guard (i : BitVec 64) : GuardOK (mkS i) 0 := by
-  refine ⟨by simp [mkS], by simp [mkS, Memory.accessible], ?_⟩; simp [mkS, Memory.readLE]
-theorem stack (i : BitVec 64) : StackOK (mkS i) 24 16 := by
-  refine ⟨by simp [mkS], by simp [mkS], by simp [mkS], by simp [mkS, Memory.accessible]⟩
--- in bounds: the theorem's Returns conclusion is reached
-example : Returns (Extracted.program.withExit ret) (mkS 1) (fun s' => ABIReturn (mkS 1) s' ∧
-    (s'.regs 0).toNat = (mkS 1).mem.readLE (0x3000 + 8 * 1) 8) :=
-  (Proof.correctness 0x3000 4 4 1 ret hret (mkS 1) (setup 1) (guard 1) (stack 1)).1 (by decide)
-    ⟨by decide, by decide⟩ (by simp [Disjoint, mkS])
--- out of bounds: the theorem's Panics conclusion is reached
-example : Panics (Extracted.program.withExit ret) (mkS 5) :=
-  (Proof.correctness 0x3000 4 4 5 ret hret (mkS 5) (setup 5) (guard 5) (stack 5)).2 (by decide)
-end AuditWitness
+
+def sp0 : Nat := 0x108000
+def g0 : Nat := 0x200000
+def hp : Nat := 0x300000
+
+def wbytes (a : Nat) : Byte := 0
+
+def wmem : Memory := ⟨wbytes, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then (0x300000) else if i = 1 then (4) else if i = 2 then (4) else if i = 3 then (1) else if i = 28 then BitVec.ofNat 64 g0 else if i = 29 then BitVec.ofNat 64 (sp0 - 8)
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x300000 : BitVec 64), (4 : BitVec 64), (4 : BitVec 64), (1 : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl⟩
+
+theorem hg : GuardOK s0 0 := by
+  simp only [Janus.Spec.GuardOK, s0, wmem, wbytes, sp0, g0, hp]
+  decide
+
+theorem hst : StackOK s0 24 16 := by
+  simp only [Janus.Spec.StackOK, s0, wmem, wbytes, sp0, g0, hp]
+  decide
+
+theorem hgd : Janus.Spec.Disjoint ((s0.regs 28).toNat + 16) 8 (s0.sp.toNat - 24) 40 := by
+  simp only [Janus.Spec.Disjoint, s0, sp0, g0]
+  decide
+
+theorem hptr : Ptr s0.mem (0x300000 : BitVec 64) (8 * (4 : BitVec 64).toNat) false := by
+  simp only [Janus.Spec.Ptr, s0, wmem, wbytes, sp0, g0, hp]
+  decide
+
+theorem hdj : Disjoint (0x300000 : BitVec 64).toNat (8 * (4 : BitVec 64).toNat) (s0.sp.toNat - 24) 40 := by
+  simp only [Janus.Spec.Disjoint, s0, sp0, g0, hp]
+  decide
+
+def s1 : State :=
+  { regs := fun i => if i = 0 then (0x300000) else if i = 1 then (4) else if i = 2 then (4) else if i = 3 then (5) else if i = 28 then BitVec.ofNat 64 g0 else if i = 29 then BitVec.ofNat 64 (sp0 - 8)
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem }
+
+theorem setup1 : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x300000 : BitVec 64), (4 : BitVec 64), (4 : BitVec 64), (5 : BitVec 64)] s1 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl⟩
+
+theorem hg1 : GuardOK s1 0 := by
+  simp only [Janus.Spec.GuardOK, s1, wmem, wbytes, sp0, g0, hp]
+  decide
+
+theorem hst1 : StackOK s1 24 16 := by
+  simp only [Janus.Spec.StackOK, s1, wmem, wbytes, sp0, g0, hp]
+  decide
+
+/-- All hypotheses of `correctness` hold together at a concrete call (the returning conjunct fires). -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (ptr len cap i : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap, i] s ∧ GuardOK s 0 ∧ StackOK s 24 16 ∧
+    i.toNat < len.toNat ∧ Ptr s.mem ptr (8 * len.toNat) false ∧ Disjoint ptr.toNat (8 * len.toNat) (s.sp.toNat - 24) 40 ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => ABIReturn s s' ∧
+      (s'.regs 0).toNat = s.mem.readLE (ptr.toNat + 8 * i.toNat) 8) ∧
+    (∃ (ptr2 len2 cap2 i2 : BitVec 64) (s2 : State), CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr2, len2, cap2, i2] s2 ∧ GuardOK s2 0 ∧ StackOK s2 24 16 ∧ len2.toNat ≤ i2.toNat ∧ Panics (Extracted.program.withExit ret) s2) :=
+  ⟨ret, s0, (0x300000), (4), (4), (1), hret, setup, hg, hst, (by decide), hptr, hdj,
+    (correctness 0x300000 4 4 1 ret hret s0 setup hg hst).1 (by decide) hptr hdj,
+    ⟨(0x300000), (4), (4), (5), s1, setup1, hg1, hst1, (by decide), (correctness 0x300000 4 4 5 ret hret s1 setup1 hg1 hst1).2 (by decide)⟩⟩
+
+end Witness
+
+end Proof

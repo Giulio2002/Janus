@@ -293,7 +293,7 @@ func TestRound15aPlantedOlean(t *testing.T) {
 	verify := func(pkg string) *verifiedReport {
 		t.Helper()
 		code, out, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(pkg, "ConsumerExample", "Add.lean"), "--proof-root", pkg,
-			"--theorem", "ConsumerExample.Add.correctness", "--no-result-cache")
+			"--theorem", "ConsumerExample.Add.correctness", "--theorem", "ConsumerExample.Add.Witness.nonvacuous", "--no-result-cache")
 		if code != 0 {
 			t.Fatalf("verify %s: %d\n%s\n%s", pkg, code, out, stderr)
 		}

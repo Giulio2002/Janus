@@ -127,7 +127,7 @@ theorem wstate_eq (r : Nat → W64) : wstate r = PrintFn.Witness.wstate PrintCod
     cs_tr = lambda nm: f"""  · obtain ⟨sc, hpc, hco, hlp, hn⟩ := {nm}
     refine ⟨sc, ?_, hco, hlp, hn⟩
     rw [equiv.contractAddr]; exact hpc"""
-    out.append("\n" + d_nv + nv_stmt + f""":= by
+    nv_block = ("\n" + d_nv + nv_stmt + f""":= by
   obtain ⟨impl, rt, ret, s, E, k, h1, h2, h3, h4, h5, hp, hl2, hu2, hm2, hrun, hrun2⟩ := {nsm}.Witness.nonvacuous
   refine ⟨impl, rt, ret, s, E, k, {PRN}Lock2Contract.of_equiv equiv.symm impl rt 1024 h1, {PRN}Unlock2Contract.of_equiv equiv.symm impl rt 1024 h2,
     {PRN}MemmoveContract.of_equiv equiv.symm impl h3, equiv.symm.retAddr impl h4, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
@@ -142,6 +142,10 @@ theorem wstate_eq (r : Nat → W64) : wstate r = PrintFn.Witness.wstate PrintCod
   · {nl_fwd}exact (((equiv.sim impl).withExit ret).symm).returnsK hrun
   · {nl_fwd}exact (((equiv.sim impl).withExit ret).symm).returnsK hrun2
 """)
+    out.append(nv_block)
+    # UP3d strict pairing: `full_output` (a second main of the module) has its own witness `Witness.full_output`, the same
+    # instance (the statement carries both runs), paired with the main of the same name
+    out.append(nv_block.replace("theorem nonvacuous", "theorem full_output", 1).replace("hold together", "hold together (for `full_output`)", 1))
     out.append("\n" + d_ret + ret_stmt + f""":= by
   rw [implAt_eq, wstate_eq]
   {('rw [nl_eq, wmem_eq]' if ex == 'PrintStr' else '')}

@@ -143,6 +143,37 @@ theorem pre : GuardOK s0 4128 ∧ StackOK s0 4136 16 ∧ Outside (s0.sp.toNat - 
   · rw [addr_cl]; exact ⟨rfl, rfl⟩
   · rw [rt_eq]; simp only [outside_cons, outside_nil, and_true]; decide
 
+/-- The call-site state of `runtime.memclrNoHeapPointers`: `Zero`'s call state moved to the runtime's entry
+(`X0 = ptr0`, `X1 = 12` as in `s0`), with the callee's `SP` 16 bytes lower so that its stack window is
+inside the mapped frame. -/
+def wsCall : State := { s0 with pc := BitVec.ofNat 64 clA, sp := BitVec.ofNat 64 (sp0 - 16) }
+
+@[reducible] def memclrSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : State) : Prop :=
+  Mem.EqPre 4096 2 s ∧
+  LiveMemAt R addr [(s.regs 0).toNat, (s.regs 1).toNat] L b s (calleeStack s 4096 2) ∧
+  LiveDest R L s 4096 2 (s.regs 0).toNat (s.regs 1).toNat
+
+theorem wsCall_pre : memclrSite R clA [] 0x400 wsCall := by
+  have hcs : calleeStack wsCall 4096 2 = [(sp0 - 16 - 4096, sp0 - 16 - 8), (sp0 - 16 + 8, sp0 - 16 + 8 + 16)] := by
+    simp only [calleeStack, wsCall]; decide
+  refine ⟨⟨(guardOK_iff _ _).1 ⟨by decide, by decide, by decide⟩, by unfold CallOK; decide, ?_⟩, ⟨⟨rfl, rfl⟩, inv0, fun r hr => by simp at hr, ?_⟩,
+    ⟨by decide, by decide, ?_, Or.inr ?_⟩⟩
+  · rw [hcs]; simp only [outside_cons, outside_nil, and_true]; decide
+  · rw [hcs, rt_eq]; intro x hx
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hx
+    rcases hx with rfl | rfl <;> simp only [outside_cons, outside_nil, and_true] <;> decide
+  · rw [hcs]; simp only [outside_cons, outside_nil, and_true]; decide
+  · rw [rt_eq]; simp only [outside_cons, outside_nil, and_true]; decide
+
+/-- The returning run, exactly as `correctness` states it at the witness. -/
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ Mem.Zeroed s'.mem (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat ∧
+      R.inv 0x400 [] (s0.regs 28).toNat (view R.rt [] s'.mem) ∧
+      MemFrame s0.mem s'.mem (R.rt ++ [(s0.sp.toNat - 4136, s0.sp.toNat + 16),
+        ((BitVec.ofNat 64 ptr0).toNat, (BitVec.ofNat 64 ptr0).toNat + (12 : BitVec 64).toNat)]) :=
+  correctness implAt R 0x400 [] (BitVec.ofNat 64 ptr0) 12 12 (by rw [addr_cl]; exact model_cl)
+    ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` hold together: a runtime (`impl`, `R`), a budget, a live set and a
 call of `Zero` on 12 bytes satisfying the precondition. -/
 theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (b : Nat) (L : List (Nat × Nat)) (ret : Nat)
@@ -163,14 +194,22 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (b : Nat) (L : List (
         s.mem.accessible (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat true = true ∧
         Apart (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat (s.sp.toNat - 4136) 4152 ∧
         (InRanges (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat L ∨
-          Outside (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat R.rt))) :=
-  ⟨implAt, R, 0x400, [], ret, s0, by rw [addr_cl]; exact model_cl, hret, setup, pre⟩
+          Outside (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat R.rt))) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") ∧
+      memclrSite R (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") L b s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ Mem.Zeroed s'.mem (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat ∧
+        R.inv b L (s.regs 28).toNat (view R.rt L s'.mem) ∧
+        MemFrame s.mem s'.mem (R.rt ++ [(s.sp.toNat - 4136, s.sp.toNat + 16),
+          ((BitVec.ofNat 64 ptr0).toNat, (BitVec.ofNat 64 ptr0).toNat + (12 : BitVec 64).toNat)]) :=
+  ⟨implAt, R, 0x400, [], ret, s0, by rw [addr_cl]; exact model_cl, hret, setup, pre,
+    ⟨[], 0x400, wsCall, by rw [addr_cl]; rfl, by rw [addr_cl]; exact wsCall_pre⟩, returnsF⟩
 
 /-- So the guarantee is reached: `Zero` zeroes the 12 bytes at `ptr0`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ Mem.Zeroed s'.mem ptr0 12 :=
-  (correctness implAt R 0x400 [] (BitVec.ofNat 64 ptr0) 12 12 (by rw [addr_cl]; exact model_cl)
-    ret hret s0 setup pre).mono fun _ ⟨habi, hz, _⟩ => ⟨habi, by simpa [ptr0] using hz⟩
+  returnsF.mono fun _ ⟨habi, hz, _⟩ => ⟨habi, by simpa [ptr0] using hz⟩
 
 end Witness
 

@@ -752,7 +752,7 @@ func TestCacheGCConcurrentVerify(t *testing.T) {
 		arts[n] = mustExtract(t, "example.com/basic."+n)
 	}
 	verifyArgs := func(n string) []string {
-		return append([]string{"verify", arts[n], "--proof", filepath.Join(repoRoot, "examples", "proofs", n+".lean"), "--json"}, sb...)
+		return append([]string{"verify", arts[n], "--proof", filepath.Join(repoRoot, "examples", "proofs", n+".lean"), "--theorem", "Proof.correctness", "--theorem", "Proof.Witness.nonvacuous", "--json"}, sb...)
 	}
 	env := cacheEnv(cache)
 	run1 := func(args ...string) (int, string) {
@@ -798,7 +798,7 @@ func TestCacheGCConcurrentVerify(t *testing.T) {
 	pkg := consumerCopy(t, "toml")
 	consumerArt := mustExtract(t, "example.com/basic.Add")
 	consumerArgs := append([]string{"verify", consumerArt, "--proof", filepath.Join(pkg, "ConsumerExample/Add.lean"), "--proof-root", pkg,
-		"--theorem", "ConsumerExample.Add.correctness", "--json"}, sb...)
+		"--theorem", "ConsumerExample.Add.correctness", "--theorem", "ConsumerExample.Add.Witness.nonvacuous", "--json"}, sb...)
 	var procs []*janusProc
 	for i, n := range []string{"Add", "Max", "Mul64", "Add", "Max", "Add"} {
 		procs = append(procs, &janusProc{name: fmt.Sprintf("verify#%d %s", i, n), args: verifyArgs(n), wait: time.Duration(i) * 700 * time.Millisecond})

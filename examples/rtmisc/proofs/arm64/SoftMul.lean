@@ -113,18 +113,50 @@ theorem pre : CallerOK softEnv s0 48 16 ∧ s0.fpcr = 0 ∧ ¬ MulTiny a1.toNat 
   · unfold Spec.Disjoint; decide
   · simp [softEnv, outside_nil]
 
+/-- The call-site state: the stock callee state of `Janus.Contracts.SoftFloatSat`, moved to `runtime.fmul64`'s entry. -/
+def wsCall : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 one else if i = 1 then BitVec.ofNat 64 one
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 wret else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 cAddr, flags := ⟨false, false, false, false⟩,
+    mem := wmem }
+
+theorem wsCall_pre : SoftPre wsCall ∧ ¬ MulTiny (wsCall.regs 0).toNat (wsCall.regs 1).toNat := by
+  have hw : wmem.accessible (wsp - softDepth) (softDepth + 8 + 8 * 2) true = true := by decide
+  have h28 : wsCall.regs 28 = BitVec.ofNat 64 wg := rfl
+  have h30 : wsCall.regs 30 = BitVec.ofNat 64 wret := rfl
+  have hsp : wsCall.sp = BitVec.ofNat 64 wsp := rfl
+  have hm : wsCall.mem = wmem := rfl
+  refine ⟨⟨⟨trivial, ⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, by decide, ?_, ?_⟩, ?_⟩, rfl⟩, by decide⟩
+  · simp only [regG, stackguard0Offset, h28]; decide
+  · simp only [regG, stackguard0Offset, h28, hm]; decide
+  · simp only [stackguard0, regG, stackguard0Offset, h28, hm, hsp, softEnv]; decide
+  · simp only [h30]; decide
+  · simp only [h30]; decide
+  · simp only [hsp]; decide
+  · simp only [hsp, softEnv]; decide
+  · simp only [hsp]; decide
+  · simp only [hsp, hm, softEnv, BitVec.toNat_ofNat]
+    exact Memory.accessible_mono _ hw (by simp [wsp, softDepth]) (by simp [wsp, softDepth])
+  · simp [softEnv]
+
+/-- So the guarantee is reached: `1.0 * 1.0` is the IEEE product (`1.0`). -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ ResultIs binary64 (mul binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat ∧
+      MemFrame s0.mem s'.mem [(s0.sp.toNat - (softDepth + 48), s0.sp.toNat + 16)] :=
+  correctness implAt model a1 a1 ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (ret : Nat) (s : State),
     SoftFmulContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.fmul64") ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [a1, a1] s ∧
-    (CallerOK softEnv s 48 16 ∧ s.fpcr = 0 ∧ ¬ MulTiny a1.toNat a1.toNat) :=
-  ⟨implAt, ret, s0, model, hret, setup, pre⟩
-
-/-- So the guarantee is reached: `1.0 * 1.0` is the IEEE product (`1.0`). -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ ResultIs binary64 (mul binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat :=
-  (correctness implAt model a1 a1 ret hret s0 setup pre).mono fun _ h => ⟨h.1, h.2.1⟩
+    (CallerOK softEnv s 48 16 ∧ s.fpcr = 0 ∧ ¬ MulTiny a1.toNat a1.toNat) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.fmul64") ∧
+      SoftPre s_c ∧ ¬ MulTiny (s_c.regs 0).toNat (s_c.regs 1).toNat) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ ResultIs binary64 (mul binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat ∧
+        MemFrame s.mem s'.mem [(s.sp.toNat - (softDepth + 48), s.sp.toNat + 16)] :=
+  ⟨implAt, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 

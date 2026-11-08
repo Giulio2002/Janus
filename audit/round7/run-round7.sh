@@ -45,6 +45,8 @@ row() {
   return 0
 }
 v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" 2>&1)"; }
+# UP3d: honest rows verify together with their Witness.nonvacuous
+vw() { out="$("$J" verify --fresh --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" --theorem Proof.correctness --theorem Proof.Witness.nonvacuous 2>&1)"; }
 gob() { ( cd audit/round7/asmstub && GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}" CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
     go build -trimpath -buildvcs=false "$@" ) ; }
 
@@ -73,7 +75,7 @@ cp -r $W/AsmAdd $W/AsmAdd-c
 par_run 'v G1a_asm_runtime_stub_panics $W/AsmAdd;      row G1a_asm_runtime_stub_panics blocked'
 par_run 'v G1b_asm_runtime_stub_neverpanics $W/AsmInc; row G1b_asm_runtime_stub_neverpanics blocked'
 g1c_pat="ABIReturn s s' ∧ s'.regs 0 = x + y"
-par_run 'v G1c_asmstub_returns $W/AsmAdd-c;            row G1c_asmstub_returns Verified "$g1c_pat"'
+par_run 'vw G1c_asmstub_returns $W/AsmAdd-c;            row G1c_asmstub_returns Verified "$g1c_pat"'
 par_wait
 
 echo "== G3 (round 8): stubs pinned to their code, not to build info (audit/round8/govers: go1.25.5 labelled go1.26.0)"
@@ -102,7 +104,7 @@ else echo "  G3 fixture build failed (needs GOTOOLCHAIN=go1.25.5)   <-- BROKEN";
 echo "== G2: the entry symbol is the binary's label (//go:linkname push to example.com/basic.Add)"
 tmark "== G2: the entry symbol is the binary's label (//g"
 "$J" extract $W/asmstub example.com/basic.Add $W/Label >/dev/null || broken+=(G2-extract)
-par_run 'v G2a_pushed_entry_label $W/Label; row G2a_pushed_entry_label Verified "Entry: example.com/basic.Add" "Module: example.com/asmstub"'
+par_run 'vw G2a_pushed_entry_label $W/Label; row G2a_pushed_entry_label Verified "Entry: example.com/basic.Add" "Module: example.com/asmstub"'
 par_wait
 
 echo "== H1: bound-variable names"
@@ -111,17 +113,17 @@ for c in H1a H1c H1d H1b K1; do rm -rf $W/Add-$c; cp -r $W/Add $W/Add-$c; done
 par_run 'v H1a_binder_lookalike_vacuous $W/Add-H1a;   row H1a_binder_lookalike_vacuous blocked "binds two variables whose names look alike"'
 par_run 'v H1c_binder_cyrillic_guillemets $W/Add-H1c; row H1c_binder_cyrillic_guillemets blocked "characters other than identifier letters"'
 par_run 'v H1d_binder_zero_width $W/Add-H1d;          row H1d_binder_zero_width blocked "characters other than identifier letters"'
-par_run 'v H1b_binder_greek_honest $W/Add-H1b;        row H1b_binder_greek_honest Verified "(α β : BitVec 64)"'
+par_run 'vw H1b_binder_greek_honest $W/Add-H1b;        row H1b_binder_greek_honest Verified "(α β : BitVec 64)"'
 
 # K1 (one block: its explain rows read the verified.json of the verification before them)
 par_run 'echo "== K1: notes on standard operations that read unexpectedly"
 K=$W/Add-K1
-v K1a_misleading_ops $K; row K1a_misleading_ops Verified "Notes (standard Lean meaning" "\`^\` wraps at" "division by zero is total at Nat" "Nat subtraction truncates at 0"
-out="$("$J" verify --fresh --janus-root "$root" --proof examples/proofs/Add.lean $K 2>&1)"; row K1b_honest_add_no_notes Verified
+vw K1a_misleading_ops $K; row K1a_misleading_ops Verified "Notes (standard Lean meaning" "\`^\` wraps at" "division by zero is total at Nat" "Nat subtraction truncates at 0"
+out="$("$J" verify --fresh --janus-root "$root" --proof examples/proofs/Add.lean $K --theorem Proof.correctness --theorem Proof.Witness.nonvacuous 2>&1)"; row K1b_honest_add_no_notes Verified
 grep -q "Notes (" <<<"$out" && { echo "  K1b: the honest Add proof got notes   <-- BROKEN"; broken+=(K1b-notes); }
 out="$("$J" explain $K/verified.json 2>&1)"
 row_e() { grep -q "Read with care" <<<"$out" && echo "  K1b explain: unexpected notes   <-- BROKEN" && broken+=(K1b-explain); }; row_e
-"$J" verify --fresh --janus-root "$root" --proof $A/K1a_misleading_ops.lean $K >/dev/null 2>&1
+"$J" verify --fresh --janus-root "$root" --proof $A/K1a_misleading_ops.lean $K --theorem Proof.correctness --theorem Proof.Witness.nonvacuous >/dev/null 2>&1
 out="$("$J" explain $K/verified.json 2>&1)"
 if grep -q "Read with care" <<<"$out"; then echo "  K1a explain                          ok       notes shown"; else echo "  K1a explain: no notes   <-- BROKEN"; broken+=(K1a-explain); fi'
 

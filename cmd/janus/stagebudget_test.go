@@ -30,7 +30,7 @@ func TestVerifyStageBudgets(t *testing.T) {
 	verify := func() (wall, cpu map[string]float64) {
 		t.Helper()
 		code, out, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(pkg, "ConsumerExample", "Add.lean"),
-			"--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness")
+			"--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness", "--theorem", "ConsumerExample.Add.Witness.nonvacuous")
 		if code != 0 {
 			t.Fatalf("verify: %d\n%s\n%s", code, out, stderr)
 		}
@@ -166,7 +166,7 @@ func TestVerifyStageBudgetsSeesSandboxedCPU(t *testing.T) {
 	verify := func(src string) float64 {
 		t.Helper()
 		writeFile(t, proof, src)
-		code, out, stderr := runJanus(t, "verify", add, "--proof", proof, "--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness")
+		code, out, stderr := runJanus(t, "verify", add, "--proof", proof, "--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness", "--theorem", "ConsumerExample.Add.Witness.nonvacuous")
 		if code != 0 {
 			t.Fatalf("verify: %d\n%s\n%s", code, out, stderr)
 		}

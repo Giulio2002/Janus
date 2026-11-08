@@ -39,7 +39,7 @@ row() {
 tmark "J1 start"
 dep="$(audit/round7/dep/setup.sh "$root/$W/dep" "$root")" || { echo "  dependency fixture failed"; broken+=(dep-setup); }
 j1t0=$(date +%s)
-out="$("$J" verify --fresh "$W/Add" --janus-root "$root" --proof "$dep/R7Proofs/Proofs.lean" --proof-root "$dep" --allow-unchecked-provenance --theorem R7Proofs.misnamed 2>&1)"
+out="$("$J" verify --fresh "$W/Add" --janus-root "$root" --proof "$dep/R7Proofs/Proofs.lean" --proof-root "$dep" --allow-unchecked-provenance --theorem R7Proofs.misnamed --theorem R7Proofs.Witness.misnamed 2>&1)"
 row J1a_misnamed_dependency_def Verified "Dependency definitions used by the statement" "MisLib.mul : BitVec (64 : Nat) → BitVec (64 : Nat) → BitVec (64 : Nat) := fun (a b : BitVec (64 : Nat)) => a + b"
 # The verdict must have been computed in this run: no "Cached:" line, and the report is not older than
 # the start of the verification.

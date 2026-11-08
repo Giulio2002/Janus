@@ -96,6 +96,19 @@ theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
   intro s' h
   exact ⟨h.1, by rw [h.2]; decide⟩
 
+/-- All hypotheses of `forAllValues` hold together (cut 40, bias 0, in the link-time image), and the call returns. -/
+theorem forAllValues : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧
+    (GlobalIs Extracted.program.globals s.mem "example.com/basic.karatsubaCut" 40 ∧
+        GlobalIs Extracted.program.globals s.mem "example.com/basic.mulBias" 0) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ s'.regs 0 = if (0#64).slt (BitVec.ofNat 64 40) then BitVec.ofNat 64 0 + 1
+        else BitVec.ofNat 64 0 + 2) :=
+  ⟨ret, s0, hret, setup, ⟨hpre.globalIs (n := "example.com/basic.karatsubaCut") (by simp) rfl,
+      hpre.globalIs (n := "example.com/basic.mulBias") (by simp) rfl⟩,
+    Proof.forAllValues 0#64 40 0 ret hret s0 setup ⟨hpre.globalIs (n := "example.com/basic.karatsubaCut") (by simp) rfl,
+      hpre.globalIs (n := "example.com/basic.mulBias") (by simp) rfl⟩⟩
+
 end Witness
 
 end Proof

@@ -74,7 +74,7 @@ done
 # x.toNat * y.toNat) True` (with `Shown`'s body in the report's definitions) and A4 `… fun x
 # x_1 => True`; both round-trip, so both stay Verified-honest. Inspect with `janus explain`.
 for a in A2_unexpander A4_unexpand_janus; do
-  par_run 'row "$a" Verified-honest "$(v --proof audit/attacks/$a.lean $W/Add)"'
+  par_run 'row "$a" Verified-honest "$(v --proof audit/attacks/$a.lean $W/Add --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"'
 done
 # Round 2, CRITICAL-1 (docs/AUDIT-ROUND2.md): an instance written inline in the statement
 # (`@HMul.hMul _ _ _ ⟨fun a b => a + b⟩ x y`, printed `x * y`) used to verify against Add. Now
@@ -120,7 +120,7 @@ par_run 'if lake env lean audit/specs/B2_exit_sentinel.lean >/dev/null 2>&1; the
 row B2_exit_sentinel blocked "$b2"'
 par_run 'row B2_refuted ok "$(lake env lean audit/specs/B2_refuted.lean 2>&1 | lean_first)"'
 for n in Add Add256 Get; do
-  par_run 'row "control:${n}_witness" Verified "$(v --proof audit/controls/${n}_witness.lean $W/$n)"'
+  par_run 'row "control:${n}_witness" Verified "$(v --proof audit/controls/${n}_witness.lean $W/$n --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"'
 done
 fi
 
@@ -141,7 +141,7 @@ fi
 # work dir, the sandbox runs under --die-with-parent in a new PID namespace (no lingering
 # watcher survives), and every olean is hash-bound and re-checked after the audit and replay.
 # The honest proof verifies; there is no window to swap a fake pair into.
-want base && par_run 'row C2_toctou_swap mitigated "$(v --proof examples/proofs/Add.lean $W/Add)"'
+want base && par_run 'row C2_toctou_swap mitigated "$(v --proof examples/proofs/Add.lean $W/Add --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"'
 
 # R1: the compiled framework is pinned and read-only to untrusted builds, and the kernel replay
 # covers the theorem's whole non-core import closure. Before the fix a consumer lakefile could

@@ -165,8 +165,107 @@ theorem pre : Pre R 0x100 liveL (BitVec.ofNat 64 dstP) 1 (BitVec.ofNat 64 srcP) 
   · exact ⟨(bxP, bxP + 16), by simp [liveL], by decide, by decide⟩
   all_goals (simp only [Apart]; decide)
 
+/-! ### The call-site states of the three runtime contracts -/
+
+/-- A call state at the runtime entry `addr` (words `x, y, z` in `X0, X1, X2`), in the witness's world:
+the stack, the heap and the invariant are those of `s0`. -/
+def callS (addr x y z : Nat) : State :=
+  { s0 with
+    pc := BitVec.ofNat 64 addr
+    regs := fun i => if i = 0 then BitVec.ofNat 64 x else if i = 1 then BitVec.ofNat 64 y
+      else if i = 2 then BitVec.ofNat 64 z else s0.regs i }
+
+theorem cs_sp (a x y z : Nat) : (callS a x y z).sp.toNat = sp0 := by rfl
+theorem cs_g (a x y z : Nat) : ((callS a x y z).regs 28).toNat = g0 := by rfl
+theorem cs_x30 (a x y z : Nat) : ((callS a x y z).regs 30).toNat = ret := by rfl
+theorem cs_mem (a x y z : Nat) : (callS a x y z).mem = mem0 := rfl
+
+theorem cs_callOK (a x y z n : Nat) (hn : n ≤ 5) : CallOK (callS a x y z) 4096 n := by
+  have hw : mem0.accessible (sp0 - 4096) (4096 + 8 + 8 * 5) true = true := by decide
+  simp only [CallOK, cs_x30, cs_sp, cs_mem]
+  refine ⟨by decide, by decide, by decide, by decide, by decide, by first | decide | (unfold sp0; omega), ?_⟩
+  exact Memory.accessible_mono _ hw (Nat.le_refl _) (by omega)
+
+theorem cs_room (a x y z n : Nat) (hn : n ≤ 5) : StackRoom (callS a x y z) 4096 n := by
+  simp only [StackRoom, GuardOK, cs_g, cs_sp, cs_mem, calleeStack]
+  refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
+  simp only [outside_cons, outside_nil, and_true, sp0, g0]
+  omega
+
+theorem cs_eqpre (a x y z n : Nat) (hn : n ≤ 5) : Mem.EqPre 4096 n (callS a x y z) :=
+  ⟨(guardOK_iff _ _).1 (cs_room a x y z n hn).1, cs_callOK a x y z n hn, (cs_room a x y z n hn).2⟩
+
+theorem cs_winL (a x y z n : Nat) (hn : n ≤ 5) : LiveSep liveL (calleeStack (callS a x y z) 4096 n) := by
+  intro r hr
+  simp only [liveL, List.mem_cons, List.not_mem_nil, or_false] at hr
+  simp only [calleeStack, cs_sp, outside_cons, outside_nil, and_true, sp0]
+  rcases hr with rfl | rfl | rfl <;> simp only [dstP, srcP, bxP, HEAP] <;> omega
+
+theorem cs_winR (a x y z n : Nat) (hn : n ≤ 5) : LiveSep (calleeStack (callS a x y z) 4096 n) R.rt := by
+  intro x' hx
+  simp only [calleeStack, cs_sp, List.mem_cons, List.not_mem_nil, or_false] at hx
+  rw [rt_eq]
+  rcases hx with rfl | rfl <;>
+    simp only [outside_cons, outside_nil, and_true, sp0, HEAP, HEND, BUMP, WBUF] <;> omega
+
+def sMv : State := callS mvA dstP srcP 8
+def sMk : State := callS mkA u64Type 2 2
+def sWb : State := callS wbA 0 0 0
+
+@[reducible] def mvSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : State) : Prop :=
+  Mem.EqPre 4096 3 s ∧
+  LiveMemAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b s (calleeStack s 4096 3) ∧
+  Mem.Input s 4096 3 (s.regs 1).toNat (s.regs 2).toNat ∧
+  LiveDest R L s 4096 3 (s.regs 0).toNat (s.regs 2).toNat
+
+theorem site_mv : mvSite R mvA liveL 0x100 sMv := by
+  refine ⟨cs_eqpre _ _ _ _ 3 (by omega), ⟨?_, ?_, cs_winL _ _ _ _ 3 (by omega), cs_winR _ _ _ _ 3 (by omega)⟩,
+    ⟨by decide, by decide, ?_⟩, ⟨by decide, by decide, ?_, ?_⟩⟩
+  · exact Or.inl ⟨rfl, dstP, srcP, rfl⟩
+  · exact inv0
+  · show Outside srcP 8 (calleeStack sMv 4096 3)
+    simp only [calleeStack, sMv, cs_sp, outside_cons, outside_nil, and_true, srcP, HEAP, sp0]; omega
+  · show Outside dstP 8 (calleeStack sMv 4096 3)
+    simp only [calleeStack, sMv, cs_sp, outside_cons, outside_nil, and_true, dstP, HEAP, sp0]; omega
+  · exact Or.inl ⟨(dstP, dstP + 8), by simp [liveL], by decide, by decide⟩
+
+@[reducible] def mkSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : State) : Prop :=
+  MakeslicePre 4096 s ∧ StackRoom s 4096 3 ∧
+    LiveAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (makesliceRound s)
+      (s.regs 28).toNat s.mem (calleeStack s 4096 3)
+
+theorem site_mk : mkSite R mkA liveL 0x100 sMk := by
+  refine ⟨⟨cs_callOK _ _ _ _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide⟩,
+    cs_room _ _ _ _ 3 (by omega), ?_, inv0, by decide, cs_winL _ _ _ _ 3 (by omega), cs_winR _ _ _ _ 3 (by omega)⟩
+  exact Or.inr (Or.inl ⟨rfl, by decide⟩)
+
+@[reducible] def wbSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : State) : Prop :=
+  CallOK s 4096 0 ∧ R.ok addr [2] ∧ R.inv b L (s.regs 28).toNat (view R.rt L s.mem) ∧
+    LiveSep L [(s.sp.toNat - 4096, s.sp.toNat - 8)] ∧ LiveSep [(s.sp.toNat - 4096, s.sp.toNat - 8)] R.rt
+
+theorem site_wb : wbSite R wbA liveL 0x100 sWb := by
+  refine ⟨cs_callOK _ _ _ _ 0 (by omega), Or.inr (Or.inr ⟨rfl, rfl⟩), inv0, ?_, ?_⟩
+  · intro r hr
+    simp only [liveL, List.mem_cons, List.not_mem_nil, or_false] at hr
+    simp only [sWb, cs_sp, outside_cons, outside_nil, and_true, sp0]
+    rcases hr with rfl | rfl | rfl <;> simp only [dstP, srcP, bxP, HEAP] <;> omega
+  · intro x hx
+    simp only [sWb, cs_sp, List.mem_singleton] at hx
+    subst hx
+    rw [rt_eq]
+    simp only [outside_cons, outside_nil, and_true, sp0, HEAP, HEND, BUMP, WBUF]
+    omega
+
+/-- The returning run, exactly as `correctness` states it at the witness. -/
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ Post R 0x100 (BitVec.ofNat 64 dstP) 1 (BitVec.ofNat 64 srcP) 1 (BitVec.ofNat 64 bxP) 2 s0 s' :=
+  correctness implAt R 0x100 liveL (BitVec.ofNat 64 dstP) 1 1 (BitVec.ofNat 64 srcP) 1 1 (BitVec.ofNat 64 bxP) 2
+    (by rw [addr_mv]; exact model_mv) (by rw [addr_mk]; exact model_mk)
+    (by rw [addr_wb]; exact model_wb) ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` hold together: a runtime (`impl`, `R`), a live set, a budget and a
-call of `Chain(dst, src, bx, 2)` (one-word slices) satisfying the precondition. -/
+call of `Chain(dst, src, bx, 2)` (one-word slices) satisfying the precondition; a call-site state for each
+of the three contracts; and the returning run. -/
 theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (b : Nat) (L : List (Nat × Nat)) (ret : Nat) (s : State),
     MemmoveLive (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memmove") 4096 R ∧
     MakesliceLiveContract (Extracted.program.link impl)
@@ -176,18 +275,30 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (b : Nat) (L : List (
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 dstP, 1, 1,
       BitVec.ofNat 64 srcP, 1, 1, BitVec.ofNat 64 bxP, 2] s ∧
-    Pre R b L (BitVec.ofNat 64 dstP) 1 (BitVec.ofNat 64 srcP) 1 (BitVec.ofNat 64 bxP) 2 s :=
+    Pre R b L (BitVec.ofNat 64 dstP) 1 (BitVec.ofNat 64 srcP) 1 (BitVec.ofNat 64 bxP) 2 s ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memmove") ∧
+      mvSite R (Extracted.program.contractAddr "runtime.memmove") L b s_c) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makeslice") ∧
+      mkSite R (Extracted.program.contractAddr "runtime.makeslice") L b s_c) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gcWriteBarrier2") ∧
+      wbSite R (Extracted.program.contractAddr "runtime.gcWriteBarrier2") L b s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ Post R b (BitVec.ofNat 64 dstP) 1 (BitVec.ofNat 64 srcP) 1 (BitVec.ofNat 64 bxP) 2 s s' :=
   ⟨implAt, R, 0x100, liveL, ret, s0, by rw [addr_mv]; exact model_mv, by rw [addr_mk]; exact model_mk,
-    by rw [addr_wb]; exact model_wb, hret, setup, pre⟩
+    by rw [addr_wb]; exact model_wb, hret, setup, pre,
+    ⟨liveL, 0x100, sMv, by rw [addr_mv]; rfl, by rw [addr_mv]; exact site_mv⟩,
+    ⟨liveL, 0x100, sMk, by rw [addr_mk]; rfl, by rw [addr_mk]; exact site_mk⟩,
+    ⟨liveL, 0x100, sWb, by rw [addr_wb]; rfl, by rw [addr_wb]; exact site_wb⟩, returnsF⟩
 
 /-- So the guarantee is reached: `Chain(dst, src, bx, 2)` stores a fresh array `t` (apart from the three
 caller objects) in `bx.P` and `2` in `bx.N`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ ∃ t : Nat, s'.mem.readLE bxP 8 = t ∧ s'.mem.readLE (bxP + 8) 8 = 2 ∧
       Apart t 16 dstP 8 ∧ Apart t 16 srcP 8 ∧ Apart t 16 bxP 16 :=
-  (correctness implAt R 0x100 liveL (BitVec.ofNat 64 dstP) 1 1 (BitVec.ofNat 64 srcP) 1 1 (BitVec.ofNat 64 bxP) 2
-    (by rw [addr_mv]; exact model_mv) (by rw [addr_mk]; exact model_mk)
-    (by rw [addr_wb]; exact model_wb) ret hret s0 setup pre).mono
+  returnsF.mono
     fun _ ⟨habi, t, h1, h2, h3, h4, h5, h6, _⟩ => by
       have hbs : blockSize (8 * (2 : BitVec 64).toNat) true = 16 := by decide
       rw [hbs] at h3 h4 h5 h6

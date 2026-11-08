@@ -283,7 +283,7 @@ func TestCacheGCStressConsumerVerifies(t *testing.T) {
 	pkg := consumerCopy(t, "toml")
 	args := func(n string) []string {
 		return append([]string{"verify", mustExtract(t, "example.com/basic."+n), "--proof", filepath.Join(pkg, "ConsumerExample", n+".lean"),
-			"--proof-root", pkg, "--theorem", "ConsumerExample." + n + ".correctness", "--json"}, sb...)
+			"--proof-root", pkg, "--theorem", "ConsumerExample." + n + ".correctness", "--theorem", "ConsumerExample." + n + ".Witness.nonvacuous", "--json"}, sb...)
 	}
 	add, max := args("Add"), args("Max")
 	var stop atomic.Bool

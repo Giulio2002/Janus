@@ -187,3 +187,12 @@ func TestNonVacuityRefutationNeedsNoWitness(t *testing.T) {
 		t.Errorf("refutation main refused: %+v", outs[0])
 	}
 }
+
+func TestNonVacuityRunFreeNeedsNoWitness(t *testing.T) {
+	m := nvMain("P.correctness")
+	m.RunFree = true
+	outs, _ := runNV(t, false, m)
+	if outs[0].Err != nil || outs[0].Report.NonVacuity != nvNotShown {
+		t.Errorf("run-free main refused: %+v", outs[0])
+	}
+}

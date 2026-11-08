@@ -115,6 +115,26 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State) (ptr : BitVec 64) (len : BitVec
     ABIReturn s s' ∧ (results 3 s') = [if i.toNat < cap.toNat then ptr + 8 * i else ptr, j - i, cap - i]) :=
   ⟨ret, s0, ptr, len, cap, i, j, hret, setup, hc, hpre, correctness ptr len cap i j hc ret hret s0 setup hpre⟩
 
+def jP : BitVec 64 := 9#64
+theorem hnP : ¬ InRange i jP cap := by unfold InRange; decide +kernel
+def sP : State :=
+  { regs := fun r_ => if r_ = 0 then ptr else if r_ = 3 then len else if r_ = 1 then cap else if r_ = 7 then i else if r_ = 6 then jP else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wmem64 }
+theorem setupP : CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap, i, jP] sP :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3 ∨ i = 4) with rfl | rfl | rfl | rfl | rfl <;> rfl, rfl⟩
+theorem hpreP : (fun s => StackWritable s 16 16) sP := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+
+
+/-- All hypotheses of `panics` hold together, and the call panics. -/
+theorem panics : ∃ (ret : Nat) (s : State) (ptr len cap i j : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap, i, j] s ∧ (cap.toNat < 2 ^ 63) ∧ (¬ InRange i j cap) ∧ (StackWritable s 16 16) ∧
+    Panics (Extracted.program.withExit ret) s :=
+  ⟨ret, sP, ptr, len, cap, i, jP, hret, setupP, hc, hnP, hpreP, Proof.panics ptr len cap i jP hc ret hret sP setupP hpreP hnP⟩
+
 end Witness
 
 end Proof

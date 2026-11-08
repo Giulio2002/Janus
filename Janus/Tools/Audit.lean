@@ -99,6 +99,8 @@ structure Record where
   contractHyps : Array String := #[]
   /-- UP3c: the main theorem is a refutation (its statement, under its binders, is a negation `¬ …`): it claims no run, so no run-witness is required. -/
   refutation : Bool := false
+  /-- UP3c: the main statement makes no claim about running the program (no `Returns`/`Panics`/`ReachesRet`/`Reaches`/`Summary`/`Program.run` reachable through its definitions): `Extracted.entry = Extracted.entry`; nothing to witness. -/
+  runFree : Bool := false
   /-- The import graph of every module outside the toolchain core (`Init`, `Std`, `Lean`,
   `Lake`): `[module, direct import, …]`. The Go side kernel-replays each of these modules and
   keys its replay cache on the module's bytes and those of its imports. -/
@@ -1828,81 +1830,59 @@ partial def ensuresPres (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
   | .mdata _ b | .proj _ _ b => ensuresPres b acc
   | _ => acc
 
-/-- The theorems of the non-trusted modules (and of the module being elaborated) whose statement mentions `ICallPre`/`ICallPre64`
-and whose axioms are among propext / Classical.choice / Quot.sound: the candidate inhabitation lemmas. Computed in the FULL
-environment (the statement audit later runs in a clean environment that does not contain the proof module). -/
-def inhabCandidates (env : Environment) : MetaM (Array (Name × Expr)) := do
-  let pres := #[`Janus.Contracts.ICall.ICallPre, `Janus.Contracts.ICall.ICallPre64]
-  let modNames := env.header.moduleNames
-  let mut names : Array Name := #[]
-  names := env.const2ModIdx.fold (init := names) fun acc n idx =>
-    match modNames[idx.toNat]? with
-    | some m =>
-      if !trustedModule m && !n.isInternal then
-        match env.find? n with
-        | some (.thmInfo ci) => if ci.type.getUsedConstants.any pres.contains then acc.push n else acc
-        | _ => acc
-      else acc
-    | none => acc
-  names := env.constants.map₂.foldl (init := names) fun acc n ci =>
-    match ci with
-    | .thmInfo t => if !n.isInternal && t.type.getUsedConstants.any pres.contains then acc.push n else acc
-    | _ => acc
-  let mut out : Array (Name × Expr) := #[]
-  for n in names do
-    let some ci := env.find? n | continue
-    let axs ← collectAxioms n
-    if axs.all fun a => a == ``propext || a == ``Classical.choice || a == ``Quot.sound then out := out.push (n, ci.type)
-  return out
+/-- UP3c: CONSERVATIVE: does `e` possibly reach a run claim (`Returns`, `Panics`, `ReachesRet`, `Reaches`, `Summary`, `Program.run`, any machine
+`step`/`exec`/`run`) through the definitions it mentions? Anything the walk cannot unfold (axiom, opaque, `implemented_by`/extern bodies are opaque,
+fuel exhausted) counts as reaching one; so does any constant whose name mentions `step`, `exec` or `run` (a user-defined iteration of the step
+function reaches the machine's `step`). -/
+def reachesRunClaim (env : Environment) (e : Expr) : Bool := Id.run do
+  let base : List Name := [`Janus.GoABI.Returns, `Janus.GoABI.Panics, `Janus.Amd64.GoABI.Returns, `Janus.Amd64.GoABI.Panics,
+    `Janus.Tactic.ReachesRet, `Janus.Tactic.Reaches, `Janus.Tactic.Summary, `Janus.Amd64.Tactic.ReachesRet, `Janus.Amd64.Tactic.Reaches,
+    `Janus.Amd64.Tactic.Summary, `Janus.Program.run, `Janus.Amd64.Program.run]
+  let mut todo : Array Name := e.getUsedConstants
+  let mut seen : Std.HashSet Name := {}
+  let mut fuel := 50000
+  while !todo.isEmpty do
+    if fuel == 0 then return true
+    fuel := fuel - 1
+    let c := todo.back!
+    todo := todo.pop
+    if seen.contains c then continue
+    seen := seen.insert c
+    if base.contains c then return true
+    let lastComp := (c.componentsRev.headD .anonymous).toString.toLower
+    if (lastComp.splitOn "step").length > 1 || (lastComp.splitOn "exec").length > 1 || (lastComp.splitOn "run").length > 1 then return true
+    match env.find? c with
+    | some (.defnInfo d) => todo := todo ++ d.value.getUsedConstants ++ d.type.getUsedConstants
+    | some (.axiomInfo _) | some (.opaqueInfo _) => return true
+    | some _ => pure ()
+    | none => return true
+  return false
 
-initialize inhabRef : IO.Ref (Array (Name × Expr)) ← IO.mkRef #[]
 
-/-- UP3 (honesty of the call-site property): an `ICallContract[64]` whose `P` is anything but `fun _ => True` is a hypothesis
-with an AUTHOR-CHOSEN predicate; `P := False` (or any unsatisfiable `P`) makes the contract's call precondition unsatisfiable, so
-the hypothesis holds vacuously. The proof module must contain a kernel-checked theorem
-`∃ …, ∃ s, ICallPre[64] nargs stack above rt P s` (any leading `∀`/`∃`; the family's own precondition, `CallOK` included) that
-unifies with the statement's contract at SOME instantiation of the statement's variables (they are mvars here: the contract may
-not be unsatisfiable for every instantiation). Found by statement among the theorems of the non-trusted modules, whose axioms
-must be among propext / Classical.choice / Quot.sound. Returns the names of the lemmas tried when none matches. -/
-def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM (Except String Name) := do
-  let cands0 ← inhabRef.get
-  let cands0 ← if cands0.isEmpty then inhabCandidates env else pure cands0
-  let pre := if c == `Janus.Contracts.ICall.ICallContract then `Janus.Contracts.ICall.ICallPre else `Janus.Contracts.ICall.ICallPre64
-  -- the statement's own variables become mvars: the instantiation is existential
-  let args ← args.mapM instantiateMVars
-  let fvs : Array FVarId := (args.foldl (fun st a => collectFVars st a) ({} : CollectFVars.State)).fvarIds
-  let mut mvs : Array Expr := #[]
-  for v in fvs do mvs := mvs.push (← Meta.mkFreshExprMVar (← Meta.inferType (.fvar v)))
-  let tgt := args.map fun a => (a.abstract (fvs.map Expr.fvar)).instantiateRev mvs
-  -- ICallContract p fn nargs stack above rt keep R P preserves
-  let want := #[tgt[2]!, tgt[3]!, tgt[4]!, tgt[5]!, tgt[8]!]
-  let mut dbg : Array String := #[]
-  for (n, cty) in cands0 do
-    let st ← Meta.saveState
-    let ok ← try
-      let lps := (collectLevelParams {} cty).params
-      let ty := cty.instantiateLevelParams lps.toList (← lps.toList.mapM fun _ => Meta.mkFreshLevelMVar)
-      let (_, _, b) ← Meta.forallMetaTelescope ty
-      let mut b := (← instantiateMVars b).consumeMData
-      -- peel the `∃`s
-      for _ in [0:64] do
-        if b.isAppOfArity ``Exists 2 then
-          let x ← Meta.mkFreshExprMVar (b.getArg! 0)
-          b := (← instantiateMVars (Expr.headBeta (mkApp (b.getArg! 1) x))).consumeMData
-        else break
-      if b.getAppFn.isConstOf pre then dbg := dbg.push s!"{n}: head ok, {b.getAppNumArgs} args"
-      if b.getAppFn.isConstOf pre && b.getAppNumArgs == 6 then
-        let ba := b.getAppArgs
-        let mut all := true
-        for j in [0:5] do
-          unless ← Meta.isDefEq ba[j]! want[j]! do all := false; break
-        pure all
-      else pure false
-    catch _ => pure false
-    st.restore
-    if ok then return .ok n
-  return .error s!"no kernel-checked theorem of the proof module states `∃ s, {pre.getString!} nargs stack above rt P s` for this contract at some instantiation of the statement's variables (candidates: {dbg})"
 
+/-- UP3c: `runFree` binders: every binder of the statement is a plain machine datum (`BitVec`, `Nat`, `Int`, `Bool`, `UInt*`): no `Prop`
+hypothesis and no binder over a type that may be empty (`PLift`, `Fin 0`, subtypes, sums, …), which would make the statement vacuous. -/
+def runFreeBinders (t : Expr) : Bool :=
+  match t with
+  | .forallE _ d b _ =>
+    (match d.consumeMData.getAppFn with
+     | .const n _ => [`BitVec, `Nat, `Int, `Bool, `UInt8, `UInt16, `UInt32, `UInt64, `USize].contains n
+     | _ => false) && runFreeBinders b
+  | .mdata _ b => runFreeBinders b
+  | _ => true
+
+/-- UP3c: the claim under the `∀`/`→` binders of `e` (a pure structural walk, top level so its compiled form is stable). -/
+def claimBody (e : Expr) : Expr :=
+  match e with
+  | .forallE _ _ b _ => claimBody b
+  | .mdata _ b => claimBody b
+  | e => e
+
+/-- UP3c: the final claim of a refuted `P` is headed by a definition that reaches a run claim (not `¬`, `False`, `∧`, `∨`, `↔`). -/
+def refutedClaimOk (env : Environment) (p : Expr) : Bool :=
+  match (claimBody p).consumeMData.getAppFn with
+  | .const hd _ => !(hd == ``Not) && !(hd == ``False) && reachesRunClaim env (.const hd [])
+  | _ => false
 
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
 Round 14 (V2): with `main` (the default; every theorem that is not a `Witness.nonvacuous`/`Witness.returns`)
@@ -2205,10 +2185,6 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
               wVars := wVars.insert w
       let mut guarded : Array FVarId := sizeVarIds
       for w in wVars do guarded := guarded.push w
-      let stripPost (e : Expr) : Expr := e.replace fun sub =>
-        if (sub.getAppFn.constName?.any fun n => n == `Janus.GoABI.Ensures || n == `Janus.Amd64.GoABI.Ensures) && sub.getAppNumArgs == 5 then
-          some (mkAppN sub.getAppFn (sub.getAppArgs.set! 4 (mkConst ``True)))
-        else none
       for x in xs do
         let t ← instantiateMVars (← Meta.inferType x)
         if ← Meta.isProp t then continue
@@ -3029,6 +3005,17 @@ def premisesOf (ms : Array Expr) : MetaM (List Expr) := do
       unless trivialConj p do ps := ps.push p
   return (ps.filter (!arithPremise ·)).toList ++ (ps.filter arithPremise).toList
 
+/-- UP3d: the pieces of a fact conjunct, opened the way `withConjs` opens the witness's conjuncts: `∃ x, P x` gives a fresh metavariable
+for `x` and the pieces of `P ?x`, `∧` gives both sides. -/
+partial def factPieces (f : Expr) : MetaM (Array Expr) := do
+  let f := (← instantiateMVars f).consumeMData.headBeta
+  if f.isAppOfArity ``Exists 2 then
+    let x ← Meta.mkFreshExprMVar (f.getArg! 0)
+    factPieces (mkApp (f.getArg! 1) x).headBeta
+  else if f.isAppOfArity ``And 2 then
+    return (← factPieces (f.getArg! 0)) ++ (← factPieces (f.getArg! 1))
+  else return #[f]
+
 /-- Is the witness body `wconjs` an instance of the main statement `mty`? `none` when it is, else
 the reason. Every hypothesis of `mty` must be a conjunct of the witness; and, for EVERY conjunct of the
 conclusion (a main theorem may state several guarantees, `IsEven ∧ IsOdd`, `wb1 ∧ … ∧ wb8`; a witness for one
@@ -3046,16 +3033,32 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
   -- `Panics` (an `Ensures …` whose post merely mentions `Panics` is a returning/total-correctness claim and needs the run)
   let isPanicsApp := fun (e : Expr) =>
     let e := e.consumeMData
-    e.getAppFn.isConstOf `Janus.GoABI.Panics || e.getAppFn.isConstOf `Janus.Amd64.GoABI.Panics
-  let rec claimBody : Expr → Expr
-    | .forallE _ _ b _ => claimBody b
-    | .mdata _ b => claimBody b
-    | e => e
+    e.getAppFn.isConstOf `Janus.GoABI.Panics || e.getAppFn.isConstOf `Janus.Amd64.GoABI.Panics ||
+    -- UP3d: `Faults p s` is anchored exactly like `Panics p s`
+    e.getAppFn.isConstOf `Janus.GoABI.Faults || e.getAppFn.isConstOf `Janus.Amd64.GoABI.Faults ||
+    e.getAppFn.isConstOf `Janus.Kernel.Traps || e.getAppFn.isConstOf `Janus.Amd64.Kernel.Traps
   let panicOnly := fun (c : Expr) =>
     let b := claimBody c
     isPanicsApp b || (b.isAppOfArity ``Iff 2 && (isPanicsApp (claimBody (b.getArg! 0)) || isPanicsApp (claimBody (b.getArg! 1))))
+  -- UP3d: a conclusion conjunct that is a plain FACT (headed by `≠`/`¬`/`=`/`∃`/`∨`/an order relation, mentioning no run, `Panics` or `Faults`
+  -- claim) is not a run claim to be unfolded: it is satisfied only by the IDENTICAL conjunct among the witness's, at the instantiation the
+  -- anchor conjuncts fix (checked inside each anchor's match, never by absence, never at another state). A conclusion made of facts only has
+  -- no anchor and is refused here (the run-free exemption is decided on the Go side).
+  let runName := fun (n : Name) =>
+    let t := n.getString!
+    t.startsWith "Returns" || t.startsWith "GoReturns" || t.startsWith "GrownReturns" || t == "ReachesRet" || t == "Panics" || t == "Faults"
+  let isFact := fun (c : Expr) =>
+    !panicOnly c &&
+    (match (claimBody c).consumeMData.getAppFn with
+     | .const n _ => [``Ne, ``Not, ``Eq, ``Exists, ``Or, ``LT.lt, ``LE.le, ``GT.gt, ``GE.ge].contains n
+     | _ => false) &&
+    (c.find? (fun e => match e with | .const n _ => runName n | _ => false)).isNone
   let concls := allConcls
+  let facts := concls.filter isFact
+  if !concls.isEmpty && facts.size == concls.size then
+    return some "the conclusion of the main theorem consists of facts only: it has no run (`Returns`-style), `Panics` or `Faults` claim for a witness to exhibit"
   for (c, idx) in concls.toList.zip (List.range concls.size) do
+    if isFact c then continue
     let st ← Meta.saveState
     let isPan := panicOnly c
     let body ← if isPan then pure c else unfoldToForall c
@@ -3186,6 +3189,14 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
           -- is a premise the witness has to state
           unless ← entryAddrLike (← getEnv) 8 (q.getArg! 2) do
             return some s!"the premise `{(← Meta.ppExpr q).pretty 300}` of the main theorem{which} fixes the program counter to an address that is neither the entry nor a contract address, and the witness does not state it"
+      -- UP3d: the fact conjuncts of the conclusion, at the instantiation the premises and the run fixed
+      for f in facts do
+        let f ← instantiateMVars f
+        if f.hasExprMVar then
+          return some s!"the fact `{(← Meta.ppExpr f).pretty 300}` of the main theorem's conclusion concerns no state of the witness"
+        for piece in ← factPieces f do
+          unless ← findConj piece wconjs do
+            return some s!"the main theorem's conclusion states the fact `{(← Meta.ppExpr f).pretty 300}`: the witness must contain this very conjunct (`{(← Meta.ppExpr piece).pretty 200}`) at its own instantiation"
     | some w => return some s!"the premise {w}{which}"
     st.restore
   if concls.isEmpty then return some "the main theorem has no conclusion"
@@ -3400,13 +3411,35 @@ partial def witnessSizes (env : Environment) (ty val : Expr) (pos : String := "w
           return some s!"instantiates the runtime contract {c} (position `{pos}`) with the {nm} = {n}, outside the satisfiable range ({if nm == "nargs" then "at most 64" else if nm == "stack" then "8 ≤ stack < 2^47" else if nm == "d" then "d < 2^47" else s!"8 + 8·nargs = {low} ≤ above < 2^47"}): its call precondition is unsatisfiable there, the contract is vacuously inhabited, and the witness would show nothing (U-ICALL-STACK, witness)"
   return none
 
+/-- UP3d (strict pairing): the main theorems of the proof module (or, when it has none, of the imported non-trusted
+modules, as `mainCandidates`) whose last name component is `last`, not witnesses, not `self`, about `Extracted.program`. -/
+def mainsNamed (env : Environment) (proofMod : Name) (self : Name) (last : String) : Array Name :=
+  let modNames := env.header.moduleNames
+  let inMods (ok : Name → Bool) : Array Name :=
+    (env.const2ModIdx.fold (init := #[]) fun acc n idx =>
+      match modNames[idx.toNat]? with
+      | some m =>
+        if ok m && n != self && !n.isInternal && roleOf n == .main && n.getString! == last then
+          match env.find? n with
+          | some (.thmInfo ci) =>
+            let used := ci.type.getUsedConstants
+            if used.contains `Extracted.program || used.contains `Extracted.entry then acc.push n else acc
+          | _ => acc
+        else acc
+      | none => acc).qsort Name.lt
+  let own := inMods (· == proofMod)
+  if !own.isEmpty then own else inMods fun m => !trustedModule m && m != proofMod
+
 def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmType : Expr) (thmVal : Expr) :
     MetaM (Except String (Name × Array Name)) := do
-  let cands0 := mainCandidates env proofMod thm
-  -- further main theorems of the module that assume runtime contracts (`full_write` next to `correctness`):
-  -- each needs its own witness, and one witness may serve several of them
-  let extra := contractMains env proofMod thm
-  let cands := cands0 ++ extra.filter (!cands0.contains ·)
+  -- UP3d STRICT PAIRING: a non-vacuity witness `Witness.nonvacuous` pairs with the module's main theorem `correctness`
+  -- (the unchanged default selection, `mainCandidates`); a witness `Witness.<X>` pairs ONLY with the main `<X>`
+  -- (`Witness.panics` with `panics`, `Witness.corollaryAES128` with `corollaryAES128`). It is checked against that one main
+  -- alone and never vouches for another (a further main, contract-assuming or not, needs its own `Witness.<X>`).
+  let wname := thm.getString!
+  let cands : Array Name :=
+    if role == .nonvacuous && wname != "nonvacuous" then mainsNamed env proofMod thm wname
+    else mainCandidates env proofMod thm
   if cands.isEmpty then
     return .error "the proof module has no main theorem about Extracted.program for this witness to support"
   match role with
@@ -3458,7 +3491,6 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     let auditImports : Array Import :=
       #[{ module := `Extracted }, { module := trusted.toName }, { module := proofModN }]
     let (envA, cleanState) ← (auditEnv auditImports (pre?.map (·.1)) : IO _)
-    inhabRef.set (← runCore envA (Meta.MetaM.run' (inhabCandidates envA)))
     -- 1. kind and module
     let some ci := envA.find? thmN | fail s!"the proof does not define {thm}"
     let kind := match ci with
@@ -3539,16 +3571,23 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     let (statement, statementExplicit, defs, extOut, notes, contractHyps) ←
       cleanEnvAndPrint cx thmN ci.type localDefs stubs extDefs cleanState (pre? := pre?.map (·.2))
         (main := role == .main)
+    -- UP3c: `runFree` needs a hypothesis-free statement (data binders only): a false/circular hypothesis would make it vacuous
+    let runFreeHyps := runFreeBinders ci.type
     return { name := thm, kind, module := modName.toString, axioms := axs.map (·.toString),
              statement, statementExplicit, definitions := defs,
              modules := modNames.map (·.toString),
              external := externalNames.filterMap external.get?, externalDefinitions := extOut,
              notes, role := role.label, matchedMain, matchedMains, matchedModules, contractHyps,
-             refutation := role == .main && (let rec go : Expr → Bool
-               | .forallE _ _ b _ => go b
-               | .mdata _ b => go b
-               | e => e.isAppOfArity ``Not 1 || e.isConstOf ``False
-               go ci.type),
+             -- UP3c: a refutation is EXACTLY `¬ P` with no hypotheses of its own (no binder before the `¬`), `P` a `∀` over data binders only whose
+             -- final claim is not itself a negation / `False`, and `P` is a claim about the extracted program. `¬¬P`, `(h : ¬E) → False`, a
+             -- false hypothesis, or a program that appears only in a hypothesis are NOT refutations (they are vacuous in the way the witness closes)
+             runFree := role == .main && runFreeHyps && !reachesRunClaim envA ci.type,
+             refutation := role == .main && (
+               let t := ci.type.consumeMData
+               t.isAppOfArity ``Not 1 &&
+               refutedClaimOk envA t.appArg! &&
+               (let used := (t.appArg!).getUsedConstants
+                used.contains `Extracted.program || used.contains `Extracted.entry)),
              imports := importGraph envA }
   ).run
   match result with

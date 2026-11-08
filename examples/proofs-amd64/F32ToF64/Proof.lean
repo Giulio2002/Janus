@@ -62,6 +62,13 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State) , RetAddr Extracted.program ret
     ABIReturn s s' ∧ ResultIs binary64 (convertFormat binary32 binary64 .rne Witness.x.toNat) ((s'.xmm 0).toNat % 2 ^ 64)) :=
   ⟨ret, s0, hret, setup, hpre, correctness x ret hret s0 setup hpre⟩
 
+/-- All hypotheses of `exact` hold together, and the call returns. -/
+theorem exact : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (StackWritable s 0 8 ∧ (s.xmm 0).toNat % 2 ^ 32 = Witness.x.toNat ∧ GoMXCSR s) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ ∀ rm, ResultIs binary64 (convertFormat binary32 binary64 rm Witness.x.toNat) ((s'.xmm 0).toNat % 2 ^ 64)) :=
+  ⟨ret, s0, hret, setup, hpre, Proof.exact Witness.x ret hret s0 setup hpre⟩
+
 end Witness
 
 end Proof

@@ -315,6 +315,32 @@ theorem withOpaque : (∀ x y : BitVec 64, Ensures Extracted.program Extracted.e
 theorem viaAxiom : ∀ x y : BitVec 64, Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
     (fun _ s' => s'.regs 0 = x * y) := WordLib.cheat.elim
 
+namespace Witness
+
+def ret : Nat := 0x1000
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then (3 : BitVec 64) else if i = 1 then (4 : BitVec 64)
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 0x100000, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := ⟨fun _ => 0, []⟩ }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(3 : BitVec 64), (4 : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
+
+-- All the hypotheses of correctness hold together at a concrete call, and it returns.
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ True ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => ABIReturn s s' ∧ s'.regs 0 = (WordLib.Word.add (toWord x) (toWord y)).val) :=
+  ⟨ret, s0, 3, 4, hret, setup, trivial, correctness 3 4 ret hret s0 setup trivial⟩
+
+end Witness
+
 end WordProofs.Add
 `)
 	lake, _ := findLake()
@@ -340,11 +366,15 @@ func TestConsumerExtraDep(t *testing.T) {
 	add := mustExtract(t, "example.com/basic.Add")
 	verify := func(thm string, extra ...string) (int, string, string) {
 		return runJanus(t, append([]string{"verify", add, "--proof", filepath.Join(pkg, "WordProofs", "Add.lean"), "--proof-root", pkg,
-			"--theorem", "WordProofs.Add." + thm}, extra...)...)
+			"--theorem", "WordProofs.Add." + thm}, append(witnessFor(thm), extra...)...)...)
+	}
+	// verify1: the failures below happen before any theorem is checked (a single-theorem run reports them on stderr)
+	verify1 := func(thm string) (int, string, string) {
+		return runJanus(t, "verify", add, "--proof", filepath.Join(pkg, "WordProofs", "Add.lean"), "--proof-root", pkg, "--theorem", "WordProofs.Add."+thm)
 	}
 
 	code, out, stderr := verify("correctness")
-	if code != 0 || !strings.HasPrefix(out, "Verified: WordProofs.Add.correctness\n") {
+	if code != 0 || !verifiedOut(out, "WordProofs.Add.correctness") {
 		t.Fatalf("correctness: %d\n%s\n%s", code, out, stderr)
 	}
 	if !strings.Contains(out, "Dependency: wordlib git file://") || !strings.Contains(out, "WordLib.Word.add (def, WordLib.Basic)") {
@@ -406,7 +436,7 @@ func TestConsumerExtraDep(t *testing.T) {
 		b, _ := os.ReadFile(f)
 		os.WriteFile(f, append(b, []byte("\ntheorem extra : True := trivial\n")...), 0o644)
 		defer os.WriteFile(f, b, 0o644)
-		code, _, stderr := verify("correctness")
+		code, _, stderr := verify1("correctness")
 		if code != 1 || !strings.Contains(stderr, "Stage: consumer manifest") || !strings.Contains(stderr, "has local modifications") {
 			t.Fatalf("got %d\n%s", code, stderr)
 		}
@@ -424,7 +454,7 @@ func TestConsumerExtraDep(t *testing.T) {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("lake update: %v\n%s", err, out)
 		}
-		code, _, stderr := verify("correctness")
+		code, _, stderr := verify1("correctness")
 		if code != 1 || !strings.Contains(stderr, "Stage: consumer manifest") || !strings.Contains(stderr, "the lakefile asks for pinme") {
 			t.Fatalf("got %d\n%s", code, stderr)
 		}
@@ -452,8 +482,9 @@ func TestConsumerPathDep(t *testing.T) {
 		t.Fatalf("lake update: %v\n%s", err, out)
 	}
 	add := mustExtract(t, "example.com/basic.Add")
-	args := []string{"verify", add, "--proof", filepath.Join(pkg, "WordProofs", "Add.lean"), "--proof-root", pkg, "--theorem", "WordProofs.Add.correctness"}
-	if code, _, stderr := runJanus(t, args...); code != 1 || !strings.Contains(stderr, "only janus may be a path dependency") ||
+	args := []string{"verify", add, "--proof", filepath.Join(pkg, "WordProofs", "Add.lean"), "--proof-root", pkg, "--theorem", "WordProofs.Add.correctness", "--theorem", "WordProofs.Add.Witness.nonvacuous"}
+	// (the rejection precedes every theorem check: a single-theorem run reports it on stderr)
+	if code, _, stderr := runJanus(t, args[:len(args)-2]...); code != 1 || !strings.Contains(stderr, "only janus may be a path dependency") ||
 		!strings.Contains(stderr, "--allow-path-deps") {
 		t.Fatalf("path dependency accepted: %d %s", code, stderr)
 	}
@@ -568,4 +599,12 @@ end MathlibConsumer.Add
 	if !found {
 		t.Errorf("dependencyConstants %v", r.DependencyConsts)
 	}
+}
+
+// witnessFor: the tied witness flag of WordProofs.Add.correctness (verified only together with it), nothing for the others.
+func witnessFor(thm string) []string {
+	if thm == "correctness" {
+		return []string{"--theorem", "WordProofs.Add.Witness.nonvacuous"}
+	}
+	return nil
 }

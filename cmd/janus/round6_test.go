@@ -31,8 +31,11 @@ func TestRound6StatementNames(t *testing.T) {
 			t.Errorf("%s not rejected (%q): %d %s", a, want, code, stderr)
 		}
 	}
+	// The control (F2c, in-range numerals) is verified together with its tied Witness.nonvacuous (a main theorem is verified only
+	// with one; the attack file carries the witness at the concrete call Add(3, 4)).
 	p := filepath.Join(repoRoot, "audit", "round6", "attacks", "F2c_numeral_in_range.lean")
-	if code, _, stderr := runJanus(t, "verify", add, "--proof", p, "--janus-root", repoRoot); code != 0 {
-		t.Errorf("F2c (in-range numerals) no longer verifies: %s", stderr)
+	if code, out, stderr := runJanus(t, "verify", add, "--proof", p, "--janus-root", repoRoot,
+		"--theorem", "Proof.correctness", "--theorem", "Proof.Witness.nonvacuous"); code != 0 {
+		t.Errorf("F2c (in-range numerals) no longer verifies: %s\n%s", out, stderr)
 	}
 }

@@ -31,7 +31,7 @@ bin/janus verify-batch examples/consumer/requests.json
 
 `requests.json` verifies both theorem modules (each `correctness` with its `Witness.nonvacuous`) in one session: one snapshot of this package, one
 workspace per distinct extraction (Add, Max), and one build of `ConsumerExample.Spec` shared
-between them. Each request gets its own `verified.json`.
+between them. Each request carries its `Witness.nonvacuous` in `witnesses` (verified in the same run): the main theorem's report is its `verified.json`, the witness's is `verified/<theorem>.json`.
 
 ## The dependency
 

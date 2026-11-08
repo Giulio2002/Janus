@@ -296,14 +296,14 @@ func TestConsumerVerifyMany(t *testing.T) {
 		}
 		return runJanus(t, a...)
 	}
-	code, out, stderr := run(spec("Add", "ConsumerExample.Add.correctness"), spec("Twin", "ConsumerExample.Twin.t"),
+	code, out, stderr := run(spec("Add", "ConsumerExample.Add.correctness"), spec("Add", "ConsumerExample.Add.Witness.nonvacuous"), spec("Twin", "ConsumerExample.Twin.t"),
 		spec("UsesCheat", "ConsumerExample.UsesCheat.t"), spec("Broken", "ConsumerExample.Broken.t"))
 	res := readResults(t, results)
 	if code != 1 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, stderr)
 	}
 	for name, why := range map[string]string{
-		"ConsumerExample.Add.correctness": "", "ConsumerExample.Twin.t": "",
+		"ConsumerExample.Add.correctness": "", "ConsumerExample.Add.Witness.nonvacuous": "", "ConsumerExample.Twin.t": "",
 		"ConsumerExample.UsesCheat.t": "disallowed axioms: sorryAx", "ConsumerExample.Broken.t": "Lean errors (",
 	} {
 		it := res[name]
@@ -329,7 +329,7 @@ func TestConsumerVerifyMany(t *testing.T) {
 		t.Errorf("collision: %d %s", code, stderr)
 	}
 	// A theorem asked for in the wrong module fails alone.
-	code, _, _ = run(spec("Add", "ConsumerExample.Add.correctness"), spec("Twin", "ConsumerExample.Add.nothere"))
+	code, _, _ = run(spec("Add", "ConsumerExample.Add.correctness"), spec("Add", "ConsumerExample.Add.Witness.nonvacuous"), spec("Twin", "ConsumerExample.Add.nothere"))
 	res = readResults(t, results)
 	if code != 1 || res["ConsumerExample.Add.correctness"].Status != "verified" || res["ConsumerExample.Add.nothere"].Status != "failed" {
 		t.Errorf("wrong module: %d %+v", code, res)
