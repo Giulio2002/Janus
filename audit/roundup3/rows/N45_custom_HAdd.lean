@@ -1,7 +1,7 @@
 import Extracted
 
 /-! Round n11 red team, row N45_custom_HAdd: proof-local HAdd Nat in `k + 16 <= w` (bound becomes 2^60 + k + 16 <= w: harmless, cannot pin k)
-Expected: Verified. The proof is `Add`'s; the hypotheses are never used, so only the audit decides. -/
+Expected: rejected (UP3d: intended, conservative; rule predates UP3 and is in the n11 base b8ac6cca). The proof is `Add`'s; the hypotheses are never used, so only the audit decides. -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Contracts.ICall
 
