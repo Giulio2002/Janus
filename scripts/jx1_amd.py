@@ -113,3 +113,36 @@ def makehint():
     trivial, by decide, hMake_dead64 _ _ _⟩
 '''
     run('MakeHint',st,ws,pre,conj('MakeMapSite','runtime.makemap',None,'M H'),'⟨wsCall, rfl, wsCall_pre⟩')
+FS='AMap (Nat × Nat) (BitVec (8 * 8))'
+MS='MapModel (Nat × Nat) (BitVec (8 * 8))'
+def strfile(fn, site_name, ctr, addr, kind):
+    if kind=='insert':
+        body='RTPre M 4 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 3).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 3).toNat f ∧ StrIn64 s_c M.depth 4 ∧\n    StrOwned M (s_c.regs 1).toNat (s_c.regs 7).toNat ∧\n    Contracts.Ready64 H M.priv [(s_c.regs 0).toNat, (s_c.regs 3).toNat, (s_c.regs 1).toNat, (s_c.regs 7).toNat] s_c'
+        extra='(H : Contracts.RtReady) '; M='(MC ckStr) HAssignStr'; a='(args (BitVec.ofNat 64 SK) 8#64)'
+        pre=f'''theorem wsCall_pre : {site_name} {M} AMap.empty wsCall := by
+  obtain ⟨a, b, c⟩ := strIn_w SK (by decide) (by decide) (Or.inl (by decide)) 4 (by decide)
+  exact ⟨{RT3%4}, trivial, by decide, mmem64_repC _, ⟨a, b, c⟩,
+    Or.inr (inPriv0 (by decide) (by decide)),
+    ⟨by show (rtView priv0 mmem64).readLE MP 8 = 0
+        rw [readLE_rtView0 (by decide) (by decide)]; decide,
+      Or.inr (Or.inl (by decide))⟩⟩
+'''
+        cx='M H'
+    else:
+        body='RTPre M 4 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 3).toNat f ∧ StrIn64 s_c M.depth 4'
+        extra=''; M='(ME (Nat × Nat))'; a='(args (BitVec.ofNat 64 VAL) 8#64)'
+        pre=f'''theorem wsCall_pre : {site_name} {M} AMap.empty wsCall := by
+  obtain ⟨a, b, c⟩ := strIn_w VAL (by decide) (by decide) (Or.inr (by decide)) 4 (by decide)
+  exact ⟨{RT3%4}, trivial, (isMap_of_ne (by decide)).2 (mmem64_rep _), ⟨a, b, c⟩⟩
+'''
+        cx='M'
+    st=HELP64+site(site_name,ctr,MS,FS,body,extra=extra)
+    ws=wsdef(addr.split('_')[-1],pcx='BitVec.ofNat 64 cAddr',args=a)
+    run(fn,st,ws,pre,conj(site_name,addr,FS,cx),'⟨AMap.empty, wsCall, rfl, wsCall_pre⟩')
+def deletes(): strfile('DeleteS','DeleteStr64Site','DeleteStr64','runtime.mapdelete_faststr','del')
+def lookups(): strfile('LookupS','Access1Str64Site','Access1Str64','runtime.mapaccess1_faststr','look')
+def inserts(): strfile('InsertS','AssignStr64Site','AssignStr64','runtime.mapassign_faststr','insert')
+def set32():
+    varfile('Set32','AssignF32Site','AssignF32',('MapModel (BitVec 32) (BitVec (8 * 1))','(MCW ck32) HAssign','(args kv 0)','mmem64'),
+      'AMap (BitVec 32) (BitVec (8 * 1))',3,'RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 3).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 3).toNat f ∧\n    Contracts.Ready64 H M.priv [(s_c.regs 0).toNat, (s_c.regs 3).toNat, (key32 s_c).toNat] s_c','(H : Contracts.RtReady) ',
+      f'⟨{RTV}, trivial, by decide, ⟨rfl, by decide, by decide, Or.inl ⟨by decide, rfl⟩⟩,\n    by show (rtView privW mmem64).readLE MP 8 = 0\n       rw [readLE_rtView (inPrivW (by decide) (by decide))]; decide⟩','runtime.mapassign_fast32','M H')

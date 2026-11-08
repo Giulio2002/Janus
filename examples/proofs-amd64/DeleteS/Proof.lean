@@ -137,15 +137,21 @@ theorem pre0 : pre (ME (Nat × Nat)) mv kp kl AMap.empty s0 := by
   · simp only [ME_priv, priv0, outside_cons, outside_nil, and_true]; decide
   · simp only [window, ME_depth, outside_cons, outside_nil, and_true]; decide
 
-/-- All hypotheses of `correctness` are satisfiable together, with a non-nil map. -/
-theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (Nat × Nat) (BitVec 64))
-    (ret : Nat) (s : State) (m kp kl : BitVec 64) (f : AMap (Nat × Nat) (BitVec 64)),
-    M.Laws ∧ DeleteStr64 (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.mapdelete_faststr") 8 M ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, kp, kl] s ∧
-    m.toNat ≠ 0 ∧ pre M m kp kl f s :=
-  ⟨implAt, ME _, ret, s0, mv, kp, kl, AMap.empty, ME_laws _, model, hret, setup, by decide, pre0⟩
+theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with rip := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+
+/-- The precondition of `DeleteStr64`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def DeleteStr64Site (M : MapModel (Nat × Nat) (BitVec (8 * 8))) (f : AMap (Nat × Nat) (BitVec (8 * 8))) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 4 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 3).toNat f ∧ StrIn64 s_c M.depth 4
+
+/-- The call state of the `faststr` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSatAmd64`, at the contract address. -/
+def wsCall : Janus.Amd64.State := { mstate64 mmem64 (args (BitVec.ofNat 64 VAL) 8#64) with rip := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : DeleteStr64Site (ME (Nat × Nat)) AMap.empty wsCall := by
+  obtain ⟨a, b, c⟩ := strIn_w VAL (by decide) (by decide) (Or.inr (by decide)) 4 (by decide)
+  exact ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64 rfl _ 4 (by decide) mmem64_zenv mmem64_guard mmem64_ret), trivial, (isMap_of_ne (by decide)).2 (mmem64_rep _), ⟨a, b, c⟩⟩
 
 /-- So the guarantee is reached: the map stays empty. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
@@ -153,6 +159,20 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
   refine (correctness implAt (ME _) (ME_laws _) model mv kp kl AMap.empty ret hret s0 setup pre0).mono ?_
   intro s' h
   exact ⟨h.1, by simpa [erase_empty] using h.2.1⟩
+
+/-- All hypotheses of `correctness` are satisfiable together, with a non-nil map. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (Nat × Nat) (BitVec 64))
+    (ret : Nat) (s : State) (m kp kl : BitVec 64) (f : AMap (Nat × Nat) (BitVec 64)),
+    M.Laws ∧ DeleteStr64 (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.mapdelete_faststr") 8 M ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, kp, kl] s ∧
+    m.toNat ≠ 0 ∧ pre M m kp kl f s ∧
+    (∃ (f : AMap (Nat × Nat) (BitVec (8 * 8))) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapdelete_faststr") ∧ DeleteStr64Site M f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (IsMap M s'.mem m.toNat (f.erase (strKey s.mem kp.toNat kl.toNat)) ∧
+        M.Env s'.mem (s.regs 14)) :=
+  ⟨implAt, ME _, ret, s0, mv, kp, kl, AMap.empty, ME_laws _, model, hret, setup, by decide, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, correctness implAt (ME _) (ME_laws _) model mv kp kl AMap.empty ret hret s0 setup pre0⟩
 
 end Witness
 
