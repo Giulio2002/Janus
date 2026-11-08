@@ -26,7 +26,7 @@ def patch(path, defs, sites, st='s', has_returns_conj=False, retproof='returns',
             if d>=0 and '\ntheorem' not in pre_[d:] and '\ndef' not in pre_[d:]: nvd=d; continue
         break
     # returns statement
-    rm=re.search(r'theorem returns :(.*?):=\n',retblk,re.S)
+    rm=re.search(r'theorem returns :(.*?):=(?: by)?\n',retblk,re.S)
     stmt=rm.group(1)
     conj=re.sub(r'\bs0\b',st,stmt).strip().replace('link implAt','link impl')
     t=t[:nvd]+defs.rstrip()+"\n\n"+retblk.rstrip()+"\n\n"+t[nvd:]
