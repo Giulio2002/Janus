@@ -1059,6 +1059,8 @@ type consumerRequest struct {
 	closure  []string // consumer modules the theorem's environment imports
 	Report   *verifiedReport
 	Err      error
+
+	companionOf *int // verify-batch: index of the main request this theorem accompanies (its report is verified/<theorem>.json)
 }
 
 // prepare checks the request's selection and its extraction.

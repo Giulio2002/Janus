@@ -26,19 +26,35 @@ type batchRequest struct {
 	Theorem   string `json:"theorem"`
 	ProofRoot string `json:"proofRoot"`
 	Binary    string `json:"binary"`
+	// Witnesses names further theorems of the SAME proof file, verified in the same run and the
+	// same outdir as Theorem (so a main theorem travels with its Witness.nonvacuous). Their
+	// reports go to <outdir>/verified/<theorem>.json; Theorem's stays at <outdir>/verified.json.
+	Witnesses []string `json:"witnesses,omitempty"`
+}
+
+// batchItem is one theorem verification: a manifest request's main theorem (main == -1) or one of
+// its companion (Witnesses) theorems (main = index of the main item).
+type batchItem struct {
+	br      batchRequest
+	theorem string
+	main    int
 }
 
 type batchResult struct {
-	Index     int          `json:"index"`
-	Outdir    string       `json:"outdir"`
-	Proof     string       `json:"proof"`
-	Theorem   string       `json:"theorem"`
-	ProofRoot string       `json:"proofRoot,omitempty"`
-	Status    string       `json:"status"` // "verified" or "failed"
-	Module    string       `json:"module,omitempty"`
-	Group     int          `json:"group"` // index into groups, -1 when none
-	Report    string       `json:"report,omitempty"`
-	Failure   *failureJSON `json:"failure"`
+	Index     int    `json:"index"`
+	Outdir    string `json:"outdir"`
+	Proof     string `json:"proof"`
+	Theorem   string `json:"theorem"`
+	ProofRoot string `json:"proofRoot,omitempty"`
+	// Companion is set on the entry of a theorem listed in a request's "witnesses"; CompanionOf is the
+	// index of that request's main theorem entry. Companion reports are <outdir>/verified/<theorem>.json.
+	Companion   bool         `json:"companion,omitempty"`
+	CompanionOf *int         `json:"companionOf,omitempty"`
+	Status      string       `json:"status"` // "verified" or "failed"
+	Module      string       `json:"module,omitempty"`
+	Group       int          `json:"group"` // index into groups, -1 when none
+	Report      string       `json:"report,omitempty"`
+	Failure     *failureJSON `json:"failure"`
 	// ASL is the outcome of the ASL stage (--asl): "verified" or "invalid" (then ASLFailure).
 	ASL        string       `json:"asl,omitempty"`
 	ASLFailure *failureJSON `json:"aslFailure,omitempty"`
@@ -115,10 +131,18 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&man); err != nil {
 		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("Cannot parse %s: %v", displayPath(manifestPath), err), Stage: "batch requests",
-			Next: `Use {"schema": 1, "proofRoot": "...", "requests": [{"outdir": "...", "proof": "...", "theorem": "..."}]}.`}
+			Next: `Use {"schema": 1, "proofRoot": "...", "requests": [{"outdir": "...", "proof": "...", "theorem": "...", "witnesses": ["..."]}]} ("witnesses" is optional: further theorems of the same proof file, e.g. the main theorem's Witness.nonvacuous, verified in the same run and outdir).`}
 	}
 	if man.Schema != 1 || len(man.Requests) == 0 {
 		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("%s must have \"schema\": 1 and at least one request.", displayPath(manifestPath)), Stage: "batch requests"}
+	}
+	var items []batchItem
+	for _, br := range man.Requests {
+		mi := len(items)
+		items = append(items, batchItem{br: br, theorem: br.Theorem, main: -1})
+		for _, w := range br.Witnesses {
+			items = append(items, batchItem{br: br, theorem: w, main: mi})
+		}
 	}
 	base := filepath.Dir(manifestPath)
 	resolve := func(p string) string {
@@ -133,10 +157,12 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 	}
 
 	res := &batchResults{Schema: 1, Groups: []batchGroup{}}
-	reqs := make([]*consumerRequest, len(man.Requests))
-	roots := make([]string, len(man.Requests))
+	reqs := make([]*consumerRequest, len(items))
+	roots := make([]string, len(items))
 	seenOut := map[string]int{}
-	for i, br := range man.Requests {
+	for i, it := range items {
+		br := it.br
+		br.Theorem = it.theorem
 		root := br.ProofRoot
 		if root == "" {
 			root = man.ProofRoot
@@ -144,6 +170,35 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 		roots[i] = resolve(root)
 		reqs[i] = &consumerRequest{Outdir: resolve(br.Outdir), Proof: resolve(br.Proof), Theorem: br.Theorem, Binary: resolve(br.Binary)}
 		res.Results = append(res.Results, batchResult{Index: i, Outdir: br.Outdir, Proof: br.Proof, Theorem: br.Theorem, ProofRoot: root, Group: -1})
+		if it.main >= 0 {
+			m := it.main
+			res.Results[i].Companion, res.Results[i].CompanionOf = true, &m
+			reqs[i].companionOf = &m
+			switch {
+			case reqs[m].Err != nil:
+				reqs[i].Err = reqs[m].Err
+			case roots[i] == "":
+				reqs[i].Err = &diag{Invalid: true, Msg: "A request with witnesses needs a proofRoot: single-file verifications cannot carry companion theorems.", Stage: "batch requests",
+					Next: "Set proofRoot (top level or on the request), or list the witness as its own single-file request in its own outdir."}
+				reqs[m].Err = reqs[i].Err
+			case it.theorem == "" || theoremOrDefault(items[m].theorem) == it.theorem:
+				reqs[i].Err = &diag{Invalid: true, Msg: fmt.Sprintf("Witness %q of request %d is the request's own theorem or empty.", it.theorem, m), Stage: "batch requests",
+					Next: "List each companion theorem once, distinct from the request's theorem."}
+				reqs[m].Err = reqs[i].Err
+			default:
+				for j := m + 1; j < i; j++ {
+					if items[j].main == m && items[j].theorem == it.theorem {
+						reqs[i].Err = &diag{Invalid: true, Msg: fmt.Sprintf("Witness %q is listed more than once in request %d.", it.theorem, m), Stage: "batch requests",
+							Next: "List each companion theorem once."}
+						reqs[m].Err = reqs[i].Err
+					}
+				}
+			}
+			if reqs[i].Err == nil {
+				_ = os.Remove(filepath.Join(reqs[i].Outdir, verifiedDir, it.theorem+".json"))
+			}
+			continue
+		}
 		if br.Outdir == "" {
 			reqs[i].Err = &diag{Invalid: true, Msg: "The request has no outdir.", Stage: "batch requests"}
 			continue
@@ -162,8 +217,14 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 	finish := func(i int) {
 		r := reqs[i]
 		br := &res.Results[i]
+		reportRel := "verified.json"
+		if r.companionOf != nil {
+			reportRel = filepath.Join(verifiedDir, r.Theorem+".json")
+		}
 		if r.Err == nil && r.Report != nil {
-			if err := writeReport(filepath.Join(r.Outdir, "verified.json"), r.Report); err != nil {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(r.Outdir, reportRel)), 0o755); err != nil {
+				r.Err = &diag{Msg: fmt.Sprintf("Cannot write %s: %v", reportRel, err), Stage: "writing report"}
+			} else if err := writeReport(filepath.Join(r.Outdir, reportRel), r.Report); err != nil {
 				r.Err = err
 			}
 		}
@@ -179,7 +240,7 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 		}
 		br.Status = "verified"
 		br.Module = r.Report.Module
-		br.Report = filepath.ToSlash(filepath.Join(br.Outdir, "verified.json"))
+		br.Report = filepath.ToSlash(filepath.Join(br.Outdir, reportRel))
 		res.Passed++
 		fmt.Fprintf(out, "PASS %s %s (module %s)\n", displayPath(r.Outdir), termSafe(r.Report.Theorem), termSafe(r.Report.Module))
 		if a := r.Report.ASL; a != nil {

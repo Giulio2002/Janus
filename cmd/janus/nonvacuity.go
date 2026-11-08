@@ -198,20 +198,29 @@ func nonVacuitySingle(outdir string, r *verifiedReport, allow bool) error {
 	return writeReport(filepath.Join(outdir, "verified.json"), r)
 }
 
-// nonVacuityBatch is the policy for the requests of one batch group (one extraction): a witness
-// request of the same proof module supports a main request. A rejected request keeps no report.
+// nonVacuityBatch is the policy for the requests of one batch group (one extraction). A witness only supports
+// a main theorem of the SAME run, i.e. the same outdir (a request's "witnesses" share its outdir): another
+// request's witness of the same module does not vouch for this one. A rejected request keeps no report.
 func nonVacuityBatch(reqs []*consumerRequest, allow bool) {
-	var peers []*verifiedReport
-	for _, r := range reqs {
-		if r.Err == nil && r.Report != nil {
-			peers = append(peers, r.Report)
+	peersOf := func(of *consumerRequest) []*verifiedReport {
+		var peers []*verifiedReport
+		ao, _ := filepath.Abs(of.Outdir)
+		for _, r := range reqs {
+			if a, _ := filepath.Abs(r.Outdir); a == ao && r.Err == nil && r.Report != nil {
+				peers = append(peers, r.Report)
+			}
 		}
+		return peers
+	}
+	allPeers := map[*consumerRequest][]*verifiedReport{}
+	for _, r := range reqs {
+		allPeers[r] = peersOf(r)
 	}
 	for _, r := range reqs {
 		if r.Err != nil || r.Report == nil {
 			continue
 		}
-		st, w, ret, d := nonVacuityVerdict(r.Report, peers, allow)
+		st, w, ret, d := nonVacuityVerdict(r.Report, allPeers[r], allow)
 		if d != nil {
 			r.Err, r.Report = d, nil
 			continue

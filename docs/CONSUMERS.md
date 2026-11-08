@@ -269,8 +269,10 @@ janus verify-batch requests.json [--results FILE] [--json] [--fresh] [--unsafe-n
   "schema": 1,
   "proofRoot": ".",
   "requests": [
-    { "outdir": "artifacts/Add", "proof": "ConsumerExample/Add.lean", "theorem": "ConsumerExample.Add.correctness" },
-    { "outdir": "artifacts/Max", "proof": "ConsumerExample/Max.lean", "theorem": "ConsumerExample.Max.correctness" }
+    { "outdir": "artifacts/Add", "proof": "ConsumerExample/Add.lean", "theorem": "ConsumerExample.Add.correctness",
+      "witnesses": ["ConsumerExample.Add.Witness.nonvacuous"] },
+    { "outdir": "artifacts/Max", "proof": "ConsumerExample/Max.lean", "theorem": "ConsumerExample.Max.correctness",
+      "witnesses": ["ConsumerExample.Max.Witness.nonvacuous"] }
   ]
 }
 ```
@@ -278,6 +280,18 @@ janus verify-batch requests.json [--results FILE] [--json] [--fresh] [--unsafe-n
 Paths are relative to the manifest. Each request names an `outdir` (an extraction directory), a
 `proof` and a `theorem`, and optionally its own `proofRoot` (overriding the top-level one) and
 `binary`. A request **without** a `proofRoot` is a single-file verification.
+
+**Witnesses.** A request names ONE main `theorem` and may list further theorems of the same
+`proof` file in the optional `"witnesses": ["Ns.Witness.nonvacuous", ...]` (schema 1 stays
+compatible). They are verified in the same run, the same group and the same `outdir` as the main
+theorem, so the non-vacuity policy finds them as its peers exactly as in `janus verify --theorem A
+--theorem B`: the main theorem's report stays `<outdir>/verified.json`, each witness's report is
+`<outdir>/verified/<theorem>.json`. A main theorem that makes a run claim and lists no (matching)
+witness is refused with the same non-vacuity diagnostic as `janus verify`; `--allow-no-witness`
+does not bypass it. The results list one entry per theorem: companion entries have
+`"companion": true` and `"companionOf"` (the index of the main entry), and `PASS`/`FAIL` is
+printed per theorem. A request with `witnesses` needs a `proofRoot` (single-file requests cannot
+carry companions); two requests still may not share an `outdir`.
 
 **What is shared, what is per request.** Requests that share one `proofRoot` take **one snapshot**
 of that package. Requests whose extraction (`Extracted.lean`) is byte-identical share **one Lake

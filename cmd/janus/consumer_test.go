@@ -657,8 +657,9 @@ func TestConsumerGit(t *testing.T) {
 	}
 }
 
-// TestVerifyBatch: several requests, two extractions, one failing request that fails alone;
-// a second run rebuilds nothing.
+// TestVerifyBatch: REAL Ensures proofs. Add and Max each travel with their Witness.nonvacuous in "witnesses" (one outdir
+// each); a broken request fails alone; a main theorem WITHOUT its witness is refused with `janus verify`'s non-vacuity
+// message (--allow-no-witness inert); a second run rebuilds nothing.
 func TestVerifyBatch(t *testing.T) {
 	defer parallel(t)()
 	needLeanSlow(t)
@@ -668,16 +669,17 @@ func TestVerifyBatch(t *testing.T) {
 		"import Extracted\nimport ConsumerExample.Spec\ntheorem ConsumerExample.Broken.t : Extracted.entry = 0 := rfl\n")
 	d := t.TempDir()
 	outs := map[string]string{}
-	for name, sym := range map[string]string{"Add": "Add", "Max": "Max", "MaxBound": "Max", "Broken": "Add"} {
+	for name, sym := range map[string]string{"Add": "Add", "Max": "Max", "NoWitness": "Add", "Broken": "Add"} {
 		outs[name] = filepath.Join(d, "artifacts", name)
 		if code, _, stderr := runJanus(t, "extract", exampleBin, "example.com/basic."+sym, outs[name]); code != 0 {
 			t.Fatal(stderr)
 		}
 	}
 	type req struct {
-		Outdir  string `json:"outdir"`
-		Proof   string `json:"proof"`
-		Theorem string `json:"theorem"`
+		Outdir    string   `json:"outdir"`
+		Proof     string   `json:"proof"`
+		Theorem   string   `json:"theorem"`
+		Witnesses []string `json:"witnesses,omitempty"`
 	}
 	write := func(name string, reqs ...req) string {
 		b, _ := json.Marshal(map[string]any{"schema": 1, "proofRoot": pkg, "requests": reqs})
@@ -685,23 +687,18 @@ func TestVerifyBatch(t *testing.T) {
 		writeFile(t, p, string(b))
 		return p
 	}
-	// verify-batch runs ONE theorem per request, into its own outdir, so it cannot carry a main theorem together with its
-	// tied witness (a real claim about the program is refused without one): the requests are run-free statements
-	// (`Extracted.entry = Extracted.entry`, hypothesis-free, claiming nothing about a run) that import the package's
-	// shared Spec module, one proof module per request.
-	for _, n := range []string{"EntryA", "EntryB", "EntryC"} {
-		writeFile(t, filepath.Join(pkg, "ConsumerExample", n+".lean"),
-			"import Extracted\nimport ConsumerExample.Spec\nnamespace ConsumerExample."+n+"\ntheorem t : Extracted.entry = Extracted.entry := rfl\nend ConsumerExample."+n+"\n")
-	}
+	addP, maxP := filepath.Join(pkg, "ConsumerExample/Add.lean"), filepath.Join(pkg, "ConsumerExample/Max.lean")
 	good := []req{
-		{"artifacts/Add", filepath.Join(pkg, "ConsumerExample/EntryA.lean"), "ConsumerExample.EntryA.t"},
-		{"artifacts/Max", filepath.Join(pkg, "ConsumerExample/EntryB.lean"), "ConsumerExample.EntryB.t"},
-		{"artifacts/MaxBound", filepath.Join(pkg, "ConsumerExample/EntryC.lean"), "ConsumerExample.EntryC.t"},
+		{"artifacts/Add", addP, "ConsumerExample.Add.correctness", []string{"ConsumerExample.Add.Witness.nonvacuous"}},
+		{"artifacts/Max", maxP, "ConsumerExample.Max.correctness", []string{"ConsumerExample.Max.Witness.nonvacuous"}},
 	}
-	all := write("all.json", append(good, req{"artifacts/Broken", filepath.Join(pkg, "ConsumerExample/Broken.lean"), "ConsumerExample.Broken.t"})...)
+	noWit := req{"artifacts/NoWitness", addP, "ConsumerExample.Add.correctness", nil}
+	broken := req{"artifacts/Broken", filepath.Join(pkg, "ConsumerExample/Broken.lean"), "ConsumerExample.Broken.t", nil}
+	all := write("all.json", append(append([]req{}, good...), broken, noWit)...)
 	results := filepath.Join(d, "results.json")
-	code, out, stderr := runJanus(t, "verify-batch", all, "--results", results)
-	if code != 1 || strings.Count(out, "PASS ") != 3 || strings.Count(out, "FAIL ") != 1 || !strings.Contains(stderr, "1 of 4 request(s) failed") {
+	// flat result indices: 0 Add, 1 Add witness, 2 Max, 3 Max witness, 4 Broken, 5 NoWitness
+	code, out, stderr := runJanus(t, "verify-batch", all, "--results", results, "--allow-no-witness")
+	if code != 1 || strings.Count(out, "PASS ") != 4 || strings.Count(out, "FAIL ") != 2 || !strings.Contains(stderr, "2 of 6 request(s) failed") {
 		t.Fatalf("batch: %d\n%s\n%s", code, out, stderr)
 	}
 	var res batchResults
@@ -709,26 +706,47 @@ func TestVerifyBatch(t *testing.T) {
 	if err := json.Unmarshal(b, &res); err != nil {
 		t.Fatal(err)
 	}
-	if res.Passed != 3 || res.Failed != 1 || res.Snapshots != 1 || len(res.Groups) != 2 {
+	if res.Passed != 4 || res.Failed != 2 || res.Snapshots != 1 || len(res.Groups) != 2 || len(res.Results) != 6 {
 		t.Fatalf("results: %+v", res)
 	}
-	if f := res.Results[3].Failure; f == nil || f.Stage != "proof checking" || !strings.Contains(f.Message, "Broken.lean:3:") {
-		t.Fatalf("broken request: %+v", res.Results[3])
-	}
-	if !reflect.DeepEqual(res.Groups[0].Requests, []int{0, 3}) || !reflect.DeepEqual(res.Groups[1].Requests, []int{1, 2}) {
-		t.Errorf("groups %+v", res.Groups)
-	}
-	for _, name := range []string{"Add", "Max", "MaxBound"} {
-		r := readReport(t, outs[name])
-		if r.Consumer == nil || r.KernelReplay.Status != "passed" {
-			t.Errorf("%s report %+v", name, r)
+	for i, comp := range []bool{false, true, false, true, false, false} {
+		if res.Results[i].Companion != comp || (comp && (res.Results[i].CompanionOf == nil || *res.Results[i].CompanionOf != i-1)) {
+			t.Errorf("result %d companion fields: %+v", i, res.Results[i])
 		}
 	}
-	if readReport(t, outs["MaxBound"]).Theorem != "ConsumerExample.EntryC.t" {
-		t.Error("MaxBound report is not independent")
+	if f := res.Results[4].Failure; f == nil || f.Stage != "proof checking" || !strings.Contains(f.Message, "Broken.lean:3:") {
+		t.Fatalf("broken request: %+v", res.Results[4])
 	}
-	if _, err := os.Stat(filepath.Join(outs["Broken"], "verified.json")); err == nil {
-		t.Error("failed request has a verified.json")
+	// the same non-vacuity refusal as `janus verify` (and --allow-no-witness did not bypass it)
+	if f := res.Results[5].Failure; f == nil || f.Stage != "non-vacuity" || !strings.Contains(f.Message, "ConsumerExample.Add.correctness has no kernel-checked non-vacuity witness verified in this run") {
+		t.Fatalf("no-witness request: %+v", res.Results[5])
+	}
+	if !reflect.DeepEqual(res.Groups[0].Requests, []int{0, 1, 4, 5}) || !reflect.DeepEqual(res.Groups[1].Requests, []int{2, 3}) {
+		t.Errorf("groups %+v", res.Groups)
+	}
+	for _, name := range []string{"Add", "Max"} {
+		r := readReport(t, outs[name])
+		if r.Consumer == nil || r.KernelReplay.Status != "passed" || r.NonVacuity != nvShown || !strings.HasSuffix(r.Theorem, ".correctness") {
+			t.Errorf("%s report %+v", name, r)
+		}
+		wb, err := os.ReadFile(filepath.Join(outs[name], "verified", "ConsumerExample."+name+".Witness.nonvacuous.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wr verifiedReport
+		if err := json.Unmarshal(wb, &wr); err != nil || wr.NonVacuity != nvWitness {
+			t.Errorf("%s witness report: %v %+v", name, err, wr)
+		}
+	}
+	for _, name := range []string{"Broken", "NoWitness"} {
+		if _, err := os.Stat(filepath.Join(outs[name], "verified.json")); err == nil {
+			t.Errorf("failed request %s has a verified.json", name)
+		}
+	}
+	// the exact `janus verify` message
+	vcode, vout, verr := runJanus(t, "verify", outs["NoWitness"], "--proof", addP, "--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness")
+	if vcode == 0 || !strings.Contains(vout+verr, res.Results[5].Failure.Message) {
+		t.Errorf("batch and verify non-vacuity messages differ:\n%s\n%s\n%s", res.Results[5].Failure.Message, vout, verr)
 	}
 
 	code, out, stderr = runJanus(t, "verify-batch", write("good.json", good...), "--json")
@@ -738,10 +756,36 @@ func TestVerifyBatch(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatalf("--json: %v\n%s", err, out)
 	}
+	if res.Passed != 4 || len(res.Results) != 4 {
+		t.Errorf("second run: %+v", res)
+	}
 	for _, g := range res.Groups {
 		if len(g.Rebuilt) != 0 {
 			t.Errorf("second run rebuilt %v", g.Rebuilt)
 		}
+	}
+}
+
+// TestVerifyBatchToolchain: a batch over a consumer whose lean-toolchain differs from the framework's fails every request
+// with the toolchain diagnostic (the same one `janus verify` gives).
+func TestVerifyBatchToolchain(t *testing.T) {
+	defer parallel(t)()
+	needLeanSlow(t)
+	useTestCache(t)
+	pkg := consumerCopy(t, "toml")
+	writeFile(t, filepath.Join(pkg, "lean-toolchain"), "leanprover/lean4:v4.0.0\n")
+	add := mustExtract(t, "example.com/basic.Add")
+	b, _ := json.Marshal(map[string]any{"schema": 1, "proofRoot": pkg, "requests": []map[string]any{{
+		"outdir": add, "proof": filepath.Join(pkg, "ConsumerExample/Add.lean"), "theorem": "ConsumerExample.Add.correctness",
+		"witnesses": []string{"ConsumerExample.Add.Witness.nonvacuous"}}}})
+	mf := filepath.Join(t.TempDir(), "req.json")
+	writeFile(t, mf, string(b))
+	code, out, stderr := runJanus(t, "verify-batch", mf)
+	if code != 1 || strings.Count(out, "FAIL ") != 2 || !strings.Contains(out, "uses toolchain leanprover/lean4:v4.0.0") || !strings.Contains(out, "Stage: toolchain") || strings.Contains(out, "PASS ") {
+		t.Fatalf("%d\n%s\n%s", code, out, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(add, "verified.json")); err == nil {
+		t.Error("verified.json written for a toolchain-mismatched consumer")
 	}
 }
 
