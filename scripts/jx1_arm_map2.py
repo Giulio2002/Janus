@@ -139,3 +139,15 @@ def wsCall : State :=
   · simp only [calleeStack, MS0, outside_cons, outside_nil, and_true]; decide
 '''
     go2('LookupStr',st,ws,pre,conjF('Access2StrSite','runtime.mapaccess2_faststr',FS2),STD)
+def lookupkey16():
+    F='AMap (BitVec 128) (BitVec 64)'
+    st=HELP+site('Access2PtrSite','Access2Ptr','MapModel (BitVec 128) (BitVec 64)',F,3,
+      body='RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 1).toNat f ∧\n    s_c.mem.accessible (s_c.regs 2).toNat 16 false = true ∧ Outside (s_c.regs 2).toNat 16 (calleeStack s_c M.depth 3)')
+    ws='/-- The call state of the `mapaccess2` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSat`, at the contract address. -/\ndef wsCall : State := { mstate mmem (args (BitVec.ofNat 64 IfaceModel.VAL) 0) with pc := BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess2") }\n'
+    pre='''theorem wsCall_pre : Access2PtrSite (ME (BitVec 128)) AMap.empty wsCall :=
+  ⟨rtpre_pc _ (mstate_rtpre _ rfl rfl mmem rfl _ 3 (by decide) mmem_zenv mmem_guard), trivial,
+    (isMap_of_ne (by decide)).2 (mmem_rep _), by decide,
+    by simp only [calleeStack, ME_depth, outside_cons, outside_nil, and_true]; decide⟩
+'''
+    patch(P+'LookupKey16.lean', st+'\n'+ws+'\n'+pre, [conjF('Access2PtrSite','runtime.mapaccess2',F)], ['⟨AMap.empty, wsCall, rfl, wsCall_pre⟩'],
+      [('s0','s'),('implAt','impl'),('(ME (BitVec 128))','M')])
