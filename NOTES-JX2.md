@@ -7,9 +7,9 @@ Setup in worktree (untracked): bin/artifacts symlinks to /srv/janus-up3, .lake c
 3. Returns conjunct = the main post at the witness's concrete values and BOUND names (runconj_auto in jx2gen.py; `subs` renames constants like PW->P implW->impl). For GoReturns posts copy the file's `returns` statement with subs.
 4. Morestack: sm = state at the stub (pc = Extracted.stubs.head!.addr), LR := Extracted.entry (glue), X3 := ret; chain proof through FT record at entry (spdelta 0) then ret stop frame. amd: glue at [RSP], caller ret at [RSP+8].
 ## DONE and Verified (correctness + Witness.nonvacuous), committed
-BOTH ISAs: MakeSlice NewPair MakeAdder AppendOne AppendPoint Concat FromBytes ToBytes CopyNodes StrEq CopyTrees ClearTrees MinStr BigLocal HoldPtr SumRec.  arm64 only: DeferTwice.
+BOTH ISAs: MakeSlice NewPair MakeAdder AppendOne AppendPoint Concat FromBytes ToBytes CopyNodes StrEq CopyTrees ClearTrees MinStr BigLocal HoldPtr SumRec DeferTwice.
 ## TODO
-- DeferTwice amd64 (deferproc + deferreturn premises; use PanicSatAmd64/PanicWitnessAmd64 sstate analogues).
+- (DeferTwice amd64 done: scripts/jx2_dt64.py; use it as the template for the other Panic examples on amd64.)
 - Panic: DeferMix (DeferprocStack, Deferproc, Gopanic, Deferreturn), DeferOrder/NestedPanic (Gopanic), NestedRecover/RecoverSet (Gopanic, Gorecover, Deferreturn), GoexitDefer (Goexit, Gorecover), RangeDefer (Deferrangefunc, Deferprocat, Deferreturn): both ISAs. Gopanic/Goexit premise = `∃ s fi, s.pc = addr ∧ FuncInfo.find T (s.regs 30).toNat = some fi ∧ GopanicPre P fi s`: needs LR inside Extracted.funcs (sstate's LR is outside), FrameOK of frameOf fi; Deferprocat needs a defer record with a token in memory. Template: PanicWitness.lean gopanic_satisfiable (arm64) / PanicWitnessAmd64.lean.
 - Errorf/Pool: ErrWrap, ScratchSum, StackGrow (live contracts; amd64 audit logs for StackGrow missing). Not started.
 - Timings: not recorded yet (verify 7-75 s per example warm, load 12-28).
