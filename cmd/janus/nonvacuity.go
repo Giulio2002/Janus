@@ -124,6 +124,12 @@ func nonVacuityLine(r *verifiedReport) string {
 	case nvWitness:
 		return "  Non-vacuity: this is a witness (it is not a correctness claim)"
 	case nvNotShown:
+		if r.RunFree {
+			return "  Non-vacuity: Verified (run-free: statement makes no claim about executing the program; hypothesis-free, nothing to witness)"
+		}
+		if r.Refutation {
+			return "  Non-vacuity: Verified (refutation: the statement is a negation, it claims no run)"
+		}
 		return "  Non-vacuity: NOT SHOWN (no witness for this theorem was verified; it assumes no runtime contract)"
 	}
 	return "  Non-vacuity: NOT SHOWN (not evaluated)"

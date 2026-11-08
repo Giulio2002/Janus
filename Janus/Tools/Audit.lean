@@ -1907,25 +1907,33 @@ def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM
 
 
 
-/-- UP3c: does `e` reach a run claim (`Returns`, `Panics`, `ReachesRet`, `Reaches`, `Summary`, `Program.run`) through the definitions it mentions? -/
+/-- UP3c: CONSERVATIVE: does `e` possibly reach a run claim (`Returns`, `Panics`, `ReachesRet`, `Reaches`, `Summary`, `Program.run`, any machine
+`step`/`exec`/`run`) through the definitions it mentions? Anything the walk cannot unfold (axiom, opaque, `implemented_by`/extern bodies are opaque,
+fuel exhausted) counts as reaching one; so does any constant whose name mentions `step`, `exec` or `run` (a user-defined iteration of the step
+function reaches the machine's `step`). -/
 def reachesRunClaim (env : Environment) (e : Expr) : Bool := Id.run do
   let base : List Name := [`Janus.GoABI.Returns, `Janus.GoABI.Panics, `Janus.Amd64.GoABI.Returns, `Janus.Amd64.GoABI.Panics,
     `Janus.Tactic.ReachesRet, `Janus.Tactic.Reaches, `Janus.Tactic.Summary, `Janus.Amd64.Tactic.ReachesRet, `Janus.Amd64.Tactic.Reaches,
     `Janus.Amd64.Tactic.Summary, `Janus.Program.run, `Janus.Amd64.Program.run]
   let mut todo : Array Name := e.getUsedConstants
   let mut seen : Std.HashSet Name := {}
-  let mut fuel := 20000
-  while !todo.isEmpty && fuel > 0 do
+  let mut fuel := 50000
+  while !todo.isEmpty do
+    if fuel == 0 then return true
     fuel := fuel - 1
     let c := todo.back!
     todo := todo.pop
     if seen.contains c then continue
     seen := seen.insert c
     if base.contains c then return true
+    let lastComp := (c.componentsRev.headD .anonymous).toString.toLower
+    if (lastComp.splitOn "step").length > 1 || (lastComp.splitOn "exec").length > 1 || (lastComp.splitOn "run").length > 1 then return true
+    if c.getPrefix == `Janus.Program || c.getPrefix == `Janus.Amd64.Program then return true
     match env.find? c with
     | some (.defnInfo d) => todo := todo ++ d.value.getUsedConstants ++ d.type.getUsedConstants
-    | some (.inductInfo _) | some (.thmInfo _) | some (.axiomInfo _) | some (.opaqueInfo _) | some (.quotInfo _) | some (.ctorInfo _) | some (.recInfo _) => pure ()
-    | none => pure ()
+    | some (.axiomInfo _) | some (.opaqueInfo _) => return true
+    | some _ => pure ()
+    | none => return true
   return false
 
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
@@ -3563,6 +3571,8 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     let (statement, statementExplicit, defs, extOut, notes, contractHyps) ←
       cleanEnvAndPrint cx thmN ci.type localDefs stubs extDefs cleanState (pre? := pre?.map (·.2))
         (main := role == .main)
+    -- UP3c: `runFree` needs a hypothesis-free statement (data binders only): a false/circular hypothesis would make it vacuous
+    let runFreeHyps ← runCore envA <| Meta.MetaM.run' <| Meta.forallTelescope ci.type fun xs _ => xs.allM fun x => do return !(← Meta.isProp (← Meta.inferType x))
     return { name := thm, kind, module := modName.toString, axioms := axs.map (·.toString),
              statement, statementExplicit, definitions := defs,
              modules := modNames.map (·.toString),
@@ -3571,7 +3581,7 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
              -- UP3c: a refutation is EXACTLY `¬ P` with no hypotheses of its own (no binder before the `¬`), `P` a `∀` over data binders only whose
              -- final claim is not itself a negation / `False`, and `P` is a claim about the extracted program. `¬¬P`, `(h : ¬E) → False`, a
              -- false hypothesis, or a program that appears only in a hypothesis are NOT refutations (they are vacuous in the way the witness closes)
-             runFree := role == .main && !reachesRunClaim envA ci.type,
+             runFree := role == .main && runFreeHyps && !reachesRunClaim envA ci.type,
              refutation := role == .main && (
                let t := ci.type.consumeMData
                t.isAppOfArity ``Not 1 &&

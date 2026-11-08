@@ -71,6 +71,11 @@ for n in C1_stub_control F01_live_stack4096 F08_newobj_live_ok W02_d_ok W03_d_va
   o="$("$J" verify "$art" --proof "$f" --theorem Proof.correctness --janus-root "$root" --audit-only --no-result-cache 2>&1)"
   if printf '%s' "$o" | grep -q '^Audit-only:'; then printf '%-34s statement audit ok\n' "$n"; else printf '%-34s REJECTED   <-- BROKEN\n' "$n"; printf '%s\n' "$o" | grep -m2 '^Invalid' | cut -c1-300 | sed 's/^/    /'; bad=1; fi
 done
+echo "== run-free control (hypothesis-free, no run claim): verifies, reported as run-free"
+for f in $R/vrows/RF*.lean; do
+  v=$(vrun "$W/Add" "$f" "" Proof.correctness); out="$(cat "$W/out.txt")"
+  if [ "$v" = verified ] && printf '%s' "$out" | grep -q 'run-free'; then printf '%-34s verified (run-free) ok\n' "$(basename "$f" .lean)"; else printf '%-34s NOT run-free-verified   <-- BROKEN\n' "$(basename "$f" .lean)"; bad=1; fi
+done
 echo "== known-accepted"
 if [ -f $R/vrows/KA1.lean ]; then
   v=$(vrun "$W/Add" $R/vrows/KA1.lean "" Proof.correctness Proof.Witness.nonvacuous); out="$(cat "$W/out.txt")"
