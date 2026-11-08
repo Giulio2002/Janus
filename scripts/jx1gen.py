@@ -12,7 +12,7 @@ def ident_sub(txt, old, new):
     if re.fullmatch(r'[\w\.\']+', old):
         return re.sub(r'(?<![\w\.\'])'+re.escape(old)+r'(?![\w\'])', new, txt)
     return txt.replace(old, new)
-def patch(path, site_ws, conjs, terms, subs, returns_term='returns'):
+def patch(path, site_ws, conjs, terms, subs, returns_term='returns', rstmt_override=None):
     t = open(path).read()
     if 'JX1' in t and 'callsite' in t: print('already patched?', path)
     w = t.index('namespace Witness')
@@ -35,6 +35,7 @@ def patch(path, site_ws, conjs, terms, subs, returns_term='returns'):
     m = re.search(r':=(\s*\n|\s+by)', t[rstmt_start:])
     rstmt = t[rstmt_start: rstmt_start + m.start()].strip()
     for o, nw in subs: rstmt = ident_sub(rstmt, o, nw)
+    if rstmt_override: rstmt = "fun s' => " + rstmt_override
     rstmt = rstmt.replace("s'.mem", "s'.mem")
     # statement of nonvacuous: ends at first ' :=' newline after n
     m2 = re.search(r' :=\n', t[n:])

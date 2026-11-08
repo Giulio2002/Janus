@@ -85,7 +85,9 @@ theorem wsCallB_pre : Access1Site (MC ck64) AMap.empty wsCallB := by
       [TERM_F('wsCallA').replace('addr.symm','addr.symm'), TERM_F('wsCallB').replace('addr.symm','addrB.symm')],
       [('s0','s'),('implAt','impl'),('(MC ck64)','M')])
 HELP='''theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : State} (a : BitVec 64) (h : RTPre M n s) :
-    RTPre M n { s with pc := a } := h
+    RTPre M n { s with pc := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c, o⟩
 
 '''
 def lookupptr():
@@ -98,7 +100,9 @@ theorem wsCall_pre : Access1Site (ME (BitVec 64)) AMap.empty wsCall :=
 '''
     patch(P+'LookupPtr.lean', mapsite('Access1Site','Access1',3)+'\n'+ws,
       [conj('Access1Site','runtime.mapaccess1_fast64')], ['⟨AMap.empty, wsCall, rfl, wsCall_pre⟩'],
-      [('s0','s'),('implAt','impl'),('(ME (BitVec 64))','M'),('(ME _)','M')])
+      [('s0','s'),('implAt','impl'),('(ME (BitVec 64))','M'),('(ME _)','M')],
+      returns_term='correctness implAt (ME _) (ME_laws _) model mv pv AMap.empty ret hret s0 setup pre0',
+      rstmt_override="ABIReturn s s' ∧ s'.regs 0 = (f p).getD 0")
 def sumvalues():
     site=HELP+'''/-- The precondition of `IterStart`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
 @[reducible] def IterStartSite (M : MapModel (BitVec 64) (BitVec 64)) (f : AMap (BitVec 64) (BitVec 64)) (s_c : State) : Prop :=
@@ -134,4 +138,6 @@ theorem wsCallN_pre : IterNextSite (MEI (BitVec 64)) MP AMap.empty 7#64 [] wsCal
       s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapIterNext") ∧ IterNextSite M mp f k ks s_c)'''
     patch(P+'SumValues.lean', site, [cs,cn],
       ['⟨AMap.empty, wsCallS, rfl, wsCallS_pre⟩','⟨MP, AMap.empty, 7#64, [], wsCallN, rfl, wsCallN_pre⟩'],
-      [('s0','s'),('implAt','impl'),('(MEI (BitVec 64))','M'),('(MEI _)','M')])
+      [('s0','s'),('implAt','impl'),('(MEI (BitVec 64))','M'),('(MEI _)','M')],
+      returns_term='correctness implAt (MEI _) (MEI_laws _) modelS modelN mv AMap.empty ret hret s0 setup pre0',
+      rstmt_override="ABIReturn s s' ∧ ∀ ks, Keys f ks → (s'.regs 0).toNat = sumValues f ks % 2 ^ 64")
