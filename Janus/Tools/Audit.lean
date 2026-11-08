@@ -1830,83 +1830,6 @@ partial def ensuresPres (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
   | .mdata _ b | .proj _ _ b => ensuresPres b acc
   | _ => acc
 
-/-- The theorems of the non-trusted modules (and of the module being elaborated) whose statement mentions `ICallPre`/`ICallPre64`
-and whose axioms are among propext / Classical.choice / Quot.sound: the candidate inhabitation lemmas. Computed in the FULL
-environment (the statement audit later runs in a clean environment that does not contain the proof module). -/
-def inhabCandidates (env : Environment) : MetaM (Array (Name × Expr)) := do
-  let pres := #[`Janus.Contracts.ICall.ICallPre, `Janus.Contracts.ICall.ICallPre64]
-  let modNames := env.header.moduleNames
-  let mut names : Array Name := #[]
-  names := env.const2ModIdx.fold (init := names) fun acc n idx =>
-    match modNames[idx.toNat]? with
-    | some m =>
-      if !trustedModule m && !n.isInternal then
-        match env.find? n with
-        | some (.thmInfo ci) => if ci.type.getUsedConstants.any pres.contains then acc.push n else acc
-        | _ => acc
-      else acc
-    | none => acc
-  names := env.constants.map₂.foldl (init := names) fun acc n ci =>
-    match ci with
-    | .thmInfo t => if !n.isInternal && t.type.getUsedConstants.any pres.contains then acc.push n else acc
-    | _ => acc
-  let mut out : Array (Name × Expr) := #[]
-  for n in names do
-    let some ci := env.find? n | continue
-    let axs ← collectAxioms n
-    if axs.all fun a => a == ``propext || a == ``Classical.choice || a == ``Quot.sound then out := out.push (n, ci.type)
-  return out
-
-initialize inhabRef : IO.Ref (Array (Name × Expr)) ← IO.mkRef #[]
-
-/-- UP3 (honesty of the call-site property): an `ICallContract[64]` whose `P` is anything but `fun _ => True` is a hypothesis
-with an AUTHOR-CHOSEN predicate; `P := False` (or any unsatisfiable `P`) makes the contract's call precondition unsatisfiable, so
-the hypothesis holds vacuously. The proof module must contain a kernel-checked theorem
-`∃ …, ∃ s, ICallPre[64] nargs stack above rt P s` (any leading `∀`/`∃`; the family's own precondition, `CallOK` included) that
-unifies with the statement's contract at SOME instantiation of the statement's variables (they are mvars here: the contract may
-not be unsatisfiable for every instantiation). Found by statement among the theorems of the non-trusted modules, whose axioms
-must be among propext / Classical.choice / Quot.sound. Returns the names of the lemmas tried when none matches. -/
-def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM (Except String Name) := do
-  let cands0 ← inhabRef.get
-  let cands0 ← if cands0.isEmpty then inhabCandidates env else pure cands0
-  let pre := if c == `Janus.Contracts.ICall.ICallContract then `Janus.Contracts.ICall.ICallPre else `Janus.Contracts.ICall.ICallPre64
-  -- the statement's own variables become mvars: the instantiation is existential
-  let args ← args.mapM instantiateMVars
-  let fvs : Array FVarId := (args.foldl (fun st a => collectFVars st a) ({} : CollectFVars.State)).fvarIds
-  let mut mvs : Array Expr := #[]
-  for v in fvs do mvs := mvs.push (← Meta.mkFreshExprMVar (← Meta.inferType (.fvar v)))
-  let tgt := args.map fun a => (a.abstract (fvs.map Expr.fvar)).instantiateRev mvs
-  -- ICallContract p fn nargs stack above rt keep R P preserves
-  let want := #[tgt[2]!, tgt[3]!, tgt[4]!, tgt[5]!, tgt[8]!]
-  let mut dbg : Array String := #[]
-  for (n, cty) in cands0 do
-    let st ← Meta.saveState
-    let ok ← try
-      let lps := (collectLevelParams {} cty).params
-      let ty := cty.instantiateLevelParams lps.toList (← lps.toList.mapM fun _ => Meta.mkFreshLevelMVar)
-      let (_, _, b) ← Meta.forallMetaTelescope ty
-      let mut b := (← instantiateMVars b).consumeMData
-      -- peel the `∃`s
-      for _ in [0:64] do
-        if b.isAppOfArity ``Exists 2 then
-          let x ← Meta.mkFreshExprMVar (b.getArg! 0)
-          b := (← instantiateMVars (Expr.headBeta (mkApp (b.getArg! 1) x))).consumeMData
-        else break
-      if b.getAppFn.isConstOf pre then dbg := dbg.push s!"{n}: head ok, {b.getAppNumArgs} args"
-      if b.getAppFn.isConstOf pre && b.getAppNumArgs == 6 then
-        let ba := b.getAppArgs
-        let mut all := true
-        for j in [0:5] do
-          unless ← Meta.isDefEq ba[j]! want[j]! do all := false; break
-        pure all
-      else pure false
-    catch _ => pure false
-    st.restore
-    if ok then return .ok n
-  return .error s!"no kernel-checked theorem of the proof module states `∃ s, {pre.getString!} nargs stack above rt P s` for this contract at some instantiation of the statement's variables (candidates: {dbg})"
-
-
-
 /-- UP3c: CONSERVATIVE: does `e` possibly reach a run claim (`Returns`, `Panics`, `ReachesRet`, `Reaches`, `Summary`, `Program.run`, any machine
 `step`/`exec`/`run`) through the definitions it mentions? Anything the walk cannot unfold (axiom, opaque, `implemented_by`/extern bodies are opaque,
 fuel exhausted) counts as reaching one; so does any constant whose name mentions `step`, `exec` or `run` (a user-defined iteration of the step
@@ -1934,6 +1857,20 @@ def reachesRunClaim (env : Environment) (e : Expr) : Bool := Id.run do
     | some _ => pure ()
     | none => return true
   return false
+
+
+/-- UP3c: the claim under the `∀`/`→` binders of `e` (a pure structural walk, top level so its compiled form is stable). -/
+def claimBody (e : Expr) : Expr :=
+  match e with
+  | .forallE _ _ b _ => claimBody b
+  | .mdata _ b => claimBody b
+  | e => e
+
+/-- UP3c: the final claim of a refuted `P` is headed by a definition that reaches a run claim (not `¬`, `False`, `∧`, `∨`, `↔`). -/
+def refutedClaimOk (env : Environment) (p : Expr) : Bool :=
+  match (claimBody p).consumeMData.getAppFn with
+  | .const hd _ => !(hd == ``Not) && !(hd == ``False) && reachesRunClaim env (.const hd [])
+  | _ => false
 
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
 Round 14 (V2): with `main` (the default; every theorem that is not a `Witness.nonvacuous`/`Witness.returns`)
@@ -3078,10 +3015,6 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
   let isPanicsApp := fun (e : Expr) =>
     let e := e.consumeMData
     e.getAppFn.isConstOf `Janus.GoABI.Panics || e.getAppFn.isConstOf `Janus.Amd64.GoABI.Panics
-  let rec claimBody : Expr → Expr
-    | .forallE _ _ b _ => claimBody b
-    | .mdata _ b => claimBody b
-    | e => e
   let panicOnly := fun (c : Expr) =>
     let b := claimBody c
     isPanicsApp b || (b.isAppOfArity ``Iff 2 && (isPanicsApp (claimBody (b.getArg! 0)) || isPanicsApp (claimBody (b.getArg! 1))))
@@ -3489,7 +3422,6 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     let auditImports : Array Import :=
       #[{ module := `Extracted }, { module := trusted.toName }, { module := proofModN }]
     let (envA, cleanState) ← (auditEnv auditImports (pre?.map (·.1)) : IO _)
-    inhabRef.set (← runCore envA (Meta.MetaM.run' (inhabCandidates envA)))
     -- 1. kind and module
     let some ci := envA.find? thmN | fail s!"the proof does not define {thm}"
     let kind := match ci with
@@ -3584,11 +3516,7 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
              refutation := role == .main && (
                let t := ci.type.consumeMData
                t.isAppOfArity ``Not 1 &&
-               (let rec body : Expr → Bool
-                  | .forallE _ d b _ => (d.consumeMData.getAppFn.constName?.any fun n => [`BitVec, `Nat, `Int, `Bool].contains n) && body b
-                  | .mdata _ b => body b
-                  | e => !(e.isAppOfArity ``Not 1) && !(e.isConstOf ``False)
-                body (t.appArg!)) &&
+               refutedClaimOk envA t.appArg! &&
                (let used := (t.appArg!).getUsedConstants
                 used.contains `Extracted.program || used.contains `Extracted.entry)),
              imports := importGraph envA }

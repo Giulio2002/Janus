@@ -765,22 +765,8 @@ func TestInitEndToEnd(t *testing.T) {
 	if code, _, stderr := runJanus(t, "extract", bin, "main.Add", art); code != 0 {
 		t.Fatal(stderr)
 	}
-	// The scaffold's Add.lean has no witness, and a main theorem is verified only together with a tied Witness.nonvacuous:
-	// add the example consumer's witness block (same statement, same extraction) to the generated proof.
+	// the scaffold's Add.lean carries its Witness.nonvacuous (the README command verifies both theorems)
 	gen := filepath.Join(dir, "HelloProofs", "Add.lean")
-	genSrc, err := os.ReadFile(gen)
-	if err != nil {
-		t.Fatal(err)
-	}
-	exSrc, err := os.ReadFile(filepath.Join(repoRoot, "examples", "consumer", "ConsumerExample", "Add.lean"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	i, j := strings.Index(string(exSrc), "namespace Witness"), strings.Index(string(exSrc), "end Witness\n")
-	if i < 0 || j < i || !strings.Contains(string(genSrc), "end HelloProofs.Add\n") {
-		t.Fatal("cannot add the witness block to the scaffold")
-	}
-	writeFile(t, gen, strings.Replace(string(genSrc), "end HelloProofs.Add\n", string(exSrc)[i:j+len("end Witness\n")]+"\nend HelloProofs.Add\n", 1))
 	code, out, stderr := runJanus(t, "verify", art, "--proof", gen, "--proof-root", dir,
 		"--theorem", "HelloProofs.Add.correctness", "--theorem", "HelloProofs.Add.Witness.nonvacuous")
 	if code != 0 || !verifiedOut(out, "HelloProofs.Add.correctness") {
