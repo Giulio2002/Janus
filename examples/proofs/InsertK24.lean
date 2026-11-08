@@ -324,6 +324,47 @@ theorem pre0 : pre (MCW ck24) HAssign mv kp AMap.empty s0 := by
     | (simp only [s0, MCW, privW, priv0, window, Ready, HAssign, Disjoint, ZEnv, mmemK, hT, outside_cons, outside_nil,
         outside_append, and_true, regG, stackguard0Offset, Memory.accessible, Memory.readLE]; decide)
 
+/-- The precondition of `AssignG`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def AssignGSite (M : MapModel (BitVec (8 * 24)) (BitVec (8 * 8))) (H : RtReady)
+    (f : AMap (BitVec (8 * 24)) (BitVec (8 * 8))) (s_c : State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ KeyRegular (rtView M.priv s_c.mem) (s_c.regs 0).toNat 24 ∧
+    (s_c.regs 1).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 1).toNat f ∧ KeyIn s_c M.depth 3 (s_c.regs 2).toNat 24 ∧
+    Ready H M.priv [(s_c.regs 0).toNat, (s_c.regs 1).toNat, (s_c.regs 2).toNat,
+      s_c.mem.readLE (s_c.regs 2).toNat 24] s_c
+
+/-- The call state of the `mapassign` contract (U-WITNESS-CALLSITE): like `s0` at the callee's entry (frame lowered), the map type in `X0`. -/
+def wsCall : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 mapType else if i = 1 then mv else if i = 2 then kp
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (wsp - 48), pc := BitVec.ofNat 64 cAddr,
+    flags := ⟨false, false, false, false⟩, mem := mmemK }
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : AssignGSite (MCW ck24) HAssign AMap.empty wsCall := by
+  janus_eval_nat hT : mapType
+  have hR : ∀ a n, 0x10000 ≤ a → a + n ≤ 0x11000 → (rtView (MCW ck24).priv mmemK).readLE a n = mmemK.readLE a n :=
+    fun a n h1 h2 => readLE_rtView ((inPriv0 h1 h2).append_left _)
+  have hW : (rtView (MCW ck24).priv mmemK).readLE (mapType + 48) 8 = KT24 := by
+    rw [readLE_rtView ⟨(mapType + 48, mapType + 56), by simp [MCW, privW], Nat.le_refl _, Nat.le_refl _⟩]
+    simp only [mmemK, KT24, hT]; decide
+  refine ⟨⟨?_, ⟨by decide, ?_, ?_⟩, ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, ?_⟩,
+    trivial, ?_, ?_, ⟨?_, ?_, ?_, Or.inl ⟨?_, rfl⟩⟩, ⟨?_, ?_, ?_⟩, ?_⟩
+  all_goals first
+    | (show KeyRegular (rtView (MCW ck24).priv mmemK) (BitVec.ofNat 64 mapType).toNat 24
+       rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt (by rw [hT]; decide)]
+       unfold KeyRegular keyType tySize isRegularMemory tyTFlag; rw [hW, hR _ _ (by decide) (by decide)]
+       try rw [hR _ _ (by decide) (by decide)]
+       simp only [mmemK, KT24, hT]; decide)
+    | (simp only [wsCall, mv, kp, MCW, privW, priv0, calleeStack, Ready, HAssign, Disjoint, ZEnv, mmemK, hT,
+        outside_cons, outside_nil, outside_append, and_true, regG, stackguard0Offset, Memory.accessible,
+        Memory.readLE]; decide)
+
+/-- So the guarantee is reached: the map now holds the key's 24 bytes with `42`. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (MCW ck24).Rep s'.mem MP (AMap.empty.set (keyAt mmemK VAL 24) 42#64) :=
+  correctness implAt (MCW _) (MCW_laws _) HAssign model mv kp v AMap.empty ret hret s0 setup pre0
+    |>.mono fun _ h => ⟨h.1, h.2.1⟩
+
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec (8 * 24)) (BitVec (8 * 8)))
     (H : RtReady) (ret : Nat) (s : State) (m kp v : BitVec 64)
@@ -332,14 +373,14 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec (8 * 24)) (
       (Extracted.program.contractAddr "runtime.mapassign") 24 8 M H ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, kp, v] s ∧
-    pre M H m kp f s :=
-  ⟨implAt, MCW _, HAssign, ret, s0, mv, kp, v, AMap.empty, MCW_laws _, model, hret, setup, pre0⟩
-
-/-- So the guarantee is reached: the map now holds the key's 24 bytes with `42`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (MCW ck24).Rep s'.mem MP (AMap.empty.set (keyAt mmemK VAL 24) 42#64) :=
-  correctness implAt (MCW _) (MCW_laws _) HAssign model mv kp v AMap.empty ret hret s0 setup pre0
-    |>.mono fun _ h => ⟨h.1, h.2.1⟩
+    pre M H m kp f s ∧
+    (∃ (f : AMap (BitVec (8 * 24)) (BitVec (8 * 8))) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapassign") ∧ AssignGSite M H f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (M.Rep s'.mem m.toNat (f.set (keyAt s.mem kp.toNat 24) v) ∧ M.Env s'.mem (s.regs 28)) :=
+  ⟨implAt, MCW _, HAssign, ret, s0, mv, kp, v, AMap.empty, MCW_laws _, model, hret, setup, pre0,
+    ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩,
+    correctness implAt (MCW _) (MCW_laws _) HAssign model mv kp v AMap.empty ret hret s0 setup pre0⟩
 
 end Witness
 
