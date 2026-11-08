@@ -9,12 +9,13 @@ defs='''def mAddr : Nat := Extracted.stubs.head!.addr
 return address above it. -/
 def memm : Memory := (mem0.writeLE (spw + 8) 8 ret).writeLE spw 8 Extracted.entry
 
+set_option maxRecDepth 100000 in
 theorem memm_desc : memm.readLE G0 8 = SL ∧ memm.readLE (G0 + 8) 8 = SH ∧
     memm.readLE (G0 + 16) 8 = SL + stackGuard := by
   obtain ⟨d1, d2, d3⟩ := mem0_desc
   refine ⟨?_, ?_, ?_⟩ <;> unfold memm <;>
-    rw [Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by simp [G0, spw, SL]),
-      Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by simp [G0, spw, SL])] <;> assumption
+    rw [Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by left; decide),
+      Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by left; decide)] <;> assumption
 
 /-- The state at the stub. -/
 def sm : State :=
