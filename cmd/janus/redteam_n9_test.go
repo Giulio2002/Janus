@@ -18,7 +18,7 @@ import (
 func n9Verify(t *testing.T, add, pkg string, extra ...string) (int, string, string) {
 	t.Helper()
 	return runJanus(t, append([]string{"verify", add, "--proof", filepath.Join(pkg, "ConsumerExample/Add.lean"), "--proof-root", pkg,
-		"--theorem", "ConsumerExample.Add.correctness", "--no-result-cache"}, extra...)...)
+		"--theorem", "ConsumerExample.Add.correctness", "--theorem", "ConsumerExample.Add.Witness.nonvacuous", "--no-result-cache"}, extra...)...)
 }
 
 func n9Listing(t *testing.T, dir string) []string {
@@ -116,7 +116,7 @@ func TestRedTeamN9OutsideModuleNotTrusted(t *testing.T) {
 		writeFile(t, filepath.Join(pkg, ".lake/build/lib/lean/Helper"+ext), "planted, not an olean")
 	}
 	code, out, stderr := n9Verify(t, add, pkg)
-	if code == 0 && strings.HasPrefix(out, "Verified: ConsumerExample.Add.correctness") {
+	if code == 0 && verifiedOut(out, "ConsumerExample.Add.correctness") {
 		for _, a := range readReport(t, add).Axioms {
 			if a == "sorryAx" {
 				t.Fatalf("axioms include sorryAx: %v", a)

@@ -210,7 +210,7 @@ func TestMemGuardNormalVerify(t *testing.T) {
 		if _, err := os.Stat(proof); err != nil {
 			t.Fatalf("missing example proof %s", proof)
 		}
-		cmd := exec.Command(bin, "verify", dir, "--proof", proof, "--janus-root", repoRoot)
+		cmd := exec.Command(bin, append([]string{"verify", dir, "--proof", proof, "--janus-root", repoRoot}, proofThms...)...)
 		cmd.Env = env
 		out, err := cmd.CombinedOutput()
 		if err != nil || !strings.Contains(string(out), "Verified: ") {

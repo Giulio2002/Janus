@@ -34,7 +34,7 @@ func TestInlineInstanceRejected(t *testing.T) {
 		}
 	}
 	code, _, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(repoRoot, "examples", "proofs", "Add.lean"),
-		"--janus-root", repoRoot)
+		"--janus-root", repoRoot, "--theorem", "Proof.correctness", "--theorem", "Proof.Witness.nonvacuous")
 	if code != 0 {
 		t.Fatalf("honest Add: %s", stderr)
 	}
@@ -198,7 +198,7 @@ func TestUnshareFallbackVerifies(t *testing.T) {
 	}
 	bin := buildJanusBinary(t)
 	add := mustExtract(t, "example.com/basic.Add")
-	cmd := exec.Command(bin, "verify", add, "--proof", filepath.Join(repoRoot, "examples", "proofs", "Add.lean"), "--janus-root", repoRoot)
+	cmd := exec.Command(bin, "verify", add, "--proof", filepath.Join(repoRoot, "examples", "proofs", "Add.lean"), "--janus-root", repoRoot, "--theorem", "Proof.correctness", "--theorem", "Proof.Witness.nonvacuous")
 	cmd.Env = append(cacheEnv(testCacheDir()), "JANUS_SANDBOX=unshare")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("verify under the unshare fallback: %v\n%s", err, out)

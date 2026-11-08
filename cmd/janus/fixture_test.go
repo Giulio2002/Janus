@@ -163,10 +163,15 @@ func ensureFixture(fixture, userSeed, exampleBin string) error {
 	for _, extra := range todo {
 		o.Reset()
 		e.Reset()
-		args := append([]string{"verify", art, "--proof", filepath.Join(repoRoot, "examples", "proofs", "Add.lean")}, extra...)
+		args := append([]string{"verify", art, "--proof", filepath.Join(repoRoot, "examples", "proofs", "Add.lean")}, append(append([]string{}, proofThms...), extra...)...)
 		if code := run(args, &o, &e); code != 0 {
 			return fmt.Errorf("fixture: verify %v: %s%s", extra, o.String(), e.String())
 		}
 	}
 	return nil
 }
+
+// proofThms are the --theorem flags verifying an examples/proofs/<Name>.lean: the main theorem is verified only
+// together with its tied witness (UP3c non-vacuity policy). A run with both is a multi-theorem run (`=== X: verified ===`
+// blocks, verified.json = the first theorem's report, verified/<name>.json for each).
+var proofThms = []string{"--theorem", "Proof.correctness", "--theorem", "Proof.Witness.nonvacuous"}

@@ -29,8 +29,11 @@ func TestBoundInstanceRejected(t *testing.T) {
 			t.Errorf("%s not rejected as a bound instance: %d %s", a, code, stderr)
 		}
 	}
+	// The control: a theorem-level instance binder is accepted by the statement audit. It cannot be verified with a witness
+	// (a witness must exhibit the instance in an `∃`, which the audit rejects as a bound instance), so this checks the audit
+	// only (--audit-only: not a verification).
 	p := filepath.Join(repoRoot, "audit", "round3", "attacks", "R2_inst_binder.lean")
-	if code, _, stderr := runJanus(t, "verify", add, "--proof", p, "--janus-root", repoRoot); code != 0 {
-		t.Errorf("R2 (theorem-level instance binder) no longer verifies: %s", stderr)
+	if code, out, stderr := runJanus(t, "verify", add, "--proof", p, "--janus-root", repoRoot, "--audit-only"); code != 0 || !strings.Contains(out, "Audit-only") {
+		t.Errorf("R2 (theorem-level instance binder) no longer passes the audit: %d %s\n%s", code, out, stderr)
 	}
 }

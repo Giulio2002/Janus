@@ -325,7 +325,7 @@ func TestConsumerModstoreAcrossFamilies(t *testing.T) {
 	useTestCache(t)
 	t.Setenv("JANUS_LAKE_BUILD", "1")
 	verify := func(pkg, outdir, proof, thm string) *verifiedReport {
-		code, out, stderr := runJanus(t, "verify", outdir, "--proof", filepath.Join(pkg, proof), "--proof-root", pkg, "--theorem", thm, "--no-result-cache") // (JANUS_LAKE_BUILD=1: the Lake path, where the module store works)
+		code, out, stderr := runJanus(t, append([]string{"verify", outdir, "--proof", filepath.Join(pkg, proof), "--proof-root", pkg}, append(thmArgs(thm), "--no-result-cache")...)...) // (JANUS_LAKE_BUILD=1: the Lake path, where the module store works)
 		if code != 0 {
 			t.Fatalf("%s: %d\n%s\n%s", thm, code, out, stderr)
 		}
@@ -421,10 +421,10 @@ func TestConsumerLakeFreeIgnoresLake(t *testing.T) {
 	add := mustExtract(t, "example.com/basic.Add")
 	verify := func(extra ...string) (int, string, string) {
 		return runJanus(t, append([]string{"verify", add, "--proof", filepath.Join(pkg, "ConsumerExample/Add.lean"), "--proof-root", pkg,
-			"--theorem", "ConsumerExample.Add.correctness", "--no-result-cache"}, extra...)...)
+			"--theorem", "ConsumerExample.Add.correctness", "--theorem", "ConsumerExample.Add.Witness.nonvacuous", "--no-result-cache"}, extra...)...)
 	}
 	code, out, stderr := verify()
-	if code != 0 || !strings.HasPrefix(out, "Verified: ConsumerExample.Add.correctness") {
+	if code != 0 || !verifiedOut(out, "ConsumerExample.Add.correctness") {
 		t.Fatalf("first: %d\n%s\n%s", code, out, stderr)
 	}
 	r1 := readReport(t, add)
@@ -495,9 +495,9 @@ func TestConsumerKeepWorkspaceLakeFree(t *testing.T) {
 	pkg := consumerCopy(t, "toml")
 	add := mustExtract(t, "example.com/basic.Add")
 	args := []string{"verify", add, "--proof", filepath.Join(pkg, "ConsumerExample/Add.lean"), "--proof-root", pkg,
-		"--theorem", "ConsumerExample.Add.correctness", "--no-result-cache", "--keep-workspace"}
+		"--theorem", "ConsumerExample.Add.correctness", "--theorem", "ConsumerExample.Add.Witness.nonvacuous", "--no-result-cache", "--keep-workspace"}
 	code, out, stderr := runJanus(t, args...)
-	if code != 0 || !strings.HasPrefix(out, "Verified: ConsumerExample.Add.correctness") {
+	if code != 0 || !verifiedOut(out, "ConsumerExample.Add.correctness") {
 		t.Fatalf("keep-workspace: %d\n%s\n%s", code, out, stderr)
 	}
 	r1 := readReport(t, add)
@@ -560,7 +560,7 @@ func TestConsumerLakeFreeBrokenLakefile(t *testing.T) {
 		}
 		writeFile(t, p, string(b)+tail)
 		code, out, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(pkg, "ConsumerExample/Add.lean"), "--proof-root", pkg,
-			"--theorem", "ConsumerExample.Add.correctness", "--no-result-cache")
+			"--theorem", "ConsumerExample.Add.correctness", "--theorem", "ConsumerExample.Add.Witness.nonvacuous", "--no-result-cache")
 		if code == 0 || strings.Contains(out, "Verified") {
 			t.Errorf("%s: a broken lakefile was verified: %d\n%s\n%s", name, code, out, stderr)
 		} else if strings.TrimSpace(out+stderr) == "" {
