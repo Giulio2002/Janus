@@ -3094,7 +3094,8 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
           -- not a `Summary`: the call state is the instantiation of the premises (the first one fixes the entry, `s.pc = addr`)
           if prems.isEmpty then
             return some s!"the contract hypothesis `{c}` does not unfold to a `Summary` or a `∀ xs, premises → …` claim, so the witness cannot be required to exhibit its call-site state (U-WITNESS-CALLSITE)"
-          for q in prems do
+          for q0 in prems do
+           for q in flattenAnd (← instantiateMVars q0) do
             let q ← instantiateMVars q
             unless ← findConj q wconjs do
               return some s!"the witness does not exhibit a call-site state for the contract hypothesis `{(← Meta.ppExpr h).pretty 200}`: it must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr q).pretty 400}` (the contract's premise; U-WITNESS-CALLSITE)"
@@ -3118,7 +3119,12 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
           if ok then break
           let st ← Meta.saveState
           if ← defEqTry e1 (← instantiateMVars w) then
-            if ← findConj (← instantiateMVars e2) wconjs then ok := true
+            -- the pre of most families is a conjunction (`HPre H d 3 s ∧ Input s d 3 …`) and the witness's conjuncts are flattened:
+            -- every conjunct of the pre must be one of the witness's
+            let mut all := true
+            for q in flattenAnd (← instantiateMVars e2) do
+              unless ← findConj (← instantiateMVars q) wconjs do all := false; break
+            if all then ok := true
           if !ok then st.restore
         unless ok do
           return some s!"the witness does not exhibit a call-site state for the contract hypothesis `{(← Meta.ppExpr h).pretty 200}`: it must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr (← instantiateMVars expected)).pretty 400}` (a state at the callee's entry satisfying the contract's call precondition; U-WITNESS-CALLSITE)"
