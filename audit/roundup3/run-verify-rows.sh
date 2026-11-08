@@ -53,6 +53,13 @@ check_rejected $RT/rows2/R01_R_pinned_false_in_pre.lean R01 Proof.correctness
 for f in $R/vrows/PIN*.lean; do check_rejected "$f" "$(basename "$f" .lean)" Proof.correctness; done
 echo "== attackers (witness-bearing: rejected for the named reason)"
 for f in $R/vrows/ATT_*.lean $R/wit/WIT[1-6]_*.lean; do check_rejected "$f" "$(basename "$f" .lean)" Proof.correctness Proof.Witness.nonvacuous; done
+echo "== strict pairing (UP3d): Witness.nonvacuous <-> correctness, Witness.<X> <-> main <X>, nothing else"
+check_rejected $R/pair/PAIR1_missing_witness_extra.lean PAIR1 Proof.correctness Proof.extra Proof.Witness.nonvacuous
+check_rejected $R/pair/PAIR2_witness_extra_tied_to_correctness.lean PAIR2 Proof.correctness Proof.extra Proof.Witness.nonvacuous Proof.Witness.extra
+check_rejected $R/pair/PAIR3_nonvacuous_tied_to_extra.lean PAIR3 Proof.correctness Proof.extra Proof.Witness.nonvacuous Proof.Witness.extra
+check_rejected $R/pair/PAIR4_witness_name_pairs_no_main.lean PAIR4 Proof.correctness Proof.extra Proof.Witness.nonvacuous Proof.Witness.extra Proof.Witness.other
+v=$(vrun "$W/Add" $R/pair/PAIR_ok_control.lean "" Proof.correctness Proof.extra Proof.Witness.nonvacuous Proof.Witness.extra)
+if [ "$v" = verified ]; then printf '%-34s verified ok\n' PAIR_ok_control; else printf '%-34s REJECTED   <-- BROKEN\n' PAIR_ok_control; bad=1; fi
 echo "== controls (witness-bearing: must VERIFY)"
 for f in $R/ctl/*.lean; do
   n=$(basename "$f" .lean)

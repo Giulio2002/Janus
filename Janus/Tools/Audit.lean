@@ -3372,13 +3372,35 @@ partial def witnessSizes (env : Environment) (ty val : Expr) (pos : String := "w
           return some s!"instantiates the runtime contract {c} (position `{pos}`) with the {nm} = {n}, outside the satisfiable range ({if nm == "nargs" then "at most 64" else if nm == "stack" then "8 ≤ stack < 2^47" else if nm == "d" then "d < 2^47" else s!"8 + 8·nargs = {low} ≤ above < 2^47"}): its call precondition is unsatisfiable there, the contract is vacuously inhabited, and the witness would show nothing (U-ICALL-STACK, witness)"
   return none
 
+/-- UP3d (strict pairing): the main theorems of the proof module (or, when it has none, of the imported non-trusted
+modules, as `mainCandidates`) whose last name component is `last`, not witnesses, not `self`, about `Extracted.program`. -/
+def mainsNamed (env : Environment) (proofMod : Name) (self : Name) (last : String) : Array Name :=
+  let modNames := env.header.moduleNames
+  let inMods (ok : Name → Bool) : Array Name :=
+    (env.const2ModIdx.fold (init := #[]) fun acc n idx =>
+      match modNames[idx.toNat]? with
+      | some m =>
+        if ok m && n != self && !n.isInternal && roleOf n == .main && n.getString! == last then
+          match env.find? n with
+          | some (.thmInfo ci) =>
+            let used := ci.type.getUsedConstants
+            if used.contains `Extracted.program || used.contains `Extracted.entry then acc.push n else acc
+          | _ => acc
+        else acc
+      | none => acc).qsort Name.lt
+  let own := inMods (· == proofMod)
+  if !own.isEmpty then own else inMods fun m => !trustedModule m && m != proofMod
+
 def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmType : Expr) (thmVal : Expr) :
     MetaM (Except String (Name × Array Name)) := do
-  let cands0 := mainCandidates env proofMod thm
-  -- further main theorems of the module that assume runtime contracts (`full_write` next to `correctness`):
-  -- each needs its own witness, and one witness may serve several of them
-  let extra := contractMains env proofMod thm
-  let cands := cands0 ++ extra.filter (!cands0.contains ·)
+  -- UP3d STRICT PAIRING: a non-vacuity witness `Witness.nonvacuous` pairs with the module's main theorem `correctness`
+  -- (the unchanged default selection, `mainCandidates`); a witness `Witness.<X>` pairs ONLY with the main `<X>`
+  -- (`Witness.panics` with `panics`, `Witness.corollaryAES128` with `corollaryAES128`). It is checked against that one main
+  -- alone and never vouches for another (a further main, contract-assuming or not, needs its own `Witness.<X>`).
+  let wname := thm.getString!
+  let cands : Array Name :=
+    if role == .nonvacuous && wname != "nonvacuous" then mainsNamed env proofMod thm wname
+    else mainCandidates env proofMod thm
   if cands.isEmpty then
     return .error "the proof module has no main theorem about Extracted.program for this witness to support"
   match role with

@@ -216,3 +216,9 @@ Branch agent/up3-vacuity (/srv/janus-up3). JX1, JX2 merged. ALL examples have ti
 ## State / remaining (see also main's queue)
 - check-merge running (log /srv/janus-ops/work.up3c/cm5.log). Known failures being fixed: sys WriteOut both ISAs (worker a68ae7e8: call-site + run witnesses). Watch for more families failing in the verify lane (cgo/print with contracts).
 - Then: gotest lane green (33/34 single-test green earlier; Foreign + Init fixed since), SAT (python3 -I audit/round9/sat_check.py /srv/janus-up3), runner audit/roundup3/run-verify-rows.sh (rerun: new rows PIN7-10, RF1, ATT_NOCS/NORUN, KA1), corpus audit by FV-WRUN2 at the final head, report head+timings to main. Do NOT merge into integ/*.
+
+# UP3d: strict witness pairing (auditor change, requested by main)
+Branch up3d-pairing (worktree /srv/janus-up3d; to land on agent/up3-vacuity once the check-merge gate in /srv/janus-up3 has finished: editing/building the framework in that tree would break its SHA identity).
+Rule: `Witness.nonvacuous` <-> `correctness`; `Witness.<X>` <-> main `<X>` only (Audit.lean `mainsNamed`, `checkWitness`). Verify scripts must pass `Proof.Witness.<X>` for every extra main (`panics exact outOfRange faults forAllValues anyCPU saturation traps full_write corollary*`).
+Rows: audit/roundup3/pair/PAIR_ok_control, PAIR1-4 (wired into run-verify-rows.sh). Worked: amd64 Div (`Witness.panics`, a tied `Panics` instance), EncryptBlock corollaries (concrete FIPS-197 C.1 call state s1), WriteBarrier (nonvacuous restated against `correctness`: all eight contracts, call-site premises and eight ReachesRet).
+Gotcha: audit-only (JANUS_STOP_AFTER_AUDIT) does NOT show a missing witness for a main (that verdict is Go-side in nonvacuity.go); only a REAL verify does. Warm real verifies take seconds.
