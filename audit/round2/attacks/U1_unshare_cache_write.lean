@@ -3,7 +3,7 @@ import Extracted
 cache lives on another mount (here JANUS_CACHE_DIR under the host /tmp), the sandboxed proof can
 write the trusted cache, e.g. plant a replay-cache marker. The theorem is honest; the side effect
 is the attack. -/
-open Janus Janus.GoABI Janus.Tactic
+open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 run_cmd do
   let some c ← IO.getEnv "JANUS_CACHE_DIR" | return
   IO.FS.createDirAll (c ++ "/v1/replay/00")

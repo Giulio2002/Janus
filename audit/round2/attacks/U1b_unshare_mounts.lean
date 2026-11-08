@@ -4,7 +4,7 @@ read-only, so a sandboxed proof could still write the host's `/tmp`, `/dev/shm` 
 read-write mount (`/boot`, `/run/user/<uid>`, …). The proof tries each; the runner checks on
 the host that no marker arrived. The theorem is honest; the side effect is the attack. Run with
 `JANUS_SANDBOX=unshare`. -/
-open Janus Janus.GoABI Janus.Tactic
+open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 run_cmd do
   for d in ["/tmp", "/dev/shm", "/boot", "/run/user/0", "/run"] do
     try IO.FS.writeFile (d ++ "/janus-u1b-marker") "planted by a sandboxed proof\n" catch _ => pure ()
