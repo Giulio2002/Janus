@@ -116,6 +116,18 @@ def WbContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat))
                     zmmHi := zh, kreg := kr } ∧
       MemFrame s.mem m (rt ++ [((s.regs 4).toNat - stack, (s.regs 4).toNat)]) ∧ WbSlots rt m buf.toNat n)
 
+/-- The post of `WbContract64` at the call state `s`, as a reducible definition: a witness states the returning run at the contract's
+own post through it (a statement may not spell out `State.kreg`; the framework definition is exempt). Reducibly equal to the
+contract's post. -/
+@[reducible] def WbPost64 (rt : List (Nat × Nat)) (stack n : Nat) (s s' : Janus.Amd64.State) : Prop :=
+  ∃ (buf : W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
+        (zh : Nat → BitVec 256) (kr : Nat → W64),
+      s' = { s with regs := fun i => if i = 4 then s.regs 4 + 8#64 else if i = 11 then buf else s.regs i,
+                    rip := Janus.Amd64.Tactic.retAddrOf s, flags := f,
+                    xmm := fun i => if i = 15 then s.xmm 15 else x i, ymmHi := yh, mem := m,
+                    zmmHi := zh, kreg := kr } ∧
+      MemFrame s.mem m (rt ++ [((s.regs 4).toNat - stack, (s.regs 4).toNat)]) ∧ WbSlots rt m buf.toNat n
+
 end Janus.Contracts
 
 namespace Janus.Contracts

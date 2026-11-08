@@ -236,10 +236,9 @@ theorem returns : ReachesRet Extracted.program (retAddrOf s0) s0 fun s' =>
 precondition of `gcWriteBarrierN`'s contract, with `HRoom`, holds at the concrete state `s0`. -/
 theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s : State),
     WbContract64 Extracted.program wb1 rt 120 (HRoom rt 1) 1 ∧
-    ∀ n, n ≤ 8 → CallOK64 s 120 0 ∧ Ready64 (HRoom rt n) rt [n] s ∧
-    (ReachesRet Extracted.program (retAddrOf s) s fun s' =>
-    ∃ buf : W64, s'.regs 11 = buf ∧ WbSlots rt s'.mem buf.toNat 1) :=
-  ⟨rt, s0, wb1_meets rt, fun n hn => ⟨callOK, ready n hn⟩, returns⟩
+    (∀ n, n ≤ 8 → CallOK64 s 120 0 ∧ Ready64 (HRoom rt n) rt [n] s) ∧
+    (ReachesRet Extracted.program (retAddrOf s) s (WbPost64 rt 120 1 s)) :=
+  ⟨rt, s0, wb1_meets rt, fun n hn => ⟨callOK, ready n hn⟩, wb1_meets rt s0 rfl ⟨callOK, ready 1 (by decide)⟩⟩
 
 end Witness
 
