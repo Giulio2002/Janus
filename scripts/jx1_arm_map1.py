@@ -84,3 +84,54 @@ theorem wsCallB_pre : Access1Site (MC ck64) AMap.empty wsCallB := by
       [conj('AssignSite','runtime.mapassign_fast64',extra='M H'), conj('Access1Site','runtime.mapaccess1_fast64')],
       [TERM_F('wsCallA').replace('addr.symm','addr.symm'), TERM_F('wsCallB').replace('addr.symm','addrB.symm')],
       [('s0','s'),('implAt','impl'),('(MC ck64)','M')])
+HELP='''theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with pc := a } := h
+
+'''
+def lookupptr():
+    ws=HELP+'''/-- The call state of the `mapaccess1_fast64` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSat`, at the contract address. -/
+def wsCall : State := { mstate mmem (args pv 0) with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : Access1Site (ME (BitVec 64)) AMap.empty wsCall :=
+  ⟨rtpre_pc _ (mstate_rtpre _ rfl rfl mmem rfl _ 3 (by decide) mmem_zenv mmem_guard), trivial,
+    (isMap_of_ne (by decide)).2 (mmem_rep _)⟩
+'''
+    patch(P+'LookupPtr.lean', mapsite('Access1Site','Access1',3)+'\n'+ws,
+      [conj('Access1Site','runtime.mapaccess1_fast64')], ['⟨AMap.empty, wsCall, rfl, wsCall_pre⟩'],
+      [('s0','s'),('implAt','impl'),('(ME (BitVec 64))','M'),('(ME _)','M')])
+def sumvalues():
+    site=HELP+'''/-- The precondition of `IterStart`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def IterStartSite (M : MapModel (BitVec 64) (BitVec 64)) (f : AMap (BitVec 64) (BitVec 64)) (s_c : State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 1).toNat f ∧
+    s_c.mem.accessible (s_c.regs 2).toNat iterSize true = true ∧
+    Outside (s_c.regs 2).toNat iterSize M.priv ∧ Outside (s_c.regs 2).toNat iterSize (calleeStack s_c M.depth 3)
+
+/-- The precondition of `IterNext`'s summary at the call state `s_c`. -/
+@[reducible] def IterNextSite (M : MapModel (BitVec 64) (BitVec 64)) (mp : Nat) (f : AMap (BitVec 64) (BitVec 64))
+    (k : BitVec 64) (ks : List (BitVec 64)) (s_c : State) : Prop :=
+  RTPre M 1 s_c ∧ IsMap M s_c.mem mp f ∧ M.Iter s_c.mem (s_c.regs 0).toNat mp f (k :: ks) ∧
+    Outside (s_c.regs 0).toNat iterSize M.priv ∧ Outside (s_c.regs 0).toNat iterSize (calleeStack s_c M.depth 1)
+
+/-- The call states of the two iteration contracts (U-WITNESS-CALLSITE): the stock witness states of `MapSat`, at the contract addresses. -/
+def wsCallS : State := { mstate mmem (args (BitVec.ofNat 64 IT) 0) with pc := BitVec.ofNat 64 sAddr }
+def wsCallN : State := { mstate mmem (fun i => if i = 0 then BitVec.ofNat 64 IT else 0) with pc := BitVec.ofNat 64 nAddr }
+
+theorem wsCallS_pre : IterStartSite (MEI (BitVec 64)) AMap.empty wsCallS :=
+  ⟨rtpre_pc _ (mstate_rtpre _ rfl rfl mmem rfl _ 3 (by decide) mmem_zenv mmem_guard), trivial,
+    (isMap_of_ne (by decide)).2 (mmem_rep _), by decide,
+    by simp only [MEI_priv, priv0, outside_cons, outside_nil, and_true]; decide,
+    by simp only [calleeStack, MEI_depth, outside_cons, outside_nil, and_true]; decide⟩
+
+theorem wsCallN_pre : IterNextSite (MEI (BitVec 64)) MP AMap.empty 7#64 [] wsCallN :=
+  ⟨rtpre_pc _ (mstate_rtpre _ rfl rfl mmem rfl _ 1 (by decide) mmem_zenv mmem_guard),
+    (isMap_of_ne (by decide)).2 (mmem_rep _), ⟨by decide, by decide⟩,
+    by simp only [MEI_priv, priv0, outside_cons, outside_nil, and_true]; decide,
+    by simp only [calleeStack, MEI_depth, outside_cons, outside_nil, and_true]; decide⟩
+'''
+    cs='''(∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapIterStart") ∧ IterStartSite M f s_c)'''
+    cn='''(∃ (mp : Nat) (f : AMap (BitVec 64) (BitVec 64)) (k : BitVec 64) (ks : List (BitVec 64)) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapIterNext") ∧ IterNextSite M mp f k ks s_c)'''
+    patch(P+'SumValues.lean', site, [cs,cn],
+      ['⟨AMap.empty, wsCallS, rfl, wsCallS_pre⟩','⟨MP, AMap.empty, 7#64, [], wsCallN, rfl, wsCallN_pre⟩'],
+      [('s0','s'),('implAt','impl'),('(MEI (BitVec 64))','M'),('(MEI _)','M')])
