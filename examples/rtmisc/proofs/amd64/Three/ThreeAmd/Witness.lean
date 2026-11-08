@@ -150,8 +150,87 @@ theorem pre : Pre R 0x400 2 s0 := by
   · rw [addr_new]; exact Or.inr (Or.inl ⟨rfl, rfl⟩)
   · rw [addr_wb]; exact Or.inr (Or.inr ⟨rfl, rfl⟩)
 
+/-! ### The call-site states of the three runtime contracts -/
+
+/-- A call state at the runtime entry `addr` (words `x, y, z` in `RAX, RBX, RCX`), in the witness's world:
+the heap and the invariant are those of `s0`; the callee's frame lies just below the caller's. -/
+def callS (addr x y z : Nat) : Amd64.State :=
+  { s0 with
+    rip := BitVec.ofNat 64 addr
+    regs := fun i => if i = 0 then BitVec.ofNat 64 x else if i = 3 then BitVec.ofNat 64 y
+      else if i = 1 then BitVec.ofNat 64 z else if i = 4 then BitVec.ofNat 64 (sp0 - 16) else s0.regs i }
+
+theorem cs_rsp (a x y z : Nat) : ((callS a x y z).regs 4).toNat = sp0 - 16 := by rfl
+theorem cs_g (a x y z : Nat) : ((callS a x y z).regs 14).toNat = g0 := by rfl
+theorem cs_mem (a x y z : Nat) : (callS a x y z).mem = mem0 := rfl
+
+theorem cs_callOK (a x y z n : Nat) (hn : n ≤ 3) : CallOK64 (callS a x y z) 4096 n := by
+  have hw : mem0.accessible (sp0 - 16 - 4096) (4096 + 8 + 8 * 3) true = true := by decide
+  have h1 : mem0.readLE (sp0 - 16) 8 < 2 ^ 47 := by decide
+  simp only [CallOK64, cs_rsp, cs_mem]
+  refine ⟨h1, by first | decide | (unfold sp0; omega), by first | decide | (unfold sp0; omega),
+    by first | decide | (unfold sp0; omega), ?_⟩
+  exact Janus.Arm64.Memory.accessible_mono _ hw (Nat.le_refl _) (by omega)
+
+theorem cs_room (a x y z n : Nat) (hn : n ≤ 3) : StackRoom64 (callS a x y z) 4096 n := by
+  simp only [StackRoom64, GuardOK64, cs_g, cs_rsp, cs_mem, calleeStack64]
+  refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
+  simp only [outside_cons, outside_nil, and_true, sp0, g0]
+  omega
+
+theorem cs_winR (a x y z n : Nat) (hn : n ≤ 3) : LiveSep (liveWin64 (callS a x y z) 4096 n) R.rt := by
+  intro x' hx
+  simp only [liveWin64, calleeStack64, cs_rsp, List.mem_append, List.mem_cons, List.not_mem_nil, or_false] at hx
+  rw [rt_eq]
+  rcases hx with (rfl | rfl) | rfl <;>
+    simp only [outside_cons, outside_nil, and_true, sp0, HEAP, HEND, BUMP, WBUF] <;> omega
+
+def sMk : Amd64.State := callS mkA u64Type 2 2
+def sNew : Amd64.State := callS newA cellType 0 0
+def sWb : Amd64.State := callS wbA 0 0 0
+
+@[reducible] def mkSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : Amd64.State) : Prop :=
+  MakeslicePre64 4096 s ∧ StackRoom64 s 4096 3 ∧
+    LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b (makesliceRound64 s)
+      (s.regs 14).toNat s.mem (liveWin64 s 4096 3)
+
+theorem site_mk : mkSite R mkA [] 0x400 sMk := by
+  refine ⟨⟨cs_callOK _ _ _ _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide⟩,
+    cs_room _ _ _ _ 3 (by omega), ?_, inv0, by decide, fun r hr => absurd hr (by simp), cs_winR _ _ _ _ 3 (by omega)⟩
+  exact Or.inl ⟨rfl, by decide⟩
+
+@[reducible] def newSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : Amd64.State) : Prop :=
+  NewobjectPre64 4096 s ∧ StackRoom64 s 4096 1 ∧
+    LiveAt R addr [(s.regs 0).toNat] L b (newobjectRound64 s) (s.regs 14).toNat s.mem (liveWin64 s 4096 1)
+
+theorem site_new : newSite R newA [] 0x400 sNew := by
+  refine ⟨⟨cs_callOK _ _ _ _ 1 (by omega), ⟨by decide, by decide⟩, by decide⟩,
+    cs_room _ _ _ _ 1 (by omega), ?_, inv0, by decide, fun r hr => absurd hr (by simp), cs_winR _ _ _ _ 1 (by omega)⟩
+  exact Or.inr (Or.inl ⟨rfl, rfl⟩)
+
+@[reducible] def wbSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : Amd64.State) : Prop :=
+  CallOK64 s 4096 0 ∧ R.ok addr [2] ∧ R.inv b L (s.regs 14).toNat (view R.rt L s.mem) ∧
+    LiveSep L [((s.regs 4).toNat - 4096, (s.regs 4).toNat + 8)] ∧
+    LiveSep [((s.regs 4).toNat - 4096, (s.regs 4).toNat + 8)] R.rt
+
+theorem site_wb : wbSite R wbA [] 0x400 sWb := by
+  refine ⟨cs_callOK _ _ _ _ 0 (by omega), Or.inr (Or.inr ⟨rfl, rfl⟩), inv0, fun r hr => absurd hr (by simp), ?_⟩
+  intro x hx
+  simp only [sWb, cs_rsp, List.mem_singleton] at hx
+  subst hx
+  rw [rt_eq]
+  simp only [outside_cons, outside_nil, and_true, sp0, HEAP, HEND, BUMP, WBUF]
+  omega
+
+/-- The returning run, exactly as `correctness` states it at the witness. -/
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ Post R 2 7 s0 s' :=
+  correctness implAt R 0x400 2 7 (by rw [addr_mk]; exact model_mk) (by rw [addr_new]; exact model_new)
+    (by rw [addr_wb]; exact model_wb) ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` hold together: a runtime (`impl`, `R`), a budget and a call of
-`Three(2, 7)` satisfying the precondition. -/
+`Three(2, 7)` satisfying the precondition; a call-site state for each of the three contracts; and the
+returning run. -/
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (ret : Nat) (s : Amd64.State),
     MakesliceLiveContract64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.makeslice") 4096 R ∧
@@ -161,21 +240,32 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (ret 
       (Extracted.program.contractAddr "runtime.gcWriteBarrier2") 4096 R 2 ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [2, 7] s ∧
-    Pre R b 2 s :=
+    Pre R b 2 s ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makeslice") ∧
+      mkSite R (Extracted.program.contractAddr "runtime.makeslice") L b s_c) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
+      newSite R (Extracted.program.contractAddr "runtime.newobject") L b s_c) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gcWriteBarrier2") ∧
+      wbSite R (Extracted.program.contractAddr "runtime.gcWriteBarrier2") L b s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ Post R 2 7 s s' :=
   ⟨implAt, R, 0x400, ret, s0, by rw [addr_mk]; exact model_mk, by rw [addr_new]; exact model_new,
-    by rw [addr_wb]; exact model_wb, hret, setup, pre⟩
+    by rw [addr_wb]; exact model_wb, hret, setup, pre,
+    ⟨[], 0x400, sMk, by rw [addr_mk]; rfl, by rw [addr_mk]; exact site_mk⟩,
+    ⟨[], 0x400, sNew, by rw [addr_new]; rfl, by rw [addr_new]; exact site_new⟩,
+    ⟨[], 0x400, sWb, by rw [addr_wb]; rfl, by rw [addr_wb]; exact site_wb⟩, returnsF⟩
 
 /-- So the guarantee is reached: `Three(2, 7)` returns three disjoint objects, `A[0] = 7`, `C.P = &B[0]`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ ∃ pa pb pc : Nat, (s'.regs 0).toNat = pa ∧ (s'.regs 7).toNat = pb ∧ (s'.regs 9).toNat = pc ∧
       s'.mem.readLE pa 8 = 7 ∧ s'.mem.readLE pc 8 = pb ∧
       Apart pa 16 pb 16 ∧ Apart pa 16 pc 16 ∧ Apart pb 16 pc 16 :=
-  (correctness implAt R 0x400 2 7 (by rw [addr_mk]; exact model_mk) (by rw [addr_new]; exact model_new)
-    (by rw [addr_wb]; exact model_wb) ret hret s0 setup pre).mono
+  returnsF.mono
     fun _ ⟨habi, pa, pb, pc, h0, h3, h6, _, _, _, _, _, _, _, hab, hac, hbc, hA, hC, _⟩ => by
       have hbs : blockSize (8 * (2 : BitVec 64).toNat) true = 16 := by decide
       rw [hbs] at hab hac hbc
       exact ⟨habi, pa, pb, pc, h0, h3, h6, hA, hC, hab, hac, hbc⟩
 
 end ThreeAmd.Witness
-
