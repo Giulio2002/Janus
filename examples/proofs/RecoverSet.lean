@@ -591,6 +591,100 @@ theorem pre : PanicCallerOK PW s0 (PW.depth + 112) 32 ∧ PW.Calm s0.mem (s0.reg
     have : defers0 wmW = [] := by rw [defers0_eq, hnd]; rfl
     exact absurd hd (by rw [show PW.defers s0.mem (gOf s0) = defers0 wmW from rfl, this]; simp)
 
+def wfi : FuncInfo := FuncInfo.named Extracted.funcs "example.com/basic.RecoverSet"
+
+/-- The call state at `runtime.gopanic`'s entry: `RecoverSet`'s own frame, pending open-coded defers in place, `LR` inside the function. -/
+def wmG : Memory := witMem (tabWords T0 ++ [(0x48000 - 32, func1A), (0x48000 - 24, 0x48000 - 40), (0x48000 - 16, 0x48000 - 32), (0x48000 - 41, 1)])
+
+def wsG : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 0x50000 else if i = 30 then BitVec.ofNat 64 (loc_RecoverSet_128) else if i = 29 then BitVec.ofNat 64 (0x48000 - 80 - 8) else if i = 0 then 1#64 else 0,
+    sp := BitVec.ofNat 64 (0x48000 - 80), pc := BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic"),
+    flags := ⟨false, false, false, false⟩, mem := wmG }
+
+theorem env_G : Env0 T0 wmG := by
+  unfold Env0
+  have hnd : ndef wmG = 0 := by decide
+  refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
+  · omega
+  · unfold TableOK
+    exact ⟨by decide, by decide, by decide⟩
+
+theorem wsG_find : FuncInfo.find T0 (wsG.regs 30).toNat = some wfi := by decide
+
+theorem defers_G : defers0 wmG = [] := by
+  have hnd : ndef wmG = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem wsG_pre : GopanicPre PW wfi wsG := by
+  refine ⟨⟨env_G, ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, ?_⟩, by decide, ?_, ?_, ?_⟩
+  · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · show 0 < room0 wmG
+    rw [room0_eq]; decide
+  · intro _; refine ⟨by decide, ?_⟩
+    simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · have hs : wsG.sp.toNat = 0x48000 - 80 := by decide
+    have hr : PW.defers wmG (gOf wsG) = [] := defers_G
+    have f_frame : wfi.frame = 80 := by rfl
+    have f_od : wfi.openDefer = some (33, 8) := by rfl
+    have f_res : wfi.resume = Extracted.entry + 0x84 := by rfl
+    have hbA : wfi.bitsAt (0x48000 - 80) = 0x48000 - 41 := by
+      unfold FuncInfo.bitsAt FuncInfo.varp; rw [f_frame, f_od]; try rfl
+    have hsA : wfi.slotsAt (0x48000 - 80) = 0x48000 - 16 := by
+      unfold FuncInfo.slotsAt FuncInfo.varp; rw [f_frame, f_od]; try rfl
+    have hbd : wfi.bound (0x48000 - 80) = 0x48000 := by
+      unfold FuncInfo.bound; rw [f_frame]; try rfl
+    have hbit : wmG.readLE (0x48000 - 41) 1 = 1 := by decide
+    have hF : frameOf wfi (0x48000 - 80) wmG = ⟨0x48000 - 80, 0x48000, Extracted.entry + 0x84, some (0x48000 - 41, 0x48000 - 16)⟩ := by
+      unfold frameOf; rw [hbA, hsA, hbd, f_res, f_od]
+      simp only [hbit]; try rfl
+    show FrameOK PW wmG (frameOf wfi (wsG.sp.toNat) wmG) (frameItems wmG (frameOf wfi (wsG.sp.toNat) wmG) (PW.defers wmG (gOf wsG)))
+    rw [hs, hr]
+    
+    rw [hF]
+    have hI : frameItems wmG ⟨0x48000 - 80, 0x48000, Extracted.entry + 0x84, some (0x48000 - 41, 0x48000 - 16)⟩ [] = [{ fn := 0x48000 - 32, bits := some 0, chain := [] }] := by
+      unfold frameItems openItems recItems
+      simp only [hbit]
+      decide
+    unfold Panic.FrameOK
+    rw [hI]
+    simp only [hbit, List.mem_cons, List.not_mem_nil, or_false, forall_eq_or_imp, forall_eq, P0_priv, outside_cons,
+      outside_nil, and_true]
+    decide
+
+/-- The call state at `runtime.gorecover`'s entry. -/
+def wsGr : State := PanicSat.sstate (Extracted.program.contractAddr "runtime.gorecover") wmW 0 0
+
+@[reducible] def grSite (P : PanicRuntime) (s_c : State) : Prop :=
+  PanicPre P 0 s_c ∧ s_c.mem.accessible ((s_c.regs 29).toNat + 8) 8 false = true ∧
+    (s_c.regs 29).toNat + 16 ≤ 2 ^ 48
+
+theorem wsGr_pre : grSite PW wsGr :=
+  ⟨PanicSat.sstate_pre 0 (by decide) _ 0 0 env_w (by decide) (by decide) (by decide), by decide, by decide⟩
+
+/-- The call state at `runtime.deferreturn`'s entry. -/
+def wsRet : State := PanicSat.sstate (Extracted.program.contractAddr "runtime.deferreturn") wmW 0 0
+
+theorem defers_R : defers0 wmW = [] := by
+  have hnd : ndef wmW = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem saved_R : saved0 wmW = none := by rw [saved0_eq]; decide
+
+theorem wsRet_pre : DeferreturnPre PW wsRet := by
+  refine ⟨PanicSat.sstate_pre 0 (by decide) _ 0 0 env_w (by decide) (by decide) (by decide), ?_⟩
+  show FrameOK (P0 T0 RPa) wmW _ _
+  have hm : wsRet.mem = wmW := rfl
+  simp [hm, retFrame, frameItems, recItems, P0_defers, P0_saved, PanicSat.sstate, defers_R, saved_R, gOf, FrameOK]
+
+/-- So the guarantee is reached: with `x = 42` `RecoverSet` panics, recovers, and returns `7`. -/
+theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) s0 fun o =>
+    match o with
+    | .returned s' => ABIReturn s0 s' ∧
+        (s'.regs 0).toNat = if (42#64 : BitVec 64).toNat ≤ 10 then (42#64 : BitVec 64).toNat else 7
+    | .panicked _ _ => False
+    | .goexited _ => False :=
+  correctness implW PW (P0_laws T0 RPa) U0 hpan hrec hdr 42#64 1#64 0#64 ret hret s0 setup (by obtain ⟨a, b, c, d, e⟩ := pre; exact ⟨a, b, c, d, e, id⟩)
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State → Nat → Nat → Prop) (ret : Nat)
     (s : State), P.Laws ∧
@@ -602,17 +696,20 @@ theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State →
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [42#64, 1#64, 0#64] s ∧
     (PanicCallerOK P s (P.depth + 112) 32 ∧ P.Calm s.mem (s.regs 28).toNat ∧ (1#64 : BitVec 64).toNat ≠ 0 ∧
       0 < P.room s.mem (gOf s) ∧ (∀ d ∈ P.defers s.mem (gOf s), s.sp.toNat ≤ d.sp) ∧
-      ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x24)) :=
-  ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hpan, hrec, hdr, hret, setup, by obtain ⟨a, b, c, d, e⟩ := pre; exact ⟨a, b, c, d, e, id⟩⟩
-
-/-- So the guarantee is reached: with `x = 42` `RecoverSet` panics, recovers, and returns `7`. -/
-theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) s0 fun o =>
+      ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x24)) ∧
+    (∃ (s_c : State) (fi : FuncInfo), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic") ∧
+      FuncInfo.find Extracted.funcs (s_c.regs 30).toNat = some fi ∧ GopanicPre P fi s_c) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gorecover") ∧
+      grSite P s_c) ∧
+    (∃ s_r : State, s_r.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") ∧
+      DeferreturnPre P s_r) ∧
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClass P) s fun o =>
     match o with
-    | .returned s' => ABIReturn s0 s' ∧
+    | .returned s' => ABIReturn s s' ∧
         (s'.regs 0).toNat = if (42#64 : BitVec 64).toNat ≤ 10 then (42#64 : BitVec 64).toNat else 7
     | .panicked _ _ => False
     | .goexited _ => False :=
-  correctness implW PW (P0_laws T0 RPa) U0 hpan hrec hdr 42#64 1#64 0#64 ret hret s0 setup (by obtain ⟨a, b, c, d, e⟩ := pre; exact ⟨a, b, c, d, e, id⟩)
+  ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hpan, hrec, hdr, hret, setup, by obtain ⟨a, b, c, d, e⟩ := pre; exact ⟨a, b, c, d, e, id⟩, ⟨wsG, wfi, rfl, wsG_find, wsG_pre⟩, ⟨wsGr, rfl, wsGr_pre⟩, ⟨wsRet, rfl, wsRet_pre⟩, returns⟩
 
 end Witness
 

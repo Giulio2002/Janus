@@ -120,6 +120,169 @@ def Post (R : RtInv) (L : List (Nat × Nat)) (bud tp tl : Nat) (s s' : State) : 
         R.inv (bud - (2 * (tl + 24) + 48)) (L ++ ((d, d + 32) :: range0 (s'.mem.readLE d 8) (tl + 24)))
           (s.regs 14).toNat (view R.rt (L ++ ((d, d + 32) :: range0 (s'.mem.readLE d 8) (tl + 24))) s'.mem)
 
+/-- The precondition of the `fmt.errorf` call at its entry `S`. -/
+@[reducible] def erSite (R : RtInv) (L : List (Nat × Nat)) (bud : Nat) (S : State) : Prop :=
+  (CallOK64 S 4096 5 ∧ RetLow S ∧ StackRoom64 S 4096 5 ∧
+        ArgsOK (Env.mk tErr iErr tInt iWrap) 26 fmtNum 4294967296 S.mem (S.regs 0).toNat (S.regs 3).toNat
+          (S.regs 1).toNat (S.regs 7).toNat (S.regs 6).toNat ∧
+        ReadsOutside (errorfReads S.mem (S.regs 0).toNat (S.regs 3).toNat (S.regs 1).toNat) (liveWin64 S 4096 5) ∧
+        ReadsSafe R L (errorfReads S.mem (S.regs 0).toNat (S.regs 3).toNat (S.regs 1).toNat) ∧
+        LiveAt R (Extracted.program.contractAddr "fmt.errorf")
+          [(S.regs 0).toNat, (S.regs 3).toNat, (S.regs 1).toNat, (S.regs 7).toNat, (S.regs 6).toNat] L bud
+          (errorfCost S.mem (S.regs 0).toNat (S.regs 3).toNat (S.regs 1).toNat) (S.regs 14).toNat S.mem
+          (liveWin64 S 4096 5))
+
+set_option maxHeartbeats 8000000 in
+set_option maxRecDepth 20000 in
+theorem siteKey (R : RtInv) (L : List (Nat × Nat)) (bud tp tl : Nat) (s : State) (hP : Pre R L bud tp tl s) :
+     ∀ S : State, MemFrame s.mem S.mem [((s.regs 4).toNat - 4200, (s.regs 4).toNat + 8)] → S.regs 14 = s.regs 14 →
+      (S.regs 4).toNat + 104 = (s.regs 4).toNat →
+      S.regs 0 = (BitVec.ofNat 64 adrFmt) → S.regs 3 = 26#64 → S.regs 1 = s.regs 4 - 56#64 → S.regs 7 = 3#64 → S.regs 6 = 3#64 →
+      S.mem.readLE (S.regs 4).toNat 8 = adrRet →
+      S.mem.readLE ((s.regs 4).toNat - 56) 8 = adrTErr → S.mem.readLE ((s.regs 4).toNat - 48) 8 = adrEvData →
+      S.mem.readLE ((s.regs 4).toNat - 40) 8 = adrTInt → S.mem.readLE ((s.regs 4).toNat - 32) 8 = adrQ1 →
+      S.mem.readLE ((s.regs 4).toNat - 24) 8 = adrTInt → S.mem.readLE ((s.regs 4).toNat - 16) 8 = adrQ2 → erSite R L bud S := by
+  obtain ⟨hg, ⟨hb4, ha4, hw4⟩, hal, hd, ⟨hv1, hv2, hv3, hv4, hv5, hv6, htl, htpb, htx⟩, hgo, hwrt, hwL, hok, hinv, hbud, hdataO, hevO, hevDO, hevW, hevDW, htW, htO⟩ := hP
+  janus_eval_nat hFA : fmtAddr
+  have hgl := hg.load
+  have hgb := hg.below
+  have hnw2 := hg.noWrap
+  have hgr := hg.readable
+  simp only [regSP, regG, stackguard0Offset, stackguard0] at hgl hgb hnw2 hgr hb4 ha4 hw4 hal
+  janus64_data hd [hw4]
+  simp only [ev, evType, evData, Extracted.dataAddr.«example.com/basic.errBadLen»,
+    Extracted.dataAddr.«example.com/basic.errBadLen→type», Extracted.dataAddr.«example.com/basic.errBadLen→data»] at hv1 hv2 hv3 hv4 hv5 hv6 hevO hevDO hevW hevDW
+  rw [hFA] at hok
+  have hsp104 : (s.regs 4 - 104#64).toNat = (s.regs 4).toNat - 104 := by
+    rw [BitVec.toNat_sub_of_le (by simp only [BitVec.le_def, BitVec.toNat_ofNat]; omega)]; rfl
+  have hsp56 : (s.regs 4 - 56#64).toNat = (s.regs 4).toNat - 56 := by
+    rw [BitVec.toNat_sub_of_le (by simp only [BitVec.le_def, BitVec.toNat_ofNat]; omega)]; rfl
+
+  have hO2 : Outside adrFmt 256 R.rt := hdataO _ (List.getElem_mem (l := Extracted.program.data) (n := 2) (by decide))
+  have hO3 : Outside adrQ1 16 R.rt := hdataO _ (List.getElem_mem (l := Extracted.program.data) (n := 3) (by decide))
+  have facts : ∀ M : Arm64.Memory, MemFrame s.mem M [((s.regs 4).toNat - 4200, (s.regs 4).toNat + 8)] →
+      M.readLE ((s.regs 4).toNat - 56) 8 = adrTErr → M.readLE ((s.regs 4).toNat - 48) 8 = adrEvData →
+      M.readLE ((s.regs 4).toNat - 40) 8 = adrTInt → M.readLE ((s.regs 4).toNat - 32) 8 = adrQ1 →
+      M.readLE ((s.regs 4).toNat - 24) 8 = adrTInt → M.readLE ((s.regs 4).toNat - 16) 8 = adrQ2 →
+      ArgsOK (Env.mk tErr iErr tInt iWrap) 26 fmtNum 4294967296 M adrFmt 26 ((s.regs 4).toNat - 56) 3 3 ∧
+      errorfReads M adrFmt 26 ((s.regs 4).toNat - 56) =
+        [(adrFmt, 26), ((s.regs 4).toNat - 56, 48), (adrEvData, 16), (tp, tl), (adrQ1, 8), (adrQ2, 8)] ∧
+      msgOf M adrFmt 26 ((s.regs 4).toNat - 56) = strBytes s.mem tp tl ++ [58, 32, 104, 97, 118, 101, 32, 54, 52, 44, 32, 119, 97, 110, 116, 32, 51, 50, 32, 98, 121, 116, 101, 115] ∧
+      errorfCost M adrFmt 26 ((s.regs 4).toNat - 56) = 2 * (tl + 24) + 48 ∧ operandD M ((s.regs 4).toNat - 56) 0 = adrEvData := by
+    intro M hf' hA0 hA1 hA2 hA3 hA4 hA5
+    have hrd : ∀ a n, Outside a n [((s.regs 4).toNat - 4200, (s.regs 4).toNat + 8)] → M.readLE a n = s.mem.readLE a n :=
+      fun a n h => hf'.readLE a n h
+    have hacc : ∀ a n w, M.accessible a n w = s.mem.accessible a n w := fun a n w => hf'.accessible a n w
+    have hW1 : ∀ a n, a + n ≤ (s.regs 4).toNat - 4200 ∨ (s.regs 4).toNat + 8 ≤ a → Outside a n [((s.regs 4).toNat - 4200, (s.regs 4).toNat + 8)] := by
+      intro a n h; simp only [outside_cons, outside_nil, and_true]; omega
+    have hfm : M.readLE adrFmt 26 = fmtNum := by
+      rw [hrd _ _ (hW1 _ _ (by omega)), h_rodata adrFmt 26 (by decide +kernel)]; decide +kernel
+    have hv64 : M.readLE adrQ1 8 = 64 := by
+      rw [hrd _ _ (hW1 _ _ (by omega)), h_rodata adrQ1 8 (by decide +kernel)]; decide +kernel
+    have hv32 : M.readLE adrQ2 8 = 32 := by
+      rw [hrd _ _ (hW1 _ _ (by omega)), h_rodata adrQ2 8 (by decide +kernel)]; decide +kernel
+    have hfR : Readable M adrFmt 26 :=
+      ⟨by omega, fun _ => by rw [hacc]; exact Arm64.Memory.accessible_mono _ h_data2 (by omega) (by omega)⟩
+    have hsR : Readable M ((s.regs 4).toNat - 56) 48 :=
+      ⟨by omega, fun _ => by rw [hacc]; exact Arm64.Memory.accessible_weaken _ (Arm64.Memory.accessible_mono _ hw4 (by omega) (by omega))⟩
+    have heR : Readable M adrEvData 16 := ⟨by omega, fun _ => by rw [hacc]; exact hv4⟩
+    have htR : Readable M tp tl :=
+      ⟨htpb, fun hpos => by rw [hacc]; rcases htx with h | h; omega; exact h⟩
+    have hq1R : Readable M adrQ1 8 :=
+      ⟨by omega, fun _ => by rw [hacc]; exact Arm64.Memory.accessible_mono _ h_data3 (by omega) (by omega)⟩
+    have hq2R : Readable M adrQ2 8 :=
+      ⟨by omega, fun _ => by rw [hacc]; exact Arm64.Memory.accessible_mono _ h_data3 (by omega) (by omega)⟩
+    have hA1' : M.readLE ((s.regs 4).toNat - 56 + 8) 8 = adrEvData := by
+      rw [show (s.regs 4).toNat - 56 + 8 = (s.regs 4).toNat - 48 by omega]; exact hA1
+    have hA2' : M.readLE ((s.regs 4).toNat - 56 + 16) 8 = adrTInt := by
+      rw [show (s.regs 4).toNat - 56 + 16 = (s.regs 4).toNat - 40 by omega]; exact hA2
+    have hA3' : M.readLE ((s.regs 4).toNat - 56 + 24) 8 = adrQ1 := by
+      rw [show (s.regs 4).toNat - 56 + 24 = (s.regs 4).toNat - 32 by omega]; exact hA3
+    have hA4' : M.readLE ((s.regs 4).toNat - 56 + 32) 8 = adrTInt := by
+      rw [show (s.regs 4).toNat - 56 + 32 = (s.regs 4).toNat - 24 by omega]; exact hA4
+    have hA5' : M.readLE ((s.regs 4).toNat - 56 + 40) 8 = adrQ2 := by
+      rw [show (s.regs 4).toNat - 56 + 40 = (s.regs 4).toNat - 16 by omega]; exact hA5
+    have htp' : M.readLE adrEvData 8 = tp := by rw [hrd _ _ (hW1 _ _ (by omega))]; exact hv5
+    have htl' : M.readLE (adrEvData + 8) 8 = tl := by rw [hrd _ _ (hW1 _ _ (by omega))]; exact hv6
+    have hargs := ErrorfConsumer.argsOK_real (Env.mk tErr iErr tInt iWrap) 4294967296 M adrFmt ((s.regs 4).toNat - 56)
+      adrEvData tp tl adrQ1 adrQ2 (by decide) hfm hfR hsR hA0 hA1' (by decide) heR htp' htl' htR hA2' hA3' (by decide)
+      hq1R hA4' hA5' (by decide) hq2R (by omega)
+    have hn : nDec (segsOf M adrFmt 26) = 2 := by rw [segsOf_real _ _ _ rfl hfm]; decide
+    have hstr : strBytes M tp tl = strBytes s.mem tp tl := by
+      apply strBytes_congr
+      intro i hi
+      exact hf'.bytes (hW1 _ _ (by omega))
+    have hmsg : msgOf M adrFmt 26 ((s.regs 4).toNat - 56) = strBytes s.mem tp tl ++ [58, 32, 104, 97, 118, 101, 32, 54, 52, 44, 32, 119, 97, 110, 116, 32, 51, 50, 32, 98, 121, 116, 101, 115] := by
+      rw [msgOf_real _ _ _ _ rfl hfm, hA1', htp', htl', hA3', hA5', hv64, hv32, hstr]
+      have d64 : decBytes (toSigned 64) = [54, 52] := by decide
+      have d32 : decBytes (toSigned 32) = [51, 50] := by decide
+      rw [d64, d32]; rfl
+    have hmlen : (msgOf M adrFmt 26 ((s.regs 4).toNat - 56)).length = tl + 24 := by
+      rw [hmsg]; simp [strBytes]
+    have hcost : errorfCost M adrFmt 26 ((s.regs 4).toNat - 56) = 2 * (tl + 24) + 48 := by
+      unfold errorfCost; rw [hmlen, if_neg (by omega)]; simp only [wrapBytes]; omega
+    have hreads : errorfReads M adrFmt 26 ((s.regs 4).toNat - 56) =
+        [(adrFmt, 26), ((s.regs 4).toNat - 56, 48), (adrEvData, 16), (tp, tl), (adrQ1, 8), (adrQ2, 8)] := by
+      unfold errorfReads
+      rw [hn]
+      simp [operandD, hA1', htp', htl', hA3', hA5', List.range_succ]
+    exact ⟨hargs, hreads, hmsg, hcost, by unfold operandD; exact hA1'⟩
+  have key : ∀ S : State, MemFrame s.mem S.mem [((s.regs 4).toNat - 4200, (s.regs 4).toNat + 8)] → S.regs 14 = s.regs 14 →
+      (S.regs 4).toNat + 104 = (s.regs 4).toNat →
+      S.regs 0 = (BitVec.ofNat 64 adrFmt) → S.regs 3 = 26#64 → S.regs 1 = s.regs 4 - 56#64 → S.regs 7 = 3#64 → S.regs 6 = 3#64 →
+      S.mem.readLE (S.regs 4).toNat 8 = adrRet →
+      S.mem.readLE ((s.regs 4).toNat - 56) 8 = adrTErr → S.mem.readLE ((s.regs 4).toNat - 48) 8 = adrEvData →
+      S.mem.readLE ((s.regs 4).toNat - 40) 8 = adrTInt → S.mem.readLE ((s.regs 4).toNat - 32) 8 = adrQ1 →
+      S.mem.readLE ((s.regs 4).toNat - 24) 8 = adrTInt → S.mem.readLE ((s.regs 4).toNat - 16) 8 = adrQ2 →
+      (CallOK64 S 4096 5 ∧ RetLow S ∧ StackRoom64 S 4096 5 ∧
+        ArgsOK (Env.mk tErr iErr tInt iWrap) 26 fmtNum 4294967296 S.mem (S.regs 0).toNat (S.regs 3).toNat
+          (S.regs 1).toNat (S.regs 7).toNat (S.regs 6).toNat ∧
+        ReadsOutside (errorfReads S.mem (S.regs 0).toNat (S.regs 3).toNat (S.regs 1).toNat) (liveWin64 S 4096 5) ∧
+        ReadsSafe R L (errorfReads S.mem (S.regs 0).toNat (S.regs 3).toNat (S.regs 1).toNat) ∧
+        LiveAt R (Extracted.program.contractAddr "fmt.errorf")
+          [(S.regs 0).toNat, (S.regs 3).toNat, (S.regs 1).toNat, (S.regs 7).toNat, (S.regs 6).toNat] L bud
+          (errorfCost S.mem (S.regs 0).toNat (S.regs 3).toNat (S.regs 1).toNat) (S.regs 14).toNat S.mem
+          (liveWin64 S 4096 5)) := by
+    intro S hf' hg' hsp h0 h3 h1 h7 h6 hra hA0 hA1 hA2 hA3 hA4 hA5
+    have e0 : (S.regs 0).toNat = adrFmt := by rw [h0]; rfl
+    have e3 : (S.regs 3).toNat = 26 := by rw [h3]; rfl
+    have e1 : (S.regs 1).toNat = (s.regs 4).toNat - 56 := by rw [h1]; exact hsp56
+    have e7 : (S.regs 7).toNat = 3 := by rw [h7]; rfl
+    have e6 : (S.regs 6).toNat = 3 := by rw [h6]; rfl
+    rw [e0, e3, e1, e7, e6]
+    obtain ⟨hargs, hreads, hmsg, hcosteq, hop⟩ := facts S.mem hf' hA0 hA1 hA2 hA3 hA4 hA5
+    have hc := call_pre64 R L bud (errorfCost S.mem adrFmt 26 ((s.regs 4).toNat - 56))
+      (Extracted.program.contractAddr "fmt.errorf") [adrFmt, 26, (s.regs 4).toNat - 56, 3, 3]
+      (s := s) (S := S) (lo := (s.regs 4).toNat - 4200) (hi := (s.regs 4).toNat + 8) (stack := 4096) (nargs := 5) (fr := 104)
+      hnw2 hgr (by omega) hgo (hf'.widen R.rt) hg' hsp (by omega) (by omega) (by omega) (by omega) (by omega) ha4
+      (by rw [show (s.regs 4).toNat + 8 - ((s.regs 4).toNat - 4200) = 4200 + 8 by omega]; exact hw4) hwrt hwL hok
+      (by rw [hg']; exact RtInv.inv_frame hf' hwrt hinv) (by omega)
+    refine ⟨hc.1, ?_, hc.2.1, hargs, ?_, ?_, hc.2.2⟩
+    · show S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 46
+      rw [hra]; decide
+    · rw [hreads]
+      intro r hr
+      simp only [List.mem_cons, List.not_mem_nil, or_false] at hr
+      simp only [liveWin64, calleeStack64, outside_append, outside_cons, outside_nil, and_true]
+      rcases hr with rfl | rfl | rfl | rfl | rfl | rfl <;> simp only [] <;> omega
+    · rw [hreads]
+      intro r hr
+      simp only [List.mem_cons, List.not_mem_nil, or_false] at hr
+      have hwin : ∀ a n, (s.regs 4).toNat - 4200 ≤ a → a + n ≤ (s.regs 4).toNat + 8 → Outside a n R.rt := fun a n h1 h2 =>
+        Outside.of_sub (hwrt _ (List.mem_singleton_self _)) h1 (by simp only; omega)
+      rcases hr with rfl | rfl | rfl | rfl | rfl | rfl
+      · exact Or.inr (Or.inl (Outside.of_sub hO2 (by omega) (by omega)))
+      · exact Or.inr (Or.inl (hwin _ _ (by omega) (by omega)))
+      · exact Or.inr (Or.inl hevDO)
+      · rcases htO with h | h | h
+        · exact Or.inl h
+        · exact Or.inr (Or.inl h)
+        · exact Or.inr (Or.inr h)
+      · exact Or.inr (Or.inl (Outside.of_sub hO3 (by omega) (by omega)))
+      · exact Or.inr (Or.inl (Outside.of_sub hO3 (by omega) (by omega)))
+
+  exact key
+
 set_option maxHeartbeats 8000000 in
 set_option maxRecDepth 20000 in
 theorem correctness (impl : List Amd64.Segment) (R : RtInv)
@@ -491,18 +654,86 @@ theorem pre0 : Pre R0 [] 116 textAddr 10 s0 := by
   · right; left
     rw [hrt]; simp only [outside_cons, outside_nil, and_true, HEAP, HEND, HSIZE, BUMP, WBUF, CELL, textAddr]; decide
 
-/-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (L : List (Nat × Nat)) (bud tp tl : Nat) (ret : Nat) (s : State),
-    ErrorfLive (Extracted.program.link impl) (Extracted.program.contractAddr "fmt.errorf") 4096 R tErr iErr tInt iWrap 26
-      fmtNum 4294967296 ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧ Pre R L bud tp tl s :=
-  ⟨implAt, R0, [], 116, textAddr, 10, retA, s0, hf0, hret0, setup, pre0⟩
+/-- The call state at `fmt.errorf`'s entry: `ErrWrap`'s frame (104 below), the three `any` operands in place, the return address at `[RSP]`. -/
+def mC : Arm64.Memory :=
+  (((((((mem0.writeLE (sp0 - 56) 8 tErr).writeLE (sp0 - 48) 8 evData).writeLE (sp0 - 40) 8 tInt).writeLE (sp0 - 32) 8
+    Extracted.dataAddr.«.rodata#4de38626»).writeLE (sp0 - 24) 8 tInt).writeLE (sp0 - 16) 8
+    Extracted.dataAddr.«.rodata#b4a1072f»).writeLE (sp0 - 104) 8 (Extracted.entry + 0x88))
+
+def wsC : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 fmtAddr else if i = 3 then 26#64 else if i = 1 then BitVec.ofNat 64 (sp0 - 56)
+      else if i = 7 then 3#64 else if i = 6 then 3#64 else if i = 14 then BitVec.ofNat 64 g0 else if i = 4 then BitVec.ofNat 64 (sp0 - 104) else 0,
+    rip := BitVec.ofNat 64 cAddr, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := mC }
+
+theorem fr_step {m : Arm64.Memory} {a v : Nat} (h : MemFrame mem0 m [(sp0 - 4200, sp0 + 8)]) (h1 : sp0 - 4200 ≤ a) (h2 : a + 8 ≤ sp0 + 8) :
+    MemFrame mem0 (m.writeLE a 8 v) [(sp0 - 4200, sp0 + 8)] := h.writeLE v (List.mem_singleton.2 rfl) h1 h2
+
+theorem mC_frame : MemFrame s0.mem wsC.mem [((s0.regs 4).toNat - 4200, (s0.regs 4).toNat + 8)] := by
+  show MemFrame mem0 mC [(sp0 - 4200, sp0 + 8)]
+  unfold mC sp0
+  exact fr_step (fr_step (fr_step (fr_step (fr_step (fr_step (fr_step (MemFrame.refl _ _) (by unfold sp0; omega) (by unfold sp0; omega)) (by unfold sp0; omega) (by unfold sp0; omega)) (by unfold sp0; omega) (by unfold sp0; omega)) (by unfold sp0; omega) (by unfold sp0; omega)) (by unfold sp0; omega) (by unfold sp0; omega)) (by unfold sp0; omega) (by unfold sp0; omega)) (by unfold sp0; omega) (by unfold sp0; omega)
+
+theorem mC_rd0 : wsC.mem.readLE ((s0.regs 4).toNat - 56) 8 = adrTErr := by
+  show mC.readLE (sp0 - 56) 8 = _
+  unfold mC sp0
+  simp (disch := omega) only [Arm64.Memory.readLE_writeLE_of_disjoint, Arm64.Memory.readLE_writeLE_self]
+  exact Nat.mod_eq_of_lt (by decide +kernel)
+
+theorem mC_rd1 : wsC.mem.readLE ((s0.regs 4).toNat - 48) 8 = adrEvData := by
+  show mC.readLE (sp0 - 48) 8 = _
+  unfold mC sp0
+  simp (disch := omega) only [Arm64.Memory.readLE_writeLE_of_disjoint, Arm64.Memory.readLE_writeLE_self]
+  exact Nat.mod_eq_of_lt (by decide +kernel)
+
+theorem mC_rd2 : wsC.mem.readLE ((s0.regs 4).toNat - 40) 8 = adrTInt := by
+  show mC.readLE (sp0 - 40) 8 = _
+  unfold mC sp0
+  simp (disch := omega) only [Arm64.Memory.readLE_writeLE_of_disjoint, Arm64.Memory.readLE_writeLE_self]
+  exact Nat.mod_eq_of_lt (by decide +kernel)
+
+theorem mC_rd3 : wsC.mem.readLE ((s0.regs 4).toNat - 32) 8 = adrQ1 := by
+  show mC.readLE (sp0 - 32) 8 = _
+  unfold mC sp0
+  simp (disch := omega) only [Arm64.Memory.readLE_writeLE_of_disjoint, Arm64.Memory.readLE_writeLE_self]
+  exact Nat.mod_eq_of_lt (by decide +kernel)
+
+theorem mC_rd4 : wsC.mem.readLE ((s0.regs 4).toNat - 24) 8 = adrTInt := by
+  show mC.readLE (sp0 - 24) 8 = _
+  unfold mC sp0
+  simp (disch := omega) only [Arm64.Memory.readLE_writeLE_of_disjoint, Arm64.Memory.readLE_writeLE_self]
+  exact Nat.mod_eq_of_lt (by decide +kernel)
+
+theorem mC_rd5 : wsC.mem.readLE ((s0.regs 4).toNat - 16) 8 = adrQ2 := by
+  show mC.readLE (sp0 - 16) 8 = _
+  unfold mC sp0
+  simp (disch := omega) only [Arm64.Memory.readLE_writeLE_of_disjoint, Arm64.Memory.readLE_writeLE_self]
+  exact Nat.mod_eq_of_lt (by decide +kernel)
+
+theorem mC_ra : wsC.mem.readLE (wsC.regs 4).toNat 8 = adrRet := by
+  show mC.readLE (sp0 - 104) 8 = _
+  unfold mC sp0
+  simp only [Arm64.Memory.readLE_writeLE_self]
+  exact Nat.mod_eq_of_lt (by decide +kernel)
+
+theorem wsC_pre : erSite R0 [] 116 wsC :=
+  siteKey R0 [] 116 textAddr 10 s0 pre0 wsC mC_frame rfl (by decide) (by decide) (by decide) (by decide) (by decide)
+    (by decide) mC_ra mC_rd0 mC_rd1 mC_rd2 mC_rd3 mC_rd4 mC_rd5
 
 /-- The guarantee fires: `ErrWrap()` from the witness state returns the wrapped error. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit retA) s0 fun s' =>
     ABIReturn s0 s' ∧ Post R0 [] 116 textAddr 10 s0 s' :=
   correctness implAt R0 hf0 [] 116 textAddr 10 retA hret0 s0 setup pre0
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (L : List (Nat × Nat)) (bud tp tl : Nat) (ret : Nat) (s : State),
+    ErrorfLive (Extracted.program.link impl) (Extracted.program.contractAddr "fmt.errorf") 4096 R tErr iErr tInt iWrap 26
+      fmtNum 4294967296 ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧ Pre R L bud tp tl s ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "fmt.errorf") ∧
+      erSite R L bud s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ Post R L bud tp tl s s' :=
+  ⟨implAt, R0, [], 116, textAddr, 10, retA, s0, hf0, hret0, setup, pre0, ⟨wsC, rfl, wsC_pre⟩, returns⟩
 
 end Witness
 

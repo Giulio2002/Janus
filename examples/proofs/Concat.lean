@@ -88,19 +88,44 @@ theorem pre : Pre rtW H0 0 0 0 0 s0 := by
     exact Memory.accessible_mono _ hw (by decide) (by decide)
   · intro j; simp [arg, List.getD_eq_getElem?_getD]; rcases j with _ | _ | _ | _ | _ | j <;> simp
 
-/-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
-    RtContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.concatstring2")
-      rt 4096 H (concatstringSpec 2) ∧ RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0] s ∧
-    Pre rt H 0 0 0 0 s :=
-  ⟨implAt, rtW, H0, ret, s0, model, hret, setup, pre⟩
+/-- The call state at `runtime.concatstring2`'s entry (all operands `0`; the stock witness memory). -/
+def wsCall : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (wsp - 64), pc := BitVec.ofNat 64 cAddr, flags := ⟨false, false, false, false⟩, mem := wmem }
+
+@[reducible] def rpSite (rt : List (Nat × Nat)) (H : RtReady) (s_c : State) : Prop :=
+  RtPre rt 4096 H (concatstringSpec 2) s_c
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : rpSite rtW H0 wsCall := by
+  have hw : wmem.accessible (wsp - 0x2000) 0x2100 true = true := by decide
+  have ha : ∀ j, arg (argWords wsCall (concatstringSpec 2).nargs) j = 0 := fun j => args_zero _ j (by decide)
+  refine ⟨⟨by decide, by decide, by decide, by decide, by decide, by decide, Memory.accessible_mono _ hw (by decide) (by decide)⟩, ⟨Or.inl (ha 0), ?_⟩, ?_, trivial, ready_intro rfl ha⟩
+  · intro x hx
+    rw [mem_strPairs_zero _ ha _ _ _ hx]
+    exact ⟨⟨by decide, by simp⟩, fun h => absurd (ha 0) h⟩
+  · intro r hr
+    rw [mem_strPairs_zero _ ha _ _ _ hr]
+    exact outside_zero _
 
 /-- So the guarantee is reached: `Concat("", "")` returns the empty string. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ StrOut s'.mem (s'.regs 0).toNat (s'.regs 1).toNat
       (strBytes s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat ++ strBytes s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
   correctness implAt rtW H0 0 0 0 0 model ret hret s0 setup pre
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
+    RtContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.concatstring2")
+      rt 4096 H (concatstringSpec 2) ∧ RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0] s ∧
+    Pre rt H 0 0 0 0 s ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.concatstring2") ∧
+      rpSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+    ABIReturn s s' ∧ StrOut s'.mem (s'.regs 0).toNat (s'.regs 1).toNat
+      (strBytes s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat ++ strBytes s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
+  ⟨implAt, rtW, H0, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 

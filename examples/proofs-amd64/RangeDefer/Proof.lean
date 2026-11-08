@@ -1618,17 +1618,62 @@ theorem pre : Pre PW s0 := by
     have : defers0 wm = [] := by rw [defers0_eq, hnd]; rfl
     exact absurd hd (by rw [show PW.defers s0.mem (gOf s0) = defers0 wm from rfl, this]; simp)
 
-/-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime)
-    (U : Janus.Amd64.State → Nat → Nat → Prop) (ret : Nat) (s : Janus.Amd64.State), P.Laws ∧
-    DeferrangefuncContract (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.deferrangefunc") P ∧
-    DeferprocatContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferprocat") P ∧
-    DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
-    Pre P s :=
-  ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hrf, hat, hdr, hret, setup, pre⟩
+/-- The call state at `runtime.deferrangefunc`'s entry. -/
+def wsRf : Janus.Amd64.State := Janus.Contracts.PanicSatAmd64.sstate rfA wm 0 0
+
+@[reducible] def rfSite (P : Spec.PanicRuntime) (s_c : Janus.Amd64.State) : Prop :=
+  PanicPre P 0 s_c ∧ 0 < P.room s_c.mem (gOf s_c)
+
+theorem wsRf_pre : rfSite PW wsRf :=
+  ⟨Janus.Contracts.PanicSatAmd64.sstate_pre 0 (by decide) rfA 0 0 env_w (by decide) (by decide) (by decide) (by decide),
+    by show 0 < room0 wm; rw [room0_eq]; decide⟩
+
+/-- The witness memory with one range-over-func `_defer` record (token `5`) on the chain. -/
+def wmT : Janus.Arm64.Memory :=
+  ⟨(witMemD (tabWords T0 ++ [(B + 8, 1), (B + 0x208, 5)]) Extracted.data).bytes,
+    (witMemD (tabWords T0 ++ [(B + 8, 1), (B + 0x208, 5)]) Extracted.data).regions ++ [⟨accA, 8, true⟩]⟩
+
+theorem env_T : Env0 T0 wmT := by
+  unfold Env0
+  have hnd : ndef wmT = 1 := by decide
+  refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
+  · rw [hnd] at hi
+    have : i = 0 := by omega
+    subst this
+    exact ⟨by decide, fun h => by exfalso; revert h; decide⟩
+  · unfold TableOK
+    exact ⟨by decide, by decide, by decide⟩
+
+/-- The call state at `runtime.deferprocat`'s entry (`fn` 0, the token `5`). -/
+def wsPa : Janus.Amd64.State := Janus.Contracts.PanicSatAmd64.sstate paA wmT 0 5
+
+@[reducible] def paSite (P : Spec.PanicRuntime) (s_c : Janus.Amd64.State) : Prop :=
+  PanicPre P 2 s_c ∧ 0 < P.room s_c.mem (gOf s_c) ∧
+    ∃ r rest, P.defers s_c.mem (gOf s_c) = r :: rest ∧ r.token = some (s_c.regs 1).toNat
+
+theorem wsPa_pre : paSite PW wsPa := by
+  refine ⟨?_, ?_, ?_⟩
+  · exact Janus.Contracts.PanicSatAmd64.sstate_pre 2 (by decide) paA 0 5 env_T (by decide) (by decide) (by decide) (by decide)
+  · show 0 < room0 wmT
+    rw [room0_eq]; decide
+  · refine ⟨{ sp := 0, fns := [], token := some 5 }, [], ?_, rfl⟩
+    show defers0 wmT = _
+    rw [defers0_eq]; decide
+
+/-- The call state at `runtime.deferreturn`'s entry. -/
+def wsRet : Janus.Amd64.State := Janus.Contracts.PanicSatAmd64.sstate (Extracted.program.contractAddr "runtime.deferreturn") wm 0 0
+
+theorem defers_R : defers0 wm = [] := by
+  have hnd : ndef wm = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem saved_R : saved0 wm = none := by rw [saved0_eq]; decide
+
+theorem wsRet_pre : DeferreturnPre PW wsRet := by
+  refine ⟨Janus.Contracts.PanicSatAmd64.sstate_pre 0 (by decide) _ 0 0 env_w (by decide) (by decide) (by decide) (by decide), ?_⟩
+  show FrameOK (P0 T0 RPa) wm _ _
+  have hm : wsRet.mem = wm := rfl
+  simp [hm, retFrame, Panic.frameItems, Panic.recItems, P0_defers, P0_saved, Janus.Contracts.PanicSatAmd64.sstate, defers_R, saved_R, gOf, FrameOK, Panic.FrameOK]
 
 /-- So the guarantee is reached: `RangeDefer` returns, having run its two deferred calls in LIFO
 order. -/
@@ -1638,6 +1683,29 @@ theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goCla
     | .panicked _ _ => False
     | .goexited _ => False :=
   correctness implW PW (P0_laws T0 RPa) U1 hrf hat hdr ret hret s0 setup pre
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime)
+    (U : Janus.Amd64.State → Nat → Nat → Prop) (ret : Nat) (s : Janus.Amd64.State), P.Laws ∧
+    DeferrangefuncContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.deferrangefunc") P ∧
+    DeferprocatContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferprocat") P ∧
+    DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
+    Pre P s ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferrangefunc") ∧
+      rfSite P s_c) ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferprocat") ∧
+      paSite P s_c) ∧
+    (∃ s_r : Janus.Amd64.State, s_r.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") ∧
+      DeferreturnPre P s_r) ∧
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClass P) s fun o =>
+    match o with
+    | .returned s' => ABIReturn s s' ∧ s'.mem.readLE accA 8 = mix (s.mem.readLE accA 8)
+    | .panicked _ _ => False
+    | .goexited _ => False :=
+  ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hrf, hat, hdr, hret, setup, pre, ⟨wsRf, rfl, wsRf_pre⟩, ⟨wsPa, rfl, wsPa_pre⟩, ⟨wsRet, rfl, wsRet_pre⟩, returns⟩
 
 end Witness
 

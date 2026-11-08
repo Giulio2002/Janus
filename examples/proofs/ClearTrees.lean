@@ -149,20 +149,46 @@ theorem hpre : pre M0 WB 64 p n s0 := by
     ⟨by decide, by decide⟩, ?_, trivial⟩ <;>
     simp only [window, callerWindow, outside_cons, outside_nil, and_true] <;> decide
 
-/-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (M : MemModel) (wb d ret : Nat) (s : State) (p n c : BitVec 64),
-    M.Laws ∧ MemclrHasPointers (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.memclrHasPointers") M wb d ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, n, c] s ∧
-    pre M wb d p n s :=
-  ⟨implAt, M0, WB, 64, ret, s0, p, n, n, M0_laws, model WB 64, hret, setup, hpre⟩
+def tmR : Nat → W64 := fun i => if i = 0 then BitVec.ofNat 64 DST else if i = 1 then 64#64 else 0
+
+@[reducible] def clSite (M : MemModel) (wb d : Nat) (s_c : State) : Prop :=
+  TPre M wb d 2 s_c ∧ (s_c.regs 0).toNat % 8 = 0 ∧ (s_c.regs 1).toNat % 8 = 0 ∧
+    Dest M s_c d 2 (s_c.regs 0).toNat (s_c.regs 1).toNat
+
+theorem clSite_stock : clSite M0 WB 64 (MemSat.wstate tmR) := by
+  have h0 : ((MemSat.wstate tmR).regs 0).toNat = DST := by simp [tmR, MemSat.wstate, DST]
+  have h1 : ((MemSat.wstate tmR).regs 1).toNat = 64 := by simp [tmR, MemSat.wstate]
+  refine ⟨MemSat.wstate_tPre _ 2 (by decide), by rw [h0]; decide, by rw [h1], ?_⟩
+  rw [h0, h1]; exact MemSat.wstate_dest _ 2 _ _ (by decide) (by decide)
+
+theorem clSite_pc (M : MemModel) (wb d : Nat) (s : State) (x : BitVec 64) (h : clSite M wb d s) :
+    clSite M wb d { s with pc := x } := by
+  obtain ⟨⟨hE, ⟨g1, g2, g3⟩, hc, ho, hi, hw, h1, h2⟩, hr⟩ := h
+  exact ⟨⟨hE, ⟨g1, g2, g3⟩, hc, ho, hi, hw, h1, h2⟩, hr⟩
+
+def wsCall : State := { MemSat.wstate tmR with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : clSite M0 WB 64 wsCall := clSite_pc _ _ _ _ _ clSite_stock
 
 /-- So the guarantee is reached: the 64 bytes at `DST` are zero. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ Zeroed s'.mem DST 64 :=
   (correctness implAt M0 M0_laws WB 64 (model WB 64) p n n ret hret s0 setup hpre).mono
     fun _ h => ⟨h.1, h.2.1⟩
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (M : MemModel) (wb d ret : Nat) (s : State) (p n c : BitVec 64),
+    M.Laws ∧ MemclrHasPointers (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.memclrHasPointers") M wb d ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, n, c] s ∧
+    pre M wb d p n s ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memclrHasPointers") ∧
+      clSite M wb d s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+      (Zeroed s'.mem p.toNat (8 * n.toNat) ∧
+        MemFrame s.mem s'.mem (M.priv ++ window d s ++ [(p.toNat, p.toNat + 8 * n.toNat)])) :=
+  ⟨implAt, M0, WB, 64, ret, s0, p, n, n, M0_laws, model WB 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt M0 M0_laws WB 64 (model WB 64) p n n ret hret s0 setup hpre⟩
 
 end Witness
 

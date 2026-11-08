@@ -133,18 +133,26 @@ theorem pre : GuardOK s0 0 ∧ StackOK s0 4144 24 ∧ Extracted.program.DataLoad
   ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩, dataLoaded,
     by simp only [rt, AllocW.rt, Janus.Contracts.AllocWitness.allocRt, AllocW.tys, outside_cons, outside_nil, List.map]; decide, hH⟩
 
-/-- The hypotheses are satisfiable: an allocator meeting the contract (`hnew`), runtime ranges,
-a readiness predicate, and a call state of `MakeAdder(7)` that satisfies the precondition. -/
-theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
-    (s : State),
-    NewobjectContract (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [7] s ∧
-    (GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
-      Outside (s.sp.toNat - 4144) 4168 rt ∧
-      H [fvType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) :=
-  ⟨impl, rt, H, ret, s0, hnew, hret, setup, pre⟩
+def cAddr : Nat := Extracted.program.contractAddr "runtime.newobject"
+
+/-- The call state at `runtime.newobject`'s entry (argument `fvType`, callee `SP` 48 below). -/
+def wsCall : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 tyA else if i = 28 then BitVec.ofNat 64 g0
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (sp0 - 48), pc := BitVec.ofNat 64 cAddr,
+    flags := ⟨false, false, false, false⟩, mem := s0.mem }
+
+@[reducible] def nwSite (rt : List (Nat × Nat)) (H : RtReady) (s_c : State) : Prop :=
+  NewobjectPre 4096 s_c ∧ Ready H rt [(s_c.regs 0).toNat] s_c
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : nwSite rt H wsCall := by
+  have h := hH
+  have hpt : fvType = tyA := by unfold tyA; decide
+  rw [hpt] at h
+  refine ⟨⟨⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩,
+    ⟨by decide, by decide⟩, by decide⟩, ?_⟩
+  exact h
 
 /-- The theorem fires: for this call and this allocator, `MakeAdder(7)` returns a fresh closure
 in `rt`. -/
@@ -155,6 +163,27 @@ theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s'
     ClosureCtx s'.mem (s'.regs 0) [(7 : BitVec 64)] ∧
     MemFrame s0.mem s'.mem (rt ++ [(s0.sp.toNat - 4144, s0.sp.toNat + 24)]) :=
   correctness impl rt H 7 hnew ret hret s0 setup pre
+
+/-- The hypotheses are satisfiable: an allocator meeting the contract (`hnew`), runtime ranges,
+a readiness predicate, and a call state of `MakeAdder(7)` that satisfies the precondition. -/
+theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
+    (s : State),
+    NewobjectContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [7] s ∧
+    (GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
+      Outside (s.sp.toNat - 4144) 4168 rt ∧
+      H [fvType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
+      nwSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    InRanges (s'.regs 0).toNat 16 rt ∧ (s'.regs 0).toNat % 16 = 0 ∧
+    s'.mem.accessible (s'.regs 0).toNat 16 true = true ∧
+    FuncvalIs s'.mem (s'.regs 0) (segAddr Extracted.program "example.com/basic.MakeAdder.func1") ∧
+    ClosureCtx s'.mem (s'.regs 0) [(7 : BitVec 64)] ∧
+    MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)]) :=
+  ⟨impl, rt, H, ret, s0, hnew, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 
