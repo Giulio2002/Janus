@@ -62,3 +62,16 @@ def insertptr():
 '''
     go('InsertPtr',st,ws,pre,conjF('Assign64PtrSite','runtime.mapassign_fast64ptr',ft,'M H'),STD,
        'correctness implAt (MC _) (MC_laws _) HAssign model mv kv v AMap.empty ret hret s0 setup pre0')
+def makehint():
+    st=HELP+'''/-- The precondition of `MakeMap`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def MakeMapSite (M : MapModel (BitVec 64) (BitVec 64)) (H : RtReady) (s_c : State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 2).toNat = 0 ∧ Ready H M.priv [(s_c.regs 0).toNat, (s_c.regs 1).toNat, 0] s_c
+'''
+    ws='/-- The call state of the `makemap` contract (U-WITNESS-CALLSITE): the stock witness state of `MapVarSat`, at the contract address. -/\ndef wsCall : State := { mstate mmemDead (args 0 0) with pc := BitVec.ofNat 64 cAddr }\n'
+    pre='''theorem wsCall_pre : MakeMapSite (MC ck64) HMake wsCall :=
+  ⟨rtpre_pc _ (mstate_rtpre _ rfl rfl mmemDead rfl _ 3 (by decide)
+      (show ZEnv mmemDead from mmem_zenv.writeLE _ (by decide)) mmemDead_guard), trivial, by decide,
+    hMake_dead _ _ _⟩
+'''
+    cj='''(∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makemap") ∧ MakeMapSite M H s_c)'''
+    go('MakeHint',st,ws,pre,cj,'⟨wsCall, rfl, wsCall_pre⟩','correctness implAt (MC _) (MC_laws _) HMake model n ret hret s0 setup pre0')
