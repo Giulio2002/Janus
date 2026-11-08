@@ -69,14 +69,6 @@ theorem pre1 : StackWritable (s0 mem1) 0 8 ∧
     GlobalBytesIs Extracted.program.globals (s0 mem1).mem "example.com/basic.useFast" 0 1 1 :=
   ⟨⟨by decide, by decide, by decide⟩, ⟨_, rfl, by decide, by decide, by decide⟩⟩
 
-/-- The hypotheses of `correctness` hold together, for the flag clear and for the flag set. -/
-theorem nonvacuous : ∃ (ret : Nat) (s s' : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] s ∧
-    (StackWritable s 0 8 ∧ GlobalBytesIs Extracted.program.globals s.mem "example.com/basic.useFast" 0 1 0) ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] s' ∧
-    (StackWritable s' 0 8 ∧ GlobalBytesIs Extracted.program.globals s'.mem "example.com/basic.useFast" 0 1 1) :=
-  ⟨ret, s0 mem0, s0 mem1, hret, setup0, pre0, setup1, pre1⟩
-
 /-- So the guarantee is reached on both paths: `Double(21)` returns `42`. -/
 theorem returns :
     Returns (Extracted.program.withExit ret) (s0 mem0)
@@ -86,6 +78,16 @@ theorem returns :
   refine ⟨(correctness 21#64 0 ret hret _ setup0 pre0).mono ?_,
     (correctness 21#64 1 ret hret _ setup1 pre1).mono ?_⟩
   all_goals intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
+
+/-- The hypotheses of `correctness` hold together, for the flag clear and for the flag set. -/
+theorem nonvacuous : ∃ (ret : Nat) (s s' : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] s ∧
+    (StackWritable s 0 8 ∧ GlobalBytesIs Extracted.program.globals s.mem "example.com/basic.useFast" 0 1 0) ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] s' ∧
+    (StackWritable s' 0 8 ∧ GlobalBytesIs Extracted.program.globals s'.mem "example.com/basic.useFast" 0 1 1) ∧
+    Returns (Extracted.program.withExit ret) s (fun t => ABIReturn s t ∧ results 1 t = [42#64]) ∧
+    Returns (Extracted.program.withExit ret) s' (fun t => ABIReturn s' t ∧ results 1 t = [42#64]) :=
+  ⟨ret, s0 mem0, s0 mem1, hret, setup0, pre0, setup1, pre1, returns.1, returns.2⟩
 
 end Witness
 
