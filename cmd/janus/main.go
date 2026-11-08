@@ -135,7 +135,10 @@ func parseArgs(args []string, valueFlags ...string) ([]string, map[string]string
 	return pos, opts, nil
 }
 
-func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+func main() {
+	closeInheritedFDs()
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
 
 func run(args []string, stdout, stderr io.Writer) (code int) {
 	// The no-memory-guard notice follows the verdict on EVERY exit path (deferred: success, failure, runExtra

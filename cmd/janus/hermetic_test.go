@@ -4,7 +4,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -127,6 +129,31 @@ func TestHermeticSandboxIgnoresHostFiles(t *testing.T) {
 			}
 			if _, err := exec.LookPath("true"); err != nil {
 				t.Skip()
+			}
+		})
+	}
+}
+
+// A descriptor the caller leaves open without CLOEXEC (heavy-run leaked a write fd to a lock file) must not reach
+// the sandboxed process: it cannot write through /proc/self/fd/N to a host file.
+func TestHermeticSandboxDoesNotInheritCallerFDs(t *testing.T) {
+	for _, sb := range hermeticModes(t) {
+		t.Run(sb.mode, func(t *testing.T) {
+			host := filepath.Join(t.TempDir(), "leaked.lock")
+			fd, err := syscall.Open(host, syscall.O_WRONLY|syscall.O_CREAT, 0o600) // no O_CLOEXEC
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer syscall.Close(fd)
+			work := t.TempDir()
+			script := "ls /proc/self/fd | tr '\\n' ' '; echo; for f in /proc/self/fd/*; do case $(readlink $f) in *leaked.lock*) echo LEAKED $f; echo pwned > $f;; esac; done; " +
+				"(echo pwned > /proc/self/fd/" + strconv.Itoa(fd) + ") 2>/dev/null && echo WROTE-FD; echo done"
+			out := runIn(t, sb, work, nil, script)
+			if strings.Contains(out, "LEAKED") || strings.Contains(out, "WROTE-FD") {
+				t.Fatalf("caller fd %d reached the sandbox:\n%s", fd, out)
+			}
+			if b, _ := os.ReadFile(host); len(b) != 0 {
+				t.Fatalf("host file written through a leaked fd: %q", b)
 			}
 		})
 	}

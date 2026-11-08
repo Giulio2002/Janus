@@ -25,7 +25,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 )
 
 type sandbox struct {
@@ -257,6 +259,9 @@ func (s *sandbox) commandRO(workDir string, extraWritable, readOnly []string, ar
 // cannot be swapped out either. In mode "none" nothing is enforced; the olean pins still are.
 func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protected []string, argv []string, env []string) *exec.Cmd {
 	writable := append([]string{workDir}, extraWritable...)
+	// A descriptor the caller (heavy-run, a shell, a test) left open without CLOEXEC would be inherited by the
+	// sandboxed proof (a write fd to a host file, a lock). Mark every fd above 2 close-on-exec before spawning.
+	closeInheritedFDs()
 	switch s.mode {
 	case "bwrap":
 		// HERMETIC (UP4): the sandbox starts from an EMPTY root and gets an allowlist of read-only
@@ -594,4 +599,23 @@ func hermeticPath(p string) string {
 		}
 	}
 	return strings.Join(keep, string(os.PathListSeparator))
+}
+
+// closeInheritedFDs marks every open descriptor above 2 close-on-exec, so no process spawned afterwards
+// (bwrap/unshare, and the proof under them) inherits a descriptor the caller leaked. Go's own descriptors are
+// already close-on-exec; ExtraFiles are re-enabled by os/exec for the child that asked for them.
+func closeInheritedFDs() {
+	// close_range(3, ~0, CLOSE_RANGE_CLOEXEC): Linux 5.11+, the same number (436) on amd64 and arm64.
+	if _, _, e := syscall.Syscall(436, 3, ^uintptr(0), 4); e == 0 {
+		return
+	}
+	ents, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		if n, err := strconv.Atoi(e.Name()); err == nil && n > 2 {
+			syscall.CloseOnExec(n)
+		}
+	}
 }
