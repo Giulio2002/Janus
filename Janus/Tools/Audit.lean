@@ -1859,6 +1859,18 @@ def reachesRunClaim (env : Environment) (e : Expr) : Bool := Id.run do
   return false
 
 
+
+/-- UP3c: `runFree` binders: every binder of the statement is a plain machine datum (`BitVec`, `Nat`, `Int`, `Bool`, `UInt*`): no `Prop`
+hypothesis and no binder over a type that may be empty (`PLift`, `Fin 0`, subtypes, sums, …), which would make the statement vacuous. -/
+def runFreeBinders (t : Expr) : Bool :=
+  match t with
+  | .forallE _ d b _ =>
+    (match d.consumeMData.getAppFn with
+     | .const n _ => [`BitVec, `Nat, `Int, `Bool, `UInt8, `UInt16, `UInt32, `UInt64, `USize].contains n
+     | _ => false) && runFreeBinders b
+  | .mdata _ b => runFreeBinders b
+  | _ => true
+
 /-- UP3c: the claim under the `∀`/`→` binders of `e` (a pure structural walk, top level so its compiled form is stable). -/
 def claimBody (e : Expr) : Expr :=
   match e with
@@ -2173,10 +2185,6 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
               wVars := wVars.insert w
       let mut guarded : Array FVarId := sizeVarIds
       for w in wVars do guarded := guarded.push w
-      let stripPost (e : Expr) : Expr := e.replace fun sub =>
-        if (sub.getAppFn.constName?.any fun n => n == `Janus.GoABI.Ensures || n == `Janus.Amd64.GoABI.Ensures) && sub.getAppNumArgs == 5 then
-          some (mkAppN sub.getAppFn (sub.getAppArgs.set! 4 (mkConst ``True)))
-        else none
       for x in xs do
         let t ← instantiateMVars (← Meta.inferType x)
         if ← Meta.isProp t then continue
@@ -3503,7 +3511,7 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
       cleanEnvAndPrint cx thmN ci.type localDefs stubs extDefs cleanState (pre? := pre?.map (·.2))
         (main := role == .main)
     -- UP3c: `runFree` needs a hypothesis-free statement (data binders only): a false/circular hypothesis would make it vacuous
-    let runFreeHyps ← runCore envA <| Meta.MetaM.run' <| Meta.forallTelescope ci.type fun xs _ => xs.allM fun x => do return !(← Meta.isProp (← Meta.inferType x))
+    let runFreeHyps := runFreeBinders ci.type
     return { name := thm, kind, module := modName.toString, axioms := axs.map (·.toString),
              statement, statementExplicit, definitions := defs,
              modules := modNames.map (·.toString),
