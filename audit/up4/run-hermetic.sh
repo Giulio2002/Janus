@@ -28,12 +28,13 @@ grep -q 'env JANUS_CACHE_DIR=<unset>' <<<"$s4" || s4ok=0
 grep -q 'env SSH_AUTH_SOCK=<unset>' <<<"$s4" || s4ok=0
 grep -q 'env PATH=[^ ]*\.cargo' <<<"$s4" && s4ok=0
 grep -q 'env PATH=[^ ]*\.bun' <<<"$s4" && s4ok=0
-for f in /etc/hostname /root/.ssh /root/.claude /srv/janus-ops /proc/1/cmdline /proc/self/environ; do
-  grep -q "file $f: no" <<<"$s4" || { grep -q "file $f: [0-9]*B" <<<"$s4" && s4ok=0; }
-done
 grep -q 'file /root/.ssh: no' <<<"$s4" || s4ok=0
 grep -q 'file /root/.claude: no' <<<"$s4" || s4ok=0
-grep -q 'file /srv/janus-ops: no' <<<"$s4" || s4ok=0
+# /srv/janus-ops is only the empty mount-point ancestor of the cache work dir (dir:1), never its contents
+grep -qE 'file /srv/janus-ops: no( dir:1)? ,|file /srv/janus-ops: no( dir:1)?$' <<<"$s4" || s4ok=0
+# private pid ns: pid 1 is the sandbox's own init (bwrap/unshare), not the host's init; /proc/self/environ is the scrubbed env
+grep -q 'file /proc/1/cmdline: ' <<<"$s4" || s4ok=0
+host1=$(wc -c < /proc/1/cmdline); grep -q "file /proc/1/cmdline: ${host1}B" <<<"$s4" && s4ok=0
 grep -q 'file /etc/hostname: no' <<<"$s4" || s4ok=0
 [ $s4ok = 1 ] && echo "  ok: S4 host-state probe (output in $W/s4.out)" || { echo "  BROKEN: S4"; echo "$s4" | head -12 | cut -c1-1500; broken=1; }
 rm -f audit/up4/HOSTFILE-PRESENT
