@@ -196,3 +196,14 @@ def wsCall : Janus.Amd64.State :=
   · simp only [Janus.Contracts.MapAmd64.calleeStack, MS0, outside_cons, outside_nil, and_true]; decide
 '''
     run('LookupStr',st,ws,pre,conj('Access2Str64Site','runtime.mapaccess2_faststr',FS2),'⟨AMap.empty, wsCall, rfl, wsCall_pre⟩')
+def lookupkey16():
+    F='AMap (BitVec 128) (BitVec 64)'
+    st=HELP64+site('Access2PtrSite','Access2Ptr','MapModel (BitVec 128) (BitVec 64)',F,
+      'RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 3).toNat f ∧\n    s_c.mem.accessible (s_c.regs 1).toNat 16 false = true ∧ Outside (s_c.regs 1).toNat 16 (calleeStack s_c M.depth 3)')
+    ws=wsdef('mapaccess2',args='(args (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL) 0)')
+    pre=f'''theorem wsCall_pre : Access2PtrSite (ME (BitVec 128)) AMap.empty wsCall :=
+  ⟨{RT3%3}, trivial,
+    (isMap_of_ne (by decide)).2 (mmem64_rep _), by decide,
+    by simp only [Janus.Contracts.MapAmd64.calleeStack, ME_depth, outside_cons, outside_nil, and_true]; decide⟩
+'''
+    run('LookupKey16',st,ws,pre,conj('Access2PtrSite','runtime.mapaccess2',F),'⟨AMap.empty, wsCall, '+PC_A+', wsCall_pre⟩',[('(ME (BitVec 128))','M')])

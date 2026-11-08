@@ -125,6 +125,30 @@ theorem pre : CallerOK (ME (BitVec 128)) s0 40 8 ∧ (ME (BitVec 128)).Typ mapTy
   ⟨callerOK, trivial, (isMap_of_ne (by decide)).2 ⟨rfl, rfl, by decide, by decide⟩, by unfold Buffer; decide,
     by simp only [Janus.Spec.Disjoint, ME_depth]; decide⟩
 
+theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with rip := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+
+/-- The precondition of `Access2Ptr`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def Access2PtrSite (M : MapModel (BitVec 128) (BitVec 64)) (f : AMap (BitVec 128) (BitVec 64)) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 3).toNat f ∧
+    s_c.mem.accessible (s_c.regs 1).toNat 16 false = true ∧ Outside (s_c.regs 1).toNat 16 (calleeStack s_c M.depth 3)
+
+/-- The call state of the `mapaccess2` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSatAmd64`, at the contract address. -/
+def wsCall : Janus.Amd64.State := { mstate64 mmem64 (args (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL) 0) with rip := BitVec.ofNat 64 cA }
+
+theorem wsCall_pre : Access2PtrSite (ME (BitVec 128)) AMap.empty wsCall :=
+  ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64 rfl _ 3 (by decide) mmem64_zenv mmem64_guard mmem64_ret), trivial,
+    (isMap_of_ne (by decide)).2 (mmem64_rep _), by decide,
+    by simp only [Janus.Contracts.MapAmd64.calleeStack, ME_depth, outside_cons, outside_nil, and_true]; decide⟩
+
+/-- The theorem fires: `LookupKey16(map, key)` returns what the theorem says. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    (let key := BitVec.ofNat 128 (s0.mem.readLE (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL).toNat 16)
+    s'.regs 0 = (emp128 key).getD 0 ∧ (s'.regs 3).toNat % 256 = (emp128 key).isSome.toNat) :=
+  correctness implAt (ME (BitVec 128)) (ME_laws _) hcon (BitVec.ofNat 64 MP) (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL) AMap.empty ret hret s0 setup pre
+
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapaccess2`
 meeting `Access2Ptr` for it, and a call state of `LookupKey16(map, key)` that satisfies the precondition. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 128) (BitVec 64)) (ret : Nat)
@@ -134,14 +158,13 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP, BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL] s ∧
     (CallerOK M s 40 8 ∧ M.Typ mapType ∧ IsMap M s.mem (BitVec.ofNat 64 MP).toNat AMap.empty ∧
-    Buffer s (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL) 16 false ∧ Janus.Spec.Disjoint (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL).toNat 16 ((s.regs 4).toNat - (M.depth + 40)) (M.depth + 40 + 8)) :=
-  ⟨implAt, (ME (BitVec 128)), ret, s0, (ME_laws _), hcon, hret, setup, pre⟩
-
-/-- The theorem fires: `LookupKey16(map, key)` returns what the theorem says. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (let key := BitVec.ofNat 128 (s0.mem.readLE (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL).toNat 16)
+    Buffer s (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL) 16 false ∧ Janus.Spec.Disjoint (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL).toNat 16 ((s.regs 4).toNat - (M.depth + 40)) (M.depth + 40 + 8)) ∧
+    (∃ (f : AMap (BitVec 128) (BitVec 64)) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess2") ∧ Access2PtrSite M f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    (let key := BitVec.ofNat 128 (s.mem.readLE (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL).toNat 16)
     s'.regs 0 = (emp128 key).getD 0 ∧ (s'.regs 3).toNat % 256 = (emp128 key).isSome.toNat) :=
-  correctness implAt (ME (BitVec 128)) (ME_laws _) hcon (BitVec.ofNat 64 MP) (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL) AMap.empty ret hret s0 setup pre
+  ⟨implAt, (ME (BitVec 128)), ret, s0, (ME_laws _), hcon, hret, setup, pre, ⟨AMap.empty, wsCall, by show BitVec.ofNat 64 cA = _; rw [addr], wsCall_pre⟩, returns⟩
 
 end Witness
 
