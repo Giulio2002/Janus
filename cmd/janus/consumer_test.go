@@ -1142,3 +1142,22 @@ func TestVerifyBatchWitnessNameTraversal(t *testing.T) {
 		t.Errorf("a file outside the outdir was removed: %v", err)
 	}
 }
+
+// TestVerifyBatchSymlinkedOutdir: an outdir that is a symbolic link (aliasing another request's directory) is refused.
+func TestVerifyBatchSymlinkedOutdir(t *testing.T) {
+	defer parallel(t)()
+	needLean(t)
+	d := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(d, "out", "A"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(d, "out", "A"), filepath.Join(d, "out", "B")); err != nil {
+		t.Skip("no symlinks")
+	}
+	man := `{"schema":1,"proofRoot":".","requests":[{"outdir":"out/A","proof":"P.lean","theorem":"P.correctness"},{"outdir":"out/B","proof":"P.lean","theorem":"P.other"}]}`
+	writeFile(t, filepath.Join(d, "req.json"), man)
+	code, o, stderr := runJanus(t, "verify-batch", filepath.Join(d, "req.json"), "--janus-root", repoRoot)
+	if code == 0 || !strings.Contains(o+stderr, "is a symbolic link") {
+		t.Errorf("symlinked outdir accepted: %d\n%s\n%s", code, o, stderr)
+	}
+}

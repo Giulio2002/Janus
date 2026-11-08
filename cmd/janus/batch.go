@@ -210,7 +210,17 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 			reqs[i].Err = &diag{Invalid: true, Msg: "The request has no outdir.", Stage: "batch requests"}
 			continue
 		}
-		abs, _ := filepath.Abs(reqs[i].Outdir)
+		for _, sub := range []string{reqs[i].Outdir, filepath.Join(reqs[i].Outdir, verifiedDir)} {
+			if fi, err := os.Lstat(sub); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+				reqs[i].Err = &diag{Invalid: true, Msg: fmt.Sprintf("The output %s is a symbolic link.", displayPath(sub)), Stage: "batch requests",
+					Next: "Give every request a real directory of its own as outdir (symbolic links could alias two requests onto one directory)."}
+				break
+			}
+		}
+		if reqs[i].Err != nil {
+			continue
+		}
+		abs := realOutKey(reqs[i].Outdir)
 		if j, dup := seenOut[abs]; dup {
 			reqs[i].Err = &diag{Invalid: true, Msg: fmt.Sprintf("Requests %d and %d write the same output %s.", j, i, br.Outdir), Stage: "batch requests",
 				Next: "Give every request its own outdir (each gets an independent verified.json)."}
@@ -443,4 +453,25 @@ func theoremOrDefault(t string) string {
 		return defaultTheorem
 	}
 	return t
+}
+
+// realOutKey is the canonical identity of an output directory: symbolic links resolved on the longest existing prefix of its
+// absolute path (the directory itself may not exist yet), so two spellings of one directory compare equal.
+func realOutKey(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	rest := ""
+	for cur := abs; ; {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(real, rest)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return abs
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+		cur = parent
+	}
 }
