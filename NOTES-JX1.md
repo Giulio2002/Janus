@@ -18,3 +18,8 @@ Helpers per ISA: scripts/jx1_arm_map1.py/jx1_arm_map2.py (arm64), jx1_amd.py (am
 4. Returns conjunct: the run conjunct's POST must be written in the witness's BOUND variables exactly like the main statement's post (e.g. `(f p).getD 0`, not the folded `0`), else "main theorem is not exhibited as a RUN". gen: if the nonvacuous binds m/f/.. use jx1_arm_map2.auto_post (copies correctness's post), else derive from the file's `returns` statement with substitutions. The proof term is `correctness ...` (or `returns` when its statement is already the conjunct); the `returns` theorem is moved before nonvacuous.
 5. Pitfalls: `Ready64` is `Contracts.Ready64` in amd64 files; amd64 State must be spelled `Janus.Amd64.State`; no `(x : T) k` ascriptions in the conjunct (use `emp`-style closed defs or bound vars); struct update `{ s0 with ... }` with several fields hit a parse error, build the state with explicit fields instead.
 ## Not yet done: audit-sweep per-file loop was not run separately (full verify subsumes it: Verified means audit passed). Commit often; nothing pushed.
+
+## Scope update (UP3c a42a542e3cea32668, 2026-11-08)
+UP3c owns ALL RUN-conjunct rejects and the 29 arm64 Alg*/Mbar* examples (AlgMem*/AlgC*/AlgF*/AlgInter*/AlgNilinter*/AlgStr*/Mbar*). SKIP those, including AlgMemhash0 amd64 (TODO item 2) and the Alg* hash/Iface items in TODO 3/4.
+Still mine: K24 map pair (both ISAs), Iface: Box AsHasher Classify Equal; Hash: HashFKey, EqFKey (both ISAs).
+Returns post must match the main theorem's post text at the instantiation; pass `correctness ... hc ret hret s setup pre` directly.
