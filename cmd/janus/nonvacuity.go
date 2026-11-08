@@ -53,6 +53,9 @@ func nonVacuityVerdict(r *verifiedReport, peers []*verifiedReport, auditOnly boo
 	if auditOnly {
 		return nvAuditOnly, "", returns, nil
 	}
+	if len(r.ContractHyps) == 0 && r.Refutation {
+		return nvNotShown, "", returns, nil // a refutation claims no run
+	}
 	if len(r.ContractHyps) == 0 {
 		// UP3c: EVERY main theorem needs a verified tied witness, contract-free ones included: an unsatisfiable or circular
 		// precondition makes a contract-free theorem exactly as vacuous.

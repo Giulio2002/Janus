@@ -178,3 +178,12 @@ func TestAllowNoWitnessIsInert(t *testing.T) {
 		t.Errorf("rejection must say the flag does not bypass: %+v", d)
 	}
 }
+
+func TestNonVacuityRefutationNeedsNoWitness(t *testing.T) {
+	m := nvMain("P.correctness")
+	m.Refutation = true
+	outs, _ := runNV(t, false, m)
+	if outs[0].Err != nil || outs[0].Report.NonVacuity != nvNotShown {
+		t.Errorf("refutation main refused: %+v", outs[0])
+	}
+}

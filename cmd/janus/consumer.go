@@ -1774,6 +1774,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			MatchedMains:          r.audit.MatchedMains,
 			MatchedModules:        r.audit.MatchedModules,
 			ContractHyps:          r.audit.ContractHyps,
+			Refutation:            r.audit.Refutation,
 			OleanProvenance:       provenance,
 			Consumer: &consumerInfo{
 				Root: pkg.Root, Lakefile: pkg.Lakefile, Module: r.module, SnapshotSha256: pkg.Sha256,

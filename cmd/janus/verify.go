@@ -96,6 +96,8 @@ type verifiedReport struct {
 	// itself (round 14): "NewobjectContract@runtime.newobject". Empty: the statement assumes
 	// nothing about the runtime, whatever the extraction left out (Contracts).
 	ContractHyps []string `json:"contractHyps,omitempty"`
+	// Refutation: the main theorem is a negation (UP3c); it claims no run, so no run-witness is required.
+	Refutation bool `json:"refutation,omitempty"`
 	// Kernel are the extraction's `.syscall` stubs ("name @ address"): the SVC/SYSCALL
 	// instructions, environment reads and vDSO clock functions whose effect only the kernel
 	// semantics of Janus/Contracts/Syscall*.lean gives (WP-C). Traps are its `.trap` stubs.
@@ -143,6 +145,7 @@ type auditResult struct {
 	MatchedMains      []string   `json:"matchedMains"`        // every main theorem of the module the witness supports
 	MatchedModules    []string   `json:"matchedModules"`      // the module declaring each of them
 	ContractHyps      []string   `json:"contractHyps"`        // round 14: the contracts the STATEMENT applies ("Contract@runtime.fn")
+	Refutation        bool       `json:"refutation"`          // UP3c: the main theorem is a negation (claims no run)
 	Imports           [][]string `json:"imports"`             // [module, direct imports…] for every non-core module
 }
 
@@ -1298,6 +1301,7 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			MatchedMains:      ar.MatchedMains,
 			MatchedModules:    ar.MatchedModules,
 			ContractHyps:      ar.ContractHyps,
+			Refutation:        ar.Refutation,
 			Notes:             ar.Notes,
 		}
 		report.Kernel, report.Traps = cr.Identity.kernelLists()

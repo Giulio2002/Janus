@@ -97,6 +97,8 @@ structure Record where
   computed from the statement, not from the extraction. A main theorem has them as hypotheses; a
   witness claims them. Empty: the statement assumes nothing about the runtime. -/
   contractHyps : Array String := #[]
+  /-- UP3c: the main theorem is a refutation (its statement, under its binders, is a negation `¬ …`): it claims no run, so no run-witness is required. -/
+  refutation : Bool := false
   /-- The import graph of every module outside the toolchain core (`Init`, `Std`, `Lean`,
   `Lake`): `[module, direct import, …]`. The Go side kernel-replays each of these modules and
   keys its replay cache on the module's bytes and those of its imports. -/
@@ -3535,7 +3537,13 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
              statement, statementExplicit, definitions := defs,
              modules := modNames.map (·.toString),
              external := externalNames.filterMap external.get?, externalDefinitions := extOut,
-             notes, role := role.label, matchedMain, matchedMains, matchedModules, contractHyps, imports := importGraph envA }
+             notes, role := role.label, matchedMain, matchedMains, matchedModules, contractHyps,
+             refutation := role == .main && (let rec go : Expr → Bool
+               | .forallE _ _ b _ => go b
+               | .mdata _ b => go b
+               | e => e.isAppOfArity ``Not 1 || e.isConstOf ``False
+               go ci.type),
+             imports := importGraph envA }
   ).run
   match result with
   | .ok rec => IO.println (marker ++ (toJson rec).compress)
