@@ -768,13 +768,49 @@ theorem pre : Pre FTs pool rt H s0 := by
     · rw [readLE_rtView hin0]; exact d1
     · rw [readLE_rtView hin8]; exact d2
 
-/-- All hypotheses of `correctness` hold together, for a call whose first frame does not fit. -/
-theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
-    (reloc : State → State → Prop) (ret : Nat) (s : State),
-    MorestackContract Extracted.program FT pool rt H reloc ∧ Env FT pool rt ∧
-    RetAddr Extracted.program ret ∧ CallSetup (Extracted.program.withExit ret) Extracted.entry [3#64] s ∧
-    Pre FT pool rt H s ∧ ¬ s.mem.readLE ((s.regs 28).toNat + 16) 8 < s.sp.toNat :=
-  ⟨FTs, pool, rt, H, reloc FTs, ret, s0, contract _ FTs, env, hret, setup, pre, no_room⟩
+def mAddr : Nat := Extracted.stubs.head!.addr
+
+/-- The state at the `morestack` stub: `s0`'s stack and goroutine, `X30` = the function's entry (the glue after
+the call, in the function's frame record) and `X3` = the caller's return address. -/
+def sm : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 G0 else if i = 29 then BitVec.ofNat 64 (spw - 8)
+      else if i = 30 then BitVec.ofNat 64 Extracted.entry else if i = 3 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 spw, pc := BitVec.ofNat 64 mAddr,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+theorem sm_pre : Janus.Contracts.Stack.MorestackPre Extracted.program FTs pool rt H G0 SL SH sm := by
+  obtain ⟨d1, d2, d3⟩ := mem0_desc
+  have hin0 : InRanges G0 8 rt := ⟨(G0, G0 + 24), List.mem_singleton_self _, by simp, by simp⟩
+  have hin8 : InRanges (G0 + 8) 8 rt := ⟨(G0, G0 + 24), List.mem_singleton_self _, by simp, by simp⟩
+  refine ⟨⟨"runtime.morestack_noctxt.abi0", rfl⟩, by decide,
+    ⟨by decide, by decide, by simp only [gStackLo, Nat.add_zero]; exact d1, d2, d3⟩,
+    by simp [pool, G0, SL, SH, BL, BH], ⟨by decide, by decide, by decide, by decide⟩,
+    ⟨by decide, by decide, by decide⟩, by decide, ⟨⟨(SL, SH), by simp [pool], Nat.le_refl _, by decide⟩, ?_⟩,
+    ⟨[⟨Extracted.entry, spw, Arch.arm64.fp FTs Extracted.entry spw⟩, ⟨ret, spw, spw⟩], ?_⟩, ⟨by decide, by decide⟩, ⟨code, laws.1⟩, ⟨rfl, .inl ⟨?_, ?_⟩⟩, mem0_noptr⟩
+  · intro r hr
+    simp only [pool, List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hr
+    rcases hr with rfl | rfl <;> exact ⟨by decide, by decide, by decide⟩
+  · have e30 : (sm.regs 30).toNat = Extracted.entry := by decide
+    have e3 : (sm.regs 3).toNat = ret := by decide
+    have esp : sm.sp.toNat = spw := by decide
+    have hv : FTs.valid Extracted.entry = true := by first | decide | rfl | simp [FTs, FrameTable.ofRecs, extraT]
+    have hs : FTs.stop Extracted.entry = false := by first | decide | rfl | simp [FTs, FrameTable.ofRecs, extraT]
+    have hi : FTs.injected Extracted.entry = false := by first | decide | rfl | simp [FTs, FrameTable.ofRecs, extraT]
+    have hd : FTs.spdelta Extracted.entry = 0 := by first | decide | rfl | simp [FTs, FrameTable.ofRecs, extraT]
+    have e : Arch.arm64.fp FTs Extracted.entry spw = spw := by
+      show spw + FTs.spdelta Extracted.entry = spw; rw [hd, Nat.add_zero]
+    have e2 : Arch.arm64.fp FTs ret spw = spw := by
+      show spw + FTs.spdelta ret = spw; rw [show FTs.spdelta ret = 0 from rfl, Nat.add_zero]
+    have inner : Chain Arch.arm64 FTs sm.mem SH ret spw none [⟨ret, spw, spw⟩] := by
+      have := Chain.stop (A := Arch.arm64) (FT := FTs) (m := sm.mem) (hi := SH) (pc := ret) (sp := spw)
+        (lr0 := none) rfl rfl rfl (by decide) (by rw [e2]; decide)
+      rw [e2] at this; exact this
+    have hl : Arch.arm64.lrOf sm.mem spw spw (some ret) = ret := by first | rfl | simp [Arch.lrOf]
+    rw [e30, e3, esp]
+    refine Chain.cons hv hs hi (by decide) (by rw [e]; decide) ?_
+    rw [e, hl]; exact inner
+  · rw [readLE_rtView hin0]; exact d1
+  · rw [readLE_rtView hin8]; exact d2
 
 /-- So the guarantee is reached: from a stack where not even the first frame fits, `SumRec(3)`
 grows the stack and returns `6`. -/
@@ -782,6 +818,16 @@ theorem returns : GrownReturns (Extracted.program.withExit ret) (reloc FTs) s0
     (fun s' => s'.regs 0 = 6#64) :=
   (correctness FTs pool rt H (reloc FTs) (contract _ FTs) 3#64 ret hret s0 setup ⟨env, pre⟩).mono
     fun s' h => by rw [h]; rfl
+
+/-- All hypotheses of `correctness` hold together, for a call whose first frame does not fit. -/
+theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
+    (reloc : State → State → Prop) (ret : Nat) (s : State),
+    MorestackContract Extracted.program FT pool rt H reloc ∧ Env FT pool rt ∧
+    RetAddr Extracted.program ret ∧ CallSetup (Extracted.program.withExit ret) Extracted.entry [3#64] s ∧
+    Pre FT pool rt H s ∧ ¬ s.mem.readLE ((s.regs 28).toNat + 16) 8 < s.sp.toNat ∧
+    (∃ (g lo hi : Nat) (s_m : State), Janus.Contracts.Stack.MorestackPre Extracted.program FT pool rt H g lo hi s_m) ∧
+    GrownReturns (Extracted.program.withExit ret) reloc s fun s' => s'.regs 0 = BitVec.ofNat 64 (sumTo (3#64).toNat) :=
+  ⟨FTs, pool, rt, H, reloc FTs, ret, s0, contract _ FTs, env, hret, setup, pre, no_room, ⟨G0, SL, SH, sm, sm_pre⟩, correctness FTs pool rt H (reloc FTs) (contract _ FTs) 3#64 ret hret s0 setup ⟨env, pre⟩⟩
 
 end Witness
 

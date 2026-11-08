@@ -2,6 +2,7 @@ import sys; sys.path.insert(0,'scripts')
 from jx2gen import patch
 name=sys.argv[1]
 path=f'examples/proofs/{name}.lean'
+FT=None
 defs='''def mAddr : Nat := Extracted.stubs.head!.addr
 
 /-- The state at the `morestack` stub: `s0`'s stack and goroutine, `X30` = the function's entry (the glue after
@@ -47,7 +48,15 @@ theorem sm_pre : Janus.Contracts.Stack.MorestackPre Extracted.program FTb pool r
   · rw [readLE_rtView hin8]; exact d2
 '''
 c='(∃ (g lo hi : Nat) (s_m : State), Janus.Contracts.Stack.MorestackPre Extracted.program FT pool rt H g lo hi s_m)'
-RUN={'BigLocal':("GrownReturns (Extracted.program.withExit ret) reloc s fun s' => s'.regs 0 = if (0#64).toNat % 16 = 0 then 7#64 else 0",
+FT={'BigLocal':'FTb','HoldPtr':'FTs','SumRec':'FTs'}[name]
+if FT!='FTb':
+    defs=defs.replace('FTb',FT)
+    defs=defs.replace("⟨code, laws.1⟩","⟨code, laws.1⟩")
+RUN={'HoldPtr':("GrownReturns (Extracted.program.withExit ret) reloc s fun s' => s'.regs 0 = hres 16#64",
+  "correctness FTs pool rt H (reloc FTs) (contract _ FTs) 16#64 ret hret s0 setup ⟨env, pre⟩"),
+ 'SumRec':("GrownReturns (Extracted.program.withExit ret) reloc s fun s' => s'.regs 0 = BitVec.ofNat 64 (sumTo (3#64).toNat)",
+  "correctness FTs pool rt H (reloc FTs) (contract _ FTs) 3#64 ret hret s0 setup ⟨env, pre⟩"),
+ 'BigLocal':("GrownReturns (Extracted.program.withExit ret) reloc s fun s' => s'.regs 0 = if (0#64).toNat % 16 = 0 then 7#64 else 0",
   "correctness FTb pool rt H (reloc FTb) (contract _ FTb) 7#64 0#64 ret hret s0 setup ⟨agrees, pre⟩")}
 rc,rp=RUN[name]
 patch(path,defs,[(c,'⟨G0, SL, SH, sm, sm_pre⟩')],runconj=rc,retproof=rp)
