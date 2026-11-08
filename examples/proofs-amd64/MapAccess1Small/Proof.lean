@@ -290,7 +290,7 @@ def emp : AMap (BitVec 64) (BitVec 64) := AMap.empty
 
 /-- `wmem64` plus the type descriptor's slot-size word (16) and the zero value, read-only. -/
 def mem : Memory :=
-  ⟨fun a => if a = 0x600058 then 16#8 else wmem64.bytes a,
+  ⟨fun a => if a = 0x600058 then 16#8 else wmem64.bytes a, -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     wmem64.regions ++ [⟨0x600058, 8, false⟩, ⟨zeroVal, 8, false⟩]⟩
 
 /-- `mapaccess1_fast64(t, nil, 0)`. -/

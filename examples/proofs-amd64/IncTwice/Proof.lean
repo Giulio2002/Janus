@@ -37,7 +37,7 @@ open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
 def ret : Nat := wret
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
-def c : BitVec 64 := 0x30800#64
+def c : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 def d : BitVec 64 := 3#64
 
 def s0 : State :=

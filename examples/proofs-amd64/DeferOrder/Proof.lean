@@ -603,19 +603,19 @@ theorem wsG_pre : GopanicPre PW fi wsG := by
     rw [room0_eq]; decide
   · intro _; refine ⟨by decide, ?_⟩
     simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
-  · have hw : wsp = 0x4ff00 := rfl
+  · have hw : wsp = 0x4ff00 := rfl -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     have hs : fspOf wsG = 0x4ff00 - 112 := by decide
     have hr : PW.defers wmG (gOf wsG) = [] := defers_G
     have f_frame : fi.frame = 112 := by rfl
     have f_od : fi.openDefer = some (81, 24) := by rfl
     have f_res : fi.resume = Extracted.entry + 0xed := by rfl
-    have hbA : fi.bitsAt (0x4ff00 - 112) = 0x4ff00 - 89 := by
+    have hbA : fi.bitsAt (0x4ff00 - 112) = 0x4ff00 - 89 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold Spec.FuncInfo.bitsAt Spec.FuncInfo.varp; rw [f_frame, f_od]; try rfl
-    have hsA : fi.slotsAt (0x4ff00 - 112) = 0x4ff00 - 32 := by
+    have hsA : fi.slotsAt (0x4ff00 - 112) = 0x4ff00 - 32 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold Spec.FuncInfo.slotsAt Spec.FuncInfo.varp; rw [f_frame, f_od]; try rfl
-    have hbd : fi.bound (0x4ff00 - 112) = 0x4ff00 := by
+    have hbd : fi.bound (0x4ff00 - 112) = 0x4ff00 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold Spec.FuncInfo.bound; rw [f_frame]; try rfl
-    have hbit : wmG.readLE (0x4ff00 - 89) 1 = 7 := by rw [← hw]; decide
+    have hbit : wmG.readLE (0x4ff00 - 89) 1 = 7 := by rw [← hw]; decide -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     have hF : Panic.frameOf fi (0x4ff00 - 112) wmG = ⟨0x4ff00 - 112, 0x4ff00, Extracted.entry + 0xed, some (0x4ff00 - 89, 0x4ff00 - 32)⟩ := by
       unfold Panic.frameOf; rw [hbA, hsA, hbd, f_res, f_od]
       simp only [hbit]; try rfl
@@ -623,9 +623,9 @@ theorem wsG_pre : GopanicPre PW fi wsG := by
     rw [hs, hr]
     unfold frameOf
     rw [hF]
-    have hI : frameItems wmG ⟨0x4ff00 - 112, 0x4ff00, Extracted.entry + 0xed, some (0x4ff00 - 89, 0x4ff00 - 32)⟩ [] =
+    have hI : frameItems wmG ⟨0x4ff00 - 112, 0x4ff00, Extracted.entry + 0xed, some (0x4ff00 - 89, 0x4ff00 - 32)⟩ [] = -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
         [{ fn := 0x4ff00 - 80, bits := some 3, chain := [] }, { fn := 0x4ff00 - 64, bits := some 1, chain := [] },
-         { fn := 0x4ff00 - 48, bits := some 0, chain := [] }] := by
+         { fn := 0x4ff00 - 48, bits := some 0, chain := [] }] := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold frameItems openItems recItems
       simp only [hbit]
       decide

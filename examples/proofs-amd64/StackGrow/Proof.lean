@@ -2178,7 +2178,7 @@ theorem wsR_pre : grSite R [] 0x400 wsR := by
   · intro hpos; rw [hr3, hr7] at hpos; omega
 
 /-- The call state at `runtime.memclrNoHeapPointers`'s entry: clear 8 bytes of the stack window's bottom. -/
-def wsM : State := mkS64 (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") (sp0 - 144) 1044296 8 0 0 0 mem0
+def wsM : State := mkS64 (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") (sp0 - 144) 1044296 8 0 0 0 mem0 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 
 set_option maxRecDepth 100000 in
 theorem wsM_pre : memSite R [] 0x400 wsM := by
@@ -2197,14 +2197,14 @@ theorem wsM_pre : memSite R [] 0x400 wsM := by
     rw [s0_sp]; exact stkw _ (by decide) (by decide)
   have hx15 : wsM.xmm 15 = 0 := rfl
   have hdf : wsM.df = false := rfl
-  have h0 : (wsM.regs 0).toNat = 1044296 := by simp [wsM, mkS64]
+  have h0 : (wsM.regs 0).toNat = 1044296 := by simp [wsM, mkS64] -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
   have h1 : (wsM.regs 3).toNat = 8 := by simp [wsM, mkS64]
   have h := call_pre64 R [] 0x400 0 (Extracted.program.contractAddr "runtime.memclrNoHeapPointers")
     [(wsM.regs 0).toNat, (wsM.regs 3).toNat] (s := s0) (S := wsM) (lo := (s0.regs 4).toNat - 4280)
     (hi := (s0.regs 4).toNat + 16) (stack := 4096) (nargs := 2) (fr := 144) hg1 hg2 (by omega) hgo (hf.widen R.rt)
     hg' hsp (by omega) hra (by omega) (by omega) (by omega) ha4
     (by rw [show (s0.regs 4).toNat + 16 - ((s0.regs 4).toNat - 4280) = 4280 + 16 by omega]; exact hw4) hwrt hwL
-    (by rw [h0, h1]; have := hokClr 1044296 0 (by omega) (by decide); simpa using this)
+    (by rw [h0, h1]; have := hokClr 1044296 0 (by omega) (by decide); simpa using this) -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     (by rw [hg']; exact RtInv.inv_frame hf hwrt hinv) (Nat.zero_le _)
   have hrt : R.rt = [(HEAP, HEND), (BUMP, BUMP + 8), (WBUF, WBUF + 64)] := rfl
   refine ⟨(memPre64_of hx15 hdf h).1, (memPre64_of hx15 hdf h).2, ?_, ?_, ?_, Or.inr ?_, ?_⟩

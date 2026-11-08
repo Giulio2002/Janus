@@ -246,9 +246,9 @@ def hp : Nat := 0x300000
 def tt : BitVec 64 := 0x600000
 def emp : AMap (BitVec 64) (BitVec 64) := AMap.empty
 
-def wbytes (a : Nat) : Byte := if a = 0x600058 then 16 else 0
+def wbytes (a : Nat) : Byte := if a = 0x600058 then 16 else 0 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 
-def wmem : Memory := ⟨wbytes, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩, ⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩, ⟨0x600058, 8, false⟩, ⟨zeroVal, 8, false⟩]⟩
+def wmem : Memory := ⟨wbytes, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩, ⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩, ⟨0x600058, 8, false⟩, ⟨zeroVal, 8, false⟩]⟩ -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 
 def s0 : State :=
   { regs := fun i => if i = 0 then (tt) else if i = 1 then (0) else if i = 2 then (5) else if i = 28 then BitVec.ofNat 64 g0 else if i = 29 then BitVec.ofNat 64 (sp0 - 8)

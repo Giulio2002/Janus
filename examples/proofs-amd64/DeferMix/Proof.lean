@@ -1201,11 +1201,11 @@ def wfi : Spec.FuncInfo := Spec.FuncInfo.named Extracted.funcs "example.com/basi
 
 /-- The call state at `runtime.gopanic`'s entry: `DeferMix`'s own frame (no open-coded defers), return address inside it. -/
 def wmG : Janus.Arm64.Memory :=
-  ⟨(witMemD (tabWords T0 ++ [(wsp, ret), (0x4ff00 - 96, loc_DeferMix_69)]) Extracted.data).bytes,
+  ⟨(witMemD (tabWords T0 ++ [(wsp, ret), (0x4ff00 - 96, loc_DeferMix_69)]) Extracted.data).bytes, -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     (witMemD (tabWords T0 ++ [(wsp, ret), (0x4ff00 - 96, loc_DeferMix_69)]) Extracted.data).regions ++ [⟨accA, 8, true⟩]⟩
 
 def wsG : Janus.Amd64.State :=
-  { regs := fun i => if i = 4 then BitVec.ofNat 64 (0x4ff00 - 96) else if i = 14 then BitVec.ofNat 64 wg else if i = 0 then 1#64 else 0,
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 (0x4ff00 - 96) else if i = 14 then BitVec.ofNat 64 wg else if i = 0 then 1#64 else 0, -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     rip := BitVec.ofNat 64 gA, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := wmG }
 
 theorem wsG_find : Spec.FuncInfo.find T0 (wsG.mem.readLE (wsG.regs 4).toNat 8) = some wfi := by decide
@@ -1230,14 +1230,14 @@ theorem wsG_pre : GopanicPre PW wfi wsG := by
   · intro h
     have hod : wfi.openDefer = none := by rfl
     rw [hod] at h; exact absurd h (by decide)
-  · have hs : fspOf wsG = 0x4ff00 - 88 := by decide
+  · have hs : fspOf wsG = 0x4ff00 - 88 := by decide -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     have hr : PW.defers wmG (gOf wsG) = [] := defers_G
     have f_frame : wfi.frame = 88 := by rfl
     have f_od : wfi.openDefer = none := by rfl
     have f_res : wfi.resume = Extracted.entry + 0x49 := by rfl
-    have hbd : wfi.bound (0x4ff00 - 88) = 0x4ff00 := by
+    have hbd : wfi.bound (0x4ff00 - 88) = 0x4ff00 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold Spec.FuncInfo.bound; rw [f_frame]; try rfl
-    have hF : Panic.frameOf wfi (0x4ff00 - 88) wmG = ⟨0x4ff00 - 88, 0x4ff00, Extracted.entry + 0x49, none⟩ := by
+    have hF : Panic.frameOf wfi (0x4ff00 - 88) wmG = ⟨0x4ff00 - 88, 0x4ff00, Extracted.entry + 0x49, none⟩ := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold Panic.frameOf; rw [hbd, f_res, f_od]
     show FrameOK PW wmG (frameOf wfi (fspOf wsG) wmG) (frameItems wmG (frameOf wfi (fspOf wsG) wmG) (PW.defers wmG (gOf wsG)))
     rw [hs, hr]

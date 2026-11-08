@@ -776,13 +776,13 @@ open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
 def ret : Nat := wret
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
-def z : BitVec 64 := 0x30800#64
+def z : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 def zl : BitVec 64 := 0x2#64
 def zc : BitVec 64 := 0x2#64
-def x : BitVec 64 := 0x30900#64
+def x : BitVec 64 := 0x30900#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 def xl : BitVec 64 := 0x2#64
 def xc : BitVec 64 := 0x2#64
-def y : BitVec 64 := 0x30a00#64
+def y : BitVec 64 := 0x30a00#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 def yl : BitVec 64 := 0x2#64
 def yc : BitVec 64 := 0x2#64
 def mw : BitVec 64 := 0x3#64
@@ -791,7 +791,7 @@ def aw : BitVec 64 := 0x1#64
 def s0 : State :=
   { regs := fun r_ => if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
-    xmm := fun _ => 0, mem := ⟨fun a => if a = 294921 then 8#8 else if a = 294922 then 3#8 else if a = 294928 then 2#8 else if a = 294936 then 2#8 else if a = 294945 then 9#8 else if a = 294946 then 3#8 else if a = 294952 then 2#8 else if a = 294960 then 2#8 else if a = 294969 then 10#8 else if a = 294970 then 3#8 else if a = 294976 then 2#8 else if a = 294984 then 2#8 else if a = 294992 then 3#8 else if a = 295000 then 1#8 else wmem64.bytes a, wmem64.regions ++ [⟨hasADX, 1, false⟩]⟩ }
+    xmm := fun _ => 0, mem := ⟨fun a => if a = 294921 then 8#8 else if a = 294922 then 3#8 else if a = 294928 then 2#8 else if a = 294936 then 2#8 else if a = 294945 then 9#8 else if a = 294946 then 3#8 else if a = 294952 then 2#8 else if a = 294960 then 2#8 else if a = 294969 then 10#8 else if a = 294970 then 3#8 else if a = 294976 then 2#8 else if a = 294984 then 2#8 else if a = 294992 then 3#8 else if a = 295000 then 1#8 else wmem64.bytes a, wmem64.regions ++ [⟨hasADX, 1, false⟩]⟩ } -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 set_option maxRecDepth 100000 in
 theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry [z, zl, zc, x, xl, xc, y, yl, yc, mw, aw] 1 s0 :=
   ⟨rfl, by decide +kernel, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3 ∨ i = 4 ∨ i = 5 ∨ i = 6 ∨ i = 7 ∨ i = 8 ∨ i = 9 ∨ i = 10) with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> (simp only [List.getElem_cons_zero, List.getElem_cons_succ]; decide), by unfold FrameOK; decide, rfl⟩

@@ -31,7 +31,7 @@ theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 /-- The panic runtime: the model with an empty funcs table. -/
 def PW : Spec.PanicRuntime := Janus.Contracts.PanicModel.P0 [] Janus.Contracts.PanicSatAmd64.RPa
 
-def ptr : BitVec 64 := 0x30800#64
+def ptr : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 def len : BitVec 64 := 4#64
 def cap : BitVec 64 := 4#64
 def i : BitVec 64 := 4#64

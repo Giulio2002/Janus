@@ -85,7 +85,7 @@ def mem : Memory := withData Extracted.program.data wmem64
 
 def tabM : BitVec 64 := BitVec.ofNat 64 (Janus.Spec.dataAddr Extracted.program.data mulItab)
 def tabR : BitVec 64 := BitVec.ofNat 64 (Janus.Spec.dataAddr Extracted.program.data rotItab)
-def h : BitVec 64 := 0x30800#64
+def h : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 def x : BitVec 64 := 3#64
 
 def s0M : State :=

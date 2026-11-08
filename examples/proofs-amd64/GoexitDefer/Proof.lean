@@ -495,10 +495,10 @@ theorem pre : PanicCallerOK PW s0 (PW.depth + 64) 16 ∧ Buffer s0 (BitVec.ofNat
 def wfi : Spec.FuncInfo := Spec.FuncInfo.named Extracted.funcs "example.com/basic.GoexitDefer"
 
 /-- The call state at `runtime.Goexit`'s entry: `GoexitDefer`'s own frame, pending open-coded defers in place, `LR` inside the function. -/
-def wmG : Janus.Arm64.Memory := witMem (tabWords T0 ++ [((0x4ff00 - 48), loc_GoexitDefer_69), (0x4ff00 - 32, func1A), (0x4ff00 - 24, 0), (0x4ff00 - 16, 0x4ff00 - 32), (0x4ff00 - 33, 1)])
+def wmG : Janus.Arm64.Memory := witMem (tabWords T0 ++ [((0x4ff00 - 48), loc_GoexitDefer_69), (0x4ff00 - 32, func1A), (0x4ff00 - 24, 0), (0x4ff00 - 16, 0x4ff00 - 32), (0x4ff00 - 33, 1)]) -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 
 def wsG : Janus.Amd64.State :=
-  { regs := fun i => if i = 4 then BitVec.ofNat 64 (0x4ff00 - 48) else if i = 14 then BitVec.ofNat 64 0x50000 else if i = 0 then 1#64 else 0,
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 (0x4ff00 - 48) else if i = 14 then BitVec.ofNat 64 0x50000 else if i = 0 then 1#64 else 0, -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     rip := BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.Goexit"), flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := wmG }
 
 theorem env_G : Env0 T0 wmG := by
@@ -522,18 +522,18 @@ theorem wsG_pre : GoexitPre PW wfi wsG := by
     rw [room0_eq]; decide
   · intro _; refine ⟨by decide, ?_⟩
     simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
-  · have hs : fspOf wsG = 0x4ff00 - 40 := by decide
+  · have hs : fspOf wsG = 0x4ff00 - 40 := by decide -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     have hr : PW.defers wmG (gOf wsG) = [] := defers_G
     have f_frame : wfi.frame = 40 := by rfl
     have f_od : wfi.openDefer = some (25, 8) := by rfl
     have f_res : wfi.resume = Extracted.entry + 0x68 := by rfl
-    have hbA : wfi.bitsAt (0x4ff00 - 40) = 0x4ff00 - 33 := by
+    have hbA : wfi.bitsAt (0x4ff00 - 40) = 0x4ff00 - 33 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold Spec.FuncInfo.bitsAt Spec.FuncInfo.varp; rw [f_frame, f_od]; try rfl
-    have hsA : wfi.slotsAt (0x4ff00 - 40) = 0x4ff00 - 16 := by
+    have hsA : wfi.slotsAt (0x4ff00 - 40) = 0x4ff00 - 16 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold Spec.FuncInfo.slotsAt Spec.FuncInfo.varp; rw [f_frame, f_od]; try rfl
-    have hbd : wfi.bound (0x4ff00 - 40) = 0x4ff00 := by
+    have hbd : wfi.bound (0x4ff00 - 40) = 0x4ff00 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold Spec.FuncInfo.bound; rw [f_frame]; try rfl
-    have hbit : wmG.readLE (0x4ff00 - 33) 1 = 1 := by decide
+    have hbit : wmG.readLE (0x4ff00 - 33) 1 = 1 := by decide -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     have hF : Panic.frameOf wfi (0x4ff00 - 40) wmG = ⟨0x4ff00 - 40, 0x4ff00, Extracted.entry + 0x68, some (0x4ff00 - 33, 0x4ff00 - 16)⟩ := by
       unfold Panic.frameOf; rw [hbA, hsA, hbd, f_res, f_od]
       simp only [hbit]; try rfl
@@ -541,7 +541,7 @@ theorem wsG_pre : GoexitPre PW wfi wsG := by
     rw [hs, hr]
     unfold frameOf
     rw [hF]
-    have hI : frameItems wmG ⟨0x4ff00 - 40, 0x4ff00, Extracted.entry + 0x68, some (0x4ff00 - 33, 0x4ff00 - 16)⟩ [] = [{ fn := 0x4ff00 - 32, bits := some 0, chain := [] }] := by
+    have hI : frameItems wmG ⟨0x4ff00 - 40, 0x4ff00, Extracted.entry + 0x68, some (0x4ff00 - 33, 0x4ff00 - 16)⟩ [] = [{ fn := 0x4ff00 - 32, bits := some 0, chain := [] }] := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold frameItems openItems recItems
       simp only [hbit]
       decide

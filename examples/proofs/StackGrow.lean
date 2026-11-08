@@ -1964,7 +1964,7 @@ theorem wsR_pre : grSite R [] 0x400 wsR := by
   · intro hpos; rw [hr1, hr3] at hpos; omega
 
 /-- The call state at `runtime.memclrNoHeapPointers`'s entry: clear 8 bytes of the stack window's bottom. -/
-def wsM : State := mkS (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") (sp0 - 144) 1044288 8 0 0 0 mem0
+def wsM : State := mkS (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") (sp0 - 144) 1044288 8 0 0 0 mem0 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 
 set_option maxRecDepth 100000 in
 theorem wsM_pre : memSite R [] 0x400 wsM := by
@@ -1977,14 +1977,14 @@ theorem wsM_pre : memSite R [] 0x400 wsM := by
   have h30a : (wsM.regs 30).toNat % 4 = 0 := by simp [wsM, mkS, ret]
   have h30b : (wsM.regs 30).toNat < 2 ^ 48 := by simp [wsM, mkS, ret]
   have hf : MemFrame s0.mem wsM.mem [(s0.sp.toNat - 4288, s0.sp.toNat + 24)] := MemFrame.refl _ _
-  have h0 : (wsM.regs 0).toNat = 1044288 := by simp [wsM, mkS]
+  have h0 : (wsM.regs 0).toNat = 1044288 := by simp [wsM, mkS] -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
   have h1 : (wsM.regs 1).toNat = 8 := by simp [wsM, mkS]
   have h := call_pre R [] 0x400 0 (Extracted.program.contractAddr "runtime.memclrNoHeapPointers")
     [(wsM.regs 0).toNat, (wsM.regs 1).toNat] (s := s0) (S := wsM) (lo := s0.sp.toNat - 4288) (hi := s0.sp.toNat + 24)
     (stack := 4096) (nargs := 2) (fr := 144) hg1 hg2 (by omega) hgo (hf.widen R.rt) hg hsp (by omega) h30a h30b
     (by decide) (by omega) (by omega) (by omega) ha4
     (by rw [show s0.sp.toNat + 24 - (s0.sp.toNat - 4288) = 4288 + 24 by omega]; exact hw4) hwrt hwL
-    (by rw [h0, h1]; have := hokClr 1044288 0 (by omega) (by decide); simpa using this)
+    (by rw [h0, h1]; have := hokClr 1044288 0 (by omega) (by decide); simpa using this) -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     (by rw [hg]; exact RtInv.inv_frame hf hwrt hinv) (Nat.zero_le _)
   have hrt : R.rt = [(HEAP, HEND), (BUMP, BUMP + 8), (WBUF, WBUF + 64)] := rfl
   refine ⟨(memPre_of h).1, (memPre_of h).2, ?_, ?_, ?_, Or.inr ?_⟩

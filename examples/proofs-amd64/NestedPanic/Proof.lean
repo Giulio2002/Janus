@@ -543,10 +543,10 @@ theorem pre : PanicCallerOK PW s0 (PW.depth + 120) 48 ∧ Buffer s0 (BitVec.ofNa
 def wfi : Spec.FuncInfo := Spec.FuncInfo.named Extracted.funcs "example.com/basic.NestedPanic"
 
 /-- The call state at `runtime.gopanic`'s entry: `NestedPanic`'s own frame, pending open-coded defers in place, `LR` inside the function. -/
-def wmG : Janus.Arm64.Memory := witMem (tabWords T0 ++ [((0x4ff00 - 96), loc_NestedPanic_133), (0x4ff00 - 24, 0x4ff00 - 40), (0x4ff00 - 16, 0x4ff00 - 64), (0x4ff00 - 40, func1A), (0x4ff00 - 64, func2A), (0x4ff00 - 32, 0), (0x4ff00 - 56, 0), (0x4ff00 - 48, 0), (0x4ff00 - 65, 3)])
+def wmG : Janus.Arm64.Memory := witMem (tabWords T0 ++ [((0x4ff00 - 96), loc_NestedPanic_133), (0x4ff00 - 24, 0x4ff00 - 40), (0x4ff00 - 16, 0x4ff00 - 64), (0x4ff00 - 40, func1A), (0x4ff00 - 64, func2A), (0x4ff00 - 32, 0), (0x4ff00 - 56, 0), (0x4ff00 - 48, 0), (0x4ff00 - 65, 3)]) -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 
 def wsG : Janus.Amd64.State :=
-  { regs := fun i => if i = 4 then BitVec.ofNat 64 (0x4ff00 - 96) else if i = 14 then BitVec.ofNat 64 0x50000 else if i = 0 then 1#64 else 0,
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 (0x4ff00 - 96) else if i = 14 then BitVec.ofNat 64 0x50000 else if i = 0 then 1#64 else 0, -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     rip := BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic"), flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := wmG }
 
 theorem env_G : Env0 T0 wmG := by
@@ -570,18 +570,18 @@ theorem wsG_pre : GopanicPre PW wfi wsG := by
     rw [room0_eq]; decide
   · intro _; refine ⟨by decide, ?_⟩
     simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
-  · have hs : fspOf wsG = 0x4ff00 - 88 := by decide
+  · have hs : fspOf wsG = 0x4ff00 - 88 := by decide -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     have hr : PW.defers wmG (gOf wsG) = [] := defers_G
     have f_frame : wfi.frame = 88 := by rfl
     have f_od : wfi.openDefer = some (57, 16) := by rfl
     have f_res : wfi.resume = Extracted.entry + 0x86 := by rfl
-    have hbA : wfi.bitsAt (0x4ff00 - 88) = 0x4ff00 - 65 := by
+    have hbA : wfi.bitsAt (0x4ff00 - 88) = 0x4ff00 - 65 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold Spec.FuncInfo.bitsAt Spec.FuncInfo.varp; rw [f_frame, f_od]; try rfl
-    have hsA : wfi.slotsAt (0x4ff00 - 88) = 0x4ff00 - 24 := by
+    have hsA : wfi.slotsAt (0x4ff00 - 88) = 0x4ff00 - 24 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold Spec.FuncInfo.slotsAt Spec.FuncInfo.varp; rw [f_frame, f_od]; try rfl
-    have hbd : wfi.bound (0x4ff00 - 88) = 0x4ff00 := by
+    have hbd : wfi.bound (0x4ff00 - 88) = 0x4ff00 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold Spec.FuncInfo.bound; rw [f_frame]; try rfl
-    have hbit : wmG.readLE (0x4ff00 - 65) 1 = 3 := by decide
+    have hbit : wmG.readLE (0x4ff00 - 65) 1 = 3 := by decide -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     have hF : Panic.frameOf wfi (0x4ff00 - 88) wmG = ⟨0x4ff00 - 88, 0x4ff00, Extracted.entry + 0x86, some (0x4ff00 - 65, 0x4ff00 - 24)⟩ := by
       unfold Panic.frameOf; rw [hbA, hsA, hbd, f_res, f_od]
       simp only [hbit]; try rfl
@@ -589,7 +589,7 @@ theorem wsG_pre : GopanicPre PW wfi wsG := by
     rw [hs, hr]
     unfold frameOf
     rw [hF]
-    have hI : frameItems wmG ⟨0x4ff00 - 88, 0x4ff00, Extracted.entry + 0x86, some (0x4ff00 - 65, 0x4ff00 - 24)⟩ [] = [{ fn := 0x4ff00 - 64, bits := some 1, chain := [] }, { fn := 0x4ff00 - 40, bits := some 0, chain := [] }] := by
+    have hI : frameItems wmG ⟨0x4ff00 - 88, 0x4ff00, Extracted.entry + 0x86, some (0x4ff00 - 65, 0x4ff00 - 24)⟩ [] = [{ fn := 0x4ff00 - 64, bits := some 1, chain := [] }, { fn := 0x4ff00 - 40, bits := some 0, chain := [] }] := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       unfold frameItems openItems recItems
       simp only [hbit]
       decide

@@ -325,7 +325,7 @@ open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
 def ret : Nat := wret
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
-def p : BitVec 64 := 0x30800#64
+def p : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 def n : BitVec 64 := 64#64
 def cap : BitVec 64 := 64#64
 def c : BitVec 64 := 5#64
@@ -333,7 +333,7 @@ def c : BitVec 64 := 5#64
 def s0 : State :=
   { regs := fun r_ => if r_ = 0 then p else if r_ = 3 then n else if r_ = 1 then cap else if r_ = 7 then c else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
-    xmm := fun _ => 0, mem := ⟨fun a => if a = 200450 then 5#8 else if a = hasAVX2 then 1#8 else wmem64.bytes a, wmem64.regions ++ [⟨hasAVX2, 1, false⟩]⟩, fsBase := 0x30f08#64 }
+    xmm := fun _ => 0, mem := ⟨fun a => if a = 200450 then 5#8 else if a = hasAVX2 then 1#8 else wmem64.bytes a, wmem64.regions ++ [⟨hasAVX2, 1, false⟩]⟩, fsBase := 0x30f08#64 } -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [p, n, cap, c] s0 :=
   ⟨rfl, by decide +kernel, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl, rfl⟩
 set_option maxRecDepth 100000 in

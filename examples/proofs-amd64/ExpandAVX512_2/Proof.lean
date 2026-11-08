@@ -118,7 +118,7 @@ open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
 /-- The witness call state: the program's read-only data over `wmem64`, `RAX = 0x30800` (64 readable bytes),
 return address `wret` at `[wsp]`. -/
 def s0 : State :=
-  { regs := fun r_ => if r_ = 0 then 0x30800#64 else if r_ = 4 then BitVec.ofNat 64 wsp
+  { regs := fun r_ => if r_ = 0 then 0x30800#64 else if r_ = 4 then BitVec.ofNat 64 wsp -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
       else if r_ = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := withData Extracted.program.data wmem64 }

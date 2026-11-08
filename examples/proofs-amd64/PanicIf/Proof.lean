@@ -43,7 +43,7 @@ theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 def PW : Spec.PanicRuntime := Janus.Contracts.PanicModel.P0 [] Janus.Contracts.PanicSatAmd64.RPa
 
 def x : BitVec 64 := 3#64
-def etyp : BitVec 64 := 0x30800#64
+def etyp : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 def edata : BitVec 64 := 0x30900#64
 
 def s0 : State :=

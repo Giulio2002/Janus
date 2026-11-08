@@ -71,15 +71,15 @@ def ret : Nat := wret
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 def nr : BitVec 64 := 0xa#64
-def xk : BitVec 64 := 0x30800#64
+def xk : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 def dst : BitVec 64 := 0x30b00#64
-def src : BitVec 64 := 0x30a00#64
+def src : BitVec 64 := 0x30a00#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 theorem hnr : nr = 10#64 ∨ nr = 12#64 ∨ nr = 14#64 := by decide
 
 def s0 : State :=
   { regs := fun r_ => if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
-    xmm := fun _ => 0, mem := ⟨fun a => if a = 294920 then 10#8 else if a = 294929 then 8#8 else if a = 294930 then 3#8 else if a = 294937 then 11#8 else if a = 294938 then 3#8 else if a = 294945 then 10#8 else if a = 294946 then 3#8 else wmem64.bytes a, wmem64.regions ++ []⟩ }
+    xmm := fun _ => 0, mem := ⟨fun a => if a = 294920 then 10#8 else if a = 294929 then 8#8 else if a = 294930 then 3#8 else if a = 294937 then 11#8 else if a = 294938 then 3#8 else if a = 294945 then 10#8 else if a = 294946 then 3#8 else wmem64.bytes a, wmem64.regions ++ []⟩ } -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry [nr, xk, dst, src] 0 s0 :=
   ⟨rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> (simp only [List.getElem_cons_zero, List.getElem_cons_succ]; decide), by unfold FrameOK; decide, rfl⟩
 set_option maxRecDepth 100000 in
