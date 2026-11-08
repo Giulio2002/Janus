@@ -61,8 +61,8 @@ theorem returns : ReachesRet Extracted.program (retAddrOf s0) s0
 
 theorem nonvacuous : ∃ s, s.rip = BitVec.ofNat 64 Extracted.entry ∧ HPre H0 64 2 s ∧
     (ReachesRet Extracted.program (retAddrOf s) s
-    (fun s' => HRet H0 64 2 s s' fun r => r 0 = 7)) :=
-  ⟨s0, rfl, pre, returns⟩
+    (fun s' => HRet H0 64 2 s s' fun r => r 0 = s.regs 3)) :=
+  ⟨s0, rfl, pre, correctness H0 64 s0 rfl pre⟩
 
 end Witness
 

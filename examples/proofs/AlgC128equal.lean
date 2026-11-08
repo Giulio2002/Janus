@@ -57,8 +57,10 @@ theorem pre : EqPre 64 2 s0 ∧ s0.fpcr = 0 ∧ Input s0 64 2 (s0.regs 0).toNat 
 
 theorem nonvacuous : ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧
     (EqPre 64 2 s ∧ s.fpcr = 0 ∧ Input s 64 2 (s.regs 0).toNat 16 ∧
-      Input s 64 2 (s.regs 1).toNat 16) :=
-  ⟨s0, rfl, pre⟩
+      Input s 64 2 (s.regs 1).toNat 16) ∧
+    (ReachesRet Extracted.program (s.regs 30) s
+    (fun s' => EqRet 64 2 s s' fun r => BoolRes r ((feq binary64 (s.mem.readLE (s.regs 0).toNat 8) (s.mem.readLE (s.regs 1).toNat 8)) && (feq binary64 (s.mem.readLE ((s.regs 0).toNat + 8) 8) (s.mem.readLE ((s.regs 1).toNat + 8) 8))))) :=
+  ⟨s0, rfl, pre, correctness 64 s0 rfl pre⟩
 
 /-- `correctness` at `s0`: the call returns Go's `==` of the value at `VAL` with itself. -/
 theorem returns : ReachesRet Extracted.program (s0.regs 30) s0

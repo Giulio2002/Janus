@@ -77,8 +77,8 @@ theorem returns : ReachesRet Extracted.program (retAddrOf s0) s0
 theorem nonvacuous : ∃ s, s.rip = BitVec.ofNat 64 Extracted.entry ∧
     (EqPre 64 2 s ∧ Input s 64 2 (s.regs 0).toNat 1 ∧ Input s 64 2 (s.regs 3).toNat 1) ∧
     (ReachesRet Extracted.program (retAddrOf s) s
-    (fun s' => EqRet 64 2 s s' fun r => BoolRes r true)) :=
-  ⟨s0, rfl, pre, returns⟩
+    (fun s' => EqRet 64 2 s s' fun r => BoolRes r (s.mem.readLE (s.regs 0).toNat 1 == s.mem.readLE (s.regs 3).toNat 1))) :=
+  ⟨s0, rfl, pre, correctness 64 s0 rfl pre⟩
 
 end Witness
 

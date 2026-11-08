@@ -94,8 +94,8 @@ theorem nonvacuous : ∃ s, s.rip = BitVec.ofNat 64 Extracted.entry ∧
     (EqPre 64 2 s ∧ GoMXCSR s ∧ Input s 64 2 (s.regs 0).toNat (2 * 4) ∧
       Input s 64 2 (s.regs 3).toNat (2 * 4)) ∧
     (ReachesRet Extracted.program (retAddrOf s) s
-    (fun s' => EqRet 64 2 s s' fun r => BoolRes r true)) :=
-  ⟨s0, rfl, pre, returns⟩
+    (fun s' => EqRet 64 2 s s' fun r => BoolRes r ((feq binary32 (s.mem.readLE (s.regs 0).toNat 4) (s.mem.readLE (s.regs 3).toNat 4)) && (feq binary32 (s.mem.readLE ((s.regs 0).toNat + 4) 4) (s.mem.readLE ((s.regs 3).toNat + 4) 4))))) :=
+  ⟨s0, rfl, pre, correctness 64 s0 rfl pre⟩
 
 end Witness
 

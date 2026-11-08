@@ -465,7 +465,7 @@ theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : Rt
     RetAddr Extracted.program ret ∧
     CallSetup (Extracted.program.withExit ret) Extracted.entry [7#64, 0#64] s ∧
     GPre FT pool rt H s ∧ ¬ StackGuardOK s 40 ∧
-    (GrownReturns64 (Extracted.program.withExit ret) (reloc FTb) s
+    (GrownReturns64 (Extracted.program.withExit ret) reloc s
     (fun s' => s'.regs 0 = 7#64)) :=
   ⟨FTb, pool, rt, H, reloc FTb, ret, s0, contract64 _ FTb, agrees, hret, setup, pre, no_room, returns⟩
 

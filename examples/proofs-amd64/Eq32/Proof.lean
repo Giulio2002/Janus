@@ -112,8 +112,8 @@ theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (a b : BitVec 64), RetAddr Extracted.program ret ∧
     CallSetup (Extracted.program.withExit ret) Extracted.entry [a, b] s ∧ pre a b s ∧
     (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ (s'.regs 0).toNat % 256 = 1) :=
-  ⟨ret, s0, a, b, hret, setup, hpre, returns⟩
+    ABIReturn s s' ∧ (s'.regs 0).toNat % 256 = (s.mem.readLE a.toNat 32 == s.mem.readLE b.toNat 32).toNat) :=
+  ⟨ret, s0, a, b, hret, setup, hpre, correctness a b ret hret s0 setup hpre⟩
 
 end Witness
 

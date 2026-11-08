@@ -817,9 +817,10 @@ theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : Rt
     MorestackContract64 Extracted.program FT pool rt H reloc ∧ Env FT pool rt ∧
     RetAddr Extracted.program ret ∧ CallSetup (Extracted.program.withExit ret) Extracted.entry [3#64] s ∧
     Pre FT pool rt H s ∧ ¬ s.mem.readLE ((s.regs 14).toNat + 16) 8 < (s.regs 4).toNat ∧
-    (GrownReturns64 (Extracted.program.withExit ret) (reloc FTs) s
-    (fun s' => s'.regs 0 = 6#64)) :=
-  ⟨FTs, pool, rt, H, reloc FTs, ret, s0, contract64 _ FTs, env, hret, setup, pre, no_room, returns⟩
+    (GrownReturns64 (Extracted.program.withExit ret) reloc s
+    (fun s' => s'.regs 0 = BitVec.ofNat 64 (sumTo (3#64).toNat))) :=
+  ⟨FTs, pool, rt, H, reloc FTs, ret, s0, contract64 _ FTs, env, hret, setup, pre, no_room,
+    correctness FTs pool rt H (reloc FTs) (contract64 _ FTs) env 3#64 ret hret s0 setup pre⟩
 
 end Witness
 

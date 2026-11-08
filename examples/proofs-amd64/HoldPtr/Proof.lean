@@ -1185,7 +1185,7 @@ theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : Rt
     RetAddr Extracted.program ret ∧ CallSetup (Extracted.program.withExit ret) Extracted.entry [16#64] s ∧
     PreH FT pool rt H s ∧ (s.mem.readLE ((s.regs 14).toNat + 16) 8 < (s.regs 4).toNat ∧
       ¬ s.mem.readLE ((s.regs 14).toNat + 16) 8 + 40 < (s.regs 4).toNat - 64) ∧
-    (GrownReturns64 (Extracted.program.withExit ret) (reloc FTs) s
+    (GrownReturns64 (Extracted.program.withExit ret) reloc s
     (fun s' => s'.regs 0 = 49#64)) :=
   ⟨FTs, pool, rt, H, reloc FTs, ret, s0, contract64 _ FTs, env, hret, setup, pre, callee_grows, returns⟩
 

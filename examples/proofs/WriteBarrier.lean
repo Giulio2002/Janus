@@ -255,10 +255,14 @@ precondition of `gcWriteBarrierN`'s contract, with `HRoom`, holds at the concret
 the `wbN_meets` are not vacuous. -/
 theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s : State),
     WbContract Extracted.program wb1 rt 232 (HRoom rt 1) 1 ∧
-    ∀ n, n ≤ 8 → CallOK s 232 0 ∧ Ready (HRoom rt n) rt [n] s ∧
+    (∀ n, n ≤ 8 → CallOK s 232 0 ∧ Ready (HRoom rt n) rt [n] s) ∧
     (ReachesRet Extracted.program (s.regs 30) s fun s' =>
-    s'.pc = s.regs 30 ∧ ∃ buf : W64, s'.regs 25 = buf ∧ WbSlots rt s'.mem buf.toNat 1) :=
-  ⟨rt, s0, wb1_meets rt, fun n hn => ⟨callOK n, ready n hn⟩, returns⟩
+      ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+        (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+      s' = { s with regs := wbRegs s.regs junk buf, pc := s.regs 30, flags := f, vregs := v, mem := m,
+                    excl := ex, exclPass := ep } ∧
+      MemFrame s.mem m (rt ++ [(s.sp.toNat - 232, s.sp.toNat - 8)]) ∧ WbSlots rt m buf.toNat 1) :=
+  ⟨rt, s0, wb1_meets rt, fun n hn => ⟨callOK n, ready n hn⟩, wb1_meets rt s0 rfl ⟨callOK 1, ready 1 (by decide)⟩⟩
 
 end Witness
 
