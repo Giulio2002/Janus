@@ -980,8 +980,17 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 		toolRO = append(toolRO, ws.tc.sysroot)
 		// Hermetic sandbox: no ~/.elan, so the elan shim cannot run inside. Use the toolchain's own lake
 		// (the one the shim would exec) with its bin first on PATH.
-		if real := filepath.Join(ws.tc.sysroot, "bin", "lake"); fileExists(real) && !hasPrefixEnv(env, "JANUS_REAL_LAKE=") {
-			lakeBin = real
+		if real := filepath.Join(ws.tc.sysroot, "bin", "lake"); fileExists(real) {
+			if hasPrefixEnv(env, "JANUS_REAL_LAKE=") {
+				// the lakeguard wrapper stays, but its real lake is the toolchain's, not the elan shim
+				for i, e := range env {
+					if strings.HasPrefix(e, "JANUS_REAL_LAKE=") {
+						env[i] = "JANUS_REAL_LAKE=" + real
+					}
+				}
+			} else {
+				lakeBin = real
+			}
 		}
 		for i, e := range env {
 			if strings.HasPrefix(e, "PATH=") {
@@ -991,9 +1000,6 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 	}
 	if filepath.IsAbs(ws.lake) {
 		toolRO = append(toolRO, filepath.Dir(ws.lake))
-	}
-	if rl := os.Getenv("JANUS_REAL_LAKE"); filepath.IsAbs(rl) {
-		toolRO = append(toolRO, filepath.Dir(filepath.Dir(rl)))
 	}
 	if g := os.Getenv("JANUS_LAKEGUARD_ROOT"); g != "" {
 		toolRO = append(toolRO, g)

@@ -545,7 +545,7 @@ func hermeticEnv(env []string) []string {
 		switch {
 		case k == "PATH":
 			out = append(out, "PATH="+hermeticPath(strings.TrimPrefix(e, "PATH=")))
-		case k == "JANUS_REAL_LAKE", strings.HasPrefix(k, "JANUS_LAKEGUARD_"), k == "LANG", k == "TZ", k == "TERM", k == "JANUS_LEAN_SYSROOT",
+		case k == "JANUS_REAL_LAKE", k == "JANUS_R1_MODE", strings.HasPrefix(k, "JANUS_LAKEGUARD_"), k == "LANG", k == "TZ", k == "TERM", k == "JANUS_LEAN_SYSROOT",
 			strings.HasPrefix(k, "LEAN_"), strings.HasPrefix(k, "LAKE_"), strings.HasPrefix(k, "LC_"),
 			strings.HasPrefix(k, "GIT_"):
 			out = append(out, e)
