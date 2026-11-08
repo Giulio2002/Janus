@@ -319,4 +319,46 @@ theorem correctness (p n cap : BitVec 64) (c : BitVec 64) :
   · rw [if_neg hbr]
     exact fin_zero _ ht0
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def p : BitVec 64 := 0x30800#64
+def n : BitVec 64 := 64#64
+def cap : BitVec 64 := 64#64
+def c : BitVec 64 := 5#64
+
+def s0 : State :=
+  { regs := fun r_ => if r_ = 0 then p else if r_ = 3 then n else if r_ = 1 then cap else if r_ = 7 then c else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := ⟨fun a => if a = 200450 then 5#8 else if a = hasAVX2 then 1#8 else wmem64.bytes a, wmem64.regions ++ [⟨hasAVX2, 1, false⟩]⟩, fsBase := 0x30f08#64 }
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [p, n, cap, c] s0 :=
+  ⟨rfl, by decide +kernel, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl, rfl⟩
+set_option maxRecDepth 100000 in
+theorem hpre : (fun s => StackGuardOK s 0 ∧ StackWritable s 56 16 ∧ TlsG s ∧ n.toNat = 64 ∧
+        Buffer s p 64 false ∧
+        (p.toNat + 64 ≤ (s.regs regSP).toNat - 56 ∨ (s.regs regSP).toNat + 16 ≤ p.toNat) ∧
+        (s.fsBase.toNat - 8 + 8 ≤ (s.regs regSP).toNat - 56 ∨ (s.regs regSP).toNat + 16 ≤ s.fsBase.toNat - 8) ∧
+        s.mem.accessible hasAVX2 1 false = true ∧ s.mem.readLE hasAVX2 1 = 1 ∧
+        (hasAVX2 + 1 ≤ (s.regs regSP).toNat - 56 ∨ (s.regs regSP).toNat + 16 ≤ hasAVX2)) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (p : BitVec 64) (n : BitVec 64) (cap : BitVec 64) (c : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [p, n, cap, c] s ∧ (StackGuardOK s 0 ∧ StackWritable s 56 16 ∧ TlsG s ∧ n.toNat = 64 ∧
+        Buffer s p 64 false ∧
+        (p.toNat + 64 ≤ (s.regs regSP).toNat - 56 ∨ (s.regs regSP).toNat + 16 ≤ p.toNat) ∧
+        (s.fsBase.toNat - 8 + 8 ≤ (s.regs regSP).toNat - 56 ∨ (s.regs regSP).toNat + 16 ≤ s.fsBase.toNat - 8) ∧
+        s.mem.accessible hasAVX2 1 false = true ∧ s.mem.readLE hasAVX2 1 = 1 ∧
+        (hasAVX2 + 1 ≤ (s.regs regSP).toNat - 56 ∨ (s.regs regSP).toNat + 16 ≤ hasAVX2)) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ s'.regs 0 = BitVec.ofInt 64 (indexOf s.mem p.toNat (c.toNat % 256) 64)) :=
+  ⟨ret, s0, p, n, cap, c, hret, setup, hpre, correctness p n cap c ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

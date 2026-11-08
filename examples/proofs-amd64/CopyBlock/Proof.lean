@@ -50,4 +50,39 @@ theorem correctness (dst src : BitVec 64) :
       copy_step _ _ _ _ 64 16 <| copy_step _ _ _ _ 48 16 <| copy_step _ _ _ _ 32 16 <|
       copy_step _ _ _ _ 16 16 <| copy_first _ _ _ _ _
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def dst : BitVec 64 := 0x30800#64
+def src : BitVec 64 := 0x30a00#64
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then dst else if i = 3 then src else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wmem64 }
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [dst, src] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem hpre : (fun s => StackGuardOK s 0 ∧ StackWritable s 40 8 ∧ Buffer s dst 128 true ∧
+        Buffer s src 128 false ∧
+        (dst.toNat + 128 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat + 8 ≤ dst.toNat) ∧
+        (src.toNat + 128 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ src.toNat)) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (dst : BitVec 64) (src : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [dst, src] s ∧ (StackGuardOK s 0 ∧ StackWritable s 40 8 ∧ Buffer s dst 128 true ∧
+        Buffer s src 128 false ∧
+        (dst.toNat + 128 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat + 8 ≤ dst.toNat) ∧
+        (src.toNat + 128 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ src.toNat)) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ valueAt s' dst 128 = valueAt s src 128) :=
+  ⟨ret, s0, dst, src, hret, setup, hpre, correctness dst src ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

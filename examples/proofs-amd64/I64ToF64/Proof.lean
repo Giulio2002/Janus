@@ -38,4 +38,32 @@ theorem exact (x : BitVec 64) (hx : x.toInt.natAbs < 2 ^ 53) :
       (fun _ s' => truncInt binary64 ((s'.xmm 0).toNat % 2 ^ 64) = some x.toInt) :=
   (correctness x).mono (fun _ h => h) (fun _ _ _ h => by rw [h]; exact truncInt_fromInt _ _ hx)
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def x : BitVec 64 := 5#64
+
+def s0 : State :=
+  { regs := fun r_ => if r_ = 0 then x else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wmem64 }
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem hpre : (fun s => StackWritable s 0 8 ∧ GoMXCSR s) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s ∧ (StackWritable s 0 8 ∧ GoMXCSR s) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ (s'.xmm 0).toNat % 2 ^ 64 = fromInt binary64 .rne x.toInt) :=
+  ⟨ret, s0, x, hret, setup, hpre, correctness x ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

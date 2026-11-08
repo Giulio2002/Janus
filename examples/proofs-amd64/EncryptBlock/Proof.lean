@@ -64,4 +64,41 @@ theorem corollaryFIPS197 (xk dst src : BitVec 64) :
   (corollaryAES128 (countKey 16) xk dst src).mono (fun _ ⟨a, b, c, d, e, _⟩ => ⟨a, b, c, d, e⟩)
     fun _ _ ⟨_, _, _, _, _, hp⟩ h => by rw [h, hp, fips197_C1]
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def nr : BitVec 64 := 0xa#64
+def xk : BitVec 64 := 0x30800#64
+def dst : BitVec 64 := 0x30b00#64
+def src : BitVec 64 := 0x30a00#64
+theorem hnr : nr = 10#64 ∨ nr = 12#64 ∨ nr = 14#64 := by decide
+
+def s0 : State :=
+  { regs := fun r_ => if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := ⟨fun a => if a = 294920 then 10#8 else if a = 294929 then 8#8 else if a = 294930 then 3#8 else if a = 294937 then 11#8 else if a = 294938 then 3#8 else if a = 294945 then 10#8 else if a = 294946 then 3#8 else wmem64.bytes a, wmem64.regions ++ []⟩ }
+theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry [nr, xk, dst, src] 0 s0 :=
+  ⟨rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> (simp only [List.getElem_cons_zero, List.getElem_cons_succ]; decide), by unfold FrameOK; decide, rfl⟩
+set_option maxRecDepth 100000 in
+theorem hpre : (fun s => Buffer s xk (16 * (nr.toNat + 1)) false ∧ Buffer s src 16 false ∧
+        Buffer s dst 16 true ∧ Disjoint dst 16 (s.regs 4) 8) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (nr : BitVec 64) (xk : BitVec 64) (dst : BitVec 64) (src : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup0 (Extracted.program.withExit ret) Extracted.entry [nr, xk, dst, src] 0 s ∧ (nr = 10#64 ∨ nr = 12#64 ∨ nr = 14#64) ∧ (Buffer s xk (16 * (nr.toNat + 1)) false ∧ Buffer s src 16 false ∧
+        Buffer s dst 16 true ∧ Disjoint dst 16 (s.regs 4) 8) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn0 s s' ∧ s'.mem.readLE dst.toNat 16 =
+          cipher nr.toNat (schedule s.mem xk.toNat (4 * (nr.toNat + 1))) (s.mem.readLE src.toNat 16) ∧
+        Janus.Spec.OnlyWrites s.mem s'.mem dst.toNat 16) :=
+  ⟨ret, s0, nr, xk, dst, src, hret, setup, hnr, hpre, correctness nr xk dst src hnr ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

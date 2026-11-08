@@ -319,4 +319,46 @@ theorem correctness (crc p n cap : BitVec 64) :
     (by janus_simp) (by janus_simp [update_zero]; rw [show (4294967296 : Nat) = 2 ^ 32 from rfl, not_mod32']) (by janus_simp) (by janus_simp <;> simp)
     (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp)
 
+
+namespace Witness
+
+def ret : Nat := 0x1000
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+def sp0 : Nat := 0x108000
+def g0 : Nat := 0x200000
+def hp : Nat := 0x300000
+
+def wbytes (a : Nat) : Byte := 0
+
+def wmem : Memory := ⟨wbytes, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩]⟩
+
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then (0) else if i = 1 then (0x300000) else if i = 2 then (16) else if i = 3 then (16) else if i = 28 then BitVec.ofNat 64 g0 else if i = 29 then BitVec.ofNat 64 (sp0 - 8)
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0 : BitVec 64), (0x300000 : BitVec 64), (16 : BitVec 64), (16 : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `correctness` hold together at a concrete call. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (crc : BitVec 64) (p : BitVec 64) (n : BitVec 64) (cap : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [crc, p, n, cap] s ∧ (GuardOK s 0 ∧ StackOK s 120 24 ∧ n.toNat < 2 ^ 63 ∧ Ptr s.mem p n.toNat false ∧
+        Disjoint p.toNat n.toNat (s.sp.toNat - 120) 144) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ ((s'.regs 0).toNat % 2 ^ 32 = crc32IEEE s.mem (crc.toNat % 2 ^ 32) p.toNat n.toNat)) := by
+  refine ⟨ret, s0, (0), (0x300000), (16), (16), hret, setup, ?pre, correctness (0) (0x300000) (16) (16) ret hret s0 setup ?pre⟩
+  case pre =>
+    simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp] <;> decide
+
+end Witness
+
 end Proof

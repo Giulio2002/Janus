@@ -62,4 +62,57 @@ theorem saturation (x : BitVec 64) :
   · rw [hsp.1 hn]
   · rw [hsp.2 hinf]; split <;> rfl
 
+
+namespace Witness
+
+def ret : Nat := 0x1000
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+def sp0 : Nat := 0x108000
+def g0 : Nat := 0x200000
+def hp : Nat := 0x300000
+
+def c_x : BitVec 64 := 0x4004000000000000
+def c_i : Int := 2
+
+def wbytes (a : Nat) : Byte := 0
+
+def wmem : Memory := ⟨wbytes, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 g0 else if i = 29 then BitVec.ofNat 64 (sp0 - 8)
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem,
+    vregs := fun i => if i = 0 then BitVec.ofNat 128 (c_x.toNat) else 0 }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    omega⟩
+theorem c_hi : truncInt binary64 c_x.toNat = some c_i := by decide
+
+theorem c_h0 : 0 ≤ c_i := by decide
+
+theorem c_h1 : c_i < 2 ^ 64 := by decide
+
+theorem hpre : (s0.getV 0 64 = c_x.toNat ∧ s0.fpcr = 0) := by
+  simp only [Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, c_x]
+  decide
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `correctness` hold together at a concrete call. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧
+    (truncInt binary64 c_x.toNat = some c_i ∧ 0 ≤ c_i ∧ c_i < 2 ^ 64) ∧
+    (s.getV 0 64 = c_x.toNat ∧ s.fpcr = 0) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ ((s'.regs 0).toNat = c_i.toNat)) :=
+  ⟨ret, s0, hret, setup, ⟨c_hi, c_h0, c_h1⟩, hpre, correctness c_x c_i c_hi c_h0 c_h1 ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

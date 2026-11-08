@@ -97,10 +97,14 @@ func TestNonVacuityAuditOnlyAndNoContract(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "verified.json")); err == nil {
 		t.Error("audit-only left a verified.json")
 	}
+	// UP3c: a contract-free main theorem without a verified witness is refused too (no bypass)
 	outs, _ = runNV(t, false, nvMain("P.correctness"))
-	r = outs[0].Report
-	if outs[0].Err != nil || r.NonVacuity != nvNotShown || !strings.Contains(nonVacuityLine(r), "NOT SHOWN") {
-		t.Errorf("no-contract: %+v", outs[0])
+	if outs[0].Err == nil || !strings.Contains(outs[0].Err.Error(), "no kernel-checked non-vacuity witness") {
+		t.Errorf("contract-free main without witness accepted: %+v", outs[0])
+	}
+	outs, _ = runNV(t, false, nvMain("P.correctness"), nvWit("P.Witness.nonvacuous", "P.correctness", "witness-nonvacuous"))
+	if outs[0].Err != nil || outs[0].Report.NonVacuity != nvShown {
+		t.Errorf("contract-free main with a witness refused: %+v", outs[0])
 	}
 }
 

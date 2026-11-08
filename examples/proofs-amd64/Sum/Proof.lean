@@ -108,4 +108,37 @@ theorem correctness (ptr len cap : BitVec 64) (hlen : len.toNat < 2 ^ 63) :
       simp only [results, intArgRegs, List.take, List.map, e0]
       rw [sumFrom_writeLE _ _ _ _ _ _ (by omega)]; simp
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def ptr : BitVec 64 := 0x30800#64
+def len : BitVec 64 := 3#64
+def cap : BitVec 64 := 4#64
+theorem hlen : len.toNat < 2 ^ 63 := by decide
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then ptr else if i = 3 then len else if i = 1 then cap else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wmem64 }
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
+theorem hpre : (fun s => StackWritable s 0 16 ∧ Buffer s ptr (8 * len.toNat) false ∧
+        Disjoint ptr (8 * len.toNat) (s.regs regSP + 8) 8) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (ptr : BitVec 64) (len : BitVec 64) (cap : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap] s ∧ (len.toNat < 2 ^ 63) ∧ (StackWritable s 0 16 ∧ Buffer s ptr (8 * len.toNat) false ∧
+        Disjoint ptr (8 * len.toNat) (s.regs regSP + 8) 8) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ results 1 s' = [BitVec.ofNat 64 (sumFrom s.mem ptr.toNat 0 len.toNat)]) :=
+  ⟨ret, s0, ptr, len, cap, hret, setup, hlen, hpre, correctness ptr len cap hlen ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

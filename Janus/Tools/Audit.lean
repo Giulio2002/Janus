@@ -3035,13 +3035,25 @@ address, call state, precondition conjuncts) must be a conjunct of the witness t
 def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) := do
   let (ms, _, concl) ← Meta.forallMetaTelescope mty
   let hyps ← premisesOf ms
-  let concls := flattenAnd (← instantiateMVars concl)
+  let allConcls := flattenAnd (← instantiateMVars concl)
+  -- UP3c: a conjunct that only claims a PANIC (`Panics p s ↔ y = 0`, `len ≤ i → Panics p s`: mentions `Panics`, no `Returns`/`ReachesRet`) is
+  -- witnessed symmetrically to a returning conjunct: the witness exhibits an instance where the guard / the premises of that conjunct hold
+  -- together with the main theorem's premises, and the `Panics p s` claim itself (both sides of an `↔`), so a panic claim guarded by an
+  -- unsatisfiable condition is not vacuous either.
+  let claimsRun := fun (c : Expr) =>
+    let used := c.getUsedConstants
+    used.any fun n => n == `Janus.GoABI.Returns || n == `Janus.Amd64.GoABI.Returns || n == `Janus.Tactic.ReachesRet || n == `Janus.Amd64.Tactic.ReachesRet
+  let panicOnly := fun (c : Expr) =>
+    let used := c.getUsedConstants
+    (used.contains `Janus.GoABI.Panics || used.contains `Janus.Amd64.GoABI.Panics) && !claimsRun c
+  let concls := allConcls
   for (c, idx) in concls.toList.zip (List.range concls.size) do
     let st ← Meta.saveState
-    let body ← unfoldToForall c
+    let isPan := panicOnly c
+    let body ← if isPan then pure c else unfoldToForall c
     let (ms2, _, lastConcl) ← Meta.forallMetaTelescope body
     let which := if concls.size > 1 then s!" (conjunct {idx + 1} of {concls.size})" else ""
-    if ms2.isEmpty then
+    if ms2.isEmpty && !isPan then
       return some s!"the conclusion of the main theorem{which} does not unfold to a `∀ ret, … → ∀ s, CallSetup … → pre s → …` statement"
     let calls ← premisesOf ms2
     -- the premise `s.pc = entry` / `s.rip = entry` of a `Summary`-style contract is the call setup; a witness
@@ -3051,6 +3063,17 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
     let pcPrem := fun (e : Expr) => e.isAppOfArity ``Eq 3 && isPcProj (e.getArg! 1)
     let core := all.filter (!pcPrem ·)
     let ps := core.filter (!arithPremise ·) ++ core.filter arithPremise
+    -- a panic-only conjunct is anchored on its own claim: the instance is the one the witness's `Panics p s` conjunct names (the
+    -- premises of the main theorem are then matched at THAT state, not at the first state the returning conjunct used)
+    if isPan then
+      let panSide := if lastConcl.isAppOfArity ``Iff 2 then
+          (if (lastConcl.getArg! 0).getUsedConstants.any (fun n => n == `Janus.GoABI.Panics || n == `Janus.Amd64.GoABI.Panics) then lastConcl.getArg! 0 else lastConcl.getArg! 1)
+        else lastConcl
+      for w in wconjs do
+        let st0 ← Meta.saveState
+        if ← defEqTry panSide w then
+          if (← matchPremises ps wconjs).isNone then break
+        st0.restore
     match ← matchPremises ps wconjs with
     | none =>
       -- Round 14 (rt-auditv2, F2): a binder of the main theorem that is not a proposition and that the
@@ -3138,7 +3161,10 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
       -- vacuous contract, an unsatisfiable pre or an empty `R` admits no such run through the call, so a witness that only exhibits
       -- satisfiability (provable by `exfalso`) no longer matches.
       let lastC ← instantiateMVars lastConcl
-      unless ← findConj lastC wconjs do
+      -- a panic-only conjunct: the claim is `Panics p s` (an `↔` states it on one side and its guard on the other: both are required)
+      let lastCs := if isPan then (if lastC.isAppOfArity ``Iff 2 then #[lastC.getArg! 0, lastC.getArg! 1] else #[lastC]) else #[lastC]
+      for lastC in lastCs do
+       unless ← findConj lastC wconjs do
         return some s!"the main theorem{which} is not exhibited as a RUN: the witness must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr lastC).pretty 300}` (a concrete run from the precondition state to the return with the post holding; U-WITNESS-RUN)"
       -- the pc premises: matched if the witness states them, else they must be about a state the other
       -- premises fixed

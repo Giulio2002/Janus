@@ -71,4 +71,48 @@ theorem correctness (a0 a1 a2 b0 b1 b2 : BitVec 64) :
   rw [resultIs_bind binary64 _ w _ _ (fun y hy => add_nan_right _ _ _ _ hy) hw']
   exact hv'
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def a0 : BitVec 64 := 0x3FF0000000000000#64
+def a1 : BitVec 64 := 0x4000000000000000#64
+def a2 : BitVec 64 := 0x4008000000000000#64
+def b0 : BitVec 64 := 0x3FF0000000000000#64
+def b1 : BitVec 64 := 0x4000000000000000#64
+def b2 : BitVec 64 := 0x4008000000000000#64
+
+def s0 : State :=
+  { regs := fun r_ => if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun r_ => if r_ = 0 then BitVec.ofNat 128 a0.toNat else if r_ = 1 then BitVec.ofNat 128 a1.toNat else if r_ = 2 then BitVec.ofNat 128 a2.toNat else if r_ = 3 then BitVec.ofNat 128 b0.toNat else if r_ = 4 then BitVec.ofNat 128 b1.toNat else if r_ = 5 then BitVec.ofNat 128 b2.toNat else 0, mem := wmem64 }
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h, rfl⟩
+theorem hpre : (fun s => StackWritable s 0 8 ∧ (s.xmm 0).toNat % 2 ^ 64 = a0.toNat ∧
+        (s.xmm 1).toNat % 2 ^ 64 = a1.toNat ∧ (s.xmm 2).toNat % 2 ^ 64 = a2.toNat ∧
+        (s.xmm 3).toNat % 2 ^ 64 = b0.toNat ∧ (s.xmm 4).toNat % 2 ^ 64 = b1.toNat ∧
+        (s.xmm 5).toNat % 2 ^ 64 = b2.toNat ∧ GoMXCSR s) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) , RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (StackWritable s 0 8 ∧ (s.xmm 0).toNat % 2 ^ 64 = Witness.a0.toNat ∧
+        (s.xmm 1).toNat % 2 ^ 64 = Witness.a1.toNat ∧ (s.xmm 2).toNat % 2 ^ 64 = Witness.a2.toNat ∧
+        (s.xmm 3).toNat % 2 ^ 64 = Witness.b0.toNat ∧ (s.xmm 4).toNat % 2 ^ 64 = Witness.b1.toNat ∧
+        (s.xmm 5).toNat % 2 ^ 64 = Witness.b2.toNat ∧ GoMXCSR s) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ ResultIs binary64
+        ((mul binary64 .rne Witness.a0.toNat Witness.b0.toNat).bind fun p =>
+          (mul binary64 .rne Witness.a1.toNat Witness.b1.toNat).bind fun q =>
+          (add binary64 .rne p q).bind fun r =>
+          (mul binary64 .rne Witness.a2.toNat Witness.b2.toNat).bind fun w => add binary64 .rne r w)
+        ((s'.xmm 0).toNat % 2 ^ 64)) :=
+  ⟨ret, s0, hret, setup, hpre, correctness a0 a1 a2 b0 b1 b2 ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

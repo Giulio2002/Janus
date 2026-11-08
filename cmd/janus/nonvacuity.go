@@ -1,6 +1,6 @@
 package main
 
-// Non-vacuity policy. A MAIN theorem whose statement applies runtime-contract hypotheses
+// Non-vacuity policy (UP3c: EVERY main theorem, contract-free ones too, needs a verified tied witness). A MAIN theorem whose statement applies runtime-contract hypotheses
 // (verified.json contractHyps non-empty) is accepted only together with a kernel-checked
 // non-vacuity witness: a verified theorem of the same run (same proof module) whose audited role
 // is witness-nonvacuous and whose matchedMain is THIS theorem. The auditor (Janus/Tools/Audit.lean,
@@ -19,10 +19,10 @@ import (
 )
 
 const (
-	nvShown    = "shown"
-	nvNotShown = "not-shown"
+	nvShown     = "shown"
+	nvNotShown  = "not-shown"
 	nvAuditOnly = "audit-only"
-	nvWitness  = "witness"
+	nvWitness   = "witness"
 )
 
 // nonVacuityVerdict computes the status of reps[i] (a verified main or witness report) against the
@@ -50,11 +50,16 @@ func nonVacuityVerdict(r *verifiedReport, peers []*verifiedReport, auditOnly boo
 	if witness != "" {
 		return nvShown, witness, returns, nil
 	}
-	if len(r.ContractHyps) == 0 {
-		return nvNotShown, "", returns, nil
-	}
 	if auditOnly {
 		return nvAuditOnly, "", returns, nil
+	}
+	if len(r.ContractHyps) == 0 {
+		// UP3c: EVERY main theorem needs a verified tied witness, contract-free ones included: an unsatisfiable or circular
+		// precondition makes a contract-free theorem exactly as vacuous.
+		msg := fmt.Sprintf("%s has no kernel-checked non-vacuity witness verified in this run: nothing shows that its precondition is satisfiable and that the program actually returns from a state satisfying it, so the theorem could be vacuous. Every main theorem is verified ONLY together with a verified Witness.nonvacuous that carries the returning run; --allow-no-witness does not bypass this and is ignored.", termSafe(r.Theorem))
+		return "", "", "", &diag{Invalid: true, Stage: "non-vacuity", Msg: msg,
+			Next: "Add a named theorem in the proof's Witness namespace (conventionally Witness.nonvacuous) of the form `∃ ret s <binders>, RetAddr … ∧ CallSetup … ∧ <the precondition> ∧ Returns … s (fun s' => ABIReturn s s' ∧ <the post>)` and verify it in the same run (--theorem " +
+				witnessHint(r.Theorem) + ")."}
 	}
 	msg := fmt.Sprintf("%s assumes runtime contracts (%s) but no kernel-checked non-vacuity witness for it was verified in this run: nothing shows that its precondition, those contracts and this program are jointly satisfiable, so the theorem could be vacuous. A theorem that assumes contracts is verified ONLY together with a verified Witness.nonvacuous; --allow-no-witness does not bypass this and is ignored.",
 		termSafe(r.Theorem), termSafe(strings.Join(r.ContractHyps, ", ")))

@@ -31,4 +31,47 @@ theorem correctness (P : PanicRuntime) (x etyp edata : BitVec 64) :
       simp [setRegF]
     · first | (intro _; rfl) | rfl | trivial
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+/-- The panic runtime: the model with an empty funcs table. -/
+def PW : Spec.PanicRuntime := Janus.Contracts.PanicModel.P0 [] Janus.Contracts.PanicSatAmd64.RPa
+
+def x : BitVec 64 := 3#64
+def etyp : BitVec 64 := 0x30800#64
+def edata : BitVec 64 := 0x30900#64
+
+def s0 : State :=
+  { regs := fun r_ => if r_ = 0 then x else if r_ = 3 then etyp else if r_ = 1 then edata else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wmem64 }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [x, etyp, edata] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
+
+set_option maxRecDepth 100000 in
+theorem hpre : (fun s : State => StackGuardOK s 0 ∧ StackWritable s 40 40) s0 := by
+  dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+
+theorem hyps : True := by decide
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (P : Janus.Spec.PanicRuntime) (x : BitVec 64) (etyp : BitVec 64) (edata : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, etyp, edata] s ∧ (StackGuardOK s 0 ∧ StackWritable s 40 40) ∧
+    GoReturns (Extracted.program.withExit ret) (goClass P) s fun o =>
+    match o with
+    | .returned s' => ABIReturn s s' ∧ (x.toNat ≤ 10 → s'.regs 0 = x + 1)
+    | .panicked v s' => 10 < x.toNat → v = ⟨etyp.toNat, edata.toNat⟩
+    | .goexited _ => False :=
+  ⟨ret, s0, PW, x, etyp, edata, hret, setup, hpre, correctness PW x etyp edata ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

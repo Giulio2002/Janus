@@ -96,4 +96,52 @@ theorem correctness (f ptr len cap a b : BitVec 64) :
     (by janus_simp) (by simp [affineSum]) (by janus_simp) (by janus_simp) (by janus_simp) rfl
     (MemFrame.refl _ _)
 
+
+namespace Witness
+
+def ret : Nat := 0x1000
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+def sp0 : Nat := 0x108000
+def g0 : Nat := 0x200000
+def hp : Nat := 0x300000
+
+def c_a : BitVec 64 := 2
+def c_b : BitVec 64 := 3
+
+def wbytes (a : Nat) : Byte := if 0x400000 ≤ a ∧ a < 0x400008 then BitVec.ofNat 8 (func1 / 256 ^ (a - 0x400000) % 256) else if 0x400008 ≤ a ∧ a < 0x400010 then BitVec.ofNat 8 (c_a.toNat / 256 ^ (a - 0x400008) % 256) else if 0x400010 ≤ a ∧ a < 0x400018 then BitVec.ofNat 8 (c_b.toNat / 256 ^ (a - 0x400010) % 256) else 0
+
+def wmem : Memory := ⟨wbytes, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩, ⟨0x400000, 24, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then (0x400000) else if i = 1 then (0x300000) else if i = 2 then (4) else if i = 3 then (4) else if i = 28 then BitVec.ofNat 64 g0 else if i = 29 then BitVec.ofNat 64 (sp0 - 8)
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x400000 : BitVec 64), (0x300000 : BitVec 64), (4 : BitVec 64), (4 : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `correctness` hold together at a concrete call. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (f : BitVec 64) (ptr : BitVec 64) (len : BitVec 64) (cap : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [f, ptr, len, cap] s ∧ (FuncvalIs s.mem f func1 ∧ Spec.ClosureCtx s.mem f [c_a, c_b] ∧
+        Disjoint f.toNat 24 (s.sp.toNat - 56) 88 ∧
+        len.toNat < 2 ^ 63 ∧ Ptr s.mem ptr (8 * len.toNat) false ∧
+        Disjoint ptr.toNat (8 * len.toNat) (s.sp.toNat - 56) 88 ∧
+        GuardOK s 0 ∧ StackOK s 56 32) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (s'.regs 0 = affineSum s.mem ptr.toNat c_a c_b len.toNat)) := by
+  refine ⟨ret, s0, (0x400000), (0x300000), (4), (4), hret, setup, ?pre, correctness (0x400000) (0x300000) (4) (4) c_a c_b ret hret s0 setup ?pre⟩
+  case pre =>
+    try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, Janus.Spec.FuncvalIs, Janus.Spec.ClosureCtx, func1]
+    all_goals decide
+
+end Witness
+
 end Proof

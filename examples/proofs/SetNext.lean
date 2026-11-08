@@ -100,4 +100,58 @@ theorem correctness (n q : BitVec 64) :
     janus_run
     exact ⟨fun h => h.elim, by janus_frame⟩
 
+
+namespace Witness
+
+def ret : Nat := 0x1000
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+def sp0 : Nat := 0x108000
+def g0 : Nat := 0x200000
+def hp : Nat := 0x300000
+
+
+def wbytes (a : Nat) : Byte := 0
+
+def wmem : Memory := ⟨wbytes, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩, ⟨wbFlag, 4, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then (0x300000) else if i = 1 then (0x300100) else if i = 28 then BitVec.ofNat 64 g0 else if i = 29 then BitVec.ofNat 64 (sp0 - 8)
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x300000 : BitVec 64), (0x300100 : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `correctness` hold together at a concrete call. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (n : BitVec 64) (q : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [n, q] s ∧ (GuardOK s 0 ∧ StackOK s 248 0 ∧ Ptr s.mem n 8 true ∧
+        s.mem.accessible wbFlag 4 false = true ∧
+        Separated [(n.toNat, 8), (s.sp.toNat - 248, 248), (wbFlag, 4)] ∧
+        (s.mem.readLE wbFlag 4 ≠ 0 → BarrierOK s n.toNat)) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (s'.mem.readLE n.toNat 8 = q.toNat ∧
+        (s.mem.readLE wbFlag 4 = 0 →
+          MemFrame s.mem s'.mem [(n.toNat, n.toNat + 8), (s.sp.toNat - 248, s.sp.toNat)]) ∧
+        (s.mem.readLE wbFlag 4 ≠ 0 →
+          s'.mem.readLE (nextOf s) 8 = q.toNat ∧
+          s'.mem.readLE (nextOf s + 8) 8 = s.mem.readLE n.toNat 8 ∧
+          s'.mem.readLE (pOf s + offNext) 8 = nextOf s + 16 ∧
+          MemFrame s.mem s'.mem [(n.toNat, n.toNat + 8), (nextOf s, nextOf s + 16),
+            (pOf s + offNext, pOf s + offNext + 8), (s.sp.toNat - 248, s.sp.toNat)]))) := by
+  refine ⟨ret, s0, (0x300000), (0x300100), hret, setup, ?pre, correctness (0x300000) (0x300100) ret hret s0 setup ?pre⟩
+  case pre =>
+    refine ⟨?_, ?_, ?_, ?_, ?_, fun hh => absurd hh (by decide)⟩
+    all_goals try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, Separated, wbFlag]
+    all_goals decide
+
+end Witness
+
 end Proof

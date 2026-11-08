@@ -281,4 +281,54 @@ theorem correctness (t : Nat) (heap : Nat × Nat) :
         simp only [Option.getD_some, BitVec.toNat_ofNat]
         exact (Nat.mod_eq_of_lt (Arm64.Memory.readLE_lt _ _ 8)).symm
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+
+def tt : BitVec 64 := 0x600000#64
+def emp : AMap (BitVec 64) (BitVec 64) := AMap.empty
+
+/-- `wmem64` plus the type descriptor's slot-size word (16) and the zero value, read-only. -/
+def mem : Memory :=
+  ⟨fun a => if a = 0x600058 then 16#8 else wmem64.bytes a,
+    wmem64.regions ++ [⟨0x600058, 8, false⟩, ⟨zeroVal, 8, false⟩]⟩
+
+/-- `mapaccess1_fast64(t, nil, 0)`. -/
+def s0 : State :=
+  { regs := fun r_ => if r_ = 0 then tt else if r_ = 4 then BitVec.ofNat 64 wsp
+      else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := mem }
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 8000000 in
+theorem hpre : RTPre (smallModel 0x600000 zeroVal (0x500000, 0x1000)) 3 s0 ∧
+    (smallModel 0x600000 zeroVal (0x500000, 0x1000)).Typ (s0.regs 0).toNat ∧
+    IsMap (smallModel 0x600000 zeroVal (0x500000, 0x1000)) s0.mem (s0.regs 3).toNat emp := by
+  refine ⟨⟨?_, ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
+  all_goals (try simp only [smallModel_env, smallModel_typ, smallModel_priv, smallModel_depth, SmallEnv,
+    outside_cons, outside_nil, and_true])
+  all_goals first | decide +kernel | (simp [IsMap, emp, s0])
+
+set_option maxRecDepth 100000 in
+/-- All hypotheses of `correctness` hold together: a call state of the map access and its run. -/
+theorem nonvacuous : ∃ (t : Nat) (heap : Nat × Nat) (f : AMap (BitVec 64) (BitVec 64)) (s : State),
+    s.rip = BitVec.ofNat 64 Extracted.entry ∧
+    (RTPre (smallModel t zeroVal heap) 3 s ∧ (smallModel t zeroVal heap).Typ (s.regs 0).toNat ∧
+      IsMap (smallModel t zeroVal heap) s.mem (s.regs 3).toNat f) ∧
+    Summary Extracted.program Extracted.entry
+      (fun s => RTPre (smallModel t zeroVal heap) 3 s ∧ (smallModel t zeroVal heap).Typ (s.regs 0).toNat ∧
+        IsMap (smallModel t zeroVal heap) s.mem (s.regs 3).toNat f)
+      (fun s s' => RTReturn (smallModel t zeroVal heap) 3 [] (s.regs 3).toNat s s' fun r m =>
+        IsMap (smallModel t zeroVal heap) m (s.regs 3).toNat f ∧
+          SlotHolds (smallModel t zeroVal heap) m (r 0).toNat ((f (s.regs 1)).getD 0)) ∧
+    ReachesRet Extracted.program (retAddrOf s) s
+      (fun s' => RTReturn (smallModel t zeroVal heap) 3 [] (s.regs 3).toNat s s' fun r m =>
+        IsMap (smallModel t zeroVal heap) m (s.regs 3).toNat f ∧
+          SlotHolds (smallModel t zeroVal heap) m (r 0).toNat ((f (s.regs 1)).getD 0)) :=
+  ⟨0x600000, (0x500000, 0x1000), emp, s0, rfl, hpre, correctness 0x600000 (0x500000, 0x1000) emp,
+    correctness 0x600000 (0x500000, 0x1000) emp s0 rfl hpre⟩
+
+end Witness
+
 end Proof
