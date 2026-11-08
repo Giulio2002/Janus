@@ -99,3 +99,51 @@ theorem wsG_pre{tag} : {pre} PW wfi{tag} wsG{tag} := by
     # for goexit the premise order differs in the proof: handled below
     conj=f"(∃ (s_c : {S}) (fi : {FI}), {pcc} = BitVec.ofNat 64 (Extracted.program.contractAddr \"{addr}\") ∧\n      {findc} ∧ {pre} P fi s_c)"
     return d, conj, f"⟨wsG{tag}, wfi{tag}, rfl, wsG_find{tag}, wsG_pre{tag}⟩"
+
+def gr_defs(isa, wm='wmW', env='env_w', tag=''):
+    """Gorecover call-site (Summary: stock sstate at the callee with the example's memory)."""
+    arm = isa=='arm64'
+    S='State' if arm else 'Janus.Amd64.State'
+    SS='PanicSat' if arm else 'Janus.Contracts.PanicSatAmd64'
+    n='(by decide) (by decide) (by decide)' + ('' if arm else ' (by decide)')
+    reg=29 if arm else 5
+    pc='s_c.pc' if arm else 's_c.rip'
+    d=f"""/-- The call state at `runtime.gorecover`'s entry. -/
+def wsGr{tag} : {S} := {SS}.sstate (Extracted.program.contractAddr "runtime.gorecover") {wm} 0 0
+
+@[reducible] def grSite{tag} (P : {'PanicRuntime' if arm else 'Spec.PanicRuntime'}) (s_c : {S}) : Prop :=
+  PanicPre P 0 s_c ∧ s_c.mem.accessible ((s_c.regs {reg}).toNat + 8) 8 false = true ∧
+    (s_c.regs {reg}).toNat + 16 ≤ 2 ^ 48
+
+theorem wsGr_pre{tag} : grSite{tag} PW wsGr{tag} :=
+  ⟨{SS}.sstate_pre 0 (by decide) _ 0 0 {env} {n}, by decide, by decide⟩
+"""
+    c=f'(∃ s_c : {S}, {pc} = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gorecover") ∧\n      grSite{tag} P s_c)'
+    return d,c,f"⟨wsGr{tag}, rfl, wsGr_pre{tag}⟩"
+
+def dr_defs(isa, wm='wmW', env='env_w', tag=''):
+    """Deferreturn call-site (premise family: stock sstate, no defers pending)."""
+    arm = isa=='arm64'
+    S='State' if arm else 'Janus.Amd64.State'
+    SS='PanicSat' if arm else 'Janus.Contracts.PanicSatAmd64'
+    n='(by decide) (by decide) (by decide)' + ('' if arm else ' (by decide)')
+    simpx = '' if arm else ', Panic.FrameOK'
+    fi_ = 'Panic.frameItems, Panic.recItems' if not arm else 'frameItems, recItems'
+    pc='s_r.pc' if arm else 's_r.rip'
+    d=f"""/-- The call state at `runtime.deferreturn`'s entry. -/
+def wsRet{tag} : {S} := {SS}.sstate (Extracted.program.contractAddr "runtime.deferreturn") {wm} 0 0
+
+theorem defers_R{tag} : defers0 {wm} = [] := by
+  have hnd : ndef {wm} = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem saved_R{tag} : saved0 {wm} = none := by rw [saved0_eq]; decide
+
+theorem wsRet_pre{tag} : DeferreturnPre PW wsRet{tag} := by
+  refine ⟨{SS}.sstate_pre 0 (by decide) _ 0 0 {env} {n}, ?_⟩
+  show FrameOK (P0 T0 RPa) {wm} _ _
+  have hm : wsRet{tag}.mem = {wm} := rfl
+  simp [hm, retFrame, {fi_}, P0_defers, P0_saved, {SS}.sstate, defers_R{tag}, saved_R{tag}, gOf, FrameOK{simpx}]
+"""
+    c=f'(∃ s_r : {S}, {pc} = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") ∧\n      DeferreturnPre P s_r)'
+    return d,c,f"⟨wsRet{tag}, rfl, wsRet_pre{tag}⟩"
