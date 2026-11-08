@@ -46,7 +46,7 @@ theorem wsCall_pre : {goalstmt} := by
   have hR : ∀ a n, 0x10000 ≤ a → a + n ≤ 0x11000 → (rtView {priv} mmemK).readLE a n = mmemK.readLE a n :=
     fun a n h1 h2 => readLE_rtView ((inPriv0 h1 h2).append_left _)
   have hW : (rtView {priv} mmemK).readLE (mapType + 48) 8 = KT24 := by
-    rw [readLE_rtView ⟨(mapType + 48, mapType + 56), by simp [{simpm.split(',')[0]}, privK if False else {'privK' if which=='Lookup' else 'privW'}], Nat.le_refl _, Nat.le_refl _⟩]
+    rw [readLE_rtView ⟨(mapType + 48, mapType + 56), by simp [{'MK, privK' if which=='Lookup' else 'MCW, privW'}], Nat.le_refl _, Nat.le_refl _⟩]
     simp only [mmemK, KT24, hT]; decide
 {refine}
   all_goals first
@@ -57,7 +57,7 @@ theorem wsCall_pre : {goalstmt} := by
        simp only [mmemK, KT24, hT]; decide)
     | (simp only [wsCall, mv, kp, {simpm}, priv0, calleeStack, Janus.Spec.Disjoint, ZEnv, mmemK, hT,
         outside_cons, outside_nil, outside_append, and_true, regG, regSP, stackguard0Offset, KeyIn,
-        Janus.Arm64.Memory.accessible, Janus.Arm64.Memory.readLE]; decide)
+        Janus.Arm64.Memory.accessible, Janus.Arm64.Memory.readLE] <;> decide)
 
 '''
 t=t[:i]+site+t[i:]

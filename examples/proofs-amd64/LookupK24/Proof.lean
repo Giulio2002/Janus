@@ -229,7 +229,7 @@ theorem wsCall_pre : Access1GSite MK AMap.empty wsCall := by
   have hR : ∀ a n, 0x10000 ≤ a → a + n ≤ 0x11000 → (rtView MK.priv mmemK).readLE a n = mmemK.readLE a n :=
     fun a n h1 h2 => readLE_rtView ((inPriv0 h1 h2).append_left _)
   have hW : (rtView MK.priv mmemK).readLE (mapType + 48) 8 = KT24 := by
-    rw [readLE_rtView ⟨(mapType + 48, mapType + 56), by simp [MK, privK if False else privK], Nat.le_refl _, Nat.le_refl _⟩]
+    rw [readLE_rtView ⟨(mapType + 48, mapType + 56), by simp [MK, privK], Nat.le_refl _, Nat.le_refl _⟩]
     simp only [mmemK, KT24, hT]; decide
   refine ⟨⟨?_, ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, trivial, ?_,
     (isMap_of_ne (by decide)).2 ⟨rfl, rfl, ?_, ?_⟩, ⟨?_, ?_, ?_⟩⟩
@@ -241,7 +241,7 @@ theorem wsCall_pre : Access1GSite MK AMap.empty wsCall := by
        simp only [mmemK, KT24, hT]; decide)
     | (simp only [wsCall, mv, kp, MK, privK, priv0, calleeStack, Janus.Spec.Disjoint, ZEnv, mmemK, hT,
         outside_cons, outside_nil, outside_append, and_true, regG, regSP, stackguard0Offset, KeyIn,
-        Janus.Arm64.Memory.accessible, Janus.Arm64.Memory.readLE]; decide)
+        Janus.Arm64.Memory.accessible, Janus.Arm64.Memory.readLE] <;> decide)
 
 /-- So the guarantee is reached: the lookup in the empty map gives `0`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
