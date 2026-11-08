@@ -492,6 +492,85 @@ theorem pre : PanicCallerOK PW s0 (PW.depth + 64) 16 ∧ Buffer s0 (BitVec.ofNat
     have : defers0 wmW = [] := by rw [defers0_eq, hnd]; rfl
     exact absurd hd (by rw [show PW.defers s0.mem (gOf s0) = defers0 wmW from rfl, this]; simp)
 
+def wfi : Spec.FuncInfo := Spec.FuncInfo.named Extracted.funcs "example.com/basic.GoexitDefer"
+
+/-- The call state at `runtime.Goexit`'s entry: `GoexitDefer`'s own frame, pending open-coded defers in place, `LR` inside the function. -/
+def wmG : Janus.Arm64.Memory := witMem (tabWords T0 ++ [((0x4ff00 - 48), loc_GoexitDefer_69), (0x4ff00 - 32, func1A), (0x4ff00 - 24, 0), (0x4ff00 - 16, 0x4ff00 - 32), (0x4ff00 - 33, 1)])
+
+def wsG : Janus.Amd64.State :=
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 (0x4ff00 - 48) else if i = 14 then BitVec.ofNat 64 0x50000 else if i = 0 then 1#64 else 0,
+    rip := BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.Goexit"), flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := wmG }
+
+theorem env_G : Env0 T0 wmG := by
+  unfold Env0
+  have hnd : ndef wmG = 0 := by decide
+  refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
+  · omega
+  · unfold TableOK
+    exact ⟨by decide, by decide, by decide⟩
+
+theorem wsG_find : Spec.FuncInfo.find T0 (wsG.mem.readLE (wsG.regs 4).toNat 8) = some wfi := by decide
+
+theorem defers_G : defers0 wmG = [] := by
+  have hnd : ndef wmG = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem wsG_pre : GoexitPre PW wfi wsG := by
+  refine ⟨⟨env_G, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, rfl, rfl, by decide, ?_⟩, ?_, ?_, ?_⟩
+  · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · show 0 < room0 wmG
+    rw [room0_eq]; decide
+  · intro _; refine ⟨by decide, ?_⟩
+    simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · have hs : fspOf wsG = 0x4ff00 - 40 := by decide
+    have hr : PW.defers wmG (gOf wsG) = [] := defers_G
+    have f_frame : wfi.frame = 40 := by rfl
+    have f_od : wfi.openDefer = some (25, 8) := by rfl
+    have f_res : wfi.resume = Extracted.entry + 0x68 := by rfl
+    have hbA : wfi.bitsAt (0x4ff00 - 40) = 0x4ff00 - 33 := by
+      unfold Spec.FuncInfo.bitsAt Spec.FuncInfo.varp; rw [f_frame, f_od]; try rfl
+    have hsA : wfi.slotsAt (0x4ff00 - 40) = 0x4ff00 - 16 := by
+      unfold Spec.FuncInfo.slotsAt Spec.FuncInfo.varp; rw [f_frame, f_od]; try rfl
+    have hbd : wfi.bound (0x4ff00 - 40) = 0x4ff00 := by
+      unfold Spec.FuncInfo.bound; rw [f_frame]; try rfl
+    have hbit : wmG.readLE (0x4ff00 - 33) 1 = 1 := by decide
+    have hF : Panic.frameOf wfi (0x4ff00 - 40) wmG = ⟨0x4ff00 - 40, 0x4ff00, Extracted.entry + 0x68, some (0x4ff00 - 33, 0x4ff00 - 16)⟩ := by
+      unfold Panic.frameOf; rw [hbA, hsA, hbd, f_res, f_od]
+      simp only [hbit]; try rfl
+    show FrameOK PW wmG (frameOf wfi (fspOf wsG) wmG) (frameItems wmG (frameOf wfi (fspOf wsG) wmG) (PW.defers wmG (gOf wsG)))
+    rw [hs, hr]
+    unfold frameOf
+    rw [hF]
+    have hI : frameItems wmG ⟨0x4ff00 - 40, 0x4ff00, Extracted.entry + 0x68, some (0x4ff00 - 33, 0x4ff00 - 16)⟩ [] = [{ fn := 0x4ff00 - 32, bits := some 0, chain := [] }] := by
+      unfold frameItems openItems recItems
+      simp only [hbit]
+      decide
+    unfold FrameOK Panic.FrameOK
+    rw [hI]
+    simp only [hbit, List.mem_cons, List.not_mem_nil, or_false, forall_eq_or_imp, forall_eq, P0_priv, outside_cons,
+      outside_nil, and_true]
+    decide
+
+/-- The call state at `runtime.gorecover`'s entry. -/
+def wsGr : Janus.Amd64.State := Janus.Contracts.PanicSatAmd64.sstate (Extracted.program.contractAddr "runtime.gorecover") wmW 0 0
+
+@[reducible] def grSite (P : Spec.PanicRuntime) (s_c : Janus.Amd64.State) : Prop :=
+  PanicPre P 0 s_c ∧ s_c.mem.accessible ((s_c.regs 5).toNat + 8) 8 false = true ∧
+    (s_c.regs 5).toNat + 16 ≤ 2 ^ 48
+
+theorem wsGr_pre : grSite PW wsGr :=
+  ⟨Janus.Contracts.PanicSatAmd64.sstate_pre 0 (by decide) _ 0 0 env_w (by decide) (by decide) (by decide) (by decide), by decide, by decide⟩
+
+/-- So the guarantee is reached: `GoexitDefer` runs its deferred call (which adds 1 to `*p`) and
+terminates the goroutine. -/
+theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U1 s0) s0 fun o =>
+    match o with
+    | .returned s' => ABIReturn s0 s' ∧ False
+    | .panicked _ _ => False
+    | .goexited s' => s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 =
+        (s0.mem.readLE (BitVec.ofNat 64 pA).toNat 8 + 1) % 2 ^ 64 :=
+  correctness implW PW (P0_laws T0 RPa) U1 hge hrec (BitVec.ofNat 64 pA) ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime)
     (U : Janus.Amd64.State → Nat → Nat → Prop) (ret : Nat) (s : Janus.Amd64.State), P.Laws ∧
@@ -504,18 +583,18 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntim
       Spec.Disjoint (BitVec.ofNat 64 pA).toNat 8 ((s.regs regSP).toNat - (P.depth + (P.depth + 64)))
         (P.depth + (P.depth + 64) + 16) ∧
       Outside (BitVec.ofNat 64 pA).toNat 8 P.priv ∧ 0 < P.room s.mem (gOf s) ∧
-      ∀ d ∈ P.defers s.mem (gOf s), (s.regs regSP).toNat ≤ d.sp) :=
-  ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hge, hrec, hret, setup, pre⟩
-
-/-- So the guarantee is reached: `GoexitDefer` runs its deferred call (which adds 1 to `*p`) and
-terminates the goroutine. -/
-theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U1 s0) s0 fun o =>
+      ∀ d ∈ P.defers s.mem (gOf s), (s.regs regSP).toNat ≤ d.sp) ∧
+    (∃ (s_c : Janus.Amd64.State) (fi : Spec.FuncInfo), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.Goexit") ∧
+      Spec.FuncInfo.find Extracted.funcs (s_c.mem.readLE (s_c.regs 4).toNat 8) = some fi ∧ GoexitPre P fi s_c) ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gorecover") ∧
+      grSite P s_c) ∧
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClassU P U s) s fun o =>
     match o with
-    | .returned s' => ABIReturn s0 s' ∧ False
+    | .returned s' => ABIReturn s s' ∧ False
     | .panicked _ _ => False
     | .goexited s' => s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 =
-        (s0.mem.readLE (BitVec.ofNat 64 pA).toNat 8 + 1) % 2 ^ 64 :=
-  correctness implW PW (P0_laws T0 RPa) U1 hge hrec (BitVec.ofNat 64 pA) ret hret s0 setup pre
+        (s.mem.readLE (BitVec.ofNat 64 pA).toNat 8 + 1) % 2 ^ 64 :=
+  ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hge, hrec, hret, setup, pre, ⟨wsG, wfi, rfl, wsG_find, wsG_pre⟩, ⟨wsGr, rfl, wsGr_pre⟩, returns⟩
 
 end Witness
 
