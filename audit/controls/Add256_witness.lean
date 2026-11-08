@@ -37,28 +37,47 @@ theorem correctness (z x y : BitVec 64) :
   all_goals simp only [Disjoint] at *
   all_goals first | (exfalso; omega) | (janus_run; janus_arith)
 
-end Proof
 
-/-! ## Positive control (audit): three disjoint 32-byte objects in one writable region. -/
-namespace AuditWitness
-open Janus Janus.Arm64 Janus.GoABI Janus.Spec
+namespace Witness
+
 def ret : Nat := 0x1000
+
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
-def z : BitVec 64 := 0x1000
-def x : BitVec 64 := 0x1020
-def y : BitVec 64 := 0x1040
+
+def sp0 : Nat := 0x108000
+def g0 : Nat := 0x200000
+def hp : Nat := 0x300000
+
+def wbytes (a : Nat) : Byte := 0
+
+def wmem : Memory := ⟨wbytes, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩]⟩
+
+
 def s0 : State :=
-  { regs := fun i => if i = 0 then z else if i = 1 then x else if i = 2 then y
+  { regs := fun i => if i = 0 then (0x300000) else if i = 1 then (0x300100) else if i = 2 then (0x300200) else if i = 28 then BitVec.ofNat 64 g0 else if i = 29 then BitVec.ofNat 64 (sp0 - 8)
       else if i = 30 then BitVec.ofNat 64 ret else 0,
-    sp := 0x10000, pc := BitVec.ofNat 64 Extracted.entry, flags := ⟨false, false, false, false⟩,
-    mem := ⟨fun _ => 0, [⟨0x1000, 0x100, true⟩]⟩ }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [z, x, y] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h; rcases i with _ | _ | _ |  i <;> simp [s0] at h ⊢ <;> omega⟩
-theorem pre : Ptr32 s0.mem z true ∧ Ptr32 s0.mem x false ∧ Ptr32 s0.mem y false ∧
-    Aliasing z x ∧ Aliasing z y ∧ Aliasing x y := by
-  refine ⟨⟨?_, ?_⟩, ⟨?_, ?_⟩, ⟨?_, ?_⟩, ?_, ?_, ?_⟩ <;>
-    first | decide | (right; simp [Disjoint, z, x, y])
-example : Returns (Extracted.program.withExit ret) s0 (fun s' => ABIReturn s0 s' ∧
-    val256 s'.mem z.toNat = (val256 s0.mem x.toNat + val256 s0.mem y.toNat) % 2 ^ 256 ∧
-    OnlyWrites s0.mem s'.mem z.toNat 32) := Proof.correctness z x y ret hret s0 setup pre
-end AuditWitness
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x300000 : BitVec 64), (0x300100 : BitVec 64), (0x300200 : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `correctness` hold together at a concrete call. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (z : BitVec 64) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [z, x, y] s ∧ (Ptr32 s.mem z true ∧ Ptr32 s.mem x false ∧ Ptr32 s.mem y false ∧
+        Aliasing z x ∧ Aliasing z y ∧ Aliasing x y) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (val256 s'.mem z.toNat = (val256 s.mem x.toNat + val256 s.mem y.toNat) % 2 ^ 256 ∧
+        OnlyWrites s.mem s'.mem z.toNat 32)) := by
+  refine ⟨ret, s0, (0x300000), (0x300100), (0x300200), hret, setup, ?pre, correctness (0x300000) (0x300100) (0x300200) ret hret s0 setup ?pre⟩
+  case pre =>
+    simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp] <;> decide
+
+end Witness
+
+end Proof

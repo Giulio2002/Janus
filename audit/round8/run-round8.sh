@@ -97,7 +97,7 @@ mkdir -m 700 "$T/m1"; C="$T/m1"
 echo "== M1: trusted-compile manifests carry a MAC under the cache's key"
 type tmark >/dev/null 2>&1 && tmark "== M1: trusted-compile manifests carry a MAC under"
 # The result cache is off so that every run reaches the trusted compile.
-m1() { out="$(JANUS_CACHE_DIR="$C" JANUS_TIMINGS=1 JANUS_RESULT_CACHE=off vc $W/Add --proof examples/proofs/Add.lean)"; }
+m1() { out="$(JANUS_CACHE_DIR="$C" JANUS_TIMINGS=1 JANUS_RESULT_CACHE=off vc $W/Add --proof examples/proofs/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"; }
 m1; m1
 if grep -q '^Verified' <<<"$out" && cachedT "$out" && ls "$C"/v1/trusted/*/*/manifest.json >/dev/null 2>&1 &&
    grep -q '"mac":"[0-9a-f]\{64\}"' "$C"/v1/trusted/*/*/manifest.json; then
@@ -127,7 +127,7 @@ echo "== C1: the cache root is private"
 type tmark >/dev/null 2>&1 && tmark "== C1: the cache root is private"
 c1() { # c1 NAME CACHE PATTERN...
   local name=$1 c=$2 pat st=""; shift 2
-  out="$(JANUS_CACHE_DIR="$c" vc $W/Add --proof examples/proofs/Add.lean)"
+  out="$(JANUS_CACHE_DIR="$c" vc $W/Add --proof examples/proofs/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"
   grep -q '^Invalid: The Janus cache' <<<"$out" || st=BROKEN
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || st=BROKEN; done
   printf '  %-36s %-8s %s%s\n' "$name" blocked "$(grep -m1 -E '^(Verified|Invalid|Error)' <<<"$out" | cut -c1-110)" "${st:+   <-- BROKEN}"
@@ -141,7 +141,7 @@ c1 C1b_symlinked_subdir "$T/s" 'v1/trusted is a symbolic link' 'round 8 C1'
 chmod 644 "$C/v1/result/.key"
 c1 C1c_key_0644 "$C" '.key is unsafe: its mode is 0644' 'round 8 C1'
 chmod 600 "$C/v1/result/.key"
-out="$(JANUS_CACHE_DIR="$C" vc $W/Add --proof examples/proofs/Add.lean)"; row C1_ctl_private_cache Verified
+out="$(JANUS_CACHE_DIR="$C" vc $W/Add --proof examples/proofs/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"; row C1_ctl_private_cache Verified
 
 echo "== L1/M1/C1: unit rows (go test; L1 is covered here: a changed lib/lean file changes every key)"
 type tmark >/dev/null 2>&1 && tmark "== L1/M1/C1: unit rows (go test; L1 is covered her"

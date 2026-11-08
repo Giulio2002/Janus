@@ -46,7 +46,7 @@ check_rejected() { # file label thm...
   done
 }
 echo "== rows (no witness: rejected under every flag)"
-for n in N10 N11 N13 N16 N17 N18 N50 N51 N52 N60 N62 N64 N65; do
+for n in N10 N11 N13 N16 N17 N18 N46 N50 N51 N52 N60 N62 N64 N65; do
   f=$(ls $R/rows/${n}_*.lean); check_rejected "$f" "$n" Proof.correctness
 done
 check_rejected $RT/rows2/R01_R_pinned_false_in_pre.lean R01 Proof.correctness

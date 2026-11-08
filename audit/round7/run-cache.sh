@@ -40,7 +40,7 @@ verdict() { grep -m1 -E '^(Verified|Invalid)' <<<"$1" | cut -c1-100; }
 tmark "cache priming start"
 want priming && {
 echo "== priming: an honest verification records its result (the cache now has a key and an entry)"
-out="$(v $W/Add --proof examples/proofs/Add.lean)"; again="$(v $W/Add --proof examples/proofs/Add.lean)"
+out="$(v $W/Add --proof examples/proofs/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"; again="$(v $W/Add --proof examples/proofs/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"
 if cached "$again" && ! cached "$out"; then echo "  ok: the second run is a cache hit"
 else echo "  >>> priming failed (first: $(verdict "$out"), second cached: $(cached "$again" && echo yes || echo no))"; broken+=(priming); fi
 }
@@ -75,11 +75,11 @@ row RC2_lakefile_probe "$(verdict "$out") [cache invisible: $([ $ok = yes ] && e
 want rc3 && par_run '
 echo "== RC3: a tampered entry is ignored"
 mkdir -p $W/RC3; cp examples/proofs/Add.lean $W/RC3/Add.lean
-out="$(v $W/Add4 --proof $W/RC3/Add.lean)"
+out="$(v $W/Add4 --proof $W/RC3/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"
 f=$(grep -rl "RC3/Add.lean" "$C/v1/result" --include=*.json | head -1)
 if [ -n "$f" ]; then
   sed -i "s/x.toNat + y.toNat/x.toNat * y.toNat/" "$f"
-  out="$(v $W/Add4 --proof $W/RC3/Add.lean)"
+  out="$(v $W/Add4 --proof $W/RC3/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"
   ok=yes; cached "$out" && ok=no; grep -q "x.toNat \* y.toNat" <<<"$out" && ok=no
   row RC3_tampered_entry "$(verdict "$out") [cached: $(cached "$out" && echo YES || echo no), statement: $(grep -qF "x.toNat + y.toNat" <<<"$out" && echo honest || echo WRONG)]" $ok
 else row RC3_tampered_entry "no entry was recorded for Add4" no; fi'
@@ -91,10 +91,10 @@ echo "== RC4: a stale framework never hits"
 F=$W/janus-root-copy; rm -rf "$F"; mkdir -p "$F/.lake"
 cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean Janus "$F/"; cp -a .lake/build "$F/.lake/"
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/AddF >/dev/null
-"$J" verify --janus-root "$F" $W/AddF --proof examples/proofs/Add.lean >/dev/null 2>&1
-hit="$("$J" verify --janus-root "$F" $W/AddF --proof examples/proofs/Add.lean 2>&1)"
+"$J" verify --janus-root "$F" $W/AddF --proof examples/proofs/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous >/dev/null 2>&1
+hit="$("$J" verify --janus-root "$F" $W/AddF --proof examples/proofs/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous 2>&1)"
 echo "-- round 7: a framework change" >> "$F/Janus/GoABI.lean"
-out="$("$J" verify --janus-root "$F" $W/AddF --proof examples/proofs/Add.lean 2>&1)"
+out="$("$J" verify --janus-root "$F" $W/AddF --proof examples/proofs/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous 2>&1)"
 ok=yes; cached "$out" && ok=no; cached "$hit" || ok=no
 row RC4_stale_framework "$(verdict "$out") [before the change cached: $(cached "$hit" && echo yes || echo NO); after: $(cached "$out" && echo YES || echo no)]" $ok
 rm -rf "$F"'
@@ -102,9 +102,9 @@ rm -rf "$F"'
 # RC5/RC6: --fresh and --unsafe-no-sandbox never use the cache.
 want rc56 && par_run '
 echo "== RC5/RC6: --fresh and --unsafe-no-sandbox bypass the cache"
-out="$(v $W/Add --proof examples/proofs/Add.lean --fresh)"
+out="$(v $W/Add --proof examples/proofs/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous --fresh)"
 row RC5_fresh_bypasses "$(verdict "$out") [cached: $(cached "$out" && echo YES || echo no)]" "$(cached "$out" && echo no || echo yes)"
-out="$(v $W/Add --proof examples/proofs/Add.lean --unsafe-no-sandbox)"
+out="$(v $W/Add --proof examples/proofs/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous --unsafe-no-sandbox)"
 row RC6_unsandboxed_bypasses "$(verdict "$out") [cached: $(cached "$out" && echo YES || echo no)]" "$(cached "$out" && echo no || echo yes)"'
 par_wait
 
