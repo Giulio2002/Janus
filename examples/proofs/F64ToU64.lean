@@ -113,6 +113,34 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret 
       ABIReturn s s' ∧ ((s'.regs 0).toNat = c_i.toNat)) :=
   ⟨ret, s0, hret, setup, ⟨c_hi, c_h0, c_h1⟩, hpre, correctness c_x c_i c_hi c_h0 c_h1 ret hret s0 setup hpre⟩
 
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `saturation` hold together at a concrete call, and the call returns. -/
+theorem saturation : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (s.getV 0 64 = c_x.toNat ∧ s.fpcr = 0) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ ((∀ i, truncInt binary64 c_x.toNat = some i → i < 0 → (s'.regs 0).toNat = 0) ∧
+        (∀ i, truncInt binary64 c_x.toNat = some i → 2 ^ 64 ≤ i → (s'.regs 0).toNat = 2 ^ 64 - 1) ∧
+        (isNaN binary64 c_x.toNat = true → (s'.regs 0).toNat = 0) ∧
+        (classify binary64 c_x.toNat = .inf →
+          (s'.regs 0).toNat = if signOf binary64 c_x.toNat then 0 else 2 ^ 64 - 1))) := by
+  refine ⟨ret, s0, hret, setup, ?pre, Proof.saturation c_x ret hret s0 setup ?pre⟩
+  case pre =>
+    simp only [Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, c_x]
+    decide
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `exact` hold together at a concrete call, and the call returns. -/
+theorem exact : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (s.getV 0 64 = c_x.toNat ∧ FP.trapEnables s.fpcr.toNat = 0) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (s'.regs 0 = BitVec.ofNat 64 (FP.fpToFixed binary64 s.fpcr.toNat true .rz 64 c_x.toNat).1)) := by
+  refine ⟨ret, s0, hret, setup, ?pre, Proof.exact c_x ret hret s0 setup ?pre⟩
+  case pre =>
+    simp only [Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, c_x]
+    decide
+
 end Witness
 
 end Proof

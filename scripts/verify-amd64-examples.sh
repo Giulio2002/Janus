@@ -39,7 +39,7 @@ verify_function() {
   if grep -q '^namespace Witness' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.Witness.nonvacuous); grep -q '^theorem returns' "examples/proofs-amd64/$f/Proof.lean" && thms+=(Proof.Witness.returns); fi
   # corollaries stated as their own theorems (e.g. EncryptBlock's AES-128 and FIPS-197 vector)
   local c
-  for c in $(grep -oE '^theorem corollary[A-Za-z0-9_]*' "examples/proofs-amd64/$f/Proof.lean" | awk '{print $2}'); do
+  for c in $(grep -oE '^theorem corollary[A-Za-z0-9_]*' "examples/proofs-amd64/$f/Proof.lean" | awk '!seen[$2]++ {print $2}'); do
     thms+=("Proof.$c" "Proof.Witness.$c")
   done
   # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs

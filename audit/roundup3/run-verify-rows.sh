@@ -39,7 +39,7 @@ check_rejected() { # file label thm...
   local f=$1 n=$2; shift 2
   local want; want="$(grep -m1 -o 'Expected-reason: .*' "$f" | sed 's/Expected-reason: //')"; [ -n "$want" ] || want='.'
   for fl in "" "--allow-no-witness"; do
-    local v; v=$(vrun "$W/Add" "$f" "$fl" "$@"); out="$(cat "$W/out.txt")"
+    local v; v=$(vrun "${ART:-$W/Add}" "$f" "$fl" "$@"); out="$(cat "$W/out.txt")"
     if [ "$v" = verified ]; then printf '%-34s %-20s VERIFIED   <-- BROKEN\n' "$n" "${fl:-no-flag}"; bad=1
     elif printf '%s' "$out" | grep -qE "$want"; then printf '%-34s %-20s rejected ok  [%s]\n' "$n" "${fl:-no-flag}" "$(reason_of)"
     else printf '%-34s %-20s rejected for ANOTHER reason (wanted /%s/)   <-- BROKEN\n' "$n" "${fl:-no-flag}" "$want"; printf '%s\n' "$out" | grep -m3 '^Invalid' | cut -c1-300 | sed 's/^/    /'; bad=1; fi
@@ -60,6 +60,13 @@ check_rejected $R/pair/PAIR3_nonvacuous_tied_to_extra.lean PAIR3 Proof.correctne
 check_rejected $R/pair/PAIR4_witness_name_pairs_no_main.lean PAIR4 Proof.correctness Proof.extra Proof.Witness.nonvacuous Proof.Witness.extra Proof.Witness.other
 v=$(vrun "$W/Add" $R/pair/PAIR_ok_control.lean "" Proof.correctness Proof.extra Proof.Witness.nonvacuous Proof.Witness.extra)
 if [ "$v" = verified ]; then printf '%-34s verified ok\n' PAIR_ok_control; else printf '%-34s REJECTED   <-- BROKEN\n' PAIR_ok_control; bad=1; fi
+echo "== Faults / fact-conjunct anchoring (UP3d, on LoadThird)"
+mapfile -t tgL < <(scripts/example-targets.sh LoadThird)
+"$J" extract artifacts/examples-arm64 "$(example_symbol LoadThird)" "$W/LoadThird" ${tgL[@]+"${tgL[@]}"} >/dev/null 2>&1 || { echo "extract LoadThird failed"; bad=1; }
+FT="Proof.correctness Proof.faults Proof.Witness.nonvacuous Proof.Witness.faults"
+v=$(vrun "$W/LoadThird" $R/pair/FLT_ok_control.lean "" $FT)
+if [ "$v" = verified ]; then printf '%-34s verified ok\n' FLT_ok_control; else printf '%-34s REJECTED   <-- BROKEN\n' FLT_ok_control; bad=1; fi
+for n in FLT1_false_premise FLT2_faults_untied_state FLT3_fact_other_state; do ART="$W/LoadThird" check_rejected $R/pair/$n.lean $n $FT; done
 echo "== controls (witness-bearing: must VERIFY)"
 for f in $R/ctl/*.lean; do
   n=$(basename "$f" .lean)

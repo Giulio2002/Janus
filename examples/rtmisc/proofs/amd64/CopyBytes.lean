@@ -179,6 +179,75 @@ theorem pre : (StackGuardOK s0 4144 ∧ StackWritable s0 4144 40 ∧ (s0.regs 4)
   · rw [addr_mv]; exact ⟨rfl, rfl⟩
   · rw [rt_eq]; simp only [outside_cons, outside_nil, and_true]; decide
 
+/-! ### The call-site state of the `memmove` contract -/
+
+def callS (addr x y z : Nat) : Amd64.State :=
+  { s0 with
+    rip := BitVec.ofNat 64 addr
+    regs := fun i => if i = 0 then BitVec.ofNat 64 x else if i = 3 then BitVec.ofNat 64 y
+      else if i = 1 then BitVec.ofNat 64 z else s0.regs i }
+
+theorem cs_rsp (a x y z : Nat) : ((callS a x y z).regs 4).toNat = sp0 := by rfl
+theorem cs_g (a x y z : Nat) : ((callS a x y z).regs 14).toNat = g0 := by rfl
+theorem cs_mem (a x y z : Nat) : (callS a x y z).mem = mem0 := rfl
+
+theorem cs_eqpre (a x y z : Nat) : MemPre64 4096 3 (callS a x y z) := by
+  have hw : mem0.accessible (sp0 - 4096) (4096 + 8 + 8 * 3) true = true := by decide
+  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩
+  · simp only [regG, stackguard0Offset, cs_g, cs_mem]; decide
+  · simp only [regG, stackguard0Offset, cs_g, cs_mem]; decide
+  · simp only [stackguard0, regG, regSP, stackguard0Offset, cs_g, cs_rsp, cs_mem]; decide
+  · simp only [cs_rsp, cs_mem]; decide
+  · simp only [cs_rsp]; decide
+  · simp only [cs_rsp]; simp [sp0]
+  · simp only [cs_rsp, cs_mem]
+    exact Janus.Arm64.Memory.accessible_mono _ hw (Nat.le_refl _) (by omega)
+  · rfl
+  · rfl
+  · simp only [cs_rsp, cs_mem]; decide
+  · simp only [cs_g, cs_rsp, MemAmd64.calleeStack, MapAmd64.calleeStack, outside_cons, outside_nil, and_true]
+    simp only [sp0, g0]
+    omega
+
+def sMv : Amd64.State := callS mvA dp0 src0 12
+
+@[reducible] def mvSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : Amd64.State) : Prop :=
+  MemPre64 4096 3 s ∧
+  LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b s (liveWin64 s 4096 3) ∧
+  MemAmd64.Input s 4096 3 (s.regs 3).toNat (s.regs 1).toNat ∧
+  LiveDest64 R L s 4096 3 (s.regs 0).toNat (s.regs 1).toNat
+
+theorem site_mv : mvSite R mvA [] 0x400 sMv := by
+  have h0 : (sMv.regs 0).toNat = dp0 := by decide
+  have h3 : (sMv.regs 3).toNat = src0 := by decide
+  have h1 : (sMv.regs 1).toNat = 12 := by decide
+  refine ⟨cs_eqpre _ _ _ _, ⟨?_, inv0, fun r hr => absurd hr (by simp), ?_⟩, ?_, ?_⟩
+  · simp only [h0, h3, h1]; exact ⟨rfl, rfl⟩
+  · intro x hx
+    simp only [sMv, liveWin64, calleeStack64, cs_rsp, List.mem_append, List.mem_cons, List.not_mem_nil, or_false] at hx
+    rw [rt_eq]
+    rcases hx with (rfl | rfl) | rfl <;>
+      simp only [outside_cons, outside_nil, and_true, sp0, HEAP, HEND, BUMP, WBUF] <;> omega
+  · simp only [h3, h1]
+    refine ⟨by decide, by decide, ?_⟩
+    simp only [sMv, MemAmd64.calleeStack, MapAmd64.calleeStack, cs_rsp, outside_cons, outside_nil, and_true]
+    simp only [src0, sp0]; omega
+  · simp only [h0, h1]
+    refine ⟨by decide, by decide, ?_, Or.inr ?_, ?_⟩
+    · simp only [sMv, calleeStack64, cs_rsp, outside_cons, outside_nil, and_true, dp0, sp0]; omega
+    · rw [rt_eq]; simp only [outside_cons, outside_nil, and_true]; decide
+    · simp only [sMv, cs_rsp, outside_cons, outside_nil, and_true, dp0, sp0]; omega
+
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ ((s'.regs 0).toNat = min (12 : BitVec 64).toNat (12 : BitVec 64).toNat ∧
+      Mem.Copied s0.mem s'.mem (BitVec.ofNat 64 dp0).toNat (BitVec.ofNat 64 src0).toNat
+        (min (12 : BitVec 64).toNat (12 : BitVec 64).toNat) ∧
+      R.inv 0x400 [] (s0.regs 14).toNat (view R.rt [] s'.mem) ∧
+      MemFrame s0.mem s'.mem (R.rt ++ [((s0.regs 4).toNat - 4144, (s0.regs 4).toNat + 40),
+        ((BitVec.ofNat 64 dp0).toNat, (BitVec.ofNat 64 dp0).toNat + min (12 : BitVec 64).toNat (12 : BitVec 64).toNat)])) :=
+  correctness implAt R 0x400 [] (BitVec.ofNat 64 dp0) 12 12 (BitVec.ofNat 64 src0) 12 12
+    (by rw [addr_mv]; exact model_mv) ret hret s0 setup pre
+
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List (Nat × Nat)) (ret : Nat)
     (s : Amd64.State),
     MemmoveLive64 (Extracted.program.link impl)
@@ -202,13 +271,23 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : 
           s.mem.accessible (BitVec.ofNat 64 dp0).toNat (min (12 : BitVec 64).toNat (12 : BitVec 64).toNat) true = true ∧
           s.mem.accessible (BitVec.ofNat 64 src0).toNat (min (12 : BitVec 64).toNat (12 : BitVec 64).toNat) false = true ∧
           (InRanges (BitVec.ofNat 64 dp0).toNat (min (12 : BitVec 64).toNat (12 : BitVec 64).toNat) L ∨
-            Outside (BitVec.ofNat 64 dp0).toNat (min (12 : BitVec 64).toNat (12 : BitVec 64).toNat) R.rt))) :=
-  ⟨implAt, R, 0x400, [], ret, s0, by rw [addr_mv]; exact model_mv, hret, setup, pre⟩
+            Outside (BitVec.ofNat 64 dp0).toNat (min (12 : BitVec 64).toNat (12 : BitVec 64).toNat) R.rt))) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memmove") ∧
+      mvSite R (Extracted.program.contractAddr "runtime.memmove") L b s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ ((s'.regs 0).toNat = min (12 : BitVec 64).toNat (12 : BitVec 64).toNat ∧
+        Mem.Copied s.mem s'.mem (BitVec.ofNat 64 dp0).toNat (BitVec.ofNat 64 src0).toNat
+          (min (12 : BitVec 64).toNat (12 : BitVec 64).toNat) ∧
+        R.inv b L (s.regs 14).toNat (view R.rt L s'.mem) ∧
+        MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4144, (s.regs 4).toNat + 40),
+          ((BitVec.ofNat 64 dp0).toNat, (BitVec.ofNat 64 dp0).toNat + min (12 : BitVec 64).toNat (12 : BitVec 64).toNat)])) :=
+  ⟨implAt, R, 0x400, [], ret, s0, by rw [addr_mv]; exact model_mv, hret, setup, pre,
+    ⟨[], 0x400, sMv, by rw [addr_mv]; rfl, by rw [addr_mv]; exact site_mv⟩, returnsF⟩
 
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat = 12 ∧ Mem.Copied s0.mem s'.mem dp0 src0 12 :=
-  (correctness implAt R 0x400 [] (BitVec.ofNat 64 dp0) 12 12 (BitVec.ofNat 64 src0) 12 12
-    (by rw [addr_mv]; exact model_mv) ret hret s0 setup pre).mono fun _ ⟨habi, h0, hc, _⟩ =>
+  returnsF.mono fun _ ⟨habi, h0, hc, _⟩ =>
     ⟨habi, by simpa using h0, by simpa [dp0, src0] using hc⟩
 
 end Witness

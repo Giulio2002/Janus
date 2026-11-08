@@ -235,6 +235,86 @@ theorem pre : StackGuardOK s0 4144 ∧ StackWritable s0 4144 32 ∧ (s0.regs 4).
   · rw [addr_cs]; exact Or.inr (Or.inl ⟨rfl, by decide⟩)
   · rw [addr_64]; exact Or.inr (Or.inr ⟨rfl, by decide⟩)
 
+/-! ### The call-site states of the three runtime contracts -/
+
+def callS (addr x y : Nat) : Amd64.State :=
+  { s0 with
+    rip := BitVec.ofNat 64 addr
+    regs := fun i => if i = 0 then BitVec.ofNat 64 x else if i = 3 then BitVec.ofNat 64 y else s0.regs i }
+
+theorem cs_rsp (a x y : Nat) : ((callS a x y).regs 4).toNat = sp0 := by rfl
+theorem cs_g (a x y : Nat) : ((callS a x y).regs 14).toNat = g0 := by rfl
+theorem cs_mem (a x y : Nat) : (callS a x y).mem = mem0 := rfl
+
+theorem cs_callOK (a x y n : Nat) (hn : n ≤ 3) : CallOK64 (callS a x y) 4096 n := by
+  have hw : mem0.accessible (sp0 - 4096) (4096 + 8 + 8 * 3) true = true := by decide
+  have h1 : mem0.readLE sp0 8 < 2 ^ 47 := by decide
+  simp only [CallOK64, cs_rsp, cs_mem]
+  refine ⟨h1, by first | decide | (unfold sp0; omega), by first | decide | (unfold sp0; omega),
+    by first | decide | (unfold sp0; omega), ?_⟩
+  exact Janus.Arm64.Memory.accessible_mono _ hw (Nat.le_refl _) (by omega)
+
+theorem cs_room (a x y n : Nat) (hn : n ≤ 3) : StackRoom64 (callS a x y) 4096 n := by
+  simp only [StackRoom64, GuardOK64, cs_g, cs_rsp, cs_mem, calleeStack64]
+  refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
+  simp only [outside_cons, outside_nil, and_true, sp0, g0]
+  omega
+
+theorem cs_winR (a x y n : Nat) (hn : n ≤ 3) : LiveSep (liveWin64 (callS a x y) 4096 n) R.rt := by
+  intro x' hx
+  simp only [liveWin64, calleeStack64, cs_rsp, List.mem_append, List.mem_cons, List.not_mem_nil, or_false] at hx
+  rw [rt_eq]
+  rcases hx with (rfl | rfl) | rfl <;>
+    simp only [outside_cons, outside_nil, and_true, sp0, HEAP, HEND, BUMP, WBUF] <;> omega
+
+def sNew : Amd64.State := callS newA tNode 0
+def sCs : Amd64.State := callS csA sPtr 5
+def s64 : Amd64.State := callS c64A 300 0
+
+@[reducible] def newSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : Amd64.State) : Prop :=
+  NewobjectPre64 4096 s ∧ StackRoom64 s 4096 1 ∧
+    LiveAt R addr [(s.regs 0).toNat] L b (newobjectRound64 s) (s.regs 14).toNat s.mem (liveWin64 s 4096 1)
+
+theorem site_new : newSite R newA [] 0x400 sNew := by
+  have h0 : (sNew.regs 0).toNat = tNode := by decide
+  refine ⟨⟨cs_callOK _ _ _ _ (by omega), ?_, ?_⟩, cs_room _ _ _ _ (by omega), ?_, inv0, ?_,
+    fun r hr => absurd hr (by simp), cs_winR _ _ _ _ (by omega)⟩
+  · rw [h0]; exact ⟨by decide, by decide⟩
+  · rw [h0]; show typSize mem0 tNode ≤ maxAlloc; decide
+  · rw [h0]; exact Or.inl ⟨rfl, rfl⟩
+  · simp only [newobjectRound64, h0, cs_mem]; decide
+
+theorem site_cs : RtLivePre64 4096 R convTstringSpec convTstringLive csA [] 0x400 sCs := by
+  have ha : argWords64 sCs convTstringSpec.nargs = [sPtr, 5] := by
+    simp only [argWords64, wordsFrom, convTstringSpec]; decide
+  refine ⟨cs_callOK _ _ _ _ (by decide), trivial, fun r hr => absurd hr (by simp [convTstringSpec, RtSpec.reads]), trivial,
+    cs_room _ _ _ _ (by decide), ?_⟩
+  rw [ha]
+  refine ⟨Or.inr (Or.inl ⟨rfl, rfl⟩), inv0, ?_, fun r hr => absurd hr (by simp), cs_winR _ _ _ _ (by decide)⟩
+  simp only [convTstringLive, arg, List.getD_cons_succ, List.getD_cons_zero]; decide
+
+theorem site_64 : RtLivePre64 4096 R convT64Spec convT64Live c64A [] 0x400 s64 := by
+  have ha : argWords64 s64 convT64Spec.nargs = [300] := by
+    simp only [argWords64, wordsFrom, convT64Spec]; decide
+  refine ⟨cs_callOK _ _ _ _ (by decide), trivial, fun r hr => absurd hr (by simp [convT64Spec, RtSpec.reads]), trivial,
+    cs_room _ _ _ _ (by decide), ?_⟩
+  rw [ha]
+  refine ⟨Or.inr (Or.inr ⟨rfl, rfl⟩), inv0, ?_, fun r hr => absurd hr (by simp), cs_winR _ _ _ _ (by decide)⟩
+  simp only [convT64Live, arg, List.getD_cons_zero]; decide
+
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (InRanges (s'.regs 0).toNat 16 R.rt ∧
+        s'.mem.readLE (s'.regs 0).toNat 8 = (300 : BitVec 64).toNat ∧
+        s'.mem.readLE ((s'.regs 0).toNat + 8) 8 = ((300 : BitVec 64) + 1).toNat ∧
+        (s'.regs 3).toNat = tStr ∧ (s'.regs 7).toNat = tU64 ∧
+        ((5 : BitVec 64).toNat ≠ 0 → BoxWords' R.rt s'.mem (s'.regs 1).toNat [(BitVec.ofNat 64 sPtr).toNat, (5 : BitVec 64).toNat]) ∧
+        BoxHolds' R.rt s'.mem (s'.regs 6).toNat 8 (300 : BitVec 64).toNat ∧
+        ∃ b' L', 0x400 - 40 ≤ b' ∧ R.inv b' L' (s0.regs 14).toNat (view R.rt L' s'.mem) ∧
+          InRanges (s'.regs 0).toNat 16 L' ∧
+          MemFrame s0.mem s'.mem (R.rt ++ [((s0.regs 4).toNat - 4144, (s0.regs 4).toNat + 32)])) :=
+  correctness implAt R 0x400 [] (BitVec.ofNat 64 sPtr) 5 300 (by rw [addr_new]; exact model_new)
+    (by rw [addr_cs]; exact model_cs) (by rw [addr_64]; exact model_64) ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` hold together: a runtime (`impl`, `R`), a budget and a call of
 `BoxAfterNew("hello", 300)` satisfying the precondition. -/
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List (Nat × Nat)) (ret : Nat) (s : Amd64.State),
@@ -254,15 +334,36 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : 
       R.ok (Extracted.program.contractAddr "runtime.convTstring") [(BitVec.ofNat 64 sPtr).toNat, (5 : BitVec 64).toNat] ∧
       R.ok (Extracted.program.contractAddr "runtime.convT64") [(300 : BitVec 64).toNat] ∧
       R.inv b L (s.regs 14).toNat (view R.rt L s.mem) ∧ 40 ≤ b ∧
-      (∀ r ∈ L, Outside r.1 (r.2 - r.1) [((s.regs 4).toNat - 4144, (s.regs 4).toNat + 32)])) :=
+      (∀ r ∈ L, Outside r.1 (r.2 - r.1) [((s.regs 4).toNat - 4144, (s.regs 4).toNat + 32)])) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
+      newSite R (Extracted.program.contractAddr "runtime.newobject") L b s_c) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.convTstring") ∧
+      RtLivePre64 4096 R convTstringSpec convTstringLive (Extracted.program.contractAddr "runtime.convTstring") L b s_c) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.convT64") ∧
+      RtLivePre64 4096 R convT64Spec convT64Live (Extracted.program.contractAddr "runtime.convT64") L b s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (InRanges (s'.regs 0).toNat 16 R.rt ∧
+        s'.mem.readLE (s'.regs 0).toNat 8 = (300 : BitVec 64).toNat ∧
+        s'.mem.readLE ((s'.regs 0).toNat + 8) 8 = ((300 : BitVec 64) + 1).toNat ∧
+        (s'.regs 3).toNat = tStr ∧ (s'.regs 7).toNat = tU64 ∧
+        ((5 : BitVec 64).toNat ≠ 0 → BoxWords' R.rt s'.mem (s'.regs 1).toNat [(BitVec.ofNat 64 sPtr).toNat, (5 : BitVec 64).toNat]) ∧
+        BoxHolds' R.rt s'.mem (s'.regs 6).toNat 8 (300 : BitVec 64).toNat ∧
+        ∃ b' L', b - 40 ≤ b' ∧ R.inv b' L' (s.regs 14).toNat (view R.rt L' s'.mem) ∧
+          InRanges (s'.regs 0).toNat 16 L' ∧
+          MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4144, (s.regs 4).toNat + 32)])) :=
   ⟨implAt, R, 0x400, [], ret, s0, by rw [addr_new]; exact model_new, by rw [addr_cs]; exact model_cs,
-    by rw [addr_64]; exact model_64, hret, setup, pre⟩
+    by rw [addr_64]; exact model_64, hret, setup, pre,
+    ⟨[], 0x400, sNew, by rw [addr_new]; rfl, by rw [addr_new]; exact site_new⟩,
+    ⟨[], 0x400, sCs, by rw [addr_cs]; rfl, by rw [addr_cs]; exact site_cs⟩,
+    ⟨[], 0x400, s64, by rw [addr_64]; rfl, by rw [addr_64]; exact site_64⟩, returnsF⟩
 
 /-- So the guarantee is reached: the call returns the string and `uint64` type descriptors. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 3).toNat = tStr ∧ (s'.regs 7).toNat = tU64 :=
-  (correctness implAt R 0x400 [] (BitVec.ofNat 64 sPtr) 5 300 (by rw [addr_new]; exact model_new)
-    (by rw [addr_cs]; exact model_cs) (by rw [addr_64]; exact model_64) ret hret s0 setup pre).mono
+  returnsF.mono
     fun _ h => ⟨h.1, h.2.2.2.2.1, h.2.2.2.2.2.1⟩
 
 end Witness

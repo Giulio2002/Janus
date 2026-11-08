@@ -183,6 +183,23 @@ theorem pre : CallerOK64 C0.toRtEnv s0 40 16 ∧ Extracted.program.DataLoaded s0
   · unfold Spec.Disjoint; decide
   · unfold Spec.Disjoint; decide
 
+/-- The call state of the `checkptrAlignment` contract: at its entry, `p = 0` (so `AlignOK` holds). -/
+def sCall : Janus.Amd64.State :=
+  { s0 with rip := BitVec.ofNat 64 cAddr, regs := fun i => if i = 4 then BitVec.ofNat 64 wsp
+      else if i = 14 then BitVec.ofNat 64 wg else 0 }
+
+theorem sCall_pre : RTPre64 C0.toRtEnv 3 sCall ∧
+    AlignOK C0 sCall.mem (sCall.regs 14) (sCall.regs 0).toNat (sCall.regs 3).toNat (sCall.regs 1).toNat := by
+  refine ⟨⟨mem2_env (sCall.regs 14), ⟨by decide, by decide, by decide +kernel⟩, by decide, by decide,
+    by decide, by decide +kernel, rfl, rfl, by decide +kernel, ?_⟩, Or.inl rfl⟩
+  simp only [C0_priv, outside_cons, outside_nil, and_true]; decide
+
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ ((s'.regs 0).toNat = s0.mem.readLE pv.toNat 8 ∧
+      MemFrame s0.mem s'.mem (C0.priv ++ [((s0.regs 4).toNat - (C0.depth + 40), (s0.regs 4).toNat + 16)]) ∧
+      C0.Env s'.mem (s0.regs 14)) :=
+  correctness implAt C0 C0_laws model pv ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (C : CheckptrModel) (ret : Nat)
     (s : Janus.Amd64.State), C.Laws ∧
@@ -193,13 +210,21 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (C : CheckptrModel) (
       Buffer s pv 8 false ∧ pv.toNat ≠ 0 ∧ NoStraddle C s.mem (s.regs 14) pv.toNat 8 ∧
       Outside pv.toNat 8 C.priv ∧
       Spec.Disjoint pv.toNat 8 ((s.regs 4).toNat - (C.depth + 40)) (C.depth + 56) ∧
-      Spec.Disjoint (s.regs 14).toNat 16 ((s.regs 4).toNat - (C.depth + 40)) (C.depth + 56)) :=
-  ⟨implAt, C0, ret, s0, C0_laws, model, hret, setup, pre⟩
+      Spec.Disjoint (s.regs 14).toNat 16 ((s.regs 4).toNat - (C.depth + 40)) (C.depth + 56)) ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.checkptrAlignment") ∧
+      RTPre64 C.toRtEnv 3 s_c ∧
+      AlignOK C s_c.mem (s_c.regs 14) (s_c.regs 0).toNat (s_c.regs 3).toNat (s_c.regs 1).toNat) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ ((s'.regs 0).toNat = s.mem.readLE pv.toNat 8 ∧
+        MemFrame s.mem s'.mem (C.priv ++ [((s.regs 4).toNat - (C.depth + 40), (s.regs 4).toNat + 16)]) ∧
+        C.Env s'.mem (s.regs 14)) :=
+  ⟨implAt, C0, ret, s0, C0_laws, model, hret, setup, pre,
+    ⟨sCall, rfl, sCall_pre⟩, returnsF⟩
 
 /-- So the guarantee is reached: `Word(&v)` returns `42`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat = 42 := by
-  refine Returns.mono (correctness implAt C0 C0_laws model pv ret hret s0 setup pre) ?_
+  refine Returns.mono returnsF ?_
   intro s' ⟨habi, h0, _, _⟩
   refine ⟨habi, ?_⟩
   rw [h0]; decide +kernel

@@ -110,6 +110,27 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State) (p : BitVec 64), RetAddr Extrac
     try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp]
     all_goals decide
 
+
+def sF : State := { s0 with regs := fun i => if i = 0 then 0 else s0.regs i }
+theorem setupF : CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] sF :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    have : i = 0 := by omega
+    subst this; rfl⟩
+theorem hregF : ∀ r ∈ sF.mem.regions, 4096 ≤ r.base := by
+  simp only [sF, s0, wmem, sp0, g0, hp]; decide
+/-- The hypotheses of `faults` hold together (a nil pointer, every region above the first page), and the call faults. -/
+theorem faults : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧
+    (∀ r ∈ s.mem.regions, 4096 ≤ r.base) ∧
+    ((s.pc.toNat ≠ (Extracted.program.withExit ret).exitAddr ∧
+        (Extracted.program.withExit ret).stubAt s.pc.toNat = none ∧
+        ∃ w, (Extracted.program.withExit ret).fetch s.pc.toNat = some w ∧
+          ∃ a n, Arm64.step w s = .error (.outsideAllocation a n) ∧ a < 4096) ∧
+      Faults (Extracted.program.withExit ret) s) :=
+  ⟨ret, sF, hret, setupF, hregF, Proof.faults ret hret sF setupF hregF⟩
+
 end Witness
 
 end Proof

@@ -174,6 +174,31 @@ theorem pre : GuardOK s0 0 ∧ StackOK s0 4168 24 ∧ Extracted.program.DataLoad
   ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩, dataLoaded,
     by simp only [rt, outside_cons, outside_nil]; decide, hH⟩
 
+/-- The call state at `runtime.mallocgcSmallNoScanSC2`'s entry (`mallocgcSmallNoScanSC2(16, type:Pair, true)`),
+in the witness's world: the heap, the data and the readiness are those of `s0`; the callee's frame lies just
+below the caller's. -/
+def wsCall : State :=
+  { s0 with
+    pc := BitVec.ofNat 64 cA
+    sp := BitVec.ofNat 64 (sp0 - 16)
+    regs := fun i => if i = 0 then 16 else if i = 1 then BitVec.ofNat 64 pairType else if i = 2 then 1
+      else s0.regs i }
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : MallocgcSCPre (NoScanArgs 2) rt 4096 H wsCall := by
+  have hw : s0.mem.accessible (sp0 - 16 - 4096) (4096 + 8 + 8 * 3) true = true := by decide
+  refine ⟨⟨⟨by unfold CallOK; decide, by decide, Or.inr ⟨⟨by decide, by decide⟩, by decide⟩⟩, ?_⟩, ?_⟩
+  · exact ⟨⟨16, pairType, 1, rfl, by decide⟩, by decide, hH.2.2⟩
+  · refine ⟨by decide, by decide, by decide, by decide, by decide⟩
+
+/-- The returning run, exactly as `correctness` states it at the witness. -/
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+      s'.mem.accessible ptr 16 true = true ∧
+      s'.mem.readLE ptr 8 = (3 : BitVec 64).toNat ∧ s'.mem.readLE (ptr + 8) 8 = (5 : BitVec 64).toNat ∧
+      MemFrame s0.mem s'.mem (rt ++ [(s0.sp.toNat - 4168, s0.sp.toNat + 24)]) :=
+  correctness implAt rt H 3 5 model ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
     (s : State), MallocgcSmallNoScanSCContract 2 (Extracted.program.link impl)
@@ -182,14 +207,21 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtR
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
     (GuardOK s 0 ∧ StackOK s 4168 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside (s.sp.toNat - 4168) 4192 rt ∧
-      H [16, pairType, 1] (s.regs 28).toNat (s.sp.toNat - 64) (rtView rt s.mem)) :=
-  ⟨implAt, rt, H, ret, s0, model, hret, setup, pre⟩
+      H [16, pairType, 1] (s.regs 28).toNat (s.sp.toNat - 64) (rtView rt s.mem)) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mallocgcSmallNoScanSC2") ∧
+      MallocgcSCPre (NoScanArgs 2) rt 4096 H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+        s'.mem.accessible ptr 16 true = true ∧
+        s'.mem.readLE ptr 8 = (3 : BitVec 64).toNat ∧ s'.mem.readLE (ptr + 8) 8 = (5 : BitVec 64).toNat ∧
+        MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4168, s.sp.toNat + 24)]) :=
+  ⟨implAt, rt, H, ret, s0, model, hret, setup, pre, ⟨wsCall, by rw [addr]; rfl, wsCall_pre⟩, returnsF⟩
 
 /-- So the guarantee is reached: `NewPair(3, 5)` returns a fresh object holding 3 and 5. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧
       s'.mem.readLE ptr 8 = 3 ∧ s'.mem.readLE (ptr + 8) 8 = 5 :=
-  (correctness implAt rt H 3 5 model ret hret s0 setup pre).mono fun _ ⟨habi, ptr, h0, hin, _, _, ha, hb, _⟩ =>
+  returnsF.mono fun _ ⟨habi, ptr, h0, hin, _, _, ha, hb, _⟩ =>
     ⟨habi, ptr, h0, hin, ha, hb⟩
 
 end Witness

@@ -194,7 +194,7 @@ def bytes0 (a : Nat) : Arm64.Byte :=
   | none => if a = BUMP + 3 then 0x10 else if a = sp0 + 1 then 0x10 else 0
 
 def mem0 : Memory :=
-  ⟨bytes0, [⟨sp0 - 4176, 4216, true⟩, ⟨g0, 0x100, false⟩, ⟨BUMP, 0x200, true⟩, ⟨HEAP, HSIZE, true⟩] ++
+  ⟨bytes0, [⟨sp0 - 4176, 4224, true⟩, ⟨g0, 0x100, false⟩, ⟨BUMP, 0x200, true⟩, ⟨HEAP, HSIZE, true⟩] ++
     Extracted.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
 
 /-- `Push(nil, 7)`. -/
@@ -266,13 +266,80 @@ theorem pre : StackGuardOK s0 4176 ∧ StackWritable s0 4176 40 ∧ (s0.regs 4).
   · rw [rt_eq]; simp only [outside_cons, outside_append, outside_nil, and_true]; decide
   · rw [addr_gr, ut_eq]; exact ⟨rfl, rfl⟩
 
+/-! ### The call-site state of the `growslice` contract -/
+
+def sGr : Amd64.State :=
+  { s0 with
+    rip := BitVec.ofNat 64 grA
+    regs := fun i => if i = 3 then 1 else if i = 7 then 1 else if i = 6 then BitVec.ofNat 64 u8A else s0.regs i }
+
+theorem gr_rsp : (sGr.regs 4).toNat = sp0 := by rfl
+theorem gr_g : (sGr.regs 14).toNat = g0 := by rfl
+theorem gr_mem : sGr.mem = mem0 := rfl
+
+theorem gr_args : argWords64 sGr growsliceSpec.nargs = [0, 1, 0, 1, u8A] := by
+  simp only [argWords64, wordsFrom, growsliceSpec]
+  decide
+
+theorem site_gr : RtLivePre64 4096 R growsliceSpec growsliceLive grA [] 0x400 sGr := by
+  have ha := gr_args
+  have hw : mem0.accessible (sp0 - 4096) (4096 + 8 + 8 * 5) true = true := by decide
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
+  · show CallOK64 sGr 4096 5
+    simp only [CallOK64, gr_rsp, gr_mem]
+    refine ⟨by decide, by decide, by decide, by decide, hw⟩
+  · show growsliceSpec.pre (argWords64 sGr growsliceSpec.nargs) sGr.mem
+    rw [ha, gr_mem]; simp only [growsliceSpec, arg, List.getD_cons_succ, List.getD_cons_zero]
+    refine ⟨⟨⟨by decide, by decide⟩, by decide, by decide⟩, by decide, by decide, by decide, by decide,
+      by decide, fun h => absurd h (by decide)⟩
+  · show ReadsOutside (growsliceSpec.reads (argWords64 sGr growsliceSpec.nargs) sGr.mem) (calleeStack64 sGr 4096 growsliceSpec.nargs)
+    rw [ha, gr_mem]; simp only [growsliceSpec, arg, calleeStack64, gr_rsp, ReadsOutside, List.getD_cons_succ,
+      List.getD_cons_zero]
+    intro r hr
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hr
+    rcases hr with rfl | rfl <;>
+      simp only [outside_cons, outside_nil, and_true] <;> first | decide | (simp only [sp0]; omega)
+  · show True
+    trivial
+  · simp only [StackRoom64, GuardOK64, gr_g, gr_rsp, gr_mem, calleeStack64, growsliceSpec]
+    refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
+    simp only [outside_cons, outside_nil, and_true, sp0, g0]
+    omega
+  · rw [ha]
+    refine ⟨?_, inv0, ?_, fun r hr => absurd hr (by simp), ?_⟩
+    · exact ⟨rfl, rfl⟩
+    · simp only [growsliceLive, arg, List.getD_cons_succ, List.getD_cons_zero]; decide
+    · intro x hx
+      simp only [liveWin64, calleeStack64, gr_rsp, List.mem_append, List.mem_cons, List.not_mem_nil, or_false] at hx
+      rw [rt_eq]
+      rcases hx with (rfl | rfl) | rfl <;>
+        simp only [outside_cons, outside_append, outside_nil, and_true, sp0, HEAP, HEND, BUMP, WBUF] <;> first | decide | omega
+
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ ((s'.regs 3).toNat = (0 : BitVec 64).toNat + 1 ∧
+        ((0 : BitVec 64).toNat < (0 : BitVec 64).toNat → s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64) ∧
+          s'.mem.readLE ((0 : BitVec 64).toNat + (0 : BitVec 64).toNat) 1 = (7 : BitVec 64).toNat % 256 ∧
+          R.inv 0x400 ([] : List (Nat × Nat)) (s0.regs 14).toNat (view R.rt ([] : List (Nat × Nat)) s'.mem) ∧
+          MemFrame s0.mem s'.mem [((0 : BitVec 64).toNat + (0 : BitVec 64).toNat, (0 : BitVec 64).toNat + (0 : BitVec 64).toNat + 1),
+            ((s0.regs 4).toNat - 4176, (s0.regs 4).toNat + 40)]) ∧
+        ((0 : BitVec 64).toNat ≤ (0 : BitVec 64).toNat →
+          (s'.regs 1).toNat = growCap 1 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat ∧
+          InRanges (s'.regs 0).toNat (s'.regs 1).toNat R.rt ∧
+          (∀ i, i < (0 : BitVec 64).toNat → s'.mem.bytes ((s'.regs 0).toNat + i) = s0.mem.bytes ((0 : BitVec 64).toNat + i)) ∧
+          s'.mem.readLE ((s'.regs 0).toNat + (0 : BitVec 64).toNat) 1 = (7 : BitVec 64).toNat % 256 ∧
+          (∃ b' L', R.inv b' L' (s0.regs 14).toNat (view R.rt L' s'.mem) ∧
+            InRanges (s'.regs 0).toNat (s'.regs 1).toNat L') ∧
+          MemFrame s0.mem s'.mem (R.rt ++ [((s0.regs 4).toNat - 4176, (s0.regs 4).toNat + 40)]))) :=
+  correctness implAt R 0x400 [] 0 0 0 7 (by rw [addr_gr]; exact model_gr)
+    ret hret s0 setup pre
+
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List (Nat × Nat)) (ret : Nat)
     (s : Amd64.State),
     RtLiveContract64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.growslice") 4096 R growsliceSpec growsliceLive ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 7] s ∧
-    StackGuardOK s 4176 ∧ StackWritable s 4176 40 ∧ (s.regs 4).toNat % 8 = 0 ∧ Extracted.program.DataLoaded s.mem ∧
+    (StackGuardOK s 4176 ∧ StackWritable s 4176 40 ∧ (s.regs 4).toNat % 8 = 0 ∧ Extracted.program.DataLoaded s.mem ∧
         Outside ((s.regs 4).toNat - 4176) 4216 R.rt ∧
         Apart ((s.regs 14).toNat + 16) 8 ((s.regs 4).toNat - 4176) 4216 ∧
         Outside ((s.regs 14).toNat + 16) 8 R.rt ∧
@@ -287,14 +354,32 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : 
           R.ok (Extracted.program.contractAddr "runtime.growslice")
             [(0 : BitVec 64).toNat, (0 : BitVec 64).toNat + 1, (0 : BitVec 64).toNat, 1, u8Type] ∧
           roundupsize (nextslicecap ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat) true ≤ b ∧
-          (0 < (0 : BitVec 64).toNat → s.mem.accessible (0 : BitVec 64).toNat (0 : BitVec 64).toNat false = true)) :=
-  ⟨implAt, R, 0x400, [], ret, s0, by rw [addr_gr]; exact model_gr, hret, setup, pre⟩
+          (0 < (0 : BitVec 64).toNat → s.mem.accessible (0 : BitVec 64).toNat (0 : BitVec 64).toNat false = true))) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.growslice") ∧
+      RtLivePre64 4096 R growsliceSpec growsliceLive (Extracted.program.contractAddr "runtime.growslice") L b s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ ((s'.regs 3).toNat = (0 : BitVec 64).toNat + 1 ∧
+        ((0 : BitVec 64).toNat < (0 : BitVec 64).toNat → s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64) ∧
+          s'.mem.readLE ((0 : BitVec 64).toNat + (0 : BitVec 64).toNat) 1 = (7 : BitVec 64).toNat % 256 ∧
+          R.inv b L (s.regs 14).toNat (view R.rt L s'.mem) ∧
+          MemFrame s.mem s'.mem [((0 : BitVec 64).toNat + (0 : BitVec 64).toNat, (0 : BitVec 64).toNat + (0 : BitVec 64).toNat + 1),
+            ((s.regs 4).toNat - 4176, (s.regs 4).toNat + 40)]) ∧
+        ((0 : BitVec 64).toNat ≤ (0 : BitVec 64).toNat →
+          (s'.regs 1).toNat = growCap 1 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat ∧
+          InRanges (s'.regs 0).toNat (s'.regs 1).toNat R.rt ∧
+          (∀ i, i < (0 : BitVec 64).toNat → s'.mem.bytes ((s'.regs 0).toNat + i) = s.mem.bytes ((0 : BitVec 64).toNat + i)) ∧
+          s'.mem.readLE ((s'.regs 0).toNat + (0 : BitVec 64).toNat) 1 = (7 : BitVec 64).toNat % 256 ∧
+          (∃ b' L', R.inv b' L' (s.regs 14).toNat (view R.rt L' s'.mem) ∧
+            InRanges (s'.regs 0).toNat (s'.regs 1).toNat L') ∧
+          MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4176, (s.regs 4).toNat + 40)]))) :=
+  ⟨implAt, R, 0x400, [], ret, s0, by rw [addr_gr]; exact model_gr, hret, setup, pre,
+    ⟨[], 0x400, sGr, by rw [addr_gr]; rfl, by rw [addr_gr]; exact site_gr⟩, returnsF⟩
 
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 3).toNat = 1 ∧ (s'.regs 1).toNat = 8 ∧
       InRanges (s'.regs 0).toNat 8 R.rt ∧ s'.mem.readLE (s'.regs 0).toNat 1 = 7 :=
-  (correctness implAt R 0x400 [] 0 0 0 7 (by rw [addr_gr]; exact model_gr)
-    ret hret s0 setup pre).mono
+  returnsF.mono
     fun s' ⟨habi, h1, _, hg⟩ => by
       obtain ⟨h2, h3, -, h4, -⟩ := hg (by decide)
       have e2 : (s'.regs 1).toNat = 8 := by rw [h2]; decide

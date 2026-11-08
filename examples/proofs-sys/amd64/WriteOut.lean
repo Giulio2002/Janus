@@ -229,7 +229,7 @@ theorem returns_full : Amd64.Kernel.ReturnsK ((Extracted.program.link implAt).wi
       (s'.regs 0 = (0 : BitVec 64) →
         k'.output 1 = k0.output 1 ++ readBytes s0.mem (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat))
     (fun _ _ => False) s0 k0 :=
-  full_write implAt [] E0 hent hexit hconv (BitVec.ofNat 64 p0) 0 0 ret hret s0 k0 setup pre
+  Proof.full_write implAt [] E0 hent hexit hconv (BitVec.ofNat 64 p0) 0 0 ret hret s0 k0 setup pre
 
 /-- The hypotheses are satisfiable: three runtime functions meeting their contracts and a call state of
 `WriteOut(p, 0, 0)` that satisfies the precondition. -/
@@ -265,14 +265,46 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E
             k' = k.emit (.write 1 (readBytes s.mem (BitVec.ofNat 64 p0).toNat c)) ∧
             s'.regs 0 = BitVec.ofNat 64 c ∧ s'.regs 3 = 0 ∧ s'.regs 1 = 0) ∨
           (k' = k ∧ s'.regs 0 = BitVec.ofNat 64 (2 ^ 64 - 1))))
-      (fun _ _ => False) s k ∧
+      (fun _ _ => False) s k :=
+  ⟨implAt, [], E0, ret, s0, k0, trivial, hent, hexit, hconv, hret, setup, pre,
+    ⟨wsCall _, rfl, wsOK0 _⟩, ⟨wsCall _, rfl, wsOK0 _⟩, ⟨wsCall _, rfl, wsOK1 _⟩, returns⟩
+
+
+/-- `full_write`: the hypotheses are satisfiable and the call returns what it states: three runtime functions meeting their contracts and a call state of
+`WriteOut(p, 0, 0)` that satisfies the precondition. -/
+theorem full_write : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E : KEnv) (ret : Nat)
+    (s : Amd64.State) (k : Kern),
+    pin E k ∧
+    Amd64.Kernel.SchedContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.entersyscall") rt 1024 ∧
+    Amd64.Kernel.SchedContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.exitsyscall") rt 1024 ∧
+    Amd64.Kernel.ConvT64Contract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.convT64") rt 1024 ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 p0, 0, 0] s ∧
+    (StackGuardOK s 48 ∧ StackWritable s 1232 16 ∧ (s.regs 4).toNat % 8 = 0 ∧
+      Outside ((s.regs 4).toNat - 1232) 1248 rt ∧
+      Buf s.mem (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat false ∧ (0 : BitVec 64).toNat ≤ 2 ^ 48 ∧
+      Outside (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat rt ∧
+      ((BitVec.ofNat 64 p0).toNat + (0 : BitVec 64).toNat ≤ (s.regs 4).toNat - 1232 ∨
+        (s.regs 4).toNat + 16 ≤ (BitVec.ofNat 64 p0).toNat) ∧
+      ((s.regs 14).toNat + 24 ≤ (s.regs 4).toNat - 1232 ∨ (s.regs 4).toNat + 16 ≤ (s.regs 14).toNat + 16) ∧
+      s.mem.accessible errVars 48 false = true ∧
+      (errVars + 48 ≤ (s.regs 4).toNat - 1232 ∨ (s.regs 4).toNat + 16 ≤ errVars)) ∧
+    (∃ s_c : Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.entersyscall") ∧
+      CallOK64 s_c 1024 0) ∧
+    (∃ s_c : Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.exitsyscall") ∧
+      CallOK64 s_c 1024 0) ∧
+    (∃ s_c : Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.convT64") ∧
+      CallOK64 s_c 1024 1) ∧
     Amd64.Kernel.ReturnsK ((Extracted.program.link impl).withExit ret) E
       (fun s' k' => ABIReturn s s' ∧
         (s'.regs 0 = (0 : BitVec 64) →
           k'.output 1 = k.output 1 ++ readBytes s.mem (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat))
       (fun _ _ => False) s k :=
   ⟨implAt, [], E0, ret, s0, k0, trivial, hent, hexit, hconv, hret, setup, pre,
-    ⟨wsCall _, rfl, wsOK0 _⟩, ⟨wsCall _, rfl, wsOK0 _⟩, ⟨wsCall _, rfl, wsOK1 _⟩, returns, returns_full⟩
+    ⟨wsCall _, rfl, wsOK0 _⟩, ⟨wsCall _, rfl, wsOK0 _⟩, ⟨wsCall _, rfl, wsOK1 _⟩, returns_full⟩
 
 end Witness
 

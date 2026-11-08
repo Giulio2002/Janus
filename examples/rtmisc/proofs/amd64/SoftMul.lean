@@ -124,18 +124,37 @@ theorem pre : CallerOK64 softEnv s0 40 16 ∧ GoMXCSR s0 ∧ ¬ MulTiny a1.toNat
   · unfold Spec.Disjoint; decide
   · simp [softEnv, outside_nil]
 
+/-- The call state of the `runtime.fmul64` contract: at its entry, same registers and stack. -/
+def sCall : State := { s0 with rip := BitVec.ofNat 64 cAddr }
+
+theorem sCall_pre : SoftPre64 sCall ∧ ¬ MulTiny (sCall.regs 0).toNat (sCall.regs 3).toNat := by
+  refine ⟨⟨⟨trivial, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, rfl, rfl,
+    by decide, ?_⟩, rfl⟩, by decide⟩
+  simp [softEnv, outside_nil]
+
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (ResultIs binary64 (mul binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat ∧
+      MemFrame s0.mem s'.mem [((s0.regs 4).toNat - (softDepth + 40), (s0.regs 4).toNat + 16)]) :=
+  correctness implAt model a1 a1 ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (ret : Nat) (s : State),
     SoftFmulContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.fmul64") ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [a1, a1] s ∧
-    (CallerOK64 softEnv s 40 16 ∧ GoMXCSR s ∧ ¬ MulTiny a1.toNat a1.toNat) :=
-  ⟨implAt, ret, s0, model, hret, setup, pre⟩
+    (CallerOK64 softEnv s 40 16 ∧ GoMXCSR s ∧ ¬ MulTiny a1.toNat a1.toNat) ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.fmul64") ∧
+      SoftPre64 s_c ∧ ¬ MulTiny (s_c.regs 0).toNat (s_c.regs 3).toNat) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (ResultIs binary64 (mul binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat ∧
+      MemFrame s.mem s'.mem [((s.regs 4).toNat - (softDepth + 40), (s.regs 4).toNat + 16)]) :=
+  ⟨implAt, ret, s0, model, hret, setup, pre,
+    ⟨sCall, rfl, sCall_pre⟩, returnsF⟩
 
 /-- So the guarantee is reached: `1.0 * 1.0` is the IEEE product (`1.0`). -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ ResultIs binary64 (mul binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat :=
-  (correctness implAt model a1 a1 ret hret s0 setup pre).mono fun _ h => ⟨h.1, h.2.1⟩
+  returnsF.mono fun _ h => ⟨h.1, h.2.1⟩
 
 end Witness
 

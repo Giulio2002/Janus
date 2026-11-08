@@ -64,6 +64,13 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64), RetAddr Extrac
     ABIReturn s s' ∧ (s'.xmm 0).toNat % 2 ^ 64 = fromInt binary64 .rne x.toInt) :=
   ⟨ret, s0, x, hret, setup, hpre, correctness x ret hret s0 setup hpre⟩
 
+/-- All hypotheses of `exact` hold together, and the call returns. -/
+theorem exact : ∃ (ret : Nat) (s : State) (x : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s ∧ (x.toInt.natAbs < 2 ^ 53) ∧ (StackWritable s 0 8 ∧ GoMXCSR s) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ truncInt binary64 ((s'.xmm 0).toNat % 2 ^ 64) = some x.toInt) :=
+  ⟨ret, s0, x, hret, setup, by decide, hpre, Proof.exact x (by decide) ret hret s0 setup hpre⟩
+
 end Witness
 
 end Proof

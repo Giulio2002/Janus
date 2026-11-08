@@ -177,6 +177,45 @@ theorem pre : CallerOK C0.toRtEnv s0 48 16 ∧ Extracted.program.DataLoaded s0.m
   · unfold Disjoint; decide
   · unfold Disjoint; decide
 
+/-- The call-site state of `runtime.checkptrAlignment`: the stock callee state of
+`Janus.Contracts.InstrumentCallsSat` (`wstate`, `p = nil`, so the alignment check is trivially met), at the
+runtime's entry. -/
+def wsCall : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 wret else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 cAddr, flags := ⟨false, false, false, false⟩,
+    mem := wmem }
+
+theorem wsCall_rtpre : RTPre C0.toRtEnv 3 wsCall := by
+  have hw : wmem.accessible (wsp - 64) (64 + 8 + 8 * 4) true = true := by decide
+  have h28 : wsCall.regs 28 = BitVec.ofNat 64 wg := rfl
+  have h30 : wsCall.regs 30 = BitVec.ofNat 64 wret := rfl
+  have hsp : wsCall.sp = BitVec.ofNat 64 wsp := rfl
+  have hm : wsCall.mem = wmem := rfl
+  refine ⟨wmem_env (wsCall.regs 28), ⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, by decide, ?_, ?_⟩, ?_⟩
+  · simp only [regG, stackguard0Offset, h28]; decide
+  · simp only [regG, stackguard0Offset, h28, hm]; decide
+  · simp only [stackguard0, regG, stackguard0Offset, h28, hm, hsp, C0_depth]; decide
+  · simp only [h30]; decide
+  · simp only [h30]; decide
+  · simp only [hsp]; decide
+  · simp only [hsp, C0_depth]; decide
+  · simp only [hsp]; simp [wsp] <;> omega
+  · simp only [hsp, hm, C0_depth, BitVec.toNat_ofNat]
+    exact Memory.accessible_mono _ hw (by simp [wsp]) (by simp [wsp] <;> omega)
+  · simp only [hsp, C0_depth, C0_priv, outside_cons, outside_nil, and_true, BitVec.toNat_ofNat]
+    simp [wsp]
+
+theorem wsCall_pre : RTPre C0.toRtEnv 3 wsCall ∧
+    AlignOK C0 wsCall.mem (wsCall.regs 28) (wsCall.regs 0).toNat (wsCall.regs 1).toNat (wsCall.regs 2).toNat :=
+  ⟨wsCall_rtpre, Or.inl rfl⟩
+
+/-- The returning run, exactly as `correctness` states it at the witness. -/
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (s'.regs 0).toNat = s0.mem.readLE pv.toNat 8 ∧
+      MemFrame s0.mem s'.mem (C0.priv ++ [(s0.sp.toNat - (C0.depth + 48), s0.sp.toNat + 16)]) ∧
+      C0.Env s'.mem (s0.regs 28) :=
+  correctness implAt C0 C0_laws model pv ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (C : CheckptrModel) (ret : Nat) (s : State), C.Laws ∧
     CheckptrAlignment (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.checkptrAlignment") C ∧
@@ -185,13 +224,20 @@ theorem nonvacuous : ∃ (impl : List Segment) (C : CheckptrModel) (ret : Nat) (
     (CallerOK C.toRtEnv s 48 16 ∧ Extracted.program.DataLoaded s.mem ∧
       Ptr s.mem pv 8 false ∧ pv.toNat ≠ 0 ∧ NoStraddle C s.mem (s.regs 28) pv.toNat 8 ∧
       Outside pv.toNat 8 C.priv ∧ Disjoint pv.toNat 8 (s.sp.toNat - (C.depth + 48)) (C.depth + 64) ∧
-      Disjoint (s.regs 28).toNat 16 (s.sp.toNat - (C.depth + 48)) (C.depth + 64)) :=
-  ⟨implAt, C0, ret, s0, C0_laws, model, hret, setup, pre⟩
+      Disjoint (s.regs 28).toNat 16 (s.sp.toNat - (C.depth + 48)) (C.depth + 64)) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.checkptrAlignment") ∧
+      RTPre C.toRtEnv 3 s_c ∧
+      AlignOK C s_c.mem (s_c.regs 28) (s_c.regs 0).toNat (s_c.regs 1).toNat (s_c.regs 2).toNat) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (s'.regs 0).toNat = s.mem.readLE pv.toNat 8 ∧
+        MemFrame s.mem s'.mem (C.priv ++ [(s.sp.toNat - (C.depth + 48), s.sp.toNat + 16)]) ∧
+        C.Env s'.mem (s.regs 28) :=
+  ⟨implAt, C0, ret, s0, C0_laws, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returnsF⟩
 
 /-- So the guarantee is reached: `Word(&v)` returns `42`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat = 42 := by
-  refine Returns.mono (correctness implAt C0 C0_laws model pv ret hret s0 setup pre) ?_
+  refine Returns.mono returnsF ?_
   intro s' ⟨habi, h0, _, _⟩
   refine ⟨habi, ?_⟩
   rw [h0]; decide +kernel
