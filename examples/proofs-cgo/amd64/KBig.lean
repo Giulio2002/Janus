@@ -99,4 +99,43 @@ theorem correctness (x y : BitVec 64) :
         by simp only [Returned, sig, result, ResultAt, size_big, hm, bigMem_read, h0, and_true], rfl,
         by rw [hm]; unfold bigMem; janus_frame⟩)
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x20008  -- addr-ok: a chosen stack window, not a binary address
+def P : Nat := 0x100000  -- addr-ok: a chosen result buffer
+def x0 : BitVec 64 := 5#64
+def y0 : BitVec 64 := 3#64
+
+def smem : Janus.Arm64.Memory :=
+  ⟨fun a => if wsp ≤ a ∧ a < wsp + 8 then BitVec.ofNat 8 (ret / 256 ^ (a - wsp)) else 0,
+   [⟨wsp - 64, 128, true⟩, ⟨P, 32, true⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 6 then x0 else if i = 2 then y0 else if i = 7 then BitVec.ofNat 64 P
+      else if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := smem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem spre : SPre (vals x0 y0) s0 :=
+  (spre_iff x0 y0 s0).2 ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide,
+    by decide, by decide⟩
+
+theorem call : CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals x0 y0) s0 :=
+  ⟨rfl, by decide, by decide, rfl, spre.1, spre.2.1, by intro h; simp [sig] at h⟩
+
+theorem stack : CStack s0 0 8 := ⟨by decide, by decide, by decide, by decide⟩
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (x y : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals x y) s ∧ (CStack s 0 8) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      (∃ v, Returned sig s s' v ∧ (v = quad (x + y) (x - y) (x * y) (x ^^^ y) ∧
+        MemFrame s.mem s'.mem [((s.regs 7).toNat, (s.regs 7).toNat + 32)]))) :=
+  ⟨x0, y0, ret, s0, hret, call, stack, correctness x0 y0 ret hret s0 call stack⟩
+
+end Witness
+
 end Proof

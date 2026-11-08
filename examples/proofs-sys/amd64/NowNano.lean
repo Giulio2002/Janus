@@ -247,7 +247,7 @@ theorem pre : StackGuardOK s0 32 ∧ StackWritable s0 1072 8 ∧ (s0.regs 4).toN
     s0.mem.accessible startNano 8 false = true ∧ s0.mem.accessible timeLocal 8 false = true := by
   refine ⟨⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩,
     ⟨by decide, by decide, by decide⟩, by decide, by simp only [outside_nil], by decide, by decide,
-    by decide, Or.inl (by decide), by decide, by decide⟩
+    by decide, Or.inr (by decide), by decide, by decide⟩
 
 /-- The theorem fires: `NowNano()` returns the wall-clock reading in nanoseconds. -/
 theorem returns : Amd64.Kernel.ReturnsK (Extracted.program.withExit ret) E0

@@ -400,4 +400,51 @@ theorem correctness (xs : List (BitVec 64)) (hk : xs.length < 2 ^ 31) :
     have : SysV.result (.int 8 true) = .direct [⟨0, 8, .gpr 0⟩] := by decide
     simp only [Returned, sig, this, ResultAt, PiecesAt, and_true, pieceAt_gpr_word, h0]
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x20008  -- addr-ok: a chosen stack window, not a binary address
+def FS : Nat := 0x200000  -- addr-ok: a chosen thread block (the canary at FS+40)
+
+def smem : Janus.Arm64.Memory :=
+  ⟨fun a => if wsp ≤ a ∧ a < wsp + 8 then BitVec.ofNat 8 (ret / 256 ^ (a - wsp)) else 0,
+   [⟨wsp - 88, 160, true⟩, ⟨FS + 40, 8, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, fsBase := BitVec.ofNat 64 FS, mem := smem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem frame : Frame s0 := by
+  unfold Frame
+  refine ⟨by decide, by decide, by decide, by decide, by decide, ?_⟩
+  simp only [outside_cons, outside_nil, and_true]; decide
+
+theorem call : CCallA (Extracted.program.withExit ret) Extracted.entry (sig [])
+    ((([] : List (BitVec 64)).length) :: ([] : List (BitVec 64)).map BitVec.toNat) s0 := by
+  refine ⟨rfl, by decide, by decide, rfl, ?_, ?_, ?_⟩
+  · have hst : (sig ([] : List (BitVec 64))).start = {} := rfl
+    simp only [SysV.Sig.passing, hst]
+    simp only [sig, SysV.assignAll, assign_n]
+    simp [argsAt_cons, ArgsAt, ArgAt, PiecesAt, PieceAt, bytesOf, s0]
+    simp [SysV.assignAll, ArgsAt]
+  · intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht
+    have : SysV.result (.int 8 true) = .direct [⟨0, 8, .gpr 0⟩] := by decide
+    rw [this] at hr; cases hr
+  · intro _; refine ⟨?_, ?_⟩ <;> simp [s0, sig, SysV.Sig.vecRegs] <;> decide
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (xs : List (BitVec 64)) (ret : Nat) (s : State), xs.length < 2 ^ 31 ∧
+    RetAddr Extracted.program ret ∧
+    CCallA (Extracted.program.withExit ret) Extracted.entry (sig xs) (xs.length :: xs.map BitVec.toNat) s ∧
+    Frame s ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      (∃ v, Returned (sig xs) s s' v ∧ (v = (psum xs xs.length).toNat ∧
+        MemFrame s.mem s'.mem [((s.regs 4).toNat - 88, (s.regs 4).toNat)]))) :=
+  ⟨[], ret, s0, by decide, hret, call, frame, correctness [] (by decide) ret hret s0 call frame⟩
+
+end Witness
+
 end Proof

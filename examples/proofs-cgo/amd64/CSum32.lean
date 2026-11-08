@@ -197,4 +197,40 @@ theorem correctness (p n : BitVec 64) :
       obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12⟩ := h
       exact ⟨⟨h1, h2, h3, h4, h5, h6, h7, h8, by rw [h9], h10⟩, h12, h11⟩)
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x20008  -- addr-ok: a chosen stack window, not a binary address
+def D : Nat := 0x100000  -- addr-ok: a chosen data window
+def p0 : BitVec 64 := BitVec.ofNat 64 D
+def n0 : BitVec 64 := 4#64
+
+/-- The stack window `[wsp - 64, wsp + 64)` (writable); the return address at `[wsp]`. -/
+def smem : Janus.Arm64.Memory :=
+  ⟨fun a => if wsp ≤ a ∧ a < wsp + 8 then BitVec.ofNat 8 (ret / 256 ^ (a - wsp)) else 0,
+   [⟨wsp - 64, 128, true⟩, ⟨D, 16, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 7 then p0 else if i = 6 then n0 else if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := smem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [p0, n0] s0 :=
+  ⟨rfl, by decide, by decide, by intro i h; simp only [List.length_cons, List.length_nil] at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, by decide, rfl⟩
+
+theorem pre : CStack s0 0 8 ∧ p0.toNat + 4 * n0.toNat ≤ 2 ^ 48 ∧
+    s0.mem.accessible p0.toNat (4 * n0.toNat) false = true := by
+  exact ⟨⟨by decide, by decide, by decide, by decide⟩, by decide, by decide⟩
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (p : BitVec 64) (n : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [p, n] s ∧ (CStack s 0 8 ∧ p.toNat + 4 * n.toNat ≤ 2 ^ 48 ∧
+    s.mem.accessible p.toNat (4 * n.toNat) false = true) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧ ((s'.regs 0).toNat = sum32 s.mem p.toNat n.toNat % 2 ^ 32 ∧ s'.mem = s.mem)) :=
+  ⟨p0, n0, ret, s0, hret, call, pre, correctness p0 n0 ret hret s0 call pre⟩
+
+end Witness
+
 end Proof

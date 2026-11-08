@@ -96,4 +96,49 @@ theorem correctness (ax ay bx by_ n : BitVec 64) :
           bytesOf_pair_hi, h1, BitVec.toNat_ofNat, Nat.pow_zero, Nat.div_one, Nat.reducePow] at h0 ⊢
         exact ⟨by rw [h0, prod, Nat.mod_mod], Nat.mod_eq_of_lt (BitVec.isLt _)⟩, rfl⟩)
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x20008  -- addr-ok: a chosen stack window, not a binary address
+def ax0 : BitVec 64 := 1#64
+def ay0 : BitVec 64 := 2#64
+def bx0 : BitVec 64 := 3#64
+def by0 : BitVec 64 := 4#64
+def n0 : BitVec 64 := 9#64
+
+def smem : Janus.Arm64.Memory :=
+  ⟨fun a => if wsp ≤ a ∧ a < wsp + 8 then BitVec.ofNat 8 (ret / 256 ^ (a - wsp)) else 0,
+   [⟨wsp - 64, 128, true⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 7 then n0 else if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun i => if i = 0 then BitVec.ofNat 128 ax0.toNat else if i = 1 then BitVec.ofNat 128 ay0.toNat
+      else if i = 2 then BitVec.ofNat 128 bx0.toNat else if i = 3 then BitVec.ofNat 128 by0.toNat else 0,
+    mem := smem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem mx : GoMXCSR s0 := by unfold GoMXCSR; decide
+
+theorem spre : SPre (vals ax0 ay0 bx0 by0 n0) s0 :=
+  (spre_iff ax0 ay0 bx0 by0 n0 s0).2 ⟨by decide, by decide, by decide, by decide, by decide, mx,
+    by decide, by decide, by decide, by decide⟩
+
+theorem call : CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals ax0 ay0 bx0 by0 n0) s0 :=
+  ⟨rfl, by decide, by decide, rfl, spre.1, (by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr), (by intro h; simp [sig] at h)⟩
+
+theorem pre : CStack s0 0 8 ∧ GoMXCSR s0 := ⟨⟨by decide, by decide, by decide, by decide⟩, mx⟩
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (ax ay bx by_ n : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals ax ay bx by_ n) s ∧
+    (CStack s 0 8 ∧ GoMXCSR s) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      (∃ v, Returned sig s s' v ∧ (v = pair (BitVec.ofNat 64 (prod ax ay bx by_)) (n + 1)))) :=
+  ⟨ax0, ay0, bx0, by0, n0, ret, s0, hret, call, pre,
+    correctness ax0 ay0 bx0 by0 n0 ret hret s0 call pre⟩
+
+end Witness
+
 end Proof

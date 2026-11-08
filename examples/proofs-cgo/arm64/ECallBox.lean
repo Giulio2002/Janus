@@ -425,15 +425,52 @@ theorem rok : ROK rtW HaW u0 := by
       rw [if_neg (by rw [hb]; simp only [heap]; omega)]
     · rfl
 
+/-! ### A call-site state of the `runtime.newobject` contract -/
+
+def CSP : Nat := 0x200000
+def CG : Nat := 0x300000
+
+/-- A state at `runtime.newobject`'s entry: `X0 = boxType`, the 4096-byte window below `SP`, the
+`g` struct, `box`'s type descriptor (`Size_ = 8`) and the toy heap. -/
+def cm : Memory :=
+  ⟨fun a => if a = boxType then 8 else 0,
+    [⟨CSP - 4096, 4096 + 64, true⟩, ⟨CG, 0x100, false⟩, ⟨boxType, 16, false⟩, ⟨heap, 0x10000, true⟩]⟩
+
+def c0 : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 boxType else if i = 28 then BitVec.ofNat 64 CG
+      else if i = 30 then BitVec.ofNat 64 RET else 0,
+    sp := BitVec.ofNat 64 CSP, pc := BitVec.ofNat 64 cA, flags := ⟨false, false, false, false⟩, mem := cm }
+
+set_option maxRecDepth 100000 in
+theorem c0_pre : NewobjectPre 4096 c0 ∧ Ready HaW rtW [(c0.regs 0).toNat] c0 := by
+  refine ⟨⟨⟨by decide, by decide, by decide, by decide, by decide, by decide +kernel, by decide +kernel⟩,
+    ⟨by decide +kernel, by decide +kernel⟩, by decide +kernel⟩, ?_⟩
+  show HaW [boxType] _ _ (rtView rtW cm)
+  refine ⟨⟨by decide +kernel, fun i hi => ?_⟩, rfl, by decide +kernel⟩
+  show (if _ then cm.bytes (heap + i) else 0) = 0
+  split
+  · show (if heap + i = boxType then (8 : Byte) else 0) = 0
+    have hb : boxType = janus_eval% boxType := rfl
+    rw [if_neg (by rw [hb]; simp only [heap]; omega)]
+  · rfl
+
 /-- All hypotheses of `correctness` hold together: an allocator meeting the contract with its
-readiness, the C call's precondition, and a Go entry where the callback's readiness `ROK` holds. -/
+readiness, the C call's precondition, and a Go entry where the callback's readiness `ROK` holds;
+a state at the allocator's entry meets its call precondition; and the call returns. -/
 theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (Ha : RtReady)
     (rtc : List (Nat × Nat)) (Hc : RtReady) (x : W64) (ret : Nat) (s : State),
     NewobjectContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.newobject") rt 4096 Ha ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CCall ((Extracted.program.link impl).withExit ret) Extracted.entry [x] s ∧ CPre rt rtc Hc s ∧
-    ∃ u, ROK rt Ha u :=
-  ⟨implAt, rtW, HaW, [], fun _ _ _ _ => True, 7#64, RET, s0, newobject_impl, hret, call, pre, u0, rok⟩
+    (∃ u, ROK rt Ha u) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
+      NewobjectPre 4096 s_c ∧ Ready Ha rt [(s_c.regs 0).toNat] s_c) ∧
+    ReturnsC ((Extracted.program.link impl).withExit ret)
+      (CgoCallback Extracted.tls (Extracted.program.link impl) Contract.none (ROK rt Ha) (cbk rtc Hc))
+      (fun s' => CReturn s s' ∧ (s'.regs 0 = x + 1)) s :=
+  ⟨implAt, rtW, HaW, [], fun _ _ _ _ => True, 7#64, RET, s0, newobject_impl, hret, call, pre, ⟨u0, rok⟩,
+    ⟨c0, rfl, c0_pre⟩,
+    correctness implAt rtW HaW newobject_impl [] (fun _ _ _ _ => True) 7#64 RET hret s0 call pre⟩
 
 end Witness
 

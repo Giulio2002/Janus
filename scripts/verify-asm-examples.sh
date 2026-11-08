@@ -59,7 +59,9 @@ verify_one() {
   local -a ispec=(--fw dir:. --proof "examples/asm/proofs/$isa/$n.lean" --art "$out" --arg "sym:${sym[$n]}")
   if incr_begin "asm:$isa/$n" asm "${ispec[@]}"; then echo "$INCR_MSG" | tee "$lines/${isa}_$n"; return 0; fi
   start=$(date +%s.%N)
-  if jv "$out" --proof "examples/asm/proofs/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1 &&
+  # every example has its Witness.nonvacuous (verified in the same run: a main theorem is accepted only together with it)
+  if jv "$out" --proof "examples/asm/proofs/$isa/$n.lean" --theorem Proof.correctness --theorem Proof.Witness.nonvacuous \
+      --janus-root . > "$out/verify.log" 2>&1 &&
       ! grep -q '^Warning: the entry function follows' "$out/verify.log"; then
     t=$(echo "$(date +%s.%N) - $start" | bc)
     printf '%-17s ok  %6.1fs  %s\n' "$isa/$n" "$t" "$(grep -m1 '  Entry:' "$out/verify.log" | sed 's/^ *Entry: //')" | tee "$lines/${isa}_$n"

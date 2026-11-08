@@ -316,4 +316,48 @@ theorem correctness (a n : BitVec 64) :
   have := (cReturn_iff _ _).1 hc
   simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff, CABI.regSP] at this
   exact ⟨this, hx, hmf⟩
+
+namespace Witness
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x20008  -- addr-ok: a chosen stack window, not a binary address
+def P : Nat := 0x100000  -- addr-ok: a chosen array
+def a0 : BitVec 64 := BitVec.ofNat 64 P
+def n0 : BitVec 64 := 2#64
+
+def smem : Janus.Arm64.Memory :=
+  ⟨fun a => if wsp ≤ a ∧ a < wsp + 8 then BitVec.ofNat 8 (ret / 256 ^ (a - wsp)) else 0,
+   [⟨wsp - 64, 128, true⟩, ⟨P, 16, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 7 then a0 else if i = 6 then n0 else if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := smem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [a0, n0] s0 :=
+  ⟨rfl, by decide +kernel, by decide, by
+    intro i h; simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, by decide, rfl⟩
+
+theorem pre : a0.toNat + 8 * n0.toNat ≤ 2 ^ 48 ∧
+    s0.mem.accessible a0.toNat (8 * n0.toNat) false = true ∧ CStack s0 48 8 ∧
+    Outside a0.toNat (8 * n0.toNat) [((s0.regs 4).toNat - 48, (s0.regs 4).toNat + 8)] := by
+  refine ⟨by decide, by decide, ⟨by decide, by decide, by decide, by decide⟩, ?_⟩
+  simp only [outside_cons, outside_nil, and_true]; decide +kernel
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (a n : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [a, n] s ∧
+    (a.toNat + 8 * n.toNat ≤ 2 ^ 48 ∧
+      s.mem.accessible a.toNat (8 * n.toNat) false = true ∧ CStack s 48 8 ∧
+      Outside a.toNat (8 * n.toNat) [((s.regs 4).toNat - 48, (s.regs 4).toNat + 8)]) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      ((s'.regs 0).toNat = best BitVec.slt (word s.mem a.toNat) (n.toNat - 1) ∧
+        MemFrame s.mem s'.mem [((s.regs 4).toNat - 48, (s.regs 4).toNat)])) :=
+  ⟨a0, n0, ret, s0, hret, call, pre, correctness a0 n0 ret hret s0 call pre⟩
+
+end Witness
+
 end Proof

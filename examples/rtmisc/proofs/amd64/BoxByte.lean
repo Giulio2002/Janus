@@ -59,19 +59,20 @@ def g0 : Nat := 0x300000
 def tls0 : Nat := 0x400000
 
 
-def dataByte (a : Nat) : Option (BitVec 8) :=
-  match Extracted.data.find? (fun d => decide (d.base ≤ a) && decide (a < d.base + d.bytes.length)) with
-  | some d => some (BitVec.ofNat 8 (d.bytes.getD (a - d.base) 0))
-  | none => none
 
-def bytes0 (a : Nat) : BitVec 8 :=
-  match dataByte a with
-  | some v => v
-  | none =>
-  if a = sp0 + 2 then 0x20 else if a = tls0 + 2 then 0x30 else
-  0
+def dbyte (a : Nat) : Option Nat :=
+  Extracted.program.data.findSome? fun d =>
+    if d.base ≤ a ∧ a < d.base + d.bytes.length then d.bytes[a - d.base]? else none
 
-def mem0 : Janus.Arm64.Memory := ⟨bytes0, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x1000, false⟩, ⟨tls0, 0x100, false⟩] ++ Extracted.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+def bytes0 (a : Nat) : BitVec 8 := BitVec.ofNat 8 ((dbyte a).getD (if a = sp0 + 2 then 0x20 else if a = tls0 + 2 then 0x30 else 0))
+
+def mem0 : Janus.Arm64.Memory := ⟨bytes0, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x1000, false⟩, ⟨tls0, 0x100, false⟩] ++ Extracted.program.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+
+theorem dataLoaded : Extracted.program.DataLoaded mem0 :=
+  Program.DataLoaded_of_dataSegByte (by unfold DataSegsDisjoint; decide +kernel) (by decide +kernel) (by decide +kernel) fun a n h => by
+    have h' : dbyte a = some n := h
+    show (bytes0 a).toNat = n % 256
+    simp only [bytes0, h', Option.getD_some, BitVec.toNat_ofNat]
 
 def s0 : Janus.Amd64.State :=
   { regs := fun i => if i = 0 then (0x42 : BitVec 64) else if i = 4 then BitVec.ofNat 64 sp0 else if i = 14 then BitVec.ofNat 64 g0 else 0,
@@ -84,7 +85,7 @@ theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x4
   ⟨rfl, by decide, rfl, by decide, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
-    rcases (by omega : i = 0) with rfl <;> decide, rfl⟩
+    rcases (by omega : i = 0) with rfl <;> first | rfl | decide, rfl⟩
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
@@ -97,9 +98,9 @@ theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Amd64.State) (b : BitVec 64), Re
         s'.mem.readLE (s'.regs 3).toNat 8 = b.toNat % 256 ∧ s'.mem = s.mem)) := by
   refine ⟨ret, s0, 0x42, hret, setup, ?pre, correctness 0x42 ret hret s0 setup ?pre⟩
   case pre =>
-    try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Program.DataLoaded]
+    try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR]
     repeat' apply And.intro
-    all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+    all_goals first | exact dataLoaded | decide +kernel | (refine ⟨?_, ?_, ?_⟩ <;> decide +kernel)
 
 end Witness
 

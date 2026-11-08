@@ -458,9 +458,11 @@ theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Arm64.State) , RetAddr Extracted
     (Returns (Extracted.program.withExit ret) s fun s' =>
       ABIReturn s s' ∧ (ResultIs binary64 (cdiv true (s.getV 0 64) (s.getV 1 64) (s.getV 2 64) (s.getV 3 64)).1 (s'.getV 0 64) ∧
         ResultIs binary64 (cdiv true (s.getV 0 64) (s.getV 1 64) (s.getV 2 64) (s.getV 3 64)).2 (s'.getV 1 64))) := by
-  refine ⟨ret, s0, , hret, setup, ?pre, correctness  ret hret s0 setup ?pre⟩
+  refine ⟨ret, s0, hret, setup, ?pre, correctness  ret hret s0 setup ?pre⟩
   case pre =>
-    simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, mem0, bytes0, sp0, g0] <;> decide
+    try unfold Janus.Spec.GuardOK Janus.Spec.StackOK Janus.Spec.Disjoint Janus.Contracts.Misc.RuntimeInf
+    repeat' apply And.intro
+    all_goals decide +kernel
 
 end Witness
 

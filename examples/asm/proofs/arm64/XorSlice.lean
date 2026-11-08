@@ -118,7 +118,10 @@ theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry
   ⟨rfl, rfl, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
-    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> decide,
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl
+    · exact (by decide : s0.mem.readLE (s0.sp.toNat + 8 + 8 * 0) 8 = ((0x300000 : BitVec 64)).toNat)
+    · exact (by decide : s0.mem.readLE (s0.sp.toNat + 8 + 8 * 1) 8 = ((2 : BitVec 64)).toNat)
+    · exact (by decide : s0.mem.readLE (s0.sp.toNat + 8 + 8 * 2) 8 = ((2 : BitVec 64)).toNat),
    ⟨by decide, by decide⟩, by decide⟩
 
 theorem hpre : Ptr s0.mem (0x300000 : BitVec 64) (8 * (2 : BitVec 64).toNat) false := by

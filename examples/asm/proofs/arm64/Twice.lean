@@ -89,7 +89,8 @@ theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry [(3 
   ⟨rfl, rfl, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
-    rcases (by omega : i = 0) with rfl; decide,
+    rcases (by omega : i = 0) with rfl
+    exact (by decide : s0.mem.readLE (s0.sp.toNat + 8 + 8 * 0) 8 = ((3 : BitVec 64)).toNat),
    ⟨by decide, by decide⟩, by decide⟩
 
 theorem hpre : StackOK s0 72 24 := by

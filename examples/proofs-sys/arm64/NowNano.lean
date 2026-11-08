@@ -229,7 +229,7 @@ theorem pre : GuardOK s0 48 ∧ StackOK s0 1128 0 ∧ Outside (s0.sp.toNat - 112
     ((s0.regs 28).toNat + 400 ≤ s0.sp.toNat - 1128 ∨ s0.sp.toNat ≤ (s0.regs 28).toNat + 16) ∧
     s0.mem.accessible startNano 8 false = true ∧ s0.mem.accessible timeLocal 8 false = true := by
   refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
-    by simp only [outside_nil], by decide, by decide, by decide, Or.inl (by decide), by decide, by decide⟩
+    by simp only [outside_nil], by decide, by decide, by decide, Or.inr (by decide), by decide, by decide⟩
 
 /-- The theorem fires: `NowNano()` returns the wall-clock reading in nanoseconds. -/
 theorem returns : ReturnsK (Extracted.program.withExit ret) E0

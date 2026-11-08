@@ -88,8 +88,10 @@ theorem pre : Pre 0#64 VAR s0 := by
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (i : W64) (v ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [i] s ∧ Pre i v s :=
-  ⟨0#64, VAR, RET, s0, hret, call, pre⟩
+    CCall (Extracted.program.withExit ret) Extracted.entry [i] s ∧ Pre i v s ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      ((s'.regs 0).toNat = s.mem.readLE (envp s.mem v + 8 * i.toNat) 8 ∧ s'.mem = s.mem)) :=
+  ⟨0#64, VAR, RET, s0, hret, call, pre, correctness 0#64 VAR RET hret s0 call pre⟩
 
 end Witness
 

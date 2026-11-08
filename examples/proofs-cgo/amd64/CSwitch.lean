@@ -60,4 +60,46 @@ theorem correctness (k x : BitVec 64) :
       if_neg (hne 2 (by decide)), if_neg (hne 3 (by decide)), if_neg (hne 4 (by decide)),
       if_neg (hne 5 (by decide)), if_neg (hne 6 (by decide)), if_neg (hne 7 (by decide))]
 
+namespace Witness
+
+open Janus.Contracts.PanicSat (witMemD)
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x48008  -- addr-ok: a chosen stack word in the witness memory's stack
+def k0 : BitVec 64 := 3#64
+def x0 : BitVec 64 := 100#64
+
+/-- The stack (a region of the witness memory) holding the return address at `[wsp]`, and the
+program's read-only data in place. -/
+def wm : Janus.Arm64.Memory := witMemD [(wsp, ret)] Extracted.data
+
+def s0 : State :=
+  { regs := fun i => if i = 7 then k0 else if i = 6 then x0 else if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wm }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [k0, x0] s0 :=
+  ⟨rfl, by decide, by decide, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, by decide, rfl⟩
+
+theorem dataLoaded : Extracted.program.DataLoaded wm := by
+  unfold Janus.Amd64.Program.DataLoaded
+  set_option maxRecDepth 100000 in decide
+
+theorem pre : CStack s0 0 8 ∧ Extracted.program.DataLoaded s0.mem :=
+  ⟨⟨by decide, by decide, by decide, by decide⟩, dataLoaded⟩
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (k x : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [k, x] s ∧
+    (CStack s 0 8 ∧ Extracted.program.DataLoaded s.mem) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧ (s'.regs 0 = cswitch k x)) :=
+  ⟨k0, x0, ret, s0, hret, call, pre, correctness k0 x0 ret hret s0 call pre⟩
+
+end Witness
+
 end Proof

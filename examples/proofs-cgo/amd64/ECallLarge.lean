@@ -273,8 +273,12 @@ theorem pre : CPre [] (fun _ _ _ _ => True) s0 := by
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (x : W64) (ret : Nat) (s : State),
     RetAddr Extracted.program ret ∧ CCall (Extracted.program.withExit ret) Extracted.entry [x] s ∧
-      CPre rt H s :=
-  ⟨[], fun _ _ _ _ => True, 7#64, RET, s0, hret, call, pre⟩
+      CPre rt H s ∧
+      ReturnsC (Extracted.program.withExit ret)
+        (CgoCallback Extracted.tls Extracted.program Contract.none (fun _ => True) (cbk rt H))
+        (fun s' => CReturn s s' ∧ (s'.regs 0 = 3 * x)) s :=
+  ⟨[], fun _ _ _ _ => True, 7#64, RET, s0, hret, call, pre,
+    correctness [] (fun _ _ _ _ => True) 7#64 RET hret s0 call pre⟩
 
 end Witness
 

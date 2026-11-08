@@ -58,7 +58,7 @@ theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x3
   ⟨rfl, by decide, rfl, by decide, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
-    rcases (by omega : i = 0) with rfl <;> decide, rfl⟩
+    rcases (by omega : i = 0) with rfl <;> first | rfl | decide, rfl⟩
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in

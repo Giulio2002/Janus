@@ -728,21 +728,20 @@ def g0 : Nat := 0x300000
 def tls0 : Nat := 0x400000
 
 
-def dataByte (a : Nat) : Option (BitVec 8) :=
-  match Extracted.data.find? (fun d => decide (d.base ≤ a) && decide (a < d.base + d.bytes.length)) with
-  | some d => some (BitVec.ofNat 8 (d.bytes.getD (a - d.base) 0))
-  | none => none
 
-def bytes0 (a : Nat) : BitVec 8 :=
-  match dataByte a with
-  | some v => v
-  | none =>
-  if a = sp0 + 2 then 0x20 else if a = tls0 + 2 then 0x30 else
-  if a = infAddr + 6 then 0xf0 else
-  if a = infAddr + 7 then 0x7f else
-  0
+def dbyte (a : Nat) : Option Nat :=
+  Extracted.program.data.findSome? fun d =>
+    if d.base ≤ a ∧ a < d.base + d.bytes.length then d.bytes[a - d.base]? else none
 
-def mem0 : Janus.Arm64.Memory := ⟨bytes0, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x1000, false⟩, ⟨tls0, 0x100, false⟩, ⟨infAddr, 8, false⟩] ++ Extracted.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+def bytes0 (a : Nat) : BitVec 8 := BitVec.ofNat 8 ((dbyte a).getD (if a = sp0 + 2 then 0x20 else if a = tls0 + 2 then 0x30 else if a = infAddr + 6 then 0xf0 else if a = infAddr + 7 then 0x7f else 0))
+
+def mem0 : Janus.Arm64.Memory := ⟨bytes0, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x1000, false⟩, ⟨tls0, 0x100, false⟩, ⟨infAddr, 8, false⟩] ++ Extracted.program.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+
+theorem dataLoaded : Extracted.program.DataLoaded mem0 :=
+  Program.DataLoaded_of_dataSegByte (by unfold DataSegsDisjoint; decide +kernel) (by decide +kernel) (by decide +kernel) fun a n h => by
+    have h' : dbyte a = some n := h
+    show (bytes0 a).toNat = n % 256
+    simp only [bytes0, h', Option.getD_some, BitVec.toNat_ofNat]
 
 def s0 : Janus.Amd64.State :=
   { regs := fun i => if i = 4 then BitVec.ofNat 64 sp0 else if i = 14 then BitVec.ofNat 64 g0 else 0,
@@ -752,7 +751,7 @@ def s0 : Janus.Amd64.State :=
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
 theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h, rfl⟩
+  ⟨rfl, by decide +kernel, rfl, by decide, by intro i h; simp at h, rfl⟩
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
@@ -767,11 +766,11 @@ theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Amd64.State) , RetAddr Extracted
           ((s.xmm 2).toNat % 2 ^ 64) ((s.xmm 3).toNat % 2 ^ 64)).1 ((s'.xmm 0).toNat % 2 ^ 64) ∧
         ResultIs binary64 (cdiv false ((s.xmm 0).toNat % 2 ^ 64) ((s.xmm 1).toNat % 2 ^ 64)
           ((s.xmm 2).toNat % 2 ^ 64) ((s.xmm 3).toNat % 2 ^ 64)).2 ((s'.xmm 1).toNat % 2 ^ 64))) := by
-  refine ⟨ret, s0, , hret, setup, ?pre, correctness  ret hret s0 setup ?pre⟩
+  refine ⟨ret, s0, hret, setup, ?pre, correctness  ret hret s0 setup ?pre⟩
   case pre =>
-    try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Program.DataLoaded]
+    try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR]
     repeat' apply And.intro
-    all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+    all_goals first | exact dataLoaded | decide +kernel | (refine ⟨?_, ?_, ?_⟩ <;> decide +kernel)
 
 end Witness
 

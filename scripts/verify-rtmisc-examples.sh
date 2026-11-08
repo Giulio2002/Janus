@@ -136,7 +136,10 @@ verify_one() {
   # compile of the proof (scripts/lib/theorems.sh)
   local -a thms=(Proof.correctness)
   local st i
-  if grep -q '^namespace Witness' "examples/rtmisc/proofs/$isa/$n.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
+  if grep -q '^namespace Witness' "examples/rtmisc/proofs/$isa/$n.lean"; then
+    thms+=(Proof.Witness.nonvacuous)
+    grep -q '^theorem returns' "examples/rtmisc/proofs/$isa/$n.lean" && thms+=(Proof.Witness.returns)
+  fi
   st="$(mktemp -d)"
   verify_theorems "$out" "examples/rtmisc/proofs/$isa/$n.lean" "$st" "${thms[@]}" -- --janus-root . || true  # failures are in $st
   t=$(echo "$(date +%s.%N) - $start" | bc)

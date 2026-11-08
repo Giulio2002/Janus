@@ -84,4 +84,44 @@ theorem correctness (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) :
           Nat.pow_zero, Nat.div_one, Nat.reducePow] at h0 ⊢
         rw [h0, mul, Nat.mod_mod], rfl⟩)
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x20008  -- addr-ok: a chosen stack window, not a binary address
+def a0 : BitVec 64 := 0x4008000000000000#64
+def b0 : BitVec 32 := 0x40000000#32
+def c0 : BitVec 64 := 0x3FF0000000000000#64
+
+def smem : Janus.Arm64.Memory :=
+  ⟨fun a => if wsp ≤ a ∧ a < wsp + 8 then BitVec.ofNat 8 (ret / 256 ^ (a - wsp)) else 0,
+   [⟨wsp - 64, 128, true⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun i => if i = 0 then BitVec.ofNat 128 a0.toNat else if i = 1 then BitVec.ofNat 128 b0.toNat
+      else if i = 2 then BitVec.ofNat 128 c0.toNat else 0, mem := smem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem mx : GoMXCSR s0 := by unfold GoMXCSR; decide
+
+theorem spre : SPre (vals a0 b0 c0) s0 :=
+  (spre_iff a0 b0 c0 s0).2 ⟨by decide, by decide, by decide, mx, by decide, by decide, by decide, by decide⟩
+
+theorem call : CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals a0 b0 c0) s0 :=
+  ⟨rfl, by decide, by decide, rfl, spre.1, (by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr), (by intro h; simp [sig] at h)⟩
+
+theorem pre : CStack s0 0 8 ∧ GoMXCSR s0 := ⟨⟨by decide, by decide, by decide, by decide⟩, mx⟩
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) (ret : Nat) (s : State),
+    RetAddr Extracted.program ret ∧
+    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals a b c) s ∧ (CStack s 0 8 ∧ GoMXCSR s) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      (∃ v, Returned sig s s' v ∧ (v = mul a b c))) :=
+  ⟨a0, b0, c0, ret, s0, hret, call, pre, correctness a0 b0 c0 ret hret s0 call pre⟩
+
+end Witness
+
 end Proof

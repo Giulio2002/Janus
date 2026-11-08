@@ -79,7 +79,9 @@ theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry [(3 
   ⟨rfl, rfl, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
-    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> decide,
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl
+    · exact (by decide : s0.mem.readLE (s0.sp.toNat + 8 + 8 * 0) 8 = ((3 : BitVec 64)).toNat)
+    · exact (by decide : s0.mem.readLE (s0.sp.toNat + 8 + 8 * 1) 8 = ((4 : BitVec 64)).toNat),
    ⟨by decide, by decide⟩, by decide⟩
 
 /-- The theorem fires: `AddAsm(3, 4)` returns `7`. -/

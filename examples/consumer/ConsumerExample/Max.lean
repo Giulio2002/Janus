@@ -56,8 +56,9 @@ theorem returns : Returns (Extracted.program.withExit ret) s0
 /-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
     CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ True ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => ABIReturn s s' ∧ s'.regs 0 = maxSpec x y) :=
-  ⟨ret, s0, 3, 4, hret, setup, trivial, returns⟩
+    Returns (Extracted.program.withExit ret) s (fun s' => ABIReturn s s' ∧ s'.regs 0 = maxSpec x y) ∧
+    Ensures Extracted.program Extracted.entry [x, y] (fun _ => True) (fun _ s' => s'.regs 0 = maxSpec x y) :=
+  ⟨ret, s0, 3, 4, hret, setup, trivial, returns, correctness 3 4⟩
 
 end Witness
 

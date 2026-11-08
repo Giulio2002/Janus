@@ -107,4 +107,39 @@ theorem correctness (ax ay bx by_ n : BitVec 64) :
           bytesOf_pair_hi, h0, h1, BitVec.toNat_ofNat]
         exact ⟨Nat.mod_eq_of_lt (Nat.mod_lt _ (by decide)), Nat.mod_eq_of_lt (BitVec.isLt _)⟩, rfl⟩)
 
+namespace Witness
+
+def RET : Nat := 0x1000
+def ax0 : BitVec 64 := 1#64
+def ay0 : BitVec 64 := 2#64
+def bx0 : BitVec 64 := 3#64
+def by0 : BitVec 64 := 4#64
+def n0 : BitVec 64 := 9#64
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then n0 else if i = 30 then BitVec.ofNat 64 RET else 0,
+    vregs := fun i => if i = 0 then BitVec.ofNat 128 ax0.toNat else if i = 1 then BitVec.ofNat 128 ay0.toNat
+      else if i = 2 then BitVec.ofNat 128 bx0.toNat else if i = 3 then BitVec.ofNat 128 by0.toNat else 0,
+    sp := BitVec.ofNat 64 0x300000, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := ⟨fun _ => 0, []⟩, exclPass := fun _ => true }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem spre : SPre (vals ax0 ay0 bx0 by0 n0) s0 :=
+  (spre_iff ax0 ay0 bx0 by0 n0 s0).2 ⟨by decide, by decide, by decide, by decide, by decide, by decide,
+    by decide, by decide⟩
+
+theorem call : CCallA (Extracted.program.withExit RET) Extracted.entry sig (vals ax0 ay0 bx0 by0 n0) s0 :=
+  ⟨rfl, rfl, by decide, spre.1, by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr⟩
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (ax ay bx by_ n : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals ax ay bx by_ n) s ∧ (s.fpcr = 0) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      (∃ v, Returned sig s s' v ∧ (v = pair (BitVec.ofNat 64 (prod ax ay bx by_)) (n + 1)))) :=
+  ⟨ax0, ay0, bx0, by0, n0, RET, s0, hret, call, rfl,
+    correctness ax0 ay0 bx0 by0 n0 RET hret s0 call rfl⟩
+
+end Witness
+
 end Proof

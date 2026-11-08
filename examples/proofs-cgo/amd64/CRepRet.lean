@@ -71,10 +71,12 @@ theorem stack : CStack s0 0 8 := by
   refine ⟨by decide, by decide, by decide, ?_⟩
   decide
 
-/-- All the hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [3#64, 5#64] s ∧ CStack s 0 8 :=
-  ⟨ret, s0, hret, call, stack⟩
+/-- All hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (a b : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [a, b] s ∧ (CStack s 0 8) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      ((s'.regs 0).toNat = max a.toNat b.toNat)) :=
+  ⟨3#64, 5#64, ret, s0, hret, call, stack, correctness 3#64 5#64 ret hret s0 call stack⟩
 
 /-- So the guarantee is reached: the call returns with `max 3 5 = 5` in `RAX`. -/
 theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
