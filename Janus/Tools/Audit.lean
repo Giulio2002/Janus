@@ -1928,7 +1928,6 @@ def reachesRunClaim (env : Environment) (e : Expr) : Bool := Id.run do
     if base.contains c then return true
     let lastComp := (c.componentsRev.headD .anonymous).toString.toLower
     if (lastComp.splitOn "step").length > 1 || (lastComp.splitOn "exec").length > 1 || (lastComp.splitOn "run").length > 1 then return true
-    if c.getPrefix == `Janus.Program || c.getPrefix == `Janus.Amd64.Program then return true
     match env.find? c with
     | some (.defnInfo d) => todo := todo ++ d.value.getUsedConstants ++ d.type.getUsedConstants
     | some (.axiomInfo _) | some (.opaqueInfo _) => return true
