@@ -108,6 +108,27 @@ theorem pre : CallerOK (MC ck64) s0 16 0 ∧ HMake [] (s0.regs 28).toNat (s0.sp.
     IsMap (MC ck64) s0.mem 0 emp :=
   ⟨callerOK, by unfold HMake; decide, by simp [IsMap, emp]⟩
 
+/-- The precondition of `MakeSmall`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def MakeSmallSite (M : MapModel (BitVec 64) (BitVec 64)) (H : RtReady) (s_c : State) : Prop :=
+  RTPre M 0 s_c ∧ Ready H M.priv [] s_c
+
+/-- The call state of the `makemap_small` contract (U-WITNESS-CALLSITE): at the callee's entry, the caller's frame lowered. -/
+def wsCall : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (wsp - 16), pc := BitVec.ofNat 64 cA,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : MakeSmallSite (MC ck64) HMake wsCall := by
+  refine ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
+    ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, ?_⟩, by unfold Ready HMake; decide⟩
+  simp only [MC_priv, MC_depth, priv0, outside_cons, outside_nil, and_true]; decide
+
+/-- The theorem fires: `NewMap()` returns what the theorem says. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    ((s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty ∧ (MC ck64).Env s'.mem (s0.regs 28)) :=
+  correctness implAt (MC ck64) (MC_laws _) HMake hcon ret hret s0 setup ⟨pre.1, pre.2.1⟩
+
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.makemap_small`
 meeting `MakeSmall` for it, and a call state of `NewMap()` that satisfies the precondition. -/
 theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64)) (H : RtReady) (ret : Nat)
@@ -116,13 +137,11 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
       (Extracted.program.contractAddr "runtime.makemap_small") M H ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
-    (CallerOK M s 16 0 ∧ H [] (s.regs 28).toNat (s.sp.toNat - 16) (rtView M.priv s.mem) ∧ IsMap M s.mem 0 emp) :=
-  ⟨implAt, (MC ck64), HMake, ret, s0, (MC_laws _), hcon, hret, setup, pre⟩
-
-/-- The theorem fires: `NewMap()` returns what the theorem says. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    ((s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty ∧ (MC ck64).Env s'.mem (s0.regs 28)) :=
-  correctness implAt (MC ck64) (MC_laws _) HMake hcon ret hret s0 setup ⟨pre.1, pre.2.1⟩
+    (CallerOK M s 16 0 ∧ H [] (s.regs 28).toNat (s.sp.toNat - 16) (rtView M.priv s.mem) ∧ IsMap M s.mem 0 emp) ∧
+    (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makemap_small") ∧ MakeSmallSite M H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    ((s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧ M.Env s'.mem (s.regs 28)) :=
+  ⟨implAt, (MC ck64), HMake, ret, s0, (MC_laws _), hcon, hret, setup, pre, ⟨wsCall, by simp only [wsCall]; exact addr.symm ▸ rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 
