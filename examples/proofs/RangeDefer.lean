@@ -1003,6 +1003,83 @@ theorem pre : PanicCallerOK PW s0 160 0 ∧ Extracted.program.DataLoaded s0.mem 
     have : defers0 wm = [] := by rw [defers0_eq, hnd]; rfl
     exact absurd hd (by rw [show PW.defers s0.mem (gOf s0) = defers0 wm from rfl, this]; simp)
 
+theorem pre_xfer {P : PanicRuntime} {n : Nat} {s t : State} (h : PanicPre P n s) (h28 : t.regs 28 = s.regs 28)
+    (h30 : t.regs 30 = s.regs 30) (h29 : t.regs 29 = s.regs 29) (hsp : t.sp = s.sp) (hm : t.mem = s.mem) :
+    PanicPre P n t := by
+  obtain ⟨he, ⟨g1, g2, g3⟩, hc, ho⟩ := h
+  refine ⟨by rw [hm]; exact he, ⟨?_, ?_, ?_⟩, ?_, ?_⟩
+  · simpa [regG, h28] using g1
+  · simpa [regG, h28, hm] using g2
+  · simpa [stackguard0, regG, h28, hsp, hm] using g3
+  · simpa [CallOK, h30, h29, hsp, hm] using hc
+  · simpa [hsp, hm] using ho
+/-- The call state at `runtime.deferrangefunc`'s entry. -/
+def wsRf : State := PanicSat.sstate rfA wm 0 0
+
+@[reducible] def rfSite (P : PanicRuntime) (s_c : State) : Prop :=
+  PanicPre P 0 s_c ∧ 0 < P.room s_c.mem (gOf s_c)
+
+theorem wsRf_pre : rfSite PW wsRf :=
+  ⟨PanicSat.sstate_pre 0 (by decide) rfA 0 0 env_w (by decide) (by decide) (by decide),
+    by show 0 < room0 wm; rw [room0_eq]; decide⟩
+
+/-- The witness memory with one range-over-func `_defer` record (token `5`) on the chain. -/
+def wmT : Memory :=
+  ⟨(witMemD (tabWords T0 ++ [(B + 8, 1), (B + 0x208, 5)]) Extracted.data).bytes,
+    (witMemD (tabWords T0 ++ [(B + 8, 1), (B + 0x208, 5)]) Extracted.data).regions ++ [⟨accA, 8, true⟩]⟩
+
+theorem env_T : Env0 T0 wmT := by
+  unfold Env0
+  have hnd : ndef wmT = 1 := by decide
+  refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
+  · rw [hnd] at hi
+    have : i = 0 := by omega
+    subst this
+    exact ⟨by decide, fun h => by exfalso; revert h; decide⟩
+  · unfold TableOK
+    exact ⟨by decide, by decide, by decide⟩
+
+/-- The call state at `runtime.deferprocat`'s entry (`fn` 0, the token `5`). -/
+def wsPa : State := { PanicSat.sstate paA wmT 0 0 with regs := fun i => if i = 2 then 5 else (PanicSat.sstate paA wmT 0 0).regs i }
+
+@[reducible] def paSite (P : PanicRuntime) (s_c : State) : Prop :=
+  PanicPre P 2 s_c ∧ 0 < P.room s_c.mem (gOf s_c) ∧
+    ∃ r rest, P.defers s_c.mem (gOf s_c) = r :: rest ∧ r.token = some (s_c.regs 2).toNat
+
+theorem wsPa_pre : paSite PW wsPa := by
+  refine ⟨?_, ?_, ?_⟩
+  · have h := PanicSat.sstate_pre 2 (by decide) paA 0 0 env_T (by decide) (by decide) (by decide)
+    exact pre_xfer h rfl rfl rfl rfl rfl
+  · show 0 < room0 wmT
+    rw [room0_eq]; decide
+  · refine ⟨{ sp := 0, fns := [], token := some 5 }, [], ?_, rfl⟩
+    show defers0 wmT = _
+    rw [defers0_eq]; decide
+
+/-- The call state at `runtime.deferreturn`'s entry. -/
+def wsRet : State := PanicSat.sstate (Extracted.program.contractAddr "runtime.deferreturn") wm 0 0
+
+theorem defers_R : defers0 wm = [] := by
+  have hnd : ndef wm = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem saved_R : saved0 wm = none := by rw [saved0_eq]; decide
+
+theorem wsRet_pre : DeferreturnPre PW wsRet := by
+  refine ⟨PanicSat.sstate_pre 0 (by decide) _ 0 0 env_w (by decide) (by decide) (by decide), ?_⟩
+  show FrameOK (P0 T0 RPa) wm _ _
+  have hm : wsRet.mem = wm := rfl
+  simp [hm, retFrame, frameItems, recItems, P0_defers, P0_saved, PanicSat.sstate, defers_R, saved_R, gOf, FrameOK]
+
+/-- So the guarantee is reached: `RangeDefer` returns, having run its two deferred calls in LIFO
+order. -/
+theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) s0 fun o =>
+    match o with
+    | .returned s' => ABIReturn s0 s' ∧ s'.mem.readLE accA 8 = mix (s0.mem.readLE accA 8)
+    | .panicked _ _ => False
+    | .goexited _ => False :=
+  correctness implW PW (P0_laws T0 RPa) U0 hrf hat hdr ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State → Nat → Nat → Prop) (ret : Nat)
     (s : State), P.Laws ∧
@@ -1016,17 +1093,19 @@ theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State →
       Outside accA 8 (P.priv ++ [(s.sp.toNat - (P.depth + 160), s.sp.toNat)]) ∧
       Outside fvA 16 (P.priv ++ [(s.sp.toNat - (P.depth + 160), s.sp.toNat)]) ∧
       3 ≤ P.room s.mem (gOf s) ∧ P.saved s.mem (gOf s) = none ∧
-      ∀ d ∈ P.defers s.mem (gOf s), s.sp.toNat ≤ d.sp) :=
-  ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hrf, hat, hdr, hret, setup, pre⟩
-
-/-- So the guarantee is reached: `RangeDefer` returns, having run its two deferred calls in LIFO
-order. -/
-theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) s0 fun o =>
+      ∀ d ∈ P.defers s.mem (gOf s), s.sp.toNat ≤ d.sp) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferrangefunc") ∧
+      rfSite P s_c) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferprocat") ∧
+      paSite P s_c) ∧
+    (∃ s_r : State, s_r.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") ∧
+      DeferreturnPre P s_r) ∧
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClass P) s fun o =>
     match o with
-    | .returned s' => ABIReturn s0 s' ∧ s'.mem.readLE accA 8 = mix (s0.mem.readLE accA 8)
+    | .returned s' => ABIReturn s s' ∧ s'.mem.readLE accA 8 = mix (s.mem.readLE accA 8)
     | .panicked _ _ => False
     | .goexited _ => False :=
-  correctness implW PW (P0_laws T0 RPa) U0 hrf hat hdr ret hret s0 setup pre
+  ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hrf, hat, hdr, hret, setup, pre, ⟨wsRf, rfl, wsRf_pre⟩, ⟨wsPa, rfl, wsPa_pre⟩, ⟨wsRet, rfl, wsRet_pre⟩, returns⟩
 
 end Witness
 
