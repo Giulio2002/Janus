@@ -87,19 +87,21 @@ theorem hpre : StackWritable s0 0 8 ∧ GlobalsInit Extracted.program.globals s0
     ["example.com/basic.karatsubaCut", "example.com/basic.mulBias"] :=
   ⟨⟨by decide, by decide, by decide⟩, globalsInit_image _ _ _ (by decide) (by decide)⟩
 
-/-- All hypotheses of `correctness` hold together, in the link-time image. -/
-theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧
-    (StackWritable s 0 8 ∧ GlobalsInit Extracted.program.globals s.mem
-      ["example.com/basic.karatsubaCut", "example.com/basic.mulBias"]) :=
-  ⟨ret, s0, hret, setup, hpre⟩
-
 /-- So the guarantee is reached: `MulAlgo(0)` returns `1` (schoolbook, `0 < 40`). -/
 theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ results 1 s' = [1#64] := by
   refine (correctness 0#64 ret hret s0 setup hpre).mono ?_
   intro s' h
   exact ⟨h.1, by rw [h.2]; decide⟩
+
+/-- All hypotheses of `correctness` hold together, in the link-time image. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧
+    (StackWritable s 0 8 ∧ GlobalsInit Extracted.program.globals s.mem
+      ["example.com/basic.karatsubaCut", "example.com/basic.mulBias"]) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ results 1 s' = [1#64]) :=
+  ⟨ret, s0, hret, setup, hpre, returns⟩
 
 end Witness
 

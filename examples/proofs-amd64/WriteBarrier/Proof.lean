@@ -226,18 +226,20 @@ theorem callOK : CallOK64 s0 120 0 := by
   have hw : mem0.accessible (SP0 - 0x1000) 0x2000 true = true := by decide
   refine ⟨by decide, by decide, by decide, by decide, Arm64.Memory.accessible_mono _ hw (by decide) (by decide)⟩
 
-/-- The real `gcWriteBarrier1` meets its contract for `Witness.rt`, and for every `N = 1 … 8` the
-precondition of `gcWriteBarrierN`'s contract, with `HRoom`, holds at the concrete state `s0`. -/
-theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s : State),
-    WbContract64 Extracted.program wb1 rt 120 (HRoom rt 1) 1 ∧
-    ∀ n, n ≤ 8 → CallOK64 s 120 0 ∧ Ready64 (HRoom rt n) rt [n] s :=
-  ⟨rt, s0, wb1_meets rt, fun n hn => ⟨callOK, ready n hn⟩⟩
-
 /-- From that state (at `gcWriteBarrier1`) the real code returns, with `R11` the reserved slot. -/
 theorem returns : ReachesRet Extracted.program (retAddrOf s0) s0 fun s' =>
     ∃ buf : W64, s'.regs 11 = buf ∧ WbSlots rt s'.mem buf.toNat 1 :=
   rr_mono' (wb1_meets rt s0 rfl ⟨callOK, ready 1 (by decide)⟩) fun s' ⟨buf, f, x, yh, m, zh, kr, hs, _, hw⟩ =>
     ⟨buf, by rw [hs]; simp, by rw [hs]; exact hw⟩
+
+/-- The real `gcWriteBarrier1` meets its contract for `Witness.rt`, and for every `N = 1 … 8` the
+precondition of `gcWriteBarrierN`'s contract, with `HRoom`, holds at the concrete state `s0`. -/
+theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s : State),
+    WbContract64 Extracted.program wb1 rt 120 (HRoom rt 1) 1 ∧
+    ∀ n, n ≤ 8 → CallOK64 s 120 0 ∧ Ready64 (HRoom rt n) rt [n] s ∧
+    (ReachesRet Extracted.program (retAddrOf s) s fun s' =>
+    ∃ buf : W64, s'.regs 11 = buf ∧ WbSlots rt s'.mem buf.toNat 1) :=
+  ⟨rt, s0, wb1_meets rt, fun n hn => ⟨callOK, ready n hn⟩, returns⟩
 
 end Witness
 

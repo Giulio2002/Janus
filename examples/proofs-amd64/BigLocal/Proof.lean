@@ -451,21 +451,23 @@ theorem pre : GPre FTb pool rt H s0 := by
       · rw [readLE_rtView hin0]; exact d1
       · rw [readLE_rtView hin8]; exact d2
 
-/-- All hypotheses of `correctness` hold together, for a call whose frame does not fit. -/
-theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
-    (reloc : State → State → Prop) (ret : Nat) (s : State),
-    MorestackContract64 Extracted.program FT pool rt H reloc ∧ FT.Agrees Extracted.frames ∧
-    RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [7#64, 0#64] s ∧
-    GPre FT pool rt H s ∧ ¬ StackGuardOK s 40 :=
-  ⟨FTb, pool, rt, H, reloc FTb, ret, s0, contract64 _ FTb, agrees, hret, setup, pre, no_room⟩
-
 /-- So the guarantee is reached: from a stack where the frame does not fit, `BigLocal(7, 0)`
 grows the stack and returns `7`. -/
 theorem returns : GrownReturns64 (Extracted.program.withExit ret) (reloc FTb) s0
     (fun s' => s'.regs 0 = 7#64) :=
   (correctness FTb pool rt H (reloc FTb) (contract64 _ FTb) agrees 7#64 0#64 ret hret s0 setup pre).mono
     (fun s' h => by simpa using h)
+
+/-- All hypotheses of `correctness` hold together, for a call whose frame does not fit. -/
+theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
+    (reloc : State → State → Prop) (ret : Nat) (s : State),
+    MorestackContract64 Extracted.program FT pool rt H reloc ∧ FT.Agrees Extracted.frames ∧
+    RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [7#64, 0#64] s ∧
+    GPre FT pool rt H s ∧ ¬ StackGuardOK s 40 ∧
+    (GrownReturns64 (Extracted.program.withExit ret) (reloc FTb) s
+    (fun s' => s'.regs 0 = 7#64)) :=
+  ⟨FTb, pool, rt, H, reloc FTb, ret, s0, contract64 _ FTb, agrees, hret, setup, pre, no_room, returns⟩
 
 end Witness
 

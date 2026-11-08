@@ -1171,21 +1171,23 @@ theorem pre : PreH FTs pool rt H s0 := by
     · rw [readLE_rtView hin0]; exact d1
     · rw [readLE_rtView hin8]; exact d2
 
-/-- All hypotheses of `correctness` hold together, for a call whose callee grows the stack. -/
-theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
-    (reloc : State → State → Prop) (ret : Nat) (s : State),
-    MorestackContract64 Extracted.program FT pool rt H reloc ∧ Env FT pool rt ∧
-    RetAddr Extracted.program ret ∧ CallSetup (Extracted.program.withExit ret) Extracted.entry [16#64] s ∧
-    PreH FT pool rt H s ∧ (s.mem.readLE ((s.regs 14).toNat + 16) 8 < (s.regs 4).toNat ∧
-      ¬ s.mem.readLE ((s.regs 14).toNat + 16) 8 + 40 < (s.regs 4).toNat - 64) :=
-  ⟨FTs, pool, rt, H, reloc FTs, ret, s0, contract64 _ FTs, env, hret, setup, pre, callee_grows⟩
-
 /-- So the guarantee is reached: `HoldPtr(16)` — `holdCallee` grows the stack and stores `16`
 through the adjusted pointer into the moved array — returns `16 + 16 + 17 = 49`. -/
 theorem returns : GrownReturns64 (Extracted.program.withExit ret) (reloc FTs) s0
     (fun s' => s'.regs 0 = 49#64) :=
   (correctness FTs pool rt H (reloc FTs) (contract64 _ FTs) env 16#64 ret hret s0 setup pre).mono
     fun s' h => by rw [h]; rfl
+
+/-- All hypotheses of `correctness` hold together, for a call whose callee grows the stack. -/
+theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
+    (reloc : State → State → Prop) (ret : Nat) (s : State),
+    MorestackContract64 Extracted.program FT pool rt H reloc ∧ Env FT pool rt ∧
+    RetAddr Extracted.program ret ∧ CallSetup (Extracted.program.withExit ret) Extracted.entry [16#64] s ∧
+    PreH FT pool rt H s ∧ (s.mem.readLE ((s.regs 14).toNat + 16) 8 < (s.regs 4).toNat ∧
+      ¬ s.mem.readLE ((s.regs 14).toNat + 16) 8 + 40 < (s.regs 4).toNat - 64) ∧
+    (GrownReturns64 (Extracted.program.withExit ret) (reloc FTs) s
+    (fun s' => s'.regs 0 = 49#64)) :=
+  ⟨FTs, pool, rt, H, reloc FTs, ret, s0, contract64 _ FTs, env, hret, setup, pre, callee_grows, returns⟩
 
 end Witness
 

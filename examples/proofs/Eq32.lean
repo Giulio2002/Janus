@@ -74,11 +74,6 @@ theorem hpre : pre a b s0 := by
   refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
     ⟨by decide, by decide⟩, ⟨by decide, by decide⟩, by unfold Disjoint; decide, by unfold Disjoint; decide⟩
 
-/-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (ret : Nat) (s : State) (a b : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [a, b] s ∧ pre a b s :=
-  ⟨ret, s0, a, b, hret, setup, hpre⟩
-
 /-- So the guarantee is reached: the two zero arrays compare equal. -/
 theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat % 256 = 1 := by
@@ -87,6 +82,13 @@ theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
   refine ⟨h.1, ?_⟩
   rw [h.2]
   decide
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (a b : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [a, b] s ∧ pre a b s ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ (s'.regs 0).toNat % 256 = 1) :=
+  ⟨ret, s0, a, b, hret, setup, hpre, returns⟩
 
 end Witness
 

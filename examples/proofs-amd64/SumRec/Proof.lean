@@ -804,20 +804,22 @@ theorem pre : Pre FTs pool rt H s0 := by
     · rw [readLE_rtView hin0]; exact d1
     · rw [readLE_rtView hin8]; exact d2
 
-/-- All hypotheses of `correctness` hold together, for a call whose first frame does not fit. -/
-theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
-    (reloc : State → State → Prop) (ret : Nat) (s : State),
-    MorestackContract64 Extracted.program FT pool rt H reloc ∧ Env FT pool rt ∧
-    RetAddr Extracted.program ret ∧ CallSetup (Extracted.program.withExit ret) Extracted.entry [3#64] s ∧
-    Pre FT pool rt H s ∧ ¬ s.mem.readLE ((s.regs 14).toNat + 16) 8 < (s.regs 4).toNat :=
-  ⟨FTs, pool, rt, H, reloc FTs, ret, s0, contract64 _ FTs, env, hret, setup, pre, no_room⟩
-
 /-- So the guarantee is reached: from a stack where not even the first frame fits, `SumRec(3)`
 grows the stack and returns `6`. -/
 theorem returns : GrownReturns64 (Extracted.program.withExit ret) (reloc FTs) s0
     (fun s' => s'.regs 0 = 6#64) :=
   (correctness FTs pool rt H (reloc FTs) (contract64 _ FTs) env 3#64 ret hret s0 setup pre).mono
     fun s' h => by rw [h]; rfl
+
+/-- All hypotheses of `correctness` hold together, for a call whose first frame does not fit. -/
+theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
+    (reloc : State → State → Prop) (ret : Nat) (s : State),
+    MorestackContract64 Extracted.program FT pool rt H reloc ∧ Env FT pool rt ∧
+    RetAddr Extracted.program ret ∧ CallSetup (Extracted.program.withExit ret) Extracted.entry [3#64] s ∧
+    Pre FT pool rt H s ∧ ¬ s.mem.readLE ((s.regs 14).toNat + 16) 8 < (s.regs 4).toNat ∧
+    (GrownReturns64 (Extracted.program.withExit ret) (reloc FTs) s
+    (fun s' => s'.regs 0 = 6#64)) :=
+  ⟨FTs, pool, rt, H, reloc FTs, ret, s0, contract64 _ FTs, env, hret, setup, pre, no_room, returns⟩
 
 end Witness
 
