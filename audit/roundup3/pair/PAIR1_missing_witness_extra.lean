@@ -1,7 +1,8 @@
 import Extracted
 
 /-! UP3d strict-pairing row PAIR1_missing_witness_extra.
-Expected-reason: no kernel-checked non-vacuity witness -/
+Expected-reason: no kernel-checked non-vacuity witness
+-/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 

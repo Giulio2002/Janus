@@ -27,7 +27,8 @@ vrun() { # art proof flag thm...
   local art=$1 proof=$2 fl=$3; shift 3; local -a th=()
   for t in "$@"; do th+=(--theorem "$t"); done
   "$J" verify "$art" --proof "$proof" "${th[@]}" --janus-root "$root" $fl --no-result-cache > "$W/out.txt" 2>&1
-  local nv; nv=$(grep -c '^=== .*: verified' "$W/out.txt")
+  local nv  # one theorem: the run prints no `===` block, only `Verified:`
+  if [ "$#" -eq 1 ]; then nv=$(grep -c '^Verified: ' "$W/out.txt"); else nv=$(grep -c '^=== .*: verified' "$W/out.txt"); fi
   if [ "$nv" -ge "$#" ]; then echo verified; else echo rejected; fi
 }
 reason_of() { # the audit's reason for the rejection in $out: the witness theorem's when it failed, else the main theorem's
@@ -37,7 +38,7 @@ reason_of() { # the audit's reason for the rejection in $out: the witness theore
 }
 check_rejected() { # file label thm...
   local f=$1 n=$2; shift 2
-  local want; want="$(grep -m1 -o 'Expected-reason: .*' "$f" | sed 's/Expected-reason: //')"; [ -n "$want" ] || want='.'
+  local want; want="$(grep -m1 -o 'Expected-reason: .*' "$f" | sed 's/Expected-reason: //; s/ *-\/$//')"; [ -n "$want" ] || want='.'
   for fl in "" "--allow-no-witness"; do
     local v; v=$(vrun "${ART:-$W/Add}" "$f" "$fl" "$@"); out="$(cat "$W/out.txt")"
     if [ "$v" = verified ]; then printf '%-34s %-20s VERIFIED   <-- BROKEN\n' "$n" "${fl:-no-flag}"; bad=1

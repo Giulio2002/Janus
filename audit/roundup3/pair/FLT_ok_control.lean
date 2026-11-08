@@ -1,7 +1,8 @@
 import Extracted
 
 /-! UP3d Faults/fact anchoring row FLT_ok_control.
-Expected-reason: (control: verifies) -/
+Expected-reason: (control: verifies)
+-/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 

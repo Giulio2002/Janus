@@ -1,7 +1,8 @@
 import Extracted
 
 /-! UP3d strict-pairing row PAIR2_witness_extra_tied_to_correctness.
-Expected-reason: does not instantiate any main theorem -/
+Expected-reason: does not instantiate any main theorem
+-/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 

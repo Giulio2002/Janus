@@ -1,7 +1,8 @@
 import Extracted
 
 /-! UP3d Faults/fact anchoring row FLT2_faults_untied_state.
-Expected-reason: does not instantiate any main theorem -/
+Expected-reason: does not instantiate any main theorem
+-/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 

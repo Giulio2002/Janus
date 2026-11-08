@@ -1,7 +1,8 @@
 import Extracted
 
 /-! UP3d strict-pairing row PAIR4_witness_name_pairs_no_main.
-Expected-reason: does not instantiate any main theorem|no main theorem|no kernel-checked non-vacuity witness -/
+Expected-reason: does not instantiate any main theorem|no main theorem|no kernel-checked non-vacuity witness
+-/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 
