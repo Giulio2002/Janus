@@ -123,19 +123,26 @@ theorem pre : GuardOK s0 0 ∧ StackOK s0 4144 16 ∧ Extracted.program.DataLoad
     by simp only [rt, MakeW.rt, Janus.Contracts.AllocWitness.allocRt, MakeW.tys, outside_cons, outside_nil, List.map]; decide,
     by decide, hH⟩
 
-/-- The hypotheses are satisfiable: a `makeslice` meeting the contract (`hmk`), runtime ranges, a
-readiness predicate, and a call state of `MakeSlice(4)` that satisfies the precondition. -/
-theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
-    (s : State),
-    MakesliceContract (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.makeslice") rt 4096 H ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [4] s ∧
-    (GuardOK s 0 ∧ StackOK s 4144 16 ∧ Extracted.program.DataLoaded s.mem ∧
-      Outside (s.sp.toNat - 4144) 4160 rt ∧ (4 : BitVec 64).toNat ≤ 2 ^ 45 ∧
-      H [u64Type, (4 : BitVec 64).toNat, (4 : BitVec 64).toNat] (s.regs 28).toNat (s.sp.toNat - 48)
-        (rtView rt s.mem)) :=
-  ⟨impl, rt, H, ret, s0, hmk, hret, setup, pre⟩
+def cAddr : Nat := Extracted.program.contractAddr "runtime.makeslice"
+
+/-- The call state at `runtime.makeslice`'s entry (arguments `u64Type, 4, 4`, callee `SP` 48 below). -/
+def wsCall : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 tyA else if i = 1 then 4 else if i = 2 then 4
+      else if i = 28 then BitVec.ofNat 64 g0 else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (sp0 - 48), pc := BitVec.ofNat 64 cAddr,
+    flags := ⟨false, false, false, false⟩, mem := s0.mem }
+
+@[reducible] def mkSite (rt : List (Nat × Nat)) (H : RtReady) (s_c : State) : Prop :=
+  MakeslicePre 4096 s_c ∧ Ready H rt [(s_c.regs 0).toNat, (s_c.regs 1).toNat, (s_c.regs 2).toNat] s_c
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : mkSite rt H wsCall := by
+  have h := hH
+  have hpt : u64Type = tyA := by unfold tyA; decide
+  rw [hpt] at h
+  refine ⟨⟨⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩,
+    ⟨by decide, by decide⟩, by decide, by decide, by decide⟩, ?_⟩
+  exact h
 
 /-- The theorem fires: for this call and this `makeslice`, `MakeSlice(4)` returns a zeroed slice of
 length and capacity 4 inside `rt`. -/
@@ -147,6 +154,29 @@ theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s'
       ∀ i, i < (4 : BitVec 64).toNat → s'.mem.readLE ((s'.regs 0).toNat + 8 * i) 8 = 0) ∧
     MemFrame s0.mem s'.mem (rt ++ [(s0.sp.toNat - 4144, s0.sp.toNat + 16)]) :=
   correctness impl rt H 4 hmk ret hret s0 setup pre
+
+/-- The hypotheses are satisfiable: a `makeslice` meeting the contract (`hmk`), runtime ranges, a
+readiness predicate, and a call state of `MakeSlice(4)` that satisfies the precondition. -/
+theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
+    (s : State),
+    MakesliceContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.makeslice") rt 4096 H ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [4] s ∧
+    (GuardOK s 0 ∧ StackOK s 4144 16 ∧ Extracted.program.DataLoaded s.mem ∧
+      Outside (s.sp.toNat - 4144) 4160 rt ∧ (4 : BitVec 64).toNat ≤ 2 ^ 45 ∧
+      H [u64Type, (4 : BitVec 64).toNat, (4 : BitVec 64).toNat] (s.regs 28).toNat (s.sp.toNat - 48)
+        (rtView rt s.mem)) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makeslice") ∧
+      mkSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    s'.regs 1 = 4 ∧ s'.regs 2 = 4 ∧
+    (0 < (4 : BitVec 64).toNat → InRanges (s'.regs 0).toNat (8 * (4 : BitVec 64).toNat) rt ∧
+      (s'.regs 0).toNat % 8 = 0 ∧
+      s'.mem.accessible (s'.regs 0).toNat (8 * (4 : BitVec 64).toNat) true = true ∧
+      ∀ i, i < (4 : BitVec 64).toNat → s'.mem.readLE ((s'.regs 0).toNat + 8 * i) 8 = 0) ∧
+    MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 16)]) :=
+  ⟨impl, rt, H, ret, s0, hmk, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 
