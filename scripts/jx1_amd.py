@@ -146,3 +146,35 @@ def set32():
     varfile('Set32','AssignF32Site','AssignF32',('MapModel (BitVec 32) (BitVec (8 * 1))','(MCW ck32) HAssign','(args kv 0)','mmem64'),
       'AMap (BitVec 32) (BitVec (8 * 1))',3,'RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 3).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 3).toNat f ∧\n    Contracts.Ready64 H M.priv [(s_c.regs 0).toNat, (s_c.regs 3).toNat, (key32 s_c).toNat] s_c','(H : Contracts.RtReady) ',
       f'⟨{RTV}, trivial, by decide, ⟨rfl, by decide, by decide, Or.inl ⟨by decide, rfl⟩⟩,\n    by show (rtView privW mmem64).readLE MP 8 = 0\n       rw [readLE_rtView (inPrivW (by decide) (by decide))]; decide⟩','runtime.mapassign_fast32','M H')
+def sumvalues():
+    st=HELP64+'''/-- The precondition of `IterStart`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def IterStartSite (M : MapModel (BitVec 64) (BitVec 64)) (f : AMap (BitVec 64) (BitVec 64)) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 3).toNat f ∧
+    s_c.mem.accessible (s_c.regs 1).toNat iterSize true = true ∧
+    Outside (s_c.regs 1).toNat iterSize M.priv ∧ Outside (s_c.regs 1).toNat iterSize (calleeStack s_c M.depth 3) ∧
+    Outside (s_c.regs 1).toNat iterSize (retSlot s_c)
+
+/-- The precondition of `IterNext`'s summary at the call state `s_c`. -/
+@[reducible] def IterNextSite (M : MapModel (BitVec 64) (BitVec 64)) (mp : Nat) (f : AMap (BitVec 64) (BitVec 64))
+    (k : BitVec 64) (ks : List (BitVec 64)) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 1 s_c ∧ IsMap M s_c.mem mp f ∧ M.Iter s_c.mem (s_c.regs 0).toNat mp f (k :: ks) ∧
+    Outside (s_c.regs 0).toNat iterSize M.priv ∧ Outside (s_c.regs 0).toNat iterSize (calleeStack s_c M.depth 1) ∧
+    Outside (s_c.regs 0).toNat iterSize (retSlot s_c)
+'''
+    ws=wsdef('mapIterStart',pcx='BitVec.ofNat 64 sAddr',args='(args (BitVec.ofNat 64 IT) 0)').replace('wsCall','wsCallS')+'\n'+wsdef('mapIterNext',pcx='BitVec.ofNat 64 nAddr',args='(fun i => if i = 0 then BitVec.ofNat 64 IT else 0)').replace('wsCall','wsCallN')
+    pre=f'''theorem wsCallS_pre : IterStartSite (MEi (BitVec 64)) AMap.empty wsCallS :=
+  ⟨{RT3%3}, trivial, (isMap_of_ne (by decide)).2 (mmem64_rep _), by decide,
+    by simp only [MEi, ME_priv, priv0, outside_cons, outside_nil, and_true]; decide,
+    by simp only [Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil, and_true]; decide,
+    by simp only [Janus.Contracts.MapAmd64.retSlot, outside_cons, outside_nil, and_true]; decide⟩
+
+theorem wsCallN_pre : IterNextSite (MEi (BitVec 64)) MP AMap.empty 0 [] wsCallN :=
+  ⟨{RT3%1}, (isMap_of_ne (by decide)).2 (mmem64_rep _), ⟨by decide, by decide⟩,
+    by simp only [MEi, ME_priv, priv0, outside_cons, outside_nil, and_true]; decide,
+    by simp only [Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil, and_true]; decide,
+    by simp only [Janus.Contracts.MapAmd64.retSlot, outside_cons, outside_nil, and_true]; decide⟩
+'''
+    cs=conj('IterStartSite','runtime.mapIterStart',FT,'M')
+    cn=f'''(∃ (mp : Nat) (f : {FT}) (k : BitVec 64) (ks : List (BitVec 64)) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapIterNext") ∧ IterNextSite M mp f k ks s_c)'''
+    run('SumValues',st,ws,pre,[cs,cn],['⟨AMap.empty, wsCallS, rfl, wsCallS_pre⟩','⟨MP, AMap.empty, 0, [], wsCallN, rfl, wsCallN_pre⟩'])
