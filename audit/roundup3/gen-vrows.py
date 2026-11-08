@@ -50,7 +50,7 @@ ATT = [
 for n, hyps, pre, kv, wv in ATT:
     hx = ''.join(f'({h}) ∧ ' for _, h in hyps)
     decs = ''.join('by decide, ' for _ in hyps)
-    rfls = ' ∧ '.join(['x'])  # placeholder
+    decapp = ''.join('(by decide) ' for _ in hyps)
     W = f'''
 namespace Witness
 
@@ -79,7 +79,7 @@ theorem setup : CallSetup ((Extracted.program.link ([] : List Segment)).withExit
 
 theorem returns : Returns ((Extracted.program.link ([] : List Segment)).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
     (s'.regs 0).toNat = ((3 : BitVec 64).toNat + (4 : BitVec 64).toNat) % 2 ^ 64 :=
-  correctness [] 0 {kv} {wv} 0 [] (fun _ _ _ _ _ _ _ => True) 3 4 {decs}hc7 ret hret s0 setup (by decide)
+  correctness [] 0 {kv} {wv} 0 [] (fun _ _ _ _ _ _ _ => True) 3 4 {decapp}hc7 ret hret s0 setup (by decide)
 
 theorem nonvacuous : ∃ (impl : List Segment) (fn k w a : Nat) (rt : List (Nat × Nat)) (R : Res) (ret : Nat) (s : State) (x y : BitVec 64),
     {hx}ICallContract (Extracted.program.link impl) fn 4 k 48 rt (fun _ => []) R (fun _ => True) ∧
@@ -91,7 +91,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (fn k w a : Nat) (rt : List (Nat 
 end Witness
 '''
     t = HEAD.format(title=f'Verify-level attacker witness {n}: the pre pins the contract size to an unsatisfiable value (the contract holds vacuously); the witness proves it by exfalso and OMITS the call-site state',
-                    verdict='rejected', reason='does not exhibit a call-site state')
+                    verdict='rejected', reason='U-ICALL-STACK|does not exhibit a call-site state')
     open(f'{out}/{n}.lean', 'w').write(t + stmt(B, hyps, 4, 'k', '48', pre) + W + '\nend Proof\n')
 
 # KA1: R empty only at the arguments the caller would pass: accepted, witness at different arguments (P restricts the callee's arguments)

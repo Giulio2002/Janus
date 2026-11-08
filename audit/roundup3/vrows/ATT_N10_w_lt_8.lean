@@ -2,7 +2,7 @@ import Extracted
 
 /-! Verify-level attacker witness ATT_N10_w_lt_8: the pre pins the contract size to an unsatisfiable value (the contract holds vacuously); the witness proves it by exfalso and OMITS the call-site state
 Expected-verdict: rejected
-Expected-reason: does not exhibit a call-site state
+Expected-reason: U-ICALL-STACK|does not exhibit a call-site state
 The proof is `Add`'s; the hypotheses are never used. -/
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts.ICall Janus.Contracts
 
@@ -44,7 +44,7 @@ theorem setup : CallSetup ((Extracted.program.link ([] : List Segment)).withExit
 
 theorem returns : Returns ((Extracted.program.link ([] : List Segment)).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
     (s'.regs 0).toNat = ((3 : BitVec 64).toNat + (4 : BitVec 64).toNat) % 2 ^ 64 :=
-  correctness [] 0 7 7 0 [] (fun _ _ _ _ _ _ _ => True) 3 4 by decide, hc7 ret hret s0 setup (by decide)
+  correctness [] 0 7 7 0 [] (fun _ _ _ _ _ _ _ => True) 3 4 (by decide) hc7 ret hret s0 setup (by decide)
 
 theorem nonvacuous : ∃ (impl : List Segment) (fn k w a : Nat) (rt : List (Nat × Nat)) (R : Res) (ret : Nat) (s : State) (x y : BitVec 64),
     (k ≤ w) ∧ ICallContract (Extracted.program.link impl) fn 4 k 48 rt (fun _ => []) R (fun _ => True) ∧

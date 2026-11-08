@@ -27,6 +27,9 @@ for name, p in P.items():
     post_extra = p.get('post_extra', '')
     hyps_sub = ' ∧ '.join(f'({h})' for h in p['hyps'])
     hnames = [f'h{i}' for i in range(len(p['hyps']))]
+    used = [v for v in 'kwna' if re.search(r'\b'+v+r'\b', ' '.join(p['hyps']) + ' ' + ' '.join(str(p[x]) for x in ('nargs','stack','above')) )]
+    ubind = '(fn ' + ' '.join(used) + ' : Nat)' if used else '(fn : Nat)'
+    utup = ', '.join(['A0'] + [str(p[v]) for v in used])
     args = f"impl A0 0 {p['k']} {p['w']} {p['n']} {p['a']} rt0 R0 3 4"
     hdecl = ' '.join(f'(by decide)' for _ in p['hyps'])
     hx = ' ∧ '.join(f'({h})' for h in p['hyps'])  # statement-level hypotheses (variables)
@@ -63,17 +66,17 @@ theorem hret : RetAddr (Extracted.program.link impl) ret := RetAddr.of_check (by
 theorem setup : CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 4] s0 :=
   ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
-theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧ (s'.regs 0).toNat = ((3 : BitVec 64).toNat + (4 : BitVec 64).toNat) % 2 ^ 64{post_extra} :=
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧ (s'.regs 0).toNat = ((3 : BitVec 64).toNat + (4 : BitVec 64).toNat) % 2 ^ 64{post_extra.replace('w', str(p['w']))} :=
   correctness impl A0 0 {p['k']} {p['w']} {p['n']} {p['a']} rt0 R0 3 4 {hdecl} hc ret hret s0 setup trivial
 
-theorem nonvacuous : ∃ {BIND.replace('(impl : List Segment) ', '(impl : List Segment) ').replace('(R : Res) ', '(R : Res) (ret : Nat) (s : State) ')},
+theorem nonvacuous : ∃ (impl : List Segment) {ubind} (rt : List (Nat × Nat)) (R : Res) (ret : Nat) (s : State) (x y : BitVec 64),
     {hx} ∧
     ICallContract (Extracted.program.link impl) fn {'n' if p['nargs']=='n' else '4'} {p['stack']} {p['above']} rt (fun _ => []) R (fun _ => True) ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [x, y] s ∧ True ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 fn ∧ ICallPre {'n' if p['nargs']=='n' else '4'} {p['stack']} {p['above']} rt (fun _ => True) s_c) ∧
     Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ {post} :=
-  ⟨impl, A0, 0, {p['k']}, {p['w']}, {p['n']}, {p['a']}, rt0, R0, ret, s0, 3, 4, {'⟨' + ', '.join(['by decide']*len(p['hyps'])) + '⟩' if len(p['hyps'])>1 else 'by decide'}, hc, hret, setup, trivial, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
+  ⟨impl, {utup}, rt0, R0, ret, s0, 3, 4, {', '.join(['by decide']*len(p['hyps']))}, hc, hret, setup, trivial, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 '''

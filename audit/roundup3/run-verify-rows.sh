@@ -30,13 +30,18 @@ vrun() { # art proof flag thm...
   local nv; nv=$(grep -c '^=== .*: verified' "$W/out.txt")
   if [ "$nv" -ge "$#" ]; then echo verified; else echo rejected; fi
 }
+reason_of() { # the audit's reason for the rejection in $out: the witness theorem's when it failed, else the main theorem's
+  if printf '%s\n' "$out" | grep -q '^=== Proof.Witness.nonvacuous: FAILED'; then
+    printf '%s\n' "$out" | awk '/^=== Proof.Witness.nonvacuous: FAILED/{w=1} w&&/^Invalid:/{print;exit}' | sed -E 's/^Invalid: (The audit rejected the proof: )?//' | cut -c1-170
+  else printf '%s\n' "$out" | grep -m1 -E '^Invalid: (The audit rejected|Proof\.[A-Za-z.]* assumes)' | sed -E 's/^Invalid: (The audit rejected the proof: )?//' | cut -c1-170; fi
+}
 check_rejected() { # file label thm...
   local f=$1 n=$2; shift 2
   local want; want="$(grep -m1 -o 'Expected-reason: .*' "$f" | sed 's/Expected-reason: //')"; [ -n "$want" ] || want='.'
   for fl in "" "--allow-no-witness"; do
     local v; v=$(vrun "$W/Add" "$f" "$fl" "$@"); out="$(cat "$W/out.txt")"
     if [ "$v" = verified ]; then printf '%-34s %-20s VERIFIED   <-- BROKEN\n' "$n" "${fl:-no-flag}"; bad=1
-    elif printf '%s' "$out" | grep -qE "$want"; then printf '%-34s %-20s rejected ok\n' "$n" "${fl:-no-flag}"
+    elif printf '%s' "$out" | grep -qE "$want"; then printf '%-34s %-20s rejected ok  [%s]\n' "$n" "${fl:-no-flag}" "$(reason_of)"
     else printf '%-34s %-20s rejected for ANOTHER reason (wanted /%s/)   <-- BROKEN\n' "$n" "${fl:-no-flag}" "$want"; printf '%s\n' "$out" | grep -m3 '^Invalid' | cut -c1-300 | sed 's/^/    /'; bad=1; fi
   done
 }
@@ -47,7 +52,7 @@ done
 check_rejected $RT/rows2/R01_R_pinned_false_in_pre.lean R01 Proof.correctness
 for f in $R/vrows/PIN*.lean; do check_rejected "$f" "$(basename "$f" .lean)" Proof.correctness; done
 echo "== attackers (witness-bearing: rejected for the named reason)"
-for f in $R/vrows/ATT_*.lean $R/wit/WIT[1-5]_*.lean; do check_rejected "$f" "$(basename "$f" .lean)" Proof.correctness Proof.Witness.nonvacuous; done
+for f in $R/vrows/ATT_*.lean $R/wit/WIT[1-6]_*.lean; do check_rejected "$f" "$(basename "$f" .lean)" Proof.correctness Proof.Witness.nonvacuous; done
 echo "== controls (witness-bearing: must VERIFY)"
 for f in $R/ctl/*.lean; do
   n=$(basename "$f" .lean)

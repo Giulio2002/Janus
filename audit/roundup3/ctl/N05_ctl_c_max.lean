@@ -52,14 +52,14 @@ theorem setup : CallSetup ((Extracted.program.link impl).withExit ret) Extracted
 theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧ (s'.regs 0).toNat = ((3 : BitVec 64).toNat + (4 : BitVec 64).toNat) % 2 ^ 64 :=
   correctness impl A0 0 16 140737488355343 0 0 rt0 R0 3 4 (by decide) (by decide) hc ret hret s0 setup trivial
 
-theorem nonvacuous : ∃ (impl : List Segment) (fn fn2 k w n a : Nat) (rt : List (Nat × Nat)) (R : Res) (ret : Nat) (s : State) (x y : BitVec 64),
+theorem nonvacuous : ∃ (impl : List Segment) (fn k w : Nat) (rt : List (Nat × Nat)) (R : Res) (ret : Nat) (s : State) (x y : BitVec 64),
     (8 ≤ k) ∧ (k + 140737488355327 ≤ w) ∧
     ICallContract (Extracted.program.link impl) fn 4 k 48 rt (fun _ => []) R (fun _ => True) ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [x, y] s ∧ True ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 fn ∧ ICallPre 4 k 48 rt (fun _ => True) s_c) ∧
     Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64 :=
-  ⟨impl, A0, 0, 16, 140737488355343, 0, 0, rt0, R0, ret, s0, 3, 4, ⟨by decide, by decide⟩, hc, hret, setup, trivial, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
+  ⟨impl, A0, 16, 140737488355343, rt0, R0, ret, s0, 3, 4, by decide, by decide, hc, hret, setup, trivial, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 

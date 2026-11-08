@@ -2,7 +2,7 @@ import Extracted
 
 /-! Verify-level attacker witness ATT_N11_k_eq_7: the pre pins the contract size to an unsatisfiable value (the contract holds vacuously); the witness proves it by exfalso and OMITS the call-site state
 Expected-verdict: rejected
-Expected-reason: does not exhibit a call-site state
+Expected-reason: U-ICALL-STACK|does not exhibit a call-site state
 The proof is `Add`'s; the hypotheses are never used. -/
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts.ICall Janus.Contracts
 

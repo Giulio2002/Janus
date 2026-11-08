@@ -40,7 +40,7 @@ theorem hc0 : ICallContract (Extracted.program.link impl) A0 4 16 48 rt0 (fun _ 
     (P := fun sc => sc.regs 0 = 9) (fun _ _ => True) (fun _ => trivial)
   have h2 : ICallContract (Extracted.program.link impl) A0 4 16 48 rt0 (fun _ => []) RK (fun sc => sc.regs 0 = 9) := by
     refine Summary.of_codeIn (codeIn_link Extracted.program _ (by decide)) ?_
-    unfold ICallContract at h ⊢
+    unfold ICallContract at h
     refine Summary.mono h (fun _ hp => hp) ?_
     rintro s s' ⟨_, _, _, hP⟩ ⟨junk, f, v, m, ex, ep, h1, h2, h3, ⟨hn, he1, he2⟩, hpr⟩
     exact ⟨junk, f, v, m, ex, ep, h1, h2, h3, ⟨hP, hn, he1, he2⟩, hpr⟩
