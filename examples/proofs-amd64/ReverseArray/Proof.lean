@@ -60,4 +60,40 @@ theorem correctness (out inp : BitVec 64) :
     | (rw [half _ _ _ 8 (by omega) (by omega)])
     | (rw [half _ _ _ 0 (by omega) (by omega), Nat.add_zero])
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def out : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+def inp : BitVec 64 := 0x30a00#64
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then out else if i = 3 then inp else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wmem64 }
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [out, inp] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem hpre : (fun s => StackWritable s 72 8 ∧ Buffer s out 32 true ∧ Buffer s inp 32 false ∧
+        (out = inp ∨ Disjoint out 32 inp 32) ∧
+        ((s.regs regSP).toNat + 8 ≤ out.toNat ∨ out.toNat + 32 ≤ (s.regs regSP).toNat - 72) ∧
+        ((s.regs regSP).toNat + 8 ≤ inp.toNat ∨ inp.toNat + 32 ≤ (s.regs regSP).toNat - 72)) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (out : BitVec 64) (inp : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [out, inp] s ∧ (StackWritable s 72 8 ∧ Buffer s out 32 true ∧ Buffer s inp 32 false ∧
+        (out = inp ∨ Disjoint out 32 inp 32) ∧
+        ((s.regs regSP).toNat + 8 ≤ out.toNat ∨ out.toNat + 32 ≤ (s.regs regSP).toNat - 72) ∧
+        ((s.regs regSP).toNat + 8 ≤ inp.toNat ∨ inp.toNat + 32 ≤ (s.regs regSP).toNat - 72)) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ ∀ i < 4, s'.mem.readLE (out.toNat + 8 * i) 8 =
+        s.mem.readLE (inp.toNat + 8 * (3 - i)) 8) :=
+  ⟨ret, s0, out, inp, hret, setup, hpre, correctness out inp ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

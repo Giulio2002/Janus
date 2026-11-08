@@ -88,13 +88,6 @@ theorem setup1 : CallSetup (Extracted.program.withExit ret) Extracted.entry [0x4
 theorem pre0 : StackWritable (s0 0) 0 8 := ⟨by decide, by decide, by decide⟩
 theorem pre1 : StackWritable (s0 0x40) 0 8 := ⟨by decide, by decide, by decide⟩
 
-/-- The hypotheses of `correctness` hold, for the zero source (where `BSR` leaves its destination
-undefined) and for a non-zero one. -/
-theorem nonvacuous : ∃ (ret : Nat) (s s' : Janus.Amd64.State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧ StackWritable s 0 8 ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0x40#64] s' ∧ StackWritable s' 0 8 :=
-  ⟨ret, s0 0, s0 0x40, hret, setup0, pre0, setup1, pre1⟩
-
 /-- So the guarantee is reached: `BitLen64(0)` returns `0` and `BitLen64(0x40)` returns `7`. -/
 theorem returns :
     Returns (Extracted.program.withExit ret) (s0 0) (fun s' => ABIReturn (s0 0) s' ∧ results 1 s' = [0#64]) ∧
@@ -102,6 +95,15 @@ theorem returns :
   refine ⟨(correctness 0 ret hret _ setup0 pre0).mono ?_, (correctness 0x40 ret hret _ setup1 pre1).mono ?_⟩
   · intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
   · intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
+
+/-- The hypotheses of `correctness` hold, for the zero source (where `BSR` leaves its destination
+undefined) and for a non-zero one. -/
+theorem nonvacuous : ∃ (ret : Nat) (s s' : Janus.Amd64.State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧ StackWritable s 0 8 ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [0x40#64] s' ∧ StackWritable s' 0 8 ∧
+    Returns (Extracted.program.withExit ret) s (fun t => ABIReturn s t ∧ results 1 t = [0#64]) ∧
+    Returns (Extracted.program.withExit ret) s' (fun t => ABIReturn s' t ∧ results 1 t = [7#64]) :=
+  ⟨ret, s0 0, s0 0x40, hret, setup0, pre0, setup1, pre1, returns.1, returns.2⟩
 
 end Witness
 

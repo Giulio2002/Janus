@@ -24,11 +24,12 @@ scripts/build-examples.sh                                   # artifacts/examples
 bin/janus extract artifacts/examples-arm64 example.com/basic.Add artifacts/Add
 bin/janus extract artifacts/examples-arm64 example.com/basic.Max artifacts/Max
 bin/janus verify artifacts/Add --proof examples/consumer/ConsumerExample/Add.lean \
-    --proof-root examples/consumer --theorem ConsumerExample.Add.correctness
+    --proof-root examples/consumer --theorem ConsumerExample.Add.correctness \
+    --theorem ConsumerExample.Add.Witness.nonvacuous
 bin/janus verify-batch examples/consumer/requests.json
 ```
 
-`requests.json` verifies both theorem modules in one session: one snapshot of this package, one
+`requests.json` verifies both theorem modules (each `correctness` with its `Witness.nonvacuous`) in one session: one snapshot of this package, one
 workspace per distinct extraction (Add, Max), and one build of `ConsumerExample.Spec` shared
 between them. Each request gets its own `verified.json`.
 

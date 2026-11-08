@@ -33,4 +33,44 @@ theorem correctness (P : Spec.PanicRuntime) :
     exact hret.ne_of_fetch (pc := Extracted.entry) (w := [0x48, 0x8b, 0x00, 0xc3]) (by rfl)
   · rw [hripn]; rfl
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+/-- The panic runtime: the model with an empty funcs table. -/
+def PW : Spec.PanicRuntime := Janus.Contracts.PanicModel.P0 [] Janus.Contracts.PanicSatAmd64.RPa
+
+
+def s0 : State :=
+  { regs := fun r_ => if r_ = 0 then 0#64 else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wmem64 }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+
+set_option maxRecDepth 100000 in
+theorem hpre : (fun s : State => s.mem.accessible 0 8 false = false) s0 := by
+  dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+
+theorem hyps : True := by decide
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (P : Janus.Spec.PanicRuntime) , RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧ (s.mem.accessible 0 8 false = false) ∧
+    GoReturns (Extracted.program.withExit ret) (goClass P) s fun o =>
+    match o with
+    | .returned s' => ABIReturn s s' ∧ (True)
+    | .panicked v s' => v = P.err Spec.ErrKind.mem
+    | .goexited _ => False :=
+  ⟨ret, s0, PW, hret, setup, hpre, correctness PW ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

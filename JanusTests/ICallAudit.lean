@@ -2,6 +2,7 @@ import Janus.Tools.Audit
 import Janus.Contracts.ICall
 import Janus.Contracts.Live
 import Janus.Contracts.LiveToy
+import Janus.Contracts.ICallSat
 
 /-!
 # The auditor's rule for the callee address of an abstract-callee contract (U-ICALL)
@@ -230,5 +231,77 @@ run_elab frejects "k" "(m : Nat) → (hm : m = 2 ^ 48) → (hk : m ≤ k) → "
 run_elab frejects "k" "(m : Nat) → (h1 : m ≤ k) → (h2 : k ≤ m) → "
 run_elab frejects "k" "(m n : Nat) → (hn : n = 2 ^ 48) → (hm : m ≤ k) → (hn2 : n ≤ k) → "
 run_elab frejects "k" "(m : Nat) → (hm : ∃ z, z = 2 ^ 48 ∧ m = z) → (hk : m ≤ k) → "
+
+end JanusTests.ICallAudit
+
+namespace JanusTests.ICallAudit
+
+/-! ### UP3 (red team n11): a size occurs nowhere else in a main theorem, and the sizes are jointly satisfiable -/
+
+def ustmt (nargs stack above extra pre : String) : String :=
+  "∀ (impl : List Janus.Segment) (fn k n : Nat) (rt : List (Nat × Nat)) (R : Janus.Contracts.ICall.Res), " ++ extra ++
+  "Janus.Contracts.ICall.ICallContract (Extracted.program.link impl) fn (" ++ nargs ++ ") (" ++ stack ++ ") (" ++ above ++ ")" ++
+  " rt (fun _ => []) R (fun _ => True) → Janus.GoABI.Ensures (Extracted.program.link impl) Extracted.entry [] (fun _ => " ++ pre ++ ") (fun _ _ => True)"
+
+def uaccepts (nargs stack above extra pre : String) : TermElabM Unit := do
+  if let some m ← audit (ustmt nargs stack above extra pre) then throwError "({nargs}, {stack}, {above}) {extra} pre {pre} rejected: {m}"
+
+def urejects (nargs stack above extra pre : String) : TermElabM Unit := do
+  if (← audit (ustmt nargs stack above extra pre)).isNone then throwError "({nargs}, {stack}, {above}) {extra} pre {pre} accepted"
+
+-- control: a harmless pre; sizes in neither
+run_elab uaccepts "4" "k" "48" "(hk : 8 ≤ k) → " "True"
+run_elab uaccepts "4" "k" "48" "(w : Nat) → (hw : k + 16 ≤ w) → " "True"
+-- N11 / N62: the size pinned in the precondition; N10 / N65: its bounding variable; N18: through a `let`
+-- the post is an obligation, not an assumption: a size may be mentioned there (N12)
+def ustmtPost (extra post : String) : String :=
+  "∀ (impl : List Janus.Segment) (fn k n : Nat) (rt : List (Nat × Nat)) (R : Janus.Contracts.ICall.Res), " ++ extra ++
+  "Janus.Contracts.ICall.ICallContract (Extracted.program.link impl) fn 4 k 48 rt (fun _ => []) R (fun _ => True) → " ++
+  "Janus.GoABI.Ensures (Extracted.program.link impl) Extracted.entry [] (fun _ => True) (fun _ _ => " ++ post ++ ")"
+run_elab (do if let some m ← audit (ustmtPost "(w : Nat) → (hw : k + 16 ≤ w) → " "w = w ∧ k = k") then throwError "post mention rejected: {m}")
+-- N13 / N60 / N64 / N16 / N17: pins through non-Prop binders, whatever the wrapper
+run_elab urejects "4" "k" "48" "(p : PLift (k = 7)) → " "True"
+run_elab urejects "4" "k" "48" "(w : Nat) → (hw : k ≤ w) → (p : PLift (w < 8)) → " "True"
+run_elab urejects "4" "k" "48" "(w : Nat) → (hw : k ≤ w) → (f : Fin w → Fin 0) → " "True"
+run_elab urejects "4" "k" "48" "(w : Nat) → (hw : k + 16 ≤ w) → (p : PProd (w < 8) (k ≤ w)) → " "True"
+run_elab urejects "4" "k" "48" "(p : { u : Unit // k = 7 }) → " "True"
+run_elab urejects "4" "k" "48" "(p : ULift.{0} (PLift (k = 7))) → " "True"
+-- N50 / N51 / N52: jointly unsatisfiable nargs and above
+run_elab urejects "n" "16" "n" "" "True"
+run_elab urejects "n" "16" "8" "(hn : 1 ≤ n) → " "True"
+run_elab urejects "n" "16" "48" "(hn : 63 ≤ n) → " "True"
+run_elab uaccepts "n" "16" "a" "(a : Nat) → (hn : 1 ≤ n) → (ha : 520 ≤ a) → " "True"
+run_elab uaccepts "n" "16" "a" "(a : Nat) → (hn : 60 ≤ n) → (ha : 480 ≤ a) → " "True"
+run_elab uaccepts "n" "16" "a" "(a : Nat) → (hn : 60 ≤ n) → (ha : 488 ≤ a) → " "True"
+run_elab uaccepts "n" "s" "a" "(s a : Nat) → (hn : 1 ≤ n) → (ha : 16 ≤ a) → " "True"
+
+
+/-! ### U-ICALL-INHABITED: an author-chosen call-site property needs a kernel-checked inhabitation lemma -/
+
+/-- the lemma for `P := fun _ => 1 = 1` (a non-stock `P`), found by statement -/
+theorem inhab_one_eq_one : ∃ s, Janus.Contracts.ICall.ICallPre 4 16 48 Janus.Contracts.ICallSat.rt0 (fun _ => 1 = 1) s :=
+  ⟨Janus.Contracts.ICallSat.wstate, Janus.Contracts.ICallSat.wstate_pre.1, Janus.Contracts.ICallSat.wstate_pre.2.1,
+    Janus.Contracts.ICallSat.wstate_pre.2.2.1, rfl⟩
+
+def pstmt2 (P : String) : String :=
+  "∀ (impl : List Janus.Segment) (fn : Nat) (rt : List (Nat × Nat)) (R : Janus.Contracts.ICall.Res), " ++
+  "Janus.Contracts.ICall.ICallContract (Extracted.program.link impl) fn 4 16 48 rt (fun _ => []) R (" ++ P ++ ") → True"
+
+-- stock: accepted without a lemma; non-stock with a lemma: accepted; without a lemma, or unsatisfiable: rejected
+run_elab (do if let some m ← audit (pstmt2 "fun _ => True") then throwError "stock P rejected: {m}")
+run_elab (do if let some m ← audit (pstmt2 "fun _ => 1 = 1") then throwError "P with lemma rejected: {m}")
+run_elab (do if (← audit (pstmt2 "fun _ => False")).isNone then throwError "P := False accepted")
+
+
+theorem inhab_wp : ∃ (stack : Nat) (rt : List (Nat × Nat)) (w : BitVec 64) (s : Janus.Arm64.State),
+    Janus.Contracts.ICall.ICallPre 4 stack 48 rt (fun sc => sc.regs 0 = w) s :=
+  ⟨16, Janus.Contracts.ICallSat.rt0, 0, { Janus.Contracts.ICallSat.wstate with regs := fun i => if i = 30 then 0x200000#64 else 0#64 },
+    ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, by decide,
+    by show Janus.Outside 0x17f8 56 Janus.Contracts.ICallSat.rt0; simp [Janus.Contracts.ICallSat.rt0], rfl⟩
+
+def wstmt : String :=
+  "∀ (impl : List Janus.Segment) (fn stack : Nat) (rt : List (Nat × Nat)) (R : Janus.Contracts.ICall.Res) (w : BitVec 64), " ++
+  "Janus.Contracts.ICall.ICallContract (Extracted.program.link impl) fn 4 stack 48 rt (fun _ => []) R (fun sc => sc.regs 0 = w) → True"
+run_elab (do if let some m ← audit wstmt then throwError "variable-bearing P with lemma rejected: {m}")
 
 end JanusTests.ICallAudit

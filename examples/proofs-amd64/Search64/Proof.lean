@@ -244,4 +244,44 @@ theorem correctness (p nq c : BitVec 64) :
     · rw [htls.g]; simp [regG]
     exact search_result s.mem p.toNat c.toNat 8 (by decide)
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def p : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+def nq : BitVec 64 := 3#64
+def c : BitVec 64 := 5#64
+
+def s0 : State :=
+  { regs := fun r_ => if r_ = 0 then p else if r_ = 3 then nq else if r_ = 1 then c else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := ⟨fun a => if a = 200450 then 5#8 else wmem64.bytes a, wmem64.regions ++ []⟩, fsBase := 0x30f08#64 } -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [p, nq, c] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
+set_option maxRecDepth 100000 in
+theorem hpre : (fun s => nq.toNat ≤ 8 ∧ Buffer s p (8 * nq.toNat) false ∧ p.toNat + 64 ≤ 2 ^ 47 ∧ StackGuardOK s 0 ∧
+        StackWritable s 64 8 ∧ TlsG s ∧
+        ((s.regs 4).toNat + 8 ≤ p.toNat ∨ p.toNat + 64 ≤ (s.regs 4).toNat - 64) ∧
+        ((s.regs 4).toNat + 8 ≤ s.fsBase.toNat - 8 ∨ s.fsBase.toNat ≤ (s.regs 4).toNat - 64)) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (p : BitVec 64) (nq : BitVec 64) (c : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [p, nq, c] s ∧ (nq.toNat ≤ 8 ∧ Buffer s p (8 * nq.toNat) false ∧ p.toNat + 64 ≤ 2 ^ 47 ∧ StackGuardOK s 0 ∧
+        StackWritable s 64 8 ∧ TlsG s ∧
+        ((s.regs 4).toNat + 8 ≤ p.toNat ∨ p.toNat + 64 ≤ (s.regs 4).toNat - 64) ∧
+        ((s.regs 4).toNat + 8 ≤ s.fsBase.toNat - 8 ∨ s.fsBase.toNat ≤ (s.regs 4).toNat - 64)) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ (s'.regs 0).toNat =
+        if firstIdx s.mem p.toNat (c.toNat % 256) (8 * nq.toNat) < 8 * nq.toNat then
+          firstIdx s.mem p.toNat (c.toNat % 256) (8 * nq.toNat)
+        else 64) :=
+  ⟨ret, s0, p, nq, c, hret, setup, hpre, correctness p nq c ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

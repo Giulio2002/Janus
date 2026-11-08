@@ -261,23 +261,42 @@ theorem pre : HPre H0 72 2 s0 ∧ IfaceInput s0 72 (s0.regs 0).toNat ∧
   rw [ht]
   exact ⟨rfl, by rw [← em]; exact hashFrame _⟩
 
-/-- All hypotheses of `correctness` hold together (bounds `d' = 8`, `d = 72`). -/
-theorem nonvacuous : ∃ (impl : List Segment) (H : HashModel) (d d' : Nat), H.Laws ∧ 8 ≤ d' ∧
-    d' + 64 ≤ d ∧
-    Typehash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typehash") H d' ∧
-    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (HPre H d 2 s ∧ IfaceInput s d (s.regs 0).toNat ∧
-    (s.mem.readLE (s.regs 0).toNat 8 ≠ 0 →
-      H.Hashable (s.mem.readLE (s.regs 0).toNat 8) s.mem
-        (dataAt s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.regs 0).toNat) ∧
-      HashFrame H (s.mem.readLE (s.regs 0).toNat 8) s.mem
-        (dataAt s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.regs 0).toNat) (calleeStack s d 2))) :=
-  ⟨implAt, H0, 72, 8, H0_laws, by decide, by decide, model 8, s0, rfl, pre⟩
+/-- The call-site state of the `runtime.typehash` contract hypothesis (U-WITNESS-CALLSITE): `typehash(TD, 7)` at
+the contract's address, with its precondition for the stack bound `d' = 8`. -/
+def rT : Nat → W64 := fun i => if i = 0 then BitVec.ofNat 64 TD else if i = 1 then 7 else 0
+def wsCall : State := { MemSat.wstate rT with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : HPre H0 8 3 wsCall ∧ H0.Hashable (wsCall.regs 0).toNat wsCall.mem (wsCall.regs 1).toNat := by
+  have h0 : (wsCall.regs 0).toNat = TD := by simp [wsCall, rT, MemSat.wstate, TD]
+  refine ⟨⟨wmem_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, ?_⟩
+  · simp only [wsCall, rT, MemSat.wstate, CallOK, calleeStack, H0_priv, outside_cons, outside_nil]; decide
+  · simp only [wsCall, rT, MemSat.wstate, CallOK, calleeStack, H0_priv, outside_cons, outside_nil]; decide
+  · simp only [wsCall, rT, MemSat.wstate, CallOK, calleeStack, H0_priv, outside_cons, outside_nil]; decide
+  · simp only [wsCall, rT, MemSat.wstate, CallOK, calleeStack, H0_priv, outside_cons, outside_nil]; decide
+  · simp only [H0_hashable, h0]
 
 /-- `correctness` at `s0`. -/
 theorem returns : ReachesRet (Extracted.program.link implAt) (s0.regs 30) s0
     (fun s' => HRet H0 72 2 s0 s' fun r =>
       IHashIs H0 s0.mem (s0.mem.readLE (s0.regs 0).toNat 8) (s0.regs 0).toNat (s0.regs 1).toNat (r 0).toNat) :=
   correctness implAt H0 H0_laws 72 8 (by decide) (by decide) (model 8) s0 rfl pre
+
+/-- All hypotheses of `correctness` hold together (bounds `d' = 8`, `d = 72`). -/
+theorem nonvacuous : ∃ (impl : List Segment) (H : HashModel) (d d' : Nat), H.Laws ∧ 8 ≤ d' ∧
+    d' + 64 ≤ d ∧
+    Typehash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typehash") H d' ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.typehash") ∧
+      HPre H d' 3 s_c ∧ H.Hashable (s_c.regs 0).toNat s_c.mem (s_c.regs 1).toNat) ∧
+    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (HPre H d 2 s ∧ IfaceInput s d (s.regs 0).toNat ∧
+    (s.mem.readLE (s.regs 0).toNat 8 ≠ 0 →
+      H.Hashable (s.mem.readLE (s.regs 0).toNat 8) s.mem
+        (dataAt s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.regs 0).toNat) ∧
+      HashFrame H (s.mem.readLE (s.regs 0).toNat 8) s.mem
+        (dataAt s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.regs 0).toNat) (calleeStack s d 2))) ∧
+      ReachesRet (Extracted.program.link impl) (s.regs 30) s
+        (fun s' => HRet H d 2 s s' fun r =>
+      IHashIs H s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.regs 0).toNat (s.regs 1).toNat (r 0).toNat) :=
+  ⟨implAt, H0, 72, 8, H0_laws, by decide, by decide, model 8, ⟨wsCall, rfl, wsCall_pre⟩, s0, rfl, pre, returns⟩
 
 end Witness
 

@@ -689,6 +689,99 @@ theorem pre : PanicCallerOK PW s0 (PW.depth + 96) 32 ∧ PW.Calm s0.mem (s0.regs
     have : defers0 wmW = [] := by rw [defers0_eq, hnd]; rfl
     exact absurd hd (by rw [show PW.defers s0.mem (gOf s0) = defers0 wmW from rfl, this]; simp)
 
+def wfi : Spec.FuncInfo := Spec.FuncInfo.named Extracted.funcs "example.com/basic.RecoverSet"
+
+/-- The call state at `runtime.gopanic`'s entry: `RecoverSet`'s own frame, pending open-coded defers in place, `LR` inside the function. -/
+def wmG : Janus.Arm64.Memory := witMem (tabWords T0 ++ [((0x4ff00 - 72), loc_RecoverSet_133), (0x4ff00 - 32, func1A), (0x4ff00 - 24, 0x4ff00 - 40), (0x4ff00 - 16, 0x4ff00 - 32), (0x4ff00 - 41, 1)]) -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+
+def wsG : Janus.Amd64.State :=
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 (0x4ff00 - 72) else if i = 14 then BitVec.ofNat 64 0x50000 else if i = 0 then 1#64 else 0, -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+    rip := BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic"), flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := wmG }
+
+theorem env_G : Env0 T0 wmG := by
+  unfold Env0
+  have hnd : ndef wmG = 0 := by decide
+  refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
+  · omega
+  · unfold TableOK
+    exact ⟨by decide, by decide, by decide⟩
+
+theorem wsG_find : Spec.FuncInfo.find T0 (wsG.mem.readLE (wsG.regs 4).toNat 8) = some wfi := by decide
+
+theorem defers_G : defers0 wmG = [] := by
+  have hnd : ndef wmG = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem wsG_pre : GopanicPre PW wfi wsG := by
+  refine ⟨⟨env_G, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, rfl, rfl, by decide, ?_⟩, by decide, ?_, ?_, ?_⟩
+  · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · show 0 < room0 wmG
+    rw [room0_eq]; decide
+  · intro _; refine ⟨by decide, ?_⟩
+    simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · have hs : fspOf wsG = 0x4ff00 - 64 := by decide -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+    have hr : PW.defers wmG (gOf wsG) = [] := defers_G
+    have f_frame : wfi.frame = 64 := by rfl
+    have f_od : wfi.openDefer = some (33, 8) := by rfl
+    have f_res : wfi.resume = Extracted.entry + 0x86 := by rfl
+    have hbA : wfi.bitsAt (0x4ff00 - 64) = 0x4ff00 - 41 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+      unfold Spec.FuncInfo.bitsAt Spec.FuncInfo.varp; rw [f_frame, f_od]; try rfl
+    have hsA : wfi.slotsAt (0x4ff00 - 64) = 0x4ff00 - 16 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+      unfold Spec.FuncInfo.slotsAt Spec.FuncInfo.varp; rw [f_frame, f_od]; try rfl
+    have hbd : wfi.bound (0x4ff00 - 64) = 0x4ff00 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+      unfold Spec.FuncInfo.bound; rw [f_frame]; try rfl
+    have hbit : wmG.readLE (0x4ff00 - 41) 1 = 1 := by decide -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+    have hF : Panic.frameOf wfi (0x4ff00 - 64) wmG = ⟨0x4ff00 - 64, 0x4ff00, Extracted.entry + 0x86, some (0x4ff00 - 41, 0x4ff00 - 16)⟩ := by
+      unfold Panic.frameOf; rw [hbA, hsA, hbd, f_res, f_od]
+      simp only [hbit]; try rfl
+    show FrameOK PW wmG (frameOf wfi (fspOf wsG) wmG) (frameItems wmG (frameOf wfi (fspOf wsG) wmG) (PW.defers wmG (gOf wsG)))
+    rw [hs, hr]
+    unfold frameOf
+    rw [hF]
+    have hI : frameItems wmG ⟨0x4ff00 - 64, 0x4ff00, Extracted.entry + 0x86, some (0x4ff00 - 41, 0x4ff00 - 16)⟩ [] = [{ fn := 0x4ff00 - 32, bits := some 0, chain := [] }] := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+      unfold frameItems openItems recItems
+      simp only [hbit]
+      decide
+    unfold FrameOK Panic.FrameOK
+    rw [hI]
+    simp only [hbit, List.mem_cons, List.not_mem_nil, or_false, forall_eq_or_imp, forall_eq, P0_priv, outside_cons,
+      outside_nil, and_true]
+    decide
+
+/-- The call state at `runtime.gorecover`'s entry. -/
+def wsGr : Janus.Amd64.State := Janus.Contracts.PanicSatAmd64.sstate (Extracted.program.contractAddr "runtime.gorecover") wmW 0 0
+
+@[reducible] def grSite (P : Spec.PanicRuntime) (s_c : Janus.Amd64.State) : Prop :=
+  PanicPre P 0 s_c ∧ s_c.mem.accessible ((s_c.regs 5).toNat + 8) 8 false = true ∧
+    (s_c.regs 5).toNat + 16 ≤ 2 ^ 48
+
+theorem wsGr_pre : grSite PW wsGr :=
+  ⟨Janus.Contracts.PanicSatAmd64.sstate_pre 0 (by decide) _ 0 0 env_w (by decide) (by decide) (by decide) (by decide), by decide, by decide⟩
+
+/-- The call state at `runtime.deferreturn`'s entry. -/
+def wsRet : Janus.Amd64.State := Janus.Contracts.PanicSatAmd64.sstate (Extracted.program.contractAddr "runtime.deferreturn") wmW 0 0
+
+theorem defers_R : defers0 wmW = [] := by
+  have hnd : ndef wmW = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem saved_R : saved0 wmW = none := by rw [saved0_eq]; decide
+
+theorem wsRet_pre : DeferreturnPre PW wsRet := by
+  refine ⟨Janus.Contracts.PanicSatAmd64.sstate_pre 0 (by decide) _ 0 0 env_w (by decide) (by decide) (by decide) (by decide), ?_⟩
+  show FrameOK (P0 T0 RPa) wmW _ _
+  have hm : wsRet.mem = wmW := rfl
+  simp [hm, retFrame, Panic.frameItems, Panic.recItems, P0_defers, P0_saved, Janus.Contracts.PanicSatAmd64.sstate, defers_R, saved_R, gOf, FrameOK, Panic.FrameOK]
+
+/-- So the guarantee is reached: with `x = 42` `RecoverSet` panics, recovers, and returns `7`. -/
+theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) s0 fun o =>
+    match o with
+    | .returned s' => ABIReturn s0 s' ∧
+        (s'.regs 0).toNat = if (42#64 : BitVec 64).toNat ≤ 10 then (42#64 : BitVec 64).toNat else 7
+    | .panicked _ _ => False
+    | .goexited _ => False :=
+  correctness implW PW (P0_laws T0 RPa) U1 hpan hrec hdr 42#64 1#64 0#64 ret hret s0 setup (by obtain ⟨a, b, c, d, e⟩ := pre; exact ⟨a, b, c, d, e, id⟩)
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime)
     (U : Janus.Amd64.State → Nat → Nat → Prop) (ret : Nat) (s : Janus.Amd64.State), P.Laws ∧
@@ -700,17 +793,20 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntim
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [42#64, 1#64, 0#64] s ∧
     (PanicCallerOK P s (P.depth + 96) 32 ∧ P.Calm s.mem (s.regs 14).toNat ∧ (1#64 : BitVec 64).toNat ≠ 0 ∧
       0 < P.room s.mem (gOf s) ∧ (∀ d ∈ P.defers s.mem (gOf s), (s.regs regSP).toNat ≤ d.sp) ∧
-      ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x1b)) :=
-  ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hpan, hrec, hdr, hret, setup, by obtain ⟨a, b, c, d, e⟩ := pre; exact ⟨a, b, c, d, e, id⟩⟩
-
-/-- So the guarantee is reached: with `x = 42` `RecoverSet` panics, recovers, and returns `7`. -/
-theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) s0 fun o =>
+      ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x1b)) ∧
+    (∃ (s_c : Janus.Amd64.State) (fi : Spec.FuncInfo), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic") ∧
+      Spec.FuncInfo.find Extracted.funcs (s_c.mem.readLE (s_c.regs 4).toNat 8) = some fi ∧ GopanicPre P fi s_c) ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gorecover") ∧
+      grSite P s_c) ∧
+    (∃ s_r : Janus.Amd64.State, s_r.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") ∧
+      DeferreturnPre P s_r) ∧
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClass P) s fun o =>
     match o with
-    | .returned s' => ABIReturn s0 s' ∧
+    | .returned s' => ABIReturn s s' ∧
         (s'.regs 0).toNat = if (42#64 : BitVec 64).toNat ≤ 10 then (42#64 : BitVec 64).toNat else 7
     | .panicked _ _ => False
     | .goexited _ => False :=
-  correctness implW PW (P0_laws T0 RPa) U1 hpan hrec hdr 42#64 1#64 0#64 ret hret s0 setup (by obtain ⟨a, b, c, d, e⟩ := pre; exact ⟨a, b, c, d, e, id⟩)
+  ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hpan, hrec, hdr, hret, setup, by obtain ⟨a, b, c, d, e⟩ := pre; exact ⟨a, b, c, d, e, id⟩, ⟨wsG, wfi, rfl, wsG_find, wsG_pre⟩, ⟨wsGr, rfl, wsGr_pre⟩, ⟨wsRet, rfl, wsRet_pre⟩, returns⟩
 
 end Witness
 

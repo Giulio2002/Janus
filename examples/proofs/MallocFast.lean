@@ -424,4 +424,71 @@ theorem correctness (sz typ nz : BitVec 64) (rt : List (Nat × Nat)) :
     fun s' ⟨habi, hr⟩ => ⟨habi, ⟨hr, zero_of_run hok hr⟩,
       fresh_of_fastPost hok htab h1 h2 hb hin ⟨hr, zero_of_run hok hr⟩⟩
 
+
+namespace Witness
+
+def ret : Nat := 0x1000
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+def sp0 : Nat := 0x10108000
+def g0 : Nat := 0x10200000
+def hp : Nat := 0x10300000
+
+def le (v base a : Nat) : Byte := BitVec.ofNat 8 (v / 256 ^ (a - base) % 256)
+def mM : Nat := 0x10210000
+def pP : Nat := 0x10220000
+def cC : Nat := 0x10230000
+def sS : Nat := 0x10240000
+def bB : Nat := 0x30000000
+
+def c_rt : List (Nat × Nat) := [(0x30000000, 0x30001000)]
+
+def wbytes (a : Nat) : Byte :=
+  if g0 + 48 ≤ a ∧ a < g0 + 56 then le mM (g0 + 48) a
+  else if mM + 208 ≤ a ∧ a < mM + 216 then le pP (mM + 208) a
+  else if pP + 56 ≤ a ∧ a < pP + 64 then le cC (pP + 56) a
+  else if cC ≤ a ∧ a < cC + 8 then le 100 cC a
+  else if cC + 88 ≤ a ∧ a < cC + 96 then le sS (cC + 88) a
+  else if sS + 24 ≤ a ∧ a < sS + 32 then le bB (sS + 24) a
+  else if sS + 50 ≤ a ∧ a < sS + 52 then le 100 (sS + 50) a
+  else if sS + 56 ≤ a ∧ a < sS + 64 then le 1 (sS + 56) a
+  else if sS + 104 ≤ a ∧ a < sS + 112 then le 16 (sS + 104) a
+  else if sizeToClass8 ≤ a ∧ a < sizeToClass8 + 129 then BitVec.ofNat 8 (goSizeToClass8.getD (a - sizeToClass8) 0)
+  else if classToSize ≤ a ∧ a < classToSize + 136 then
+    BitVec.ofNat 8 (goClassToSize.getD ((a - classToSize) / 2) 0 / 256 ^ ((a - classToSize) % 2) % 256)
+  else 0
+
+def wmem : Memory := ⟨wbytes, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0 + 16, 162, true⟩, ⟨mM + 208, 60, true⟩, ⟨pP + 56, 8, false⟩, ⟨cC, 1136, true⟩, ⟨sS + 24, 88, true⟩, ⟨bB, 16, true⟩, ⟨globLo, globHi - globLo, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then (16) else if i = 1 then (0) else if i = 2 then (0) else if i = 28 then BitVec.ofNat 64 g0 else if i = 29 then BitVec.ofNat 64 (sp0 - 8)
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(16 : BitVec 64), (0 : BitVec 64), (0 : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `correctness` hold together at a concrete call. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (sz : BitVec 64) (typ : BitVec 64) (nz : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [sz, typ, nz] s ∧ (GuardOK s 144 ∧ StackOK s 152 32 ∧ 16 ≤ sz.toNat ∧ sz.toNat ≤ 1016 ∧
+        typ.toNat = 0 ∧ MCacheOK s sz.toNat ∧ TablesOK s ∧ baseOf s sz.toNat % 8192 = 0 ∧
+        InRanges (slotOf s sz.toNat) (csOf s sz.toNat) c_rt) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (FastPost s s' sz.toNat ∧
+        Fresh c_rt s'.mem (s'.regs 0).toNat sz.toNat (blockSize sz.toNat true) true)) := by
+  refine ⟨ret, s0, (16), (0), (0), hret, setup, ?pre, correctness (16) (0) (0) c_rt ret hret s0 setup ?pre⟩
+  case pre =>
+    refine ⟨?_, ?_, by decide, by decide, by decide, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_, ?_⟩
+    all_goals try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, MCacheOK, Obj, TablesOK, spread_cons, spread_nil, Apart, InRanges, ZeroBytes, le, mM, pP, cC, sS, bB]
+    all_goals decide
+
+end Witness
+
 end Proof

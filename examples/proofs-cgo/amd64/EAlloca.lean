@@ -472,4 +472,41 @@ theorem correctness (n : BitVec 64) :
       (hInv _ (by simp [setRegF_apply]) (by simp [setRegF_apply]) (by simp [setRegF_apply])
       (by simp [setRegF_apply]) (by simp [setRegF_apply]) (by simp [setRegF_apply]) rfl rfl rfl rfl rfl)
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x1000008  -- addr-ok: a chosen C stack top
+def FS : Nat := 0x500000  -- addr-ok: a chosen thread control block (the guard at FS+0x28)
+def n0 : BitVec 64 := 2#64
+
+def smem : Janus.Arm64.Memory :=
+  ⟨fun a => if wsp ≤ a ∧ a < wsp + 8 then BitVec.ofNat 8 (ret / 256 ^ (a - wsp)) else 0,
+   [⟨wsp - (24 + T 2), 24 + T 2 + 8, true⟩, ⟨FS + 0x28, 8, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 7 then n0 else if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, fsBase := BitVec.ofNat 64 FS, mem := smem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [n0] s0 :=
+  ⟨rfl, by decide +kernel, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
+
+set_option maxRecDepth 100000 in
+theorem pre : Pre n0 s0 := by
+  refine ⟨by decide, ⟨by decide, by decide, by decide, by decide +kernel⟩, by decide +kernel,
+    by decide +kernel, ?_⟩
+  simp only [outside_cons, outside_nil, and_true]; decide +kernel
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (n : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [n] s ∧ Pre n s ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      ((s'.regs 0).toNat = n.toNat * (n.toNat - 1) / 2 % 2 ^ 64 ∧
+        MemFrame s.mem s'.mem [((s.regs 4).toNat - (24 + T n.toNat), (s.regs 4).toNat)])) :=
+  ⟨n0, ret, s0, hret, call, pre, correctness n0 ret hret s0 call pre⟩
+
+end Witness
+
 end Proof

@@ -51,4 +51,45 @@ theorem ieee (a b : Nat) (ha : X87.unsupported a = false) (hb : X87.unsupported 
       (X87.std (X87.binop .mul 64 .rne a b).res) :=
   X87.binop_mul_ieee .rne a b false ha hb
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x20008  -- addr-ok: a chosen stack window, not a binary address
+
+/-- The stack window `[wsp - 64, wsp + 64)` (writable); the return address at `[wsp]`; the
+two 80-bit operands `1.0` and `2.0` (as `X87.std` sees them is irrelevant) at `[wsp+8]`, `[wsp+24]`. -/
+def a0 : Nat := 0x3FFF8000000000000000
+def b0 : Nat := 0x40008000000000000000
+
+def smem : Janus.Arm64.Memory :=
+  ⟨fun a => if wsp ≤ a ∧ a < wsp + 8 then BitVec.ofNat 8 (ret / 256 ^ (a - wsp))
+    else if wsp + 8 ≤ a ∧ a < wsp + 18 then BitVec.ofNat 8 (a0 / 256 ^ (a - (wsp + 8)))
+    else if wsp + 24 ≤ a ∧ a < wsp + 34 then BitVec.ofNat 8 (b0 / 256 ^ (a - (wsp + 24))) else 0,
+   [⟨wsp - 64, 128, true⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := smem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [] s0 :=
+  ⟨rfl, by decide, by decide, by intro i h; simp at h, by decide, rfl⟩
+
+theorem pre : CStack s0 0 40 ∧ X87.Idle s0.x87 ∧ s0.fpucw = 0x37F ∧
+    s0.mem.readLE ((s0.regs 4).toNat + 8) 10 = a0 ∧ s0.mem.readLE ((s0.regs 4).toNat + 24) 10 = b0 := by
+  refine ⟨⟨by decide, by decide, by decide, by decide⟩, ⟨rfl, by decide, by decide⟩, by decide, by decide +kernel, by decide +kernel⟩
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (a b : Nat) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [] s ∧
+    (CStack s 0 40 ∧ X87.Idle s.x87 ∧ s.fpucw = 0x37F ∧
+      s.mem.readLE ((s.regs 4).toNat + 8) 10 = a ∧ s.mem.readLE ((s.regs 4).toNat + 24) 10 = b) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      (LdResult (X87.binop .mul 64 .rne a b).res s'.x87)) :=
+  ⟨a0, b0, ret, s0, hret, call, pre, correctness a0 b0 ret hret s0 call pre⟩
+
+end Witness
+
 end Proof

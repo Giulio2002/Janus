@@ -212,15 +212,37 @@ theorem pre0 : pre MK mv kp AMap.empty s0 := by
     | (simp only [s0, MK, privK, priv0, window, Disjoint, ZEnv, mmemK, hT, outside_cons, outside_nil,
         outside_append, and_true, regG, stackguard0Offset, Memory.accessible, Memory.readLE]; decide)
 
-/-- All hypotheses of `correctness` are satisfiable together, with a non-nil map. -/
-theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec (8 * 24)) (BitVec (8 * 8)))
-    (ret : Nat) (s : State) (m kp : BitVec 64) (f : AMap (BitVec (8 * 24)) (BitVec (8 * 8))),
-    M.Laws ∧ Access1G (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.mapaccess1") 24 8 M ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, kp] s ∧
-    m.toNat ≠ 0 ∧ pre M m kp f s :=
-  ⟨implAt, MK, ret, s0, mv, kp, AMap.empty, MK_laws, model, hret, setup, by decide, pre0⟩
+/-- The precondition of `Access1G`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def Access1GSite (M : MapModel (BitVec (8 * 24)) (BitVec (8 * 8))) (f : AMap (BitVec (8 * 24)) (BitVec (8 * 8)))
+    (s_c : State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ KeyRegular (rtView M.priv s_c.mem) (s_c.regs 0).toNat 24 ∧
+    IsMap M s_c.mem (s_c.regs 1).toNat f ∧ KeyIn s_c M.depth 3 (s_c.regs 2).toNat 24
+
+/-- The call state of the `mapaccess1` contract (U-WITNESS-CALLSITE): like `s0` at the callee's entry (frame lowered), the map type in `X0`. -/
+def wsCall : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 mapType else if i = 1 then mv else if i = 2 then kp
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (wsp - 48), pc := BitVec.ofNat 64 cAddr,
+    flags := ⟨false, false, false, false⟩, mem := mmemK }
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : Access1GSite MK AMap.empty wsCall := by
+  janus_eval_nat hT : mapType
+  have hR : ∀ a n, 0x10000 ≤ a → a + n ≤ 0x11000 → (rtView MK.priv mmemK).readLE a n = mmemK.readLE a n :=
+    fun a n h1 h2 => readLE_rtView ((inPriv0 h1 h2).append_left _)
+  have hW : (rtView MK.priv mmemK).readLE (mapType + 48) 8 = KT24 := by
+    rw [readLE_rtView ⟨(mapType + 48, mapType + 56), by simp [MK, privK], Nat.le_refl _, Nat.le_refl _⟩]
+    simp only [mmemK, KT24, hT]; decide
+  refine ⟨⟨?_, ⟨by decide, ?_, ?_⟩, ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, ?_⟩,
+    trivial, ?_, (isMap_of_ne (by decide)).2 ⟨rfl, rfl, ?_, ?_⟩, by decide, ?_, ?_⟩
+  all_goals first
+    | (show KeyRegular (rtView MK.priv mmemK) (BitVec.ofNat 64 mapType).toNat 24
+       rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt (by rw [hT]; decide)]
+       unfold KeyRegular keyType tySize isRegularMemory tyTFlag; rw [hW, hR _ _ (by decide) (by decide)]
+       try rw [hR _ _ (by decide) (by decide)]
+       simp only [mmemK, KT24, hT]; decide)
+    | (simp only [wsCall, mv, kp, MK, privK, priv0, calleeStack, Disjoint, ZEnv, mmemK, hT, outside_cons, outside_nil,
+        outside_append, and_true, regG, stackguard0Offset, Memory.accessible, Memory.readLE]; decide)
 
 /-- So the guarantee is reached: the lookup in the empty map gives `0`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
@@ -228,6 +250,22 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
   refine (correctness implAt MK MK_laws model mv kp AMap.empty ret hret s0 setup pre0).mono ?_
   intro s' h
   exact ⟨h.1, by simpa [AMap.empty] using h.2⟩
+
+/-- All hypotheses of `correctness` are satisfiable together, with a non-nil map. -/
+theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec (8 * 24)) (BitVec (8 * 8)))
+    (ret : Nat) (s : State) (m kp : BitVec 64) (f : AMap (BitVec (8 * 24)) (BitVec (8 * 8))),
+    M.Laws ∧ Access1G (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.mapaccess1") 24 8 M ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, kp] s ∧
+    m.toNat ≠ 0 ∧ pre M m kp f s ∧
+    (∃ (f : AMap (BitVec (8 * 24)) (BitVec (8 * 8))) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess1") ∧ Access1GSite M f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ s'.regs 0 = (f (keyAt s.mem kp.toNat 24)).getD 0 :=
+  ⟨implAt, MK, ret, s0, mv, kp, AMap.empty, MK_laws, model, hret, setup, by decide, pre0,
+    ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩,
+    correctness implAt MK MK_laws model mv kp AMap.empty ret hret s0 setup pre0⟩
 
 end Witness
 

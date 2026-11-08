@@ -35,3 +35,6 @@ audit/roundspecbind/bin/
 audit/roundspecbind/work/
 audit/work-logs/
 audit/up4/work
+.sw/
+bin/
+janus-up4

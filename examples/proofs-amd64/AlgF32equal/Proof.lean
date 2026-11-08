@@ -60,10 +60,6 @@ theorem pre : EqPre 64 2 s0 ∧ GoMXCSR s0 ∧ Input s0 64 2 (s0.regs 0).toNat 4
     simp only [CallOK, Input, calleeStack, Janus.Contracts.MapAmd64.calleeStack, outside_cons,
       outside_nil] <;> decide
 
-theorem nonvacuous : ∃ s, s.rip = BitVec.ofNat 64 Extracted.entry ∧
-    (EqPre 64 2 s ∧ GoMXCSR s ∧ Input s 64 2 (s.regs 0).toNat 4 ∧ Input s 64 2 (s.regs 3).toNat 4) :=
-  ⟨s0, rfl, pre⟩
-
 /-- `correctness` at `s0`: the call returns `true` (a number equals itself). -/
 theorem returns : ReachesRet Extracted.program (retAddrOf s0) s0
     (fun s' => EqRet 64 2 s0 s' fun r => BoolRes r true) := by
@@ -71,6 +67,12 @@ theorem returns : ReachesRet Extracted.program (retAddrOf s0) s0
     decide
   refine (correctness 64 s0 rfl pre).mono ?_
   intro s' h; simpa only [hv] using h
+
+theorem nonvacuous : ∃ s, s.rip = BitVec.ofNat 64 Extracted.entry ∧
+    (EqPre 64 2 s ∧ GoMXCSR s ∧ Input s 64 2 (s.regs 0).toNat 4 ∧ Input s 64 2 (s.regs 3).toNat 4) ∧
+    (ReachesRet Extracted.program (retAddrOf s) s
+    (fun s' => EqRet 64 2 s s' fun r => BoolRes r (feq binary32 (s.mem.readLE (s.regs 0).toNat 4) (s.mem.readLE (s.regs 3).toNat 4)))) :=
+  ⟨s0, rfl, pre, correctness 64 s0 rfl pre⟩
 
 end Witness
 

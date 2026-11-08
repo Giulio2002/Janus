@@ -30,4 +30,49 @@ theorem correctness (a b : BitVec 64) :
   rw [show r % 18446744073709551616 % 340282366920938463463374607431768211456 % 2 ^ 128 % 2 ^ 64 = r by omega]
   exact h
 
+
+namespace Witness
+
+def ret : Nat := 0x1000
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+def sp0 : Nat := 0x108000
+def g0 : Nat := 0x200000
+def hp : Nat := 0x300000
+
+def wbytes (a : Nat) : Byte := 0
+
+def wmem : Memory := ⟨wbytes, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩]⟩
+
+def c_a : BitVec 64 := 0x3FF8000000000000
+def c_b : BitVec 64 := 0x4004000000000000
+
+def s0 : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 g0 else if i = 29 then BitVec.ofNat 64 (sp0 - 8)
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem,
+    vregs := fun i => if i = 0 then BitVec.ofNat 128 (c_a.toNat) else if i = 1 then BitVec.ofNat 128 (c_b.toNat) else 0 }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    omega⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `correctness` hold together at a concrete call. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) , RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (s.getV 0 64 = c_a.toNat ∧ s.getV 1 64 = c_b.toNat ∧ s.fpcr = 0) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (ResultIs binary64 (minimum binary64 c_a.toNat c_b.toNat) (s'.getV 0 64))) := by
+  refine ⟨ret, s0, hret, setup, ?pre, correctness c_a c_b ret hret s0 setup ?pre⟩
+  case pre =>
+    try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp]
+    all_goals decide
+
+end Witness
+
 end Proof

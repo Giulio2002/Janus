@@ -424,8 +424,12 @@ theorem pre : CPre [] (fun _ _ _ _ => True) s0 := by
 runtime-owned memory). -/
 theorem nonvacuous : ∃ (rtc : List (Nat × Nat)) (Hc : RtReady) (x : W64) (ret : Nat) (s : State),
     RetAddr Extracted.program ret ∧ CCall (Extracted.program.withExit ret) Extracted.entry [x] s ∧
-      CPre rtc Hc s :=
-  ⟨[], fun _ _ _ _ => True, 7#64, RET, s0, hret, call, pre⟩
+      CPre rtc Hc s ∧
+      ReturnsC (Extracted.program.withExit ret)
+        (CgoCallback Extracted.tls Extracted.program Contract.none (fun _ => True) (cbk rtc Hc))
+        (fun s' => CReturn s s' ∧ (s'.regs 0 = 3 * x)) s :=
+  ⟨[], fun _ _ _ _ => True, 7#64, RET, s0, hret, call, pre,
+    correctness [] (fun _ _ _ _ => True) 7#64 RET hret s0 call pre⟩
 
 end Witness
 

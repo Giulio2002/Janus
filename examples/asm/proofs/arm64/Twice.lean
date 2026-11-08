@@ -69,4 +69,51 @@ theorem correctness (x : BitVec 64) :
   · refine MemFrame.writeLE_both ?_ _ _ _
     janus_frame
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def sp0 : Nat := 0x100000
+def dat : Nat := 0x300000
+
+def bytes (a : Nat) : Byte := if a = sp0 + 8 then 3 else 0
+
+def s0 : State :=
+  { regs := fun i => if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩,
+    mem := ⟨bytes, [⟨sp0 - 0x100, 0x200, true⟩]⟩ }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry [(3 : BitVec 64)] 1 s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0) with rfl
+    exact (by decide : s0.mem.readLE (s0.sp.toNat + 8 + 8 * 0) 8 = ((3 : BitVec 64)).toNat),
+   ⟨by decide, by decide⟩, by decide⟩
+
+theorem hpre : StackOK s0 72 24 := by
+  unfold Janus.Spec.StackOK; refine ⟨by decide, by decide, by decide, by decide⟩
+
+/-- The theorem fires: `Twice(3)` returns `7`. -/
+theorem returns : Returns (Extracted.program.withExit ret) s0
+    (fun s' => ABIReturn0 s0 s' ∧
+      (results0 s0 s' 1 1 = [2 * (3 : BitVec 64) + 1] ∧
+        MemFrame (s0.mem.writeLE (s0.sp.toNat + 16) 8 (2 * (3 : BitVec 64) + 1).toNat) s'.mem
+          [(s0.sp.toNat - 72, s0.sp.toNat - 8)])) :=
+  correctness 3 ret hret s0 setup hpre
+
+/-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup0 (Extracted.program.withExit ret) Extracted.entry [x] 1 s ∧ StackOK s 72 24 ∧
+    Returns (Extracted.program.withExit ret) s
+      (fun s' => ABIReturn0 s s' ∧
+        (results0 s s' 1 1 = [2 * x + 1] ∧
+          MemFrame (s.mem.writeLE (s.sp.toNat + 16) 8 (2 * x + 1).toNat) s'.mem
+            [(s.sp.toNat - 72, s.sp.toNat - 8)])) :=
+  ⟨ret, s0, 3, hret, setup, hpre, returns⟩
+
+end Witness
+
 end Proof

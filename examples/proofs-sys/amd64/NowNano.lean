@@ -216,4 +216,66 @@ theorem correctness (rt : List (Nat × Nat)) :
                  simp [BitVec.getLsbD_or, h63] at hbr; done)
   all_goals rw [g4a sec nsec hn (by assumption)]
 
+namespace Witness
+
+def ret : Nat := 0x200000
+def sp0 : Nat := 0x100000
+def g0 : Nat := 0x300000
+
+def bytes (a : Nat) : Byte := if a = sp0 + 2 then 0x20 else 0
+
+def s0 : Amd64.State :=
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 sp0 else if i = 14 then BitVec.ofNat 64 g0 else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := ⟨bytes, [⟨sp0 - 0x800, 0x1000, true⟩, ⟨g0, 0x1000, false⟩, ⟨startNano, 8, false⟩,
+      ⟨timeLocal, 8, false⟩]⟩ }
+
+def k0 : Kern := {}
+def E0 : KEnv := ⟨[], 1024⟩
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h, rfl⟩
+
+set_option maxRecDepth 100000 in
+theorem pre : StackGuardOK s0 32 ∧ StackWritable s0 1072 8 ∧ (s0.regs 4).toNat % 8 = 0 ∧
+    Outside ((s0.regs 4).toNat - 1072) 1080 [] ∧
+    (s0.regs 14).toNat + 400 ≤ 2 ^ 48 ∧ s0.mem.accessible ((s0.regs 14).toNat + 392) 8 false = true ∧
+    s0.mem.readLE ((s0.regs 14).toNat + 392) 8 = 0 ∧
+    ((s0.regs 14).toNat + 400 ≤ (s0.regs 4).toNat - 1072 ∨ (s0.regs 4).toNat + 8 ≤ (s0.regs 14).toNat + 16) ∧
+    s0.mem.accessible startNano 8 false = true ∧ s0.mem.accessible timeLocal 8 false = true := by
+  refine ⟨⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩,
+    ⟨by decide, by decide, by decide⟩, by decide, by simp only [outside_nil], by decide, by decide,
+    by decide, Or.inr (by decide), by decide, by decide⟩
+
+/-- The theorem fires: `NowNano()` returns the wall-clock reading in nanoseconds. -/
+theorem returns : Amd64.Kernel.ReturnsK (Extracted.program.withExit ret) E0
+    (fun s' k' => ABIReturn s0 s' ∧ ∃ sec nsec msec mnsec, nsec < 10 ^ 9 ∧
+        k'.trace = k0.trace ++ [.clock 0 sec nsec, .clock 1 msec mnsec] ∧
+        k0.mono ≤ msec * 10 ^ 9 + mnsec ∧ k'.mono = msec * 10 ^ 9 + mnsec ∧
+        s'.regs 0 = BitVec.ofNat 64 (sec * 10 ^ 9 + nsec))
+    (fun _ _ => False) s0 k0 :=
+  correctness [] ret hret s0 k0 setup pre
+
+/-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
+theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (ret : Nat) (s : Amd64.State) (k : Kern),
+    RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧
+    (StackGuardOK s 32 ∧ StackWritable s 1072 8 ∧ (s.regs 4).toNat % 8 = 0 ∧
+      Outside ((s.regs 4).toNat - 1072) 1080 rt ∧
+      (s.regs 14).toNat + 400 ≤ 2 ^ 48 ∧ s.mem.accessible ((s.regs 14).toNat + 392) 8 false = true ∧
+      s.mem.readLE ((s.regs 14).toNat + 392) 8 = 0 ∧
+      ((s.regs 14).toNat + 400 ≤ (s.regs 4).toNat - 1072 ∨ (s.regs 4).toNat + 8 ≤ (s.regs 14).toNat + 16) ∧
+      s.mem.accessible startNano 8 false = true ∧ s.mem.accessible timeLocal 8 false = true) ∧
+    Amd64.Kernel.ReturnsK (Extracted.program.withExit ret) ⟨rt, 1024⟩
+      (fun s' k' => ABIReturn s s' ∧ ∃ sec nsec msec mnsec, nsec < 10 ^ 9 ∧
+          k'.trace = k.trace ++ [.clock 0 sec nsec, .clock 1 msec mnsec] ∧
+          k.mono ≤ msec * 10 ^ 9 + mnsec ∧ k'.mono = msec * 10 ^ 9 + mnsec ∧
+          s'.regs 0 = BitVec.ofNat 64 (sec * 10 ^ 9 + nsec))
+      (fun _ _ => False) s k :=
+  ⟨[], ret, s0, k0, hret, setup, pre, returns⟩
+
+end Witness
+
 end Proof

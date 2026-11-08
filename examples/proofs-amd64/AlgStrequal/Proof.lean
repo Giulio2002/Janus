@@ -154,12 +154,32 @@ theorem pre : EqPre (64 + 40) 2 s0 ∧ StrInput s0 (64 + 40) 2 (s0.regs 0).toNat
     simp only [CallOK, StrInput, Input, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
       outside_cons, outside_nil] <;> decide
 
+/-- The call-site state of the `runtime.memequal` contract hypothesis (U-WITNESS-CALLSITE): at the
+contract's address, with its precondition for the stack bound `d = 64`. -/
+def wsCall : State := { s0 with rip := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : EqPre 64 0 wsCall ∧ Input wsCall 64 0 (wsCall.regs 0).toNat (wsCall.regs 1).toNat ∧
+    Input wsCall 64 0 (wsCall.regs 3).toNat (wsCall.regs 1).toNat := by
+  refine ⟨⟨⟨by decide, by decide, by decide⟩, ?_, ?_⟩, ?_, ?_⟩ <;>
+    simp only [wsCall, s0, CallOK, Input, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
+      outside_cons, outside_nil] <;> decide
+
+/-- `correctness` at `s0`. -/
+theorem returns0 : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0
+    (fun s' => EqRet (64 + 40) 2 s0 s' fun r => BoolRes r (strEq s0.mem (s0.regs 0).toNat (s0.regs 3).toNat)) :=
+  correctness implAt 64 (model 64) s0 rfl pre
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (d : Nat) (s : State),
     Memequal (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memequal") d ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memequal") ∧
+      EqPre d 0 s_c ∧ Input s_c d 0 (s_c.regs 0).toNat (s_c.regs 1).toNat ∧
+      Input s_c d 0 (s_c.regs 3).toNat (s_c.regs 1).toNat) ∧
     s.rip = BitVec.ofNat 64 Extracted.entry ∧
-    (EqPre (d + 40) 2 s ∧ StrInput s (d + 40) 2 (s.regs 0).toNat ∧ StrInput s (d + 40) 2 (s.regs 3).toNat) :=
-  ⟨implAt, 64, s0, model 64, rfl, pre⟩
+    (EqPre (d + 40) 2 s ∧ StrInput s (d + 40) 2 (s.regs 0).toNat ∧ StrInput s (d + 40) 2 (s.regs 3).toNat) ∧
+    ReachesRet (Extracted.program.link impl) (retAddrOf s) s
+      (fun s' => EqRet (d + 40) 2 s s' fun r => BoolRes r (strEq s.mem (s.regs 0).toNat (s.regs 3).toNat)) :=
+  ⟨implAt, 64, s0, model 64, ⟨wsCall, rfl, wsCall_pre⟩, rfl, pre, returns0⟩
 
 /-- So the guarantee is reached: a string equals itself. -/
 theorem returns : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0

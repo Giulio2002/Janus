@@ -64,4 +64,49 @@ theorem correctness (x : BitVec 64) :
   · generalize x.toNat * Janus.Arm64.Memory.readLE s.mem (janus_eval% scale) 8 = t
     omega
 
+namespace Witness
+
+open Janus.Contracts.PanicSat (witMemD)
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x48008  -- addr-ok: a chosen stack word in the witness memory's stack
+def x0 : BitVec 64 := 5#64
+
+/-- The witness memory (stack holding the return address, the program's read-only data), with
+`e_scale` readable and `e_counter` writable. -/
+def wm : Janus.Arm64.Memory :=
+  { witMemD [(wsp, ret)] Extracted.data with
+    regions := (witMemD [(wsp, ret)] Extracted.data).regions ++ [⟨scale, 8, false⟩, ⟨counter, 8, true⟩] }
+
+def s0 : State :=
+  { regs := fun i => if i = 7 then x0 else if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wm }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [x0] s0 :=
+  ⟨rfl, by decide, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
+
+theorem dataLoaded : Extracted.program.DataLoaded wm := by
+  unfold Janus.Amd64.Program.DataLoaded
+  set_option maxRecDepth 100000 in decide
+
+theorem pre : CStack s0 0 8 ∧ Extracted.program.DataLoaded s0.mem ∧ s0.mem.accessible scale 8 false = true ∧
+    s0.mem.accessible counter 8 true = true ∧ Disjoint (BitVec.ofNat 64 counter) 8 (s0.regs 4) 8 := by
+  refine ⟨⟨by decide, by decide, by decide, by decide⟩, dataLoaded, by decide +kernel, by decide +kernel, ?_⟩
+  unfold Janus.Amd64.GoABI.Disjoint; decide +kernel
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (x : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [x] s ∧
+    (CStack s 0 8 ∧ Extracted.program.DataLoaded s.mem ∧ s.mem.accessible scale 8 false = true ∧
+      s.mem.accessible counter 8 true = true ∧ Disjoint (BitVec.ofNat 64 counter) 8 (s.regs 4) 8) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      ((s'.regs 0).toNat = bumped s.mem x ∧
+        s'.mem = s.mem.writeLE counter 8 (bumped s.mem x))) :=
+  ⟨x0, ret, s0, hret, call, pre, correctness x0 ret hret s0 call pre⟩
+
+end Witness
+
 end Proof

@@ -296,16 +296,22 @@ theorem pre : TPre M0 wb (64 + 48) 3 s0 ∧ TypeOK s0.mem (s0.regs 0).toNat ∧
     simp only [CallOK, Input, Dest, TypeOK, typSize, WriteBarrierOff, M0, calleeStack,
       Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil] <;> decide
 
-/-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MemModel) (d : Nat) (s : State), M.Laws ∧
-    Memmove (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.memmove") M d ∧
-    s.rip = BitVec.ofNat 64 Extracted.entry ∧
-    (TPre M wb (d + 48) 3 s ∧ TypeOK s.mem (s.regs 0).toNat ∧
-      Outside (s.regs 0).toNat 16 (calleeStack s (d + 48) 3) ∧
-      Input s (d + 48) 3 (s.regs 1).toNat (typSize s.mem (s.regs 0).toNat) ∧
-      Dest M s (d + 48) 3 (s.regs 3).toNat (typSize s.mem (s.regs 0).toNat)) :=
-  ⟨implAt, M0, 64, s0, M0_laws, model 64, rfl, pre⟩
+/-- The call-site state of the `runtime.memmove` contract hypothesis (U-WITNESS-CALLSITE): at the
+contract's address, copying the 8 bytes at `VAL` to `DST`, with its precondition for the stack
+bound `d = 64`. -/
+def wsCall : State :=
+  { s0 with rip := BitVec.ofNat 64 cAddr,
+            regs := fun i => if i = 1 then 8 else if i = 3 then BitVec.ofNat 64 VAL
+              else if i = 0 then BitVec.ofNat 64 DST else s0.regs i }
+
+theorem wsCall_pre : M0.Env wsCall.mem (wsCall.regs 14) ∧ EqPre 64 3 wsCall ∧
+    Outside ((wsCall.regs 4).toNat - 64) (64 + 8 + 8 * 3) M0.priv ∧
+    Input wsCall 64 3 (wsCall.regs 3).toNat (wsCall.regs 1).toNat ∧
+    Dest M0 wsCall 64 3 (wsCall.regs 0).toNat (wsCall.regs 1).toNat := by
+  simp only [wsCall, s0, mem0, wb, reduceRipTarget]
+  refine ⟨trivial, ⟨⟨by decide, by decide, by decide⟩, ?_, ?_⟩, ?_, ?_, ?_⟩ <;>
+    simp only [CallOK, Input, Dest, M0, calleeStack,
+      Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil] <;> decide
 
 /-- `correctness` at `s0`: the 8 bytes at `VAL` are copied to `DST`. -/
 theorem returns : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0
@@ -313,6 +319,26 @@ theorem returns : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0
       [((s0.regs 3).toNat, (s0.regs 3).toNat + typSize s0.mem (s0.regs 0).toNat)] s0 s'
       fun m => Copied s0.mem m (s0.regs 3).toNat (s0.regs 1).toNat (typSize s0.mem (s0.regs 0).toNat)) :=
   correctness implAt M0 M0_laws 64 (model 64) s0 rfl pre
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MemModel) (d : Nat) (s : State), M.Laws ∧
+    Memmove (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.memmove") M d ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memmove") ∧
+      M.Env s_c.mem (s_c.regs 14) ∧ EqPre d 3 s_c ∧
+      Outside ((s_c.regs 4).toNat - d) (d + 8 + 8 * 3) M.priv ∧
+      Input s_c d 3 (s_c.regs 3).toNat (s_c.regs 1).toNat ∧
+      Dest M s_c d 3 (s_c.regs 0).toNat (s_c.regs 1).toNat) ∧
+    s.rip = BitVec.ofNat 64 Extracted.entry ∧
+    (TPre M wb (d + 48) 3 s ∧ TypeOK s.mem (s.regs 0).toNat ∧
+      Outside (s.regs 0).toNat 16 (calleeStack s (d + 48) 3) ∧
+      Input s (d + 48) 3 (s.regs 1).toNat (typSize s.mem (s.regs 0).toNat) ∧
+      Dest M s (d + 48) 3 (s.regs 3).toNat (typSize s.mem (s.regs 0).toNat)) ∧
+    ReachesRet (Extracted.program.link impl) (retAddrOf s) s
+      (fun s' => TRet M (d + 48) 3
+        [((s.regs 3).toNat, (s.regs 3).toNat + typSize s.mem (s.regs 0).toNat)] s s'
+        fun m => Copied s.mem m (s.regs 3).toNat (s.regs 1).toNat (typSize s.mem (s.regs 0).toNat)) :=
+  ⟨implAt, M0, 64, s0, M0_laws, model 64, ⟨wsCall, rfl, wsCall_pre⟩, rfl, pre, returns⟩
 
 end Witness
 

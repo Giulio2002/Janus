@@ -88,16 +88,43 @@ theorem pre : Pre rtW H0 0 0 0 0 s0 := by
     exact Janus.Arm64.Memory.accessible_mono _ hw (by decide) (by decide)
   · intro j; simp [arg, List.getD_eq_getElem?_getD]; rcases j with _ | _ | _ | _ | _ | j <;> simp
 
-theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
-    RtContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.concatstring2")
-      rt 4096 H (concatstringSpec 2) ∧ RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0] s ∧ Pre rt H 0 0 0 0 s :=
-  ⟨implAt, rtW, H0, ret, s0, model, hret, setup, pre⟩
+open Janus.Contracts.Sat (mem_strPairs_zero outside_zero)
+
+/-- The call state at `runtime.concatstring2`'s entry (all operands `0`; the stock witness memory). -/
+def wsCall : Janus.Amd64.State :=
+  { regs := (wstate (args [])).regs,
+    rip := BitVec.ofNat 64 cAddr, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := wmem }
+
+@[reducible] def rpSite (rt : List (Nat × Nat)) (H : RtReady) (s_c : Janus.Amd64.State) : Prop :=
+  RtPre64 rt 4096 H (concatstringSpec 2) s_c
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : rpSite rtW H0 wsCall := by
+  have hw : wmem.accessible (wsp - 0x2000) 0x2100 true = true := by decide
+  have ha : ∀ j, arg (argWords64 wsCall (concatstringSpec 2).nargs) j = 0 := fun j => args_zero _ j (by decide)
+  refine ⟨⟨by decide, by decide, by decide, by decide, Arm64.Memory.accessible_mono _ hw (by decide) (by decide)⟩, ⟨Or.inl (ha 0), ?_⟩, ?_, trivial, ready_intro rfl ha⟩
+  · intro x hx
+    rw [mem_strPairs_zero _ ha _ _ _ hx]
+    exact ⟨⟨by decide, by simp⟩, fun h => absurd (ha 0) h⟩
+  · intro r hr
+    rw [mem_strPairs_zero _ ha _ _ _ hr]
+    exact outside_zero _
 
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ StrOut s'.mem (s'.regs 0).toNat (s'.regs 3).toNat
       (strBytes s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat ++ strBytes s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
   correctness implAt rtW H0 0 0 0 0 model ret hret s0 setup pre
+
+theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
+    RtContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.concatstring2")
+      rt 4096 H (concatstringSpec 2) ∧ RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0] s ∧ Pre rt H 0 0 0 0 s ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.concatstring2") ∧
+      rpSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+    ABIReturn s s' ∧ StrOut s'.mem (s'.regs 0).toNat (s'.regs 3).toNat
+      (strBytes s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat ++ strBytes s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
+  ⟨implAt, rtW, H0, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 

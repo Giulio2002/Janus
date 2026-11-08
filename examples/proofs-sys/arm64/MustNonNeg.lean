@@ -68,4 +68,37 @@ theorem traps (x : BitVec 64) (hx : x.toInt < 0) (ret : Nat)
   rw [trapAt_withExit]
   decide
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def sp0 : Nat := 0x108000
+def g0 : Nat := 0x200000
+
+def wmem : Memory := ⟨fun _ => 0, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then 5 else if i = 28 then BitVec.ofNat 64 g0
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(5 : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by intro i h; simp only [List.length_cons, List.length_nil] at h
+                rcases (by omega : i = 0) with rfl; rfl⟩
+
+theorem hpre : GuardOK s0 0 ∧ StackOK s0 24 16 := by
+  simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, s0, wmem, sp0, g0]
+  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩⟩
+
+/-- All the hypotheses of `correctness` hold together at a concrete call, and it returns `x`. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s ∧ 0 ≤ x.toInt ∧
+    (GuardOK s 0 ∧ StackOK s 24 16) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => ABIReturn s s' ∧ s'.regs 0 = x) :=
+  ⟨ret, s0, 5, hret, setup, by decide, hpre, correctness 5 (by decide) ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

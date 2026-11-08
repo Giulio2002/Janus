@@ -52,8 +52,10 @@ theorem pre : EqPre 64 2 s0 ∧ Input s0 64 2 (s0.regs 0).toNat 1 ∧ Input s0 6
   refine ⟨⟨⟨by decide, by decide, by decide⟩, ?_, ?_⟩, ?_, ?_⟩ <;>
     simp only [CallOK, Input, calleeStack, outside_cons, outside_nil] <;> decide
 
-theorem nonvacuous : ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (EqPre 64 2 s ∧ Input s 64 2 (s.regs 0).toNat 1 ∧ Input s 64 2 (s.regs 1).toNat 1) :=
-  ⟨s0, rfl, pre⟩
+theorem nonvacuous : ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (EqPre 64 2 s ∧ Input s 64 2 (s.regs 0).toNat 1 ∧ Input s 64 2 (s.regs 1).toNat 1) ∧
+    (ReachesRet Extracted.program (s.regs 30) s
+    (fun s' => EqRet 64 2 s s' fun r => BoolRes r (s.mem.readLE (s.regs 0).toNat 1 == s.mem.readLE (s.regs 1).toNat 1))) :=
+  ⟨s0, rfl, pre, correctness 64 s0 rfl pre⟩
 
 /-- `correctness` at `s0`: the call returns `true` (the same bytes). -/
 theorem returns : ReachesRet Extracted.program (s0.regs 30) s0

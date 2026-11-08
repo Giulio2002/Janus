@@ -351,17 +351,30 @@ theorem pre : PanicCallerOK PW s0 32 0 ∧ Extracted.program.DataLoaded s0.mem �
     have : defers0 wm = [] := by rw [defers0_eq, hnd]; rfl
     exact absurd hd (by rw [show PW.defers s0.mem (gOf s0) = defers0 wm from rfl, this]; simp)
 
-/-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State → Nat → Nat → Prop) (ret : Nat)
-    (s : State), P.Laws ∧
-    DeferprocContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferproc") P ∧
-    DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
-    (PanicCallerOK P s 32 0 ∧ Extracted.program.DataLoaded s.mem ∧
-      Outside fvA 8 (P.priv ++ [(s.sp.toNat - (P.depth + 32), s.sp.toNat)]) ∧ 2 ≤ P.room s.mem (gOf s) ∧
-      P.saved s.mem (gOf s) = none ∧ ∀ d ∈ P.defers s.mem (gOf s), s.sp.toNat ≤ d.sp) :=
-  ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hdp, hdr, hret, setup, pre⟩
+/-- The call state at `runtime.deferproc`'s entry. -/
+def wsCall : State := PanicSat.sstate dpA wm 0 0
+
+@[reducible] def dpSite (P : PanicRuntime) (s_c : State) : Prop :=
+  PanicPre P 1 s_c ∧ 0 < P.room s_c.mem (gOf s_c)
+
+theorem wsCall_pre : dpSite PW wsCall :=
+  ⟨PanicSat.sstate_pre 1 (by decide) dpA 0 0 env_w (by decide) (by decide) (by decide),
+    by show 0 < room0 wm; rw [room0_eq]; decide⟩
+
+/-- The call state at `runtime.deferreturn`'s entry. -/
+def wsRet : State := PanicSat.sstate drA wm 0 0
+
+theorem defers_w : defers0 wm = [] := by
+  have hnd : ndef wm = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem saved_w : saved0 wm = none := by rw [saved0_eq]; decide
+
+theorem wsRet_pre : DeferreturnPre PW wsRet := by
+  refine ⟨PanicSat.sstate_pre 0 (by decide) drA 0 0 env_w (by decide) (by decide) (by decide), ?_⟩
+  show FrameOK (P0 T0 RPa) wm _ _
+  have hm : wsRet.mem = wm := rfl
+  simp [hm, retFrame, frameItems, recItems, P0_defers, P0_saved, PanicSat.sstate, defers_w, saved_w, gOf, FrameOK]
 
 /-- So the guarantee is reached: `DeferTwice` returns from `s0`. -/
 theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) s0 fun o =>
@@ -371,6 +384,28 @@ theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goCla
     | .panicked v s' => False
     | .goexited _ => False :=
   correctness implW PW (P0_laws T0 RPa) U0 hdp hdr ret hret s0 setup pre
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State → Nat → Nat → Prop) (ret : Nat)
+    (s : State), P.Laws ∧
+    DeferprocContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferproc") P ∧
+    DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
+    (PanicCallerOK P s 32 0 ∧ Extracted.program.DataLoaded s.mem ∧
+      Outside fvA 8 (P.priv ++ [(s.sp.toNat - (P.depth + 32), s.sp.toNat)]) ∧ 2 ≤ P.room s.mem (gOf s) ∧
+      P.saved s.mem (gOf s) = none ∧ ∀ d ∈ P.defers s.mem (gOf s), s.sp.toNat ≤ d.sp) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferproc") ∧
+      dpSite P s_c) ∧
+    (∃ s_r : State, s_r.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") ∧
+      DeferreturnPre P s_r) ∧
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClass P) s fun o =>
+    match o with
+    | .returned s' => ABIReturn s s' ∧
+        (MemFrame s.mem s'.mem (P.priv ++ [(s.sp.toNat - (P.depth + 32), s.sp.toNat)]) ∧ P.Env s'.mem)
+    | .panicked v s' => False
+    | .goexited _ => False :=
+  ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hdp, hdr, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, ⟨wsRet, rfl, wsRet_pre⟩, returns⟩
 
 end Witness
 

@@ -448,4 +448,49 @@ theorem correctness (ptr len cap c : BitVec 64) :
       (GoPre ptr len) (fun s s' => (s'.regs 0).toNat = countOf s.mem ptr.toNat (c.toNat % 256) len.toNat) :=
   (go_spec ptr len cap c).refine refines
 
+namespace Witness
+
+def RET : Nat := 0x1000
+def SP0 : Nat := 0x108000
+def G0 : Nat := 0x200000
+def TP : Nat := 0x400000
+def P : Nat := 0x300000
+/-- The Go stack, the `g` struct (stack guard `0`), the TLS `g` slot, the cgo function-pointer variable
+(holding the wrapper), `runtime.cgoAlwaysFalse` (zero) and the arguments' memory. -/
+def mem0 : Memory :=
+  ⟨fun a => if fnVar ≤ a ∧ a < fnVar + 8 then BitVec.ofNat 8 (wrapper / 256 ^ (a - fnVar)) else 0,
+    [⟨SP0 - 0x8000, 0x10000, true⟩, ⟨G0, 0x1c8, false⟩, ⟨TP + 16, 8, false⟩, ⟨fnVar, 8, false⟩, ⟨alwaysFalse, 1, false⟩, ⟨P, 16, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 P else if i = 1 then 4#64 else if i = 2 then 4#64 else if i = 3 then 7#64 else if i = 28 then BitVec.ofNat 64 G0 else if i = 29 then BitVec.ofNat 64 (SP0 - 8) else if i = 30 then BitVec.ofNat 64 RET else 0,
+    sp := BitVec.ofNat 64 SP0, pc := BitVec.ofNat 64 Extracted.entry, tpidr := BitVec.ofNat 64 TP,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem setup : CallSetup (Extracted.program.withExit RET) Extracted.entry [(BitVec.ofNat 64 P), (4#64), (4#64), (7#64)] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+theorem pre : GoPre (BitVec.ofNat 64 P) (4#64) s0 := by
+  unfold GoPre
+  repeat' apply And.intro
+  all_goals first
+    | decide +kernel
+    | (simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, outside_cons, outside_nil, and_true] <;>
+       decide +kernel)
+
+/-- All hypotheses of `correctness` hold together at a concrete call, and the call returns. -/
+theorem nonvacuous : ∃ (ptr len cap c : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap, c] s ∧ (GoPre ptr len s) ∧
+    ReturnsC (Extracted.program.withExit ret) (CgoCall Extracted.program) (fun s' =>
+      ABIReturnC s s' ∧ ((fun s s' => (s'.regs 0).toNat = countOf s.mem ptr.toNat (c.toNat % 256) len.toNat) s s')) s :=
+  ⟨BitVec.ofNat 64 P, 4#64, 4#64, 7#64, RET, s0, hret, setup, pre, correctness (BitVec.ofNat 64 P) (4#64) (4#64) (7#64) RET hret s0 setup pre⟩
+
+end Witness
+
 end Proof

@@ -101,4 +101,49 @@ theorem correctness (n q : BitVec 64) :
     janus64_run
     exact ⟨fun h => h.elim, by janus_frame⟩
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def n : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+def q : BitVec 64 := 7#64
+
+def s0 : State :=
+  { regs := fun r_ => if r_ = 0 then n else if r_ = 3 then q else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := ⟨wmem64.bytes, wmem64.regions ++ [⟨wbFlag, 4, false⟩]⟩ }
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [n, q] s0 :=
+  ⟨rfl, by decide +kernel, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+set_option maxRecDepth 100000 in
+theorem hpre : (fun s => StackGuardOK s 0 ∧ StackWritable s 136 8 ∧ Buffer s n 8 true ∧
+        s.mem.accessible wbFlag 4 false = true ∧
+        Separated [(n.toNat, 8), ((s.regs 4).toNat - 136, 144), (wbFlag, 4)] ∧
+        (s.mem.readLE wbFlag 4 ≠ 0 → BarrierOK s n.toNat)) s0 := by
+  dsimp only
+  refine ⟨⟨by decide +kernel, by decide +kernel, by decide +kernel⟩, ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩, ⟨by decide +kernel, by decide +kernel⟩, by decide +kernel, ?_, ?_⟩
+  · simp only [Separated]; decide +kernel
+  · intro h; exact absurd (by decide +kernel) h
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (n : BitVec 64) (q : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [n, q] s ∧ (StackGuardOK s 0 ∧ StackWritable s 136 8 ∧ Buffer s n 8 true ∧
+        s.mem.accessible wbFlag 4 false = true ∧
+        Separated [(n.toNat, 8), ((s.regs 4).toNat - 136, 144), (wbFlag, 4)] ∧
+        (s.mem.readLE wbFlag 4 ≠ 0 → BarrierOK s n.toNat)) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ s'.mem.readLE n.toNat 8 = q.toNat ∧
+        (s.mem.readLE wbFlag 4 = 0 → MemFrame s.mem s'.mem
+          [(n.toNat, n.toNat + 8), ((s.regs 4).toNat - 136, (s.regs 4).toNat)]) ∧
+        (s.mem.readLE wbFlag 4 ≠ 0 →
+          s'.mem.readLE (nextOf s) 8 = q.toNat ∧
+          s'.mem.readLE (nextOf s + 8) 8 = s.mem.readLE n.toNat 8 ∧
+          s'.mem.readLE (pOf s + offNext) 8 = nextOf s + 16 ∧
+          MemFrame s.mem s'.mem [(n.toNat, n.toNat + 8), (nextOf s, nextOf s + 16),
+            (pOf s + offNext, pOf s + offNext + 8), ((s.regs 4).toNat - 136, (s.regs 4).toNat)])) :=
+  ⟨ret, s0, n, q, hret, setup, hpre, correctness n q ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

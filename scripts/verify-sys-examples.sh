@@ -78,7 +78,10 @@ verify_one() {
   local thm
   for thm in $(grep -oE '^theorem (correctness|traps|full_write)' "examples/proofs-sys/$isa/$n.lean" | awk '{print $2}'); do thms+=("Proof.$thm"); done
   # the non-vacuity witnesses (Proof.Witness.nonvacuous, Proof.Witness.returns) where there are some
-  if grep -q '^namespace Witness' "examples/proofs-sys/$isa/$n.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
+  if grep -q '^namespace Witness' "examples/proofs-sys/$isa/$n.lean"; then
+    thms+=(Proof.Witness.nonvacuous)
+    grep -q '^theorem returns' "examples/proofs-sys/$isa/$n.lean" && thms+=(Proof.Witness.returns)
+  fi
   if [ ${#thms[@]} -eq 0 ]; then
     printf '%-18s FAILED (no theorem found in examples/proofs-sys/%s/%s.lean)\n' "$target" "$isa" "$n" | tee "$lines/${isa}_$n"
     broken+=("sys:$target"); return 0

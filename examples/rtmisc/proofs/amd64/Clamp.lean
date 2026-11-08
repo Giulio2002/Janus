@@ -81,4 +81,51 @@ theorem correctness (x hi : BitVec 64) :
         Arm64.Memory.readLE_writeLE_of_disjoint, Nat.reduceMul, Nat.reduceAdd] <;> omega
     · simp (disch := omega) only [onlyWrites_writeLE_iff, onlyWrites_self]
 
+namespace Witness
+
+def ret : Nat := 0x200000
+def sp0 : Nat := 0x108000
+def g0 : Nat := 0x300000
+def tls0 : Nat := 0x400000
+
+
+def bytes0 (a : Nat) : BitVec 8 :=
+  if a = sp0 + 2 then 0x20 else if a = tls0 + 2 then 0x30 else
+  0
+
+def mem0 : Janus.Arm64.Memory := ⟨bytes0, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x1000, false⟩, ⟨tls0, 0x100, false⟩, ⟨ctr, 24, true⟩, ⟨pkgVar, 4, false⟩]⟩
+
+def s0 : Janus.Amd64.State :=
+  { regs := fun i => if i = 0 then (5 : BitVec 64) else if i = 3 then (9 : BitVec 64) else if i = 4 then BitVec.ofNat 64 sp0 else if i = 14 then BitVec.ofNat 64 g0 else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := mem0, fsBase := BitVec.ofNat 64 (tls0 + 8) }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(5 : BitVec 64), (9 : BitVec 64)] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> first | rfl | decide, rfl⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `correctness` hold together at a concrete call, and it returns. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Amd64.State) (x hi : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, hi] s ∧ (StackWritable s 0 8 ∧ s.mem.accessible ctr 24 true = true ∧ ctr + 24 ≤ 2 ^ 48 ∧
+        s.mem.accessible pkgVar 4 false = true ∧ pkgVar + 4 ≤ 2 ^ 48 ∧ Spec.Disjoint pkgVar 4 ctr 24 ∧
+        Spec.Disjoint ctr 24 (s.regs regSP).toNat 8) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ ((s'.regs 0).toNat = min x.toNat hi.toNat ∧
+        CovBlock s'.mem ctr (s.mem.readLE pkgVar 4) 0
+          (bumped [covWord s.mem ctr 3, covWord s.mem ctr 4, covWord s.mem ctr 5] (ran x.toNat hi.toNat)) ∧
+        OnlyWrites s.mem s'.mem ctr 24)) := by
+  refine ⟨ret, s0, 5, 9, hret, setup, ?pre, correctness 5 9 ret hret s0 setup ?pre⟩
+  case pre =>
+    try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Program.DataLoaded]
+    repeat' apply And.intro
+    all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+
+end Witness
+
 end Proof

@@ -90,4 +90,46 @@ theorem correctness (f ptr len cap a b : BitVec 64) :
     (by janus64_simp) (by janus64_simp) (by simp [affineSum]) (by janus64_simp) (by janus64_simp)
     (by janus64_simp) rfl rfl (Janus.MemFrame.refl _ _)
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def f : BitVec 64 := 0x30c00#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+def ptr : BitVec 64 := 0x30800#64
+def len : BitVec 64 := 2#64
+def cap : BitVec 64 := 2#64
+def a : BitVec 64 := 2#64
+def b : BitVec 64 := 3#64
+
+def s0 : State :=
+  { regs := fun r_ => if r_ = 0 then f else if r_ = 3 then ptr else if r_ = 1 then len else if r_ = 7 then cap else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := ⟨fun x => if 0x30c00 ≤ x ∧ x < 0x30c08 then BitVec.ofNat 8 (func1 / 256 ^ (x - 0x30c00)) else if x = 0x30c08 then 2#8 else if x = 0x30c10 then 3#8 else wmem64.bytes x, wmem64.regions⟩ } -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [f, ptr, len, cap] s0 :=
+  ⟨rfl, by decide +kernel, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl, rfl⟩
+set_option maxRecDepth 100000 in
+theorem hpre : (fun s => FuncvalIs s.mem f func1 ∧ Janus.Spec.ClosureCtx s.mem f [a, b] ∧
+        len.toNat < 2 ^ 63 ∧ Buffer s ptr (8 * len.toNat) false ∧
+        StackGuardOK s 0 ∧ StackWritable s 40 32 ∧
+        (f.toNat + 24 ≤ (s.regs 4).toNat - 40 ∨ (s.regs 4).toNat + 32 ≤ f.toNat) ∧
+        (ptr.toNat + 8 * len.toNat ≤ (s.regs 4).toNat - 40 ∨ (s.regs 4).toNat + 32 ≤ ptr.toNat)) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (f : BitVec 64) (ptr : BitVec 64) (len : BitVec 64) (cap : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [f, ptr, len, cap] s ∧ (FuncvalIs s.mem f func1 ∧ Janus.Spec.ClosureCtx s.mem f [Witness.a, Witness.b] ∧
+        len.toNat < 2 ^ 63 ∧ Buffer s ptr (8 * len.toNat) false ∧
+        StackGuardOK s 0 ∧ StackWritable s 40 32 ∧
+        (f.toNat + 24 ≤ (s.regs 4).toNat - 40 ∨ (s.regs 4).toNat + 32 ≤ f.toNat) ∧
+        (ptr.toNat + 8 * len.toNat ≤ (s.regs 4).toNat - 40 ∨ (s.regs 4).toNat + 32 ≤ ptr.toNat)) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ s'.regs 0 = affineSum s.mem ptr.toNat Witness.a Witness.b len.toNat) :=
+  ⟨ret, s0, f, ptr, len, cap, hret, setup, hpre, correctness f ptr len cap a b ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

@@ -178,4 +178,41 @@ theorem correctness (J : JmpModel64) (v : BitVec 64) :
       Janus.Arm64.Memory.bytes_writeLE_outside]
     all_goals first | omega | (simp; omega)
 
+namespace Witness
+
+open Janus.Contracts.LibcSatAmd64 (wordModel)
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x1000008  -- addr-ok: a chosen C stack top
+def v0 : BitVec 64 := 5#64
+
+/-- The C stack (`libcStack + 48` bytes below `wsp`, and the return address word), and the
+`jmp_buf` `e_env`, writable. -/
+def smem : Janus.Arm64.Memory :=
+  ⟨fun a => if wsp ≤ a ∧ a < wsp + 8 then BitVec.ofNat 8 (ret / 256 ^ (a - wsp)) else 0,
+   [⟨wsp - (libcStack + 48), libcStack + 48 + 8, true⟩, ⟨env, jmpBufSize64, true⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 7 then v0 else if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := smem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [v0] s0 :=
+  ⟨rfl, by decide +kernel, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
+
+set_option maxRecDepth 100000 in
+theorem pre : Pre s0 := by
+  refine ⟨⟨by decide, by decide, by decide, by decide +kernel⟩, by decide +kernel, by decide +kernel, ?_⟩
+  simp only [outside_cons, outside_nil, and_true]; decide +kernel
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (J : JmpModel64) (v : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [v] s ∧ Pre s ∧
+    ReturnsC (Extracted.program.withExit ret) (SetJmp J) (fun s' => CReturn s s' ∧ (Post v s s')) s :=
+  ⟨wordModel, v0, ret, s0, hret, call, pre, correctness wordModel v0 ret hret s0 call pre⟩
+
+end Witness
+
 end Proof

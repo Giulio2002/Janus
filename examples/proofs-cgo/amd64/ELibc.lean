@@ -292,4 +292,45 @@ theorem correctness (src d : BitVec 64) (n : Nat) :
       rw [b5 _ (by omega) (by omega), b4 _ (by omega) (by omega), b3 _ (by omega) (by omega),
         b2 _ (by omega) (by omega)]
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x1000008  -- addr-ok: a chosen C stack top
+def S : Nat := 0x500000  -- addr-ok: a chosen source string
+def D : Nat := 0x600000  -- addr-ok: a chosen destination
+
+/-- The empty string at `S`, a one-byte writable destination at `D`, and the C stack (holding
+the return address at `[wsp]`). -/
+def smem : Janus.Arm64.Memory :=
+  ⟨fun a => if wsp ≤ a ∧ a < wsp + 8 then BitVec.ofNat 8 (ret / 256 ^ (a - wsp)) else 0,
+   [⟨wsp - (libcStack + 48), libcStack + 48 + 8, true⟩, ⟨S, 1, false⟩, ⟨D, 1, true⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 7 then BitVec.ofNat 64 S else if i = 6 then BitVec.ofNat 64 D
+      else if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := smem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [BitVec.ofNat 64 S, BitVec.ofNat 64 D] s0 :=
+  ⟨rfl, by decide +kernel, by decide, by
+    intro i h; simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, by decide, rfl⟩
+
+set_option maxRecDepth 100000 in
+theorem pre : Pre (BitVec.ofNat 64 S) (BitVec.ofNat 64 D) 0 s0 := by
+  refine ⟨⟨by decide +kernel, by decide +kernel, by decide +kernel, fun i h => absurd h (Nat.not_lt_zero _)⟩,
+    by decide +kernel, by decide +kernel, by decide +kernel,
+    ⟨by decide, by decide, by decide, by decide +kernel⟩, ?_, ?_, by decide +kernel⟩ <;>
+  · simp only [outside_cons, outside_nil, and_true]; decide +kernel
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (src d : BitVec 64) (n : Nat) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [src, d] s ∧ Pre src d n s ∧
+    ReturnsC (Extracted.program.withExit ret) Libc (fun s' => CReturn s s' ∧ (Post src d n s s')) s :=
+  ⟨_, _, 0, ret, s0, hret, call, pre, correctness _ _ 0 ret hret s0 call pre⟩
+
+end Witness
+
 end Proof

@@ -157,6 +157,28 @@ theorem hpre : pre M0 WB 64 p n s0 := by
     ⟨by decide, by decide⟩, ?_, trivial⟩ <;>
     simp only [window, MemAmd64.callerWindow, outside_cons, outside_nil, and_true] <;> decide
 
+@[reducible] def tmSite (M : MemModel) (wb d : Nat) (s_c : Janus.Amd64.State) : Prop :=
+  MemAmd64.TPre M wb d 2 s_c ∧ (s_c.regs 0).toNat % 8 = 0 ∧ (s_c.regs 3).toNat % 8 = 0 ∧
+    MemAmd64.Dest M s_c d 2 (s_c.regs 0).toNat (s_c.regs 3).toNat
+
+theorem tmSite_stock : tmSite M0 WB 64 (Janus.Contracts.MemSatAmd64.wstate (Janus.Contracts.MemSatAmd64.args DST 64 0 0)) :=
+  ⟨Janus.Contracts.MemSatAmd64.wstate_tPre _ 2 (by decide), by decide, by decide, by simp only [Janus.Contracts.MemAmd64.Dest, Janus.Contracts.MapAmd64.calleeStack, Janus.outside_cons, Janus.outside_nil, Janus.Contracts.EqHashModel.M0]; decide⟩
+
+theorem tmSite_rip (M : MemModel) (wb d : Nat) (s : Janus.Amd64.State) (x : BitVec 64) (h : tmSite M wb d s) :
+    tmSite M wb d { s with rip := x } := by
+  obtain ⟨⟨hE, ⟨g1, g2, g3⟩, hc, ho, hi, hw, h1, h2⟩, hr⟩ := h
+  exact ⟨⟨hE, ⟨g1, g2, g3⟩, hc, ho, hi, hw, h1, h2⟩, hr⟩
+
+def wsCall : Janus.Amd64.State := { Janus.Contracts.MemSatAmd64.wstate (Janus.Contracts.MemSatAmd64.args DST 64 0 0) with rip := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : tmSite M0 WB 64 wsCall := tmSite_rip _ _ _ _ _ tmSite_stock
+
+/-- So the guarantee is reached: the 64 bytes at `DST` are zero. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ Zeroed s'.mem DST 64 :=
+  (correctness implAt M0 M0_laws WB 64 (model WB 64) p n n ret hret s0 setup hpre).mono
+    fun _ h => ⟨h.1, h.2.1⟩
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MemModel) (wb d ret : Nat) (s : State)
     (p n c : BitVec 64), M.Laws ∧
@@ -164,14 +186,13 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MemModel) (wb d 
       (Extracted.program.contractAddr "runtime.memclrHasPointers") M wb d ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, n, c] s ∧
-    pre M wb d p n s :=
-  ⟨implAt, M0, WB, 64, ret, s0, p, n, n, M0_laws, model WB 64, hret, setup, hpre⟩
-
-/-- So the guarantee is reached: the 64 bytes at `DST` are zero. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ Zeroed s'.mem DST 64 :=
-  (correctness implAt M0 M0_laws WB 64 (model WB 64) p n n ret hret s0 setup hpre).mono
-    fun _ h => ⟨h.1, h.2.1⟩
+    pre M wb d p n s ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memclrHasPointers") ∧
+      tmSite M wb d s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+      (Zeroed s'.mem p.toNat (8 * n.toNat) ∧
+        MemFrame s.mem s'.mem (M.priv ++ window d s ++ [(p.toNat, p.toNat + 8 * n.toNat)])) :=
+  ⟨implAt, M0, WB, 64, ret, s0, p, n, n, M0_laws, model WB 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt M0 M0_laws WB 64 (model WB 64) p n n ret hret s0 setup hpre⟩
 
 end Witness
 

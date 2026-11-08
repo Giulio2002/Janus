@@ -126,13 +126,23 @@ theorem hpre : pre 64 p l p l s0 := by
     ⟨by decide, by decide⟩, ⟨by decide, by decide⟩, ?_, ?_⟩ <;>
     simp only [callerWindow, outside_cons, outside_nil, and_true] <;> decide
 
-/-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (d ret : Nat) (s : State) (p1 l1 p2 l2 : BitVec 64),
-    Memequal (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memequal") d ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p1, l1, p2, l2] s ∧
-    pre d p1 l1 p2 l2 s :=
-  ⟨implAt, 64, ret, s0, p, l, p, l, model 64, hret, setup, hpre⟩
+theorem eqpre_pc {d n : Nat} {s : State} (x : BitVec 64) (h : EqPre d n s) :
+    EqPre d n { s with pc := x } := by
+  obtain ⟨⟨g1, g2, g3⟩, hc, ho⟩ := h
+  exact ⟨⟨g1, g2, g3⟩, hc, ho⟩
+
+def wsCall : State := { MemSat.wstate MemSat.eqArgs with pc := BitVec.ofNat 64 cAddr }
+
+@[reducible] def meSite (d : Nat) (s_c : State) : Prop :=
+  EqPre d 0 s_c ∧ Input s_c d 0 (s_c.regs 0).toNat (s_c.regs 2).toNat ∧
+    Input s_c d 0 (s_c.regs 1).toNat (s_c.regs 2).toNat
+
+theorem wsCall_pre : meSite 64 wsCall :=
+  ⟨eqpre_pc _ (MemSat.wstate_eqPre MemSat.eqArgs 0 (by decide)),
+    (MemSat.wstate_input MemSat.eqArgs 0 _ _ (by decide) (by decide) :
+      Input (MemSat.wstate MemSat.eqArgs) 64 0 (MemSat.eqArgs 0).toNat (MemSat.eqArgs 2).toNat),
+    (MemSat.wstate_input MemSat.eqArgs 0 _ _ (by decide) (by decide) :
+      Input (MemSat.wstate MemSat.eqArgs) 64 0 (MemSat.eqArgs 1).toNat (MemSat.eqArgs 2).toNat)⟩
 
 /-- So the guarantee is reached: a string equals itself. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
@@ -140,6 +150,19 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
   refine (correctness implAt 64 (model 64) p l p l ret hret s0 setup hpre).mono ?_
   intro s' h
   exact ⟨h.1, by rw [h.2]; simp⟩
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (d ret : Nat) (s : State) (p1 l1 p2 l2 : BitVec 64),
+    Memequal (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memequal") d ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p1, l1, p2, l2] s ∧
+    pre d p1 l1 p2 l2 s ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memequal") ∧
+      meSite d s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+      ((s'.regs 0).toNat % 256 =
+        (l1 == l2 && s.mem.readLE p1.toNat l1.toNat == s.mem.readLE p2.toNat l2.toNat).toNat) :=
+  ⟨implAt, 64, ret, s0, p, l, p, l, model 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt 64 (model 64) p l p l ret hret s0 setup hpre⟩
 
 end Witness
 

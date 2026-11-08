@@ -111,4 +111,34 @@ theorem correctness : Summary Extracted.program Extracted.entry
     · decide +kernel
     · decide +kernel
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+
+/-- The witness call state: the program's read-only data over `wmem64`, `RAX = 0x30800` (64 readable bytes),
+return address `wret` at `[wsp]`. -/
+def s0 : State :=
+  { regs := fun r_ => if r_ = 0 then 0x30800#64 else if r_ = 4 then BitVec.ofNat 64 wsp -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+      else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := withData Extracted.program.data wmem64 }
+
+set_option maxRecDepth 100000 in
+theorem hpre : (fun s : State => Extracted.program.DataLoaded s.mem ∧ s.mem.accessible (s.regs 0).toNat 64 false = true ∧
+      s.mem.accessible (s.regs 4).toNat 8 false = true ∧ s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47) s0 := by
+  dsimp only
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · unfold Janus.Amd64.Program.DataLoaded; decide +kernel
+  all_goals decide +kernel
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ s : State, s.rip = BitVec.ofNat 64 Extracted.entry ∧
+    (Extracted.program.DataLoaded s.mem ∧ s.mem.accessible (s.regs 0).toNat 64 false = true ∧
+      s.mem.accessible (s.regs 4).toNat 8 false = true ∧ s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47) ∧
+    (ReachesRet Extracted.program (retAddrOf s) s
+      (fun s' => Expanded (s.mem.readLE (s.regs 0).toNat 64) (s'.zmm 1) (s'.zmm 2))) :=
+  ⟨s0, rfl, hpre, correctness s0 rfl hpre⟩
+
+end Witness
+
 end Proof

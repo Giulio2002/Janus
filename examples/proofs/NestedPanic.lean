@@ -471,6 +471,76 @@ theorem pre : PanicCallerOK PW s0 (PW.depth + 128) 48 ∧ Ptr s0.mem (BitVec.ofN
     have : defers0 wmW = [] := by rw [defers0_eq, hnd]; rfl
     exact absurd hd (by rw [show PW.defers s0.mem (gOf s0) = defers0 wmW from rfl, this]; simp)
 
+def wfi : FuncInfo := FuncInfo.named Extracted.funcs "example.com/basic.NestedPanic"
+
+/-- The call state at `runtime.gopanic`'s entry: `NestedPanic`'s own frame, pending open-coded defers in place, `LR` inside the function. -/
+def wmG : Memory := witMem (tabWords T0 ++ [(0x48000 - 24, 0x48000 - 40), (0x48000 - 16, 0x48000 - 64), (0x48000 - 40, func1A), (0x48000 - 64, func2A), (0x48000 - 32, 0), (0x48000 - 56, 0), (0x48000 - 48, 0), (0x48000 - 65, 3)])
+
+def wsG : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 0x50000 else if i = 30 then BitVec.ofNat 64 (loc_NestedPanic_124) else if i = 29 then BitVec.ofNat 64 (0x48000 - 96 - 8) else if i = 0 then 1#64 else 0,
+    sp := BitVec.ofNat 64 (0x48000 - 96), pc := BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic"),
+    flags := ⟨false, false, false, false⟩, mem := wmG }
+
+theorem env_G : Env0 T0 wmG := by
+  unfold Env0
+  have hnd : ndef wmG = 0 := by decide
+  refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
+  · omega
+  · unfold TableOK
+    exact ⟨by decide, by decide, by decide⟩
+
+theorem wsG_find : FuncInfo.find T0 (wsG.regs 30).toNat = some wfi := by decide
+
+theorem defers_G : defers0 wmG = [] := by
+  have hnd : ndef wmG = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem wsG_pre : GopanicPre PW wfi wsG := by
+  refine ⟨⟨env_G, ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, ?_⟩, by decide, ?_, ?_, ?_⟩
+  · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · show 0 < room0 wmG
+    rw [room0_eq]; decide
+  · intro _; refine ⟨by decide, ?_⟩
+    simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · have hs : wsG.sp.toNat = 0x48000 - 96 := by decide
+    have hr : PW.defers wmG (gOf wsG) = [] := defers_G
+    have f_frame : wfi.frame = 96 := by rfl
+    have f_od : wfi.openDefer = some (57, 16) := by rfl
+    have f_res : wfi.resume = Extracted.entry + 0x80 := by rfl
+    have hbA : wfi.bitsAt (0x48000 - 96) = 0x48000 - 65 := by
+      unfold FuncInfo.bitsAt FuncInfo.varp; rw [f_frame, f_od]; try rfl
+    have hsA : wfi.slotsAt (0x48000 - 96) = 0x48000 - 24 := by
+      unfold FuncInfo.slotsAt FuncInfo.varp; rw [f_frame, f_od]; try rfl
+    have hbd : wfi.bound (0x48000 - 96) = 0x48000 := by
+      unfold FuncInfo.bound; rw [f_frame]; try rfl
+    have hbit : wmG.readLE (0x48000 - 65) 1 = 3 := by decide
+    have hF : frameOf wfi (0x48000 - 96) wmG = ⟨0x48000 - 96, 0x48000, Extracted.entry + 0x80, some (0x48000 - 65, 0x48000 - 24)⟩ := by
+      unfold frameOf; rw [hbA, hsA, hbd, f_res, f_od]
+      simp only [hbit]; try rfl
+    show FrameOK PW wmG (frameOf wfi (wsG.sp.toNat) wmG) (frameItems wmG (frameOf wfi (wsG.sp.toNat) wmG) (PW.defers wmG (gOf wsG)))
+    rw [hs, hr]
+    
+    rw [hF]
+    have hI : frameItems wmG ⟨0x48000 - 96, 0x48000, Extracted.entry + 0x80, some (0x48000 - 65, 0x48000 - 24)⟩ [] = [{ fn := 0x48000 - 64, bits := some 1, chain := [] }, { fn := 0x48000 - 40, bits := some 0, chain := [] }] := by
+      unfold frameItems openItems recItems
+      simp only [hbit]
+      decide
+    unfold Panic.FrameOK
+    rw [hI]
+    simp only [hbit, List.mem_cons, List.not_mem_nil, or_false, forall_eq_or_imp, forall_eq, P0_priv, outside_cons,
+      outside_nil, and_true]
+    decide
+
+/-- So the guarantee is reached: `NestedPanic` panics with `e2` (type word `2`), having run the
+remaining deferred call (`*p = 1`). -/
+theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U0 s0) s0 fun o =>
+    match o with
+    | .returned s' => ABIReturn s0 s' ∧ False
+    | .panicked v s' => v = ⟨(2#64 : BitVec 64).toNat, (0#64 : BitVec 64).toNat⟩ ∧
+        s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 = 1
+    | .goexited _ => False :=
+  correctness implW PW (P0_laws T0 RPa) U0 hpan (BitVec.ofNat 64 pA) 1#64 0#64 2#64 0#64 ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State → Nat → Nat → Prop) (ret : Nat)
     (s : State), P.Laws ∧
@@ -483,18 +553,16 @@ theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State →
       Spec.Disjoint (BitVec.ofNat 64 pA).toNat 8 (s.sp.toNat - (P.depth + (P.depth + 128)))
         (P.depth + (P.depth + 128) + 48) ∧
       Outside (BitVec.ofNat 64 pA).toNat 8 P.priv ∧ (1#64 : BitVec 64).toNat ≠ 0 ∧ (2#64 : BitVec 64).toNat ≠ 0 ∧
-      2 ≤ P.room s.mem (gOf s) ∧ ∀ d ∈ P.defers s.mem (gOf s), s.sp.toNat ≤ d.sp) :=
-  ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hpan, hret, setup, pre⟩
-
-/-- So the guarantee is reached: `NestedPanic` panics with `e2` (type word `2`), having run the
-remaining deferred call (`*p = 1`). -/
-theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U0 s0) s0 fun o =>
+      2 ≤ P.room s.mem (gOf s) ∧ ∀ d ∈ P.defers s.mem (gOf s), s.sp.toNat ≤ d.sp) ∧
+    (∃ (s_c : State) (fi : FuncInfo), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic") ∧
+      FuncInfo.find Extracted.funcs (s_c.regs 30).toNat = some fi ∧ GopanicPre P fi s_c) ∧
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClassU P U s) s fun o =>
     match o with
-    | .returned s' => ABIReturn s0 s' ∧ False
+    | .returned s' => ABIReturn s s' ∧ False
     | .panicked v s' => v = ⟨(2#64 : BitVec 64).toNat, (0#64 : BitVec 64).toNat⟩ ∧
         s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 = 1
     | .goexited _ => False :=
-  correctness implW PW (P0_laws T0 RPa) U0 hpan (BitVec.ofNat 64 pA) 1#64 0#64 2#64 0#64 ret hret s0 setup pre
+  ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hpan, hret, setup, pre, ⟨wsG, wfi, rfl, wsG_find, wsG_pre⟩, returns⟩
 
 end Witness
 

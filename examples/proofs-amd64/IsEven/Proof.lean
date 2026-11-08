@@ -173,13 +173,6 @@ theorem hpre (pc : Nat) : CallPre n (s0 pc) := by
   refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, ?_⟩ <;>
     simp only [regSP, regG, stackguard0, stackguard0Offset] <;> decide
 
-/-- All hypotheses of `correctness` hold together, for both members. -/
-theorem nonvacuous : ∃ (ret : Nat) (s s' : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [n] s ∧ CallPre n s ∧
-    CallSetup (Extracted.program.withExit ret) (segAddr Extracted.program "example.com/basic.IsOdd")
-      [n] s' ∧ CallPre n s' :=
-  ⟨ret, s0 _, s0 _, hret, setup _, hpre _, setup _, hpre _⟩
-
 /-- So the guarantee is reached: `IsEven(3)` returns `0` and `IsOdd(3)` returns `1`. -/
 theorem returns :
     Returns (Extracted.program.withExit ret) (s0 Extracted.entry) (fun s' =>
@@ -190,6 +183,15 @@ theorem returns :
   refine ⟨((correctness n).1 ret hret _ (setup _) (hpre _)).mono ?_,
     ((correctness n).2 ret hret _ (setup _) (hpre _)).mono ?_⟩
   all_goals intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
+
+/-- All hypotheses of `correctness` hold together, for both members, and both runs return. -/
+theorem nonvacuous : ∃ (ret : Nat) (s s' : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [n] s ∧ CallPre n s ∧
+    CallSetup (Extracted.program.withExit ret) (segAddr Extracted.program "example.com/basic.IsOdd")
+      [n] s' ∧ CallPre n s' ∧
+    Returns (Extracted.program.withExit ret) s (fun t => ABIReturn s t ∧ (t.regs 0).toNat = 0) ∧
+    Returns (Extracted.program.withExit ret) s' (fun t => ABIReturn s' t ∧ (t.regs 0).toNat = 1) :=
+  ⟨ret, s0 _, s0 _, hret, setup _, hpre _, setup _, hpre _, returns.1, returns.2⟩
 
 end Witness
 

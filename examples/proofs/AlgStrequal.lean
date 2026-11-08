@@ -155,16 +155,31 @@ theorem pre : EqPre 64 2 s0 ∧ StrInput s0 64 2 (s0.regs 0).toNat ∧ StrInput 
     simp only [CallOK, Input, StrInput, strPtr, strLen, varlenSize, calleeStack, outside_cons,
       outside_nil] <;> decide
 
-/-- All hypotheses of `correctness` hold together (bounds `d' = 48`, `d = 64`). -/
-theorem nonvacuous : ∃ (impl : List Segment) (d d' : Nat), 8 ≤ d' ∧ d' + 16 ≤ d ∧
-    Memequal (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memequal") d' ∧
-    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (EqPre d 2 s ∧ StrInput s d 2 (s.regs 0).toNat ∧ StrInput s d 2 (s.regs 1).toNat) :=
-  ⟨implAt, 64, 48, by decide, by decide, model 48, s0, rfl, pre⟩
+/-- The call-site state of the `runtime.memequal` contract hypothesis (U-WITNESS-CALLSITE): at the contract's address, with its
+precondition for the stack bound `d'` (the witness's `d' = 48`) and the size `X2 = 8`. -/
+def wsCall : State := { s0 with pc := BitVec.ofNat 64 cAddr, regs := fun i => if i = 2 then 8 else s0.regs i }
+
+theorem wsCall_pre : EqPre 48 0 wsCall ∧ Input wsCall 48 0 (wsCall.regs 0).toNat (wsCall.regs 2).toNat ∧
+    Input wsCall 48 0 (wsCall.regs 1).toNat (wsCall.regs 2).toNat := by
+  refine ⟨⟨⟨by decide, by decide, by decide⟩, ?_, ?_⟩, ?_, ?_⟩ <;>
+    simp only [wsCall, s0, r, MemSat.wstate, CallOK, Input, StrInput, strPtr, strLen, varlenSize, calleeStack, outside_cons,
+      outside_nil] <;> decide
 
 /-- `correctness` at `s0`. -/
 theorem returns : ReachesRet (Extracted.program.link implAt) (s0.regs 30) s0
     (fun s' => EqRet 64 2 s0 s' fun r => BoolRes r (strEq s0.mem (s0.regs 0).toNat (s0.regs 1).toNat)) :=
   correctness implAt 64 48 (by decide) (by decide) (model 48) s0 rfl pre
+
+/-- All hypotheses of `correctness` hold together (bounds `d' = 48`, `d = 64`). -/
+theorem nonvacuous : ∃ (impl : List Segment) (d d' : Nat), 8 ≤ d' ∧ d' + 16 ≤ d ∧
+    Memequal (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memequal") d' ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memequal") ∧
+      EqPre d' 0 s_c ∧ Input s_c d' 0 (s_c.regs 0).toNat (s_c.regs 2).toNat ∧
+      Input s_c d' 0 (s_c.regs 1).toNat (s_c.regs 2).toNat) ∧
+    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (EqPre d 2 s ∧ StrInput s d 2 (s.regs 0).toNat ∧ StrInput s d 2 (s.regs 1).toNat) ∧
+      ReachesRet (Extracted.program.link impl) (s.regs 30) s
+        (fun s' => EqRet d 2 s s' fun r => BoolRes r (strEq s.mem (s.regs 0).toNat (s.regs 1).toNat)) :=
+  ⟨implAt, 64, 48, by decide, by decide, model 48, ⟨wsCall, rfl, wsCall_pre⟩, s0, rfl, pre, returns⟩
 
 end Witness
 

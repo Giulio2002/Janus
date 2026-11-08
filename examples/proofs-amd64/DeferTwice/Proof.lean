@@ -450,18 +450,31 @@ theorem pre : PanicCallerOK PW s0 32 8 ∧ Extracted.program.DataLoaded s0.mem �
     have : defers0 wm = [] := by rw [defers0_eq, hnd]; rfl
     exact absurd hd (by rw [show PW.defers s0.mem (gOf s0) = defers0 wm from rfl, this]; simp)
 
-/-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime)
-    (U : Janus.Amd64.State → Nat → Nat → Prop) (ret : Nat) (s : Janus.Amd64.State), P.Laws ∧
-    DeferprocContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferproc") P ∧
-    DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
-    (PanicCallerOK P s 32 8 ∧ Extracted.program.DataLoaded s.mem ∧
-      Outside fvA 8 (P.priv ++ [((s.regs regSP).toNat - (P.depth + 32), (s.regs regSP).toNat + 8)]) ∧
-      2 ≤ P.room s.mem (gOf s) ∧ P.saved s.mem (gOf s) = none ∧
-      ∀ d ∈ P.defers s.mem (gOf s), (s.regs regSP).toNat ≤ d.sp) :=
-  ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hdp, hdr, hret, setup, pre⟩
+/-- The call state at `runtime.deferproc`'s entry. -/
+def wsCall : Janus.Amd64.State := Janus.Contracts.PanicSatAmd64.sstate dpA wm 0 0
+
+@[reducible] def dpSite (P : Spec.PanicRuntime) (s_c : Janus.Amd64.State) : Prop :=
+  PanicPre P 1 s_c ∧ 0 < P.room s_c.mem (gOf s_c)
+
+theorem wsCall_pre : dpSite PW wsCall :=
+  ⟨Janus.Contracts.PanicSatAmd64.sstate_pre 1 (by decide) dpA 0 0 env_w (by decide) (by decide) (by decide) (by decide),
+    by show 0 < room0 wm; rw [room0_eq]; decide⟩
+
+/-- The call state at `runtime.deferreturn`'s entry. -/
+def wsRet : Janus.Amd64.State := Janus.Contracts.PanicSatAmd64.sstate drA wm 0 0
+
+theorem defers_w : defers0 wm = [] := by
+  have hnd : ndef wm = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem saved_w : saved0 wm = none := by rw [saved0_eq]; decide
+
+theorem wsRet_pre : DeferreturnPre PW wsRet := by
+  refine ⟨Janus.Contracts.PanicSatAmd64.sstate_pre 0 (by decide) drA 0 0 env_w (by decide) (by decide) (by decide) (by decide), ?_⟩
+  show FrameOK (P0 T0 RPa) wm _ _
+  have hm : wsRet.mem = wm := rfl
+  simp [hm, retFrame, Panic.frameItems, Panic.recItems, P0_defers, P0_saved, Janus.Contracts.PanicSatAmd64.sstate, defers_w, saved_w,
+    gOf, FrameOK, Panic.FrameOK]
 
 /-- So the guarantee is reached: `DeferTwice` returns from that state. -/
 theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) s0 fun o =>
@@ -472,6 +485,30 @@ theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goCla
     | .panicked v s' => False
     | .goexited _ => False :=
   correctness implW PW (P0_laws T0 RPa) U1 hdp hdr ret hret s0 setup pre
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime)
+    (U : Janus.Amd64.State → Nat → Nat → Prop) (ret : Nat) (s : Janus.Amd64.State), P.Laws ∧
+    DeferprocContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferproc") P ∧
+    DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
+    (PanicCallerOK P s 32 8 ∧ Extracted.program.DataLoaded s.mem ∧
+      Outside fvA 8 (P.priv ++ [((s.regs regSP).toNat - (P.depth + 32), (s.regs regSP).toNat + 8)]) ∧
+      2 ≤ P.room s.mem (gOf s) ∧ P.saved s.mem (gOf s) = none ∧
+      ∀ d ∈ P.defers s.mem (gOf s), (s.regs regSP).toNat ≤ d.sp) ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferproc") ∧
+      dpSite P s_c) ∧
+    (∃ s_r : Janus.Amd64.State, s_r.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") ∧
+      DeferreturnPre P s_r) ∧
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClass P) s fun o =>
+    match o with
+    | .returned s' => ABIReturn s s' ∧
+        (MemFrame s.mem s'.mem
+          (P.priv ++ [((s.regs regSP).toNat - (P.depth + 32), (s.regs regSP).toNat + 8)]) ∧ P.Env s'.mem)
+    | .panicked v s' => False
+    | .goexited _ => False :=
+  ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hdp, hdr, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, ⟨wsRet, rfl, wsRet_pre⟩, returns⟩
 
 end Witness
 

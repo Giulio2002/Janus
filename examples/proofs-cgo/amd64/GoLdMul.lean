@@ -330,4 +330,52 @@ theorem correctness (a b r : BitVec 64) :
       (fun s s' => s'.mem.readLE r.toNat 10 = prod s.mem a.toNat b.toNat) :=
   (go_spec a b r).refine refines
 
+namespace Witness
+
+def RET : Nat := 0x1000
+def SP0 : Nat := 0x108000  -- addr-ok: a chosen goroutine stack, not a binary address
+def G0 : Nat := 0x200000  -- addr-ok: a chosen `g` struct
+def FS : Nat := 0x400010  -- addr-ok: a chosen thread control block
+def P : Nat := 0x300000  -- addr-ok: a chosen buffer
+/-- The Go stack (holding the return address), the `g` struct (stack guard `0`), the TLS `g` slot
+at `FS - 8`, the cgo function-pointer variable (holding the wrapper), `runtime.cgoAlwaysFalse` (zero)
+and the arguments' memory. -/
+def mem0 : Janus.Arm64.Memory :=
+  ⟨fun a => if fnVar ≤ a ∧ a < fnVar + 8 then BitVec.ofNat 8 (wrapper / 256 ^ (a - fnVar)) else if SP0 ≤ a ∧ a < SP0 + 8 then BitVec.ofNat 8 (RET / 256 ^ (a - SP0)) else if (FS - 8) ≤ a ∧ a < (FS - 8) + 8 then BitVec.ofNat 8 (G0 / 256 ^ (a - (FS - 8))) else 0,
+    [⟨SP0 - 0x8000, 0x10000, true⟩, ⟨G0, 0x1c8, false⟩, ⟨FS - 8, 8, false⟩, ⟨fnVar, 8, false⟩, ⟨alwaysFalse, 1, false⟩, ⟨P, 16, false⟩, ⟨P + 0x1000, 16, false⟩, ⟨P + 0x2000, 16, true⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 P else if i = 3 then BitVec.ofNat 64 (P + 0x1000) else if i = 1 then BitVec.ofNat 64 (P + 0x2000) else if i = 14 then BitVec.ofNat 64 G0 else if i = 4 then BitVec.ofNat 64 SP0 else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, fsBase := BitVec.ofNat 64 FS, mem := mem0 }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (Extracted.program.withExit RET) Extracted.entry [(BitVec.ofNat 64 P), (BitVec.ofNat 64 (P + 0x1000)), (BitVec.ofNat 64 (P + 0x2000))] s0 :=
+  ⟨rfl, by decide +kernel, rfl, by decide, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+theorem pre : GoPre (BitVec.ofNat 64 P) (BitVec.ofNat 64 (P + 0x1000)) (BitVec.ofNat 64 (P + 0x2000)) s0 := by
+  unfold GoPre
+  repeat' apply And.intro
+  all_goals first
+    | decide +kernel
+    | rfl
+    | (constructor <;> decide +kernel)
+    | (simp only [Janus.Spec.StackGuardOK, Janus.Amd64.GoABI.StackWritable, outside_cons, outside_nil, and_true] <;>
+       decide +kernel)
+
+/-- All hypotheses of `correctness` hold together at a concrete call, and the call returns. -/
+theorem nonvacuous : ∃ (a b r : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [a, b, r] s ∧ (GoPre a b r s) ∧
+    ReturnsC (Extracted.program.withExit ret) (CgoCall Extracted.program) (fun s' =>
+      ABIReturn s s' ∧ ((fun s s' => s'.mem.readLE r.toNat 10 = prod s.mem a.toNat b.toNat) s s')) s :=
+  ⟨BitVec.ofNat 64 P, BitVec.ofNat 64 (P + 0x1000), BitVec.ofNat 64 (P + 0x2000), RET, s0, hret, setup, pre, correctness (BitVec.ofNat 64 P) (BitVec.ofNat 64 (P + 0x1000)) (BitVec.ofNat 64 (P + 0x2000)) RET hret s0 setup pre⟩
+
+end Witness
+
 end Proof

@@ -158,14 +158,20 @@ theorem pre : CallerOK R0 s0 48 40 ∧ (td = td →
       simp only [window, outside_cons, outside_nil, and_true]
       simp [s0, wsp] at h1 h2 ⊢; omega
 
-/-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (ret : Nat) (s : State) (ta pa tb pb : BitVec 64),
-    R.Laws ∧ Efaceeq (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.efaceeq") R ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [ta, pa, tb, pb] s ∧
-    (CallerOK R s 48 40 ∧ (ta = tb →
-      EqOK R s.mem ta.toNat pa.toNat pb.toNat ∧ EqFrame R ta.toNat s.mem pa.toNat pb.toNat (window R s))) :=
-  ⟨implAt, R0, ret, s0, td, val, td, val, R0_laws, model, hret, setup, pre⟩
+theorem rtpre_pc {n : Nat} {R : IfaceModel} {s : State} (a : BitVec 64) (h : RTPre R n s) :
+    RTPre R n { s with pc := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c, o⟩
+
+/-- The precondition of `Efaceeq`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def EfaceeqSite (R : IfaceModel) (s_c : State) : Prop :=
+  RTPre R 3 s_c ∧ EqOK R s_c.mem (s_c.regs 0).toNat (s_c.regs 1).toNat (s_c.regs 2).toNat
+
+/-- The call state of the `runtime.efaceeq` contract (U-WITNESS-CALLSITE): the stock witness state of `IfaceSat`, at the contract address. -/
+def wsCall : State := { wstate (fun i => if i = 0 then BitVec.ofNat 64 TD else if i = 1 ∨ i = 2 then BitVec.ofNat 64 VAL else 0) with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : EfaceeqSite R0 wsCall :=
+  ⟨rtpre_pc _ (wstate_rtpre _ 3 (by decide)), fun _ => ⟨Or.inl rfl, rfl, by decide, by decide⟩⟩
 
 /-- So the guarantee is reached: comparing the box with itself gives `true`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
@@ -176,6 +182,24 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
   rw [h.2.1, show td.toNat = TD from rfl, show s0.mem = wmem from rfl,
     efaceEqual_R0 (g := s0.regs 28) (wmem_env _)]
   decide
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (ret : Nat) (s : State) (ta pa tb pb : BitVec 64),
+    R.Laws ∧ Efaceeq (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.efaceeq") R ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [ta, pa, tb, pb] s ∧
+    (CallerOK R s 48 40 ∧ (ta = tb →
+      EqOK R s.mem ta.toNat pa.toNat pb.toNat ∧ EqFrame R ta.toNat s.mem pa.toNat pb.toNat (window R s))) ∧
+    (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.efaceeq") ∧ EfaceeqSite R s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat % 256 =
+          (ta == tb && efaceEqual R s.mem ta.toNat pa.toNat pb.toNat).toNat ∧
+        (ta = tb → ta ≠ 0 → isRegularMemory s.mem ta.toNat = true →
+          isDirectIface s.mem ta.toNat = false →
+          s.mem.accessible pa.toNat (tySize s.mem ta.toNat) false = true →
+          s.mem.accessible pb.toNat (tySize s.mem ta.toNat) false = true →
+          (s'.regs 0).toNat % 256 = (s.mem.readLE pa.toNat (tySize s.mem ta.toNat) ==
+            s.mem.readLE pb.toNat (tySize s.mem ta.toNat)).toNat)) :=
+  ⟨implAt, R0, ret, s0, td, val, td, val, R0_laws, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt R0 R0_laws model td val td val ret hret s0 setup pre⟩
 
 end Witness
 

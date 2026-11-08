@@ -50,4 +50,41 @@ theorem correctness (p h : BitVec 64) :
     apply BitVec.eq_of_toNat_eq
     simp only [BitVec.toNat_ofNat, Nat.mod_mod]
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def p : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+def h : BitVec 64 := 7#64
+
+def s0 : State :=
+  { regs := fun r_ => if r_ = 0 then p else if r_ = 3 then h else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := ⟨wmem64.bytes, wmem64.regions ++ [⟨useAes, 1, false⟩, ⟨keys, 48, false⟩, ⟨hashkey, 16, false⟩]⟩ }
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [p, h] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem hpre : (fun s => StackWritable s 0 8 ∧ s.mem.accessible useAes 1 false = true ∧
+        s.mem.accessible keys 48 false = true ∧ s.mem.accessible hashkey 16 false = true ∧
+        Buffer s p 4 false) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (p : BitVec 64) (h : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [p, h] s ∧ (StackWritable s 0 8 ∧ s.mem.accessible useAes 1 false = true ∧
+        s.mem.accessible keys 48 false = true ∧ s.mem.accessible hashkey 16 false = true ∧
+        Buffer s p 4 false) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ results 1 s' = [BitVec.ofNat 64 (if s.mem.readLE useAes 1 ≠ 0 then
+        Janus.Spec.MemHash.aesHash32 (s.mem.readLE keys 16) (s.mem.readLE (keys + 16) 16)
+          (s.mem.readLE (keys + 32) 16) h.toNat (s.mem.readLE p.toNat 4)
+        else Janus.Spec.MemHash.fallbackHash32 (s.mem.readLE hashkey 8) (s.mem.readLE (hashkey + 8) 8)
+          h.toNat (s.mem.readLE p.toNat 4))]) :=
+  ⟨ret, s0, p, h, hret, setup, hpre, correctness p h ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

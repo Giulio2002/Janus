@@ -157,6 +157,35 @@ theorem pre0 : pre (MC ckStr) HAssignS mv kp kl AMap.empty s0 := by
     show (rtView priv0 mmem).readLE MP 8 = 0
     rw [readLE_rtView0 (by decide) (by decide)]; decide
 
+theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with pc := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c, o⟩
+
+/-- The precondition of `AssignStr`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def AssignStrSite (M : MapModel (Nat × Nat) (BitVec (8 * 8))) (H : RtReady) (f : AMap (Nat × Nat) (BitVec (8 * 8))) (s_c : State) : Prop :=
+  RTPre M 4 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 1).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 1).toNat f ∧ StrIn s_c M.depth 4 ∧
+    StrOwned M (s_c.regs 2).toNat (s_c.regs 3).toNat ∧
+    Ready H M.priv [(s_c.regs 0).toNat, (s_c.regs 1).toNat, (s_c.regs 2).toNat, (s_c.regs 3).toNat] s_c
+
+/-- The call state of the `mapassign_faststr` contract (U-WITNESS-CALLSITE): the stock witness state of `MapStrSat`, at the contract address. -/
+def wsCall : State := { mstate mmem aargs with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : AssignStrSite (MC ckStr) HAssignS AMap.empty wsCall := by
+  refine ⟨rtpre_pc _ (mstate_rtpre _ rfl rfl mmem rfl _ 4 (by decide) mmem_zenv mmem_guard), trivial, by decide,
+    mmem_repC _, ⟨by decide, by decide, ?_⟩, Or.inr (inPriv0 (by decide) (by decide)), ?_, ?_⟩
+  · simp only [calleeStack, outside_cons, outside_nil, and_true]
+    constructor <;> simp [wsCall, mstate, aargs, args, IfaceModel.wsp, SK]
+  · show (rtView priv0 mmem).readLE MP 8 = 0
+    rw [readLE_rtView0 (by decide) (by decide)]; decide
+  · exact Or.inr (Or.inr (by decide))
+
+/-- So the guarantee is reached: the map now holds the key's content with `42`. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (MC ckStr).Rep s'.mem MP (AMap.empty.set (strKey mmem SK 8) 42#64) :=
+  correctness implAt (MC _) (MC_laws _) HAssignS model mv kp kl v AMap.empty ret hret s0 setup pre0
+    |>.mono fun _ h => ⟨h.1, h.2.1⟩
+
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (Nat × Nat) (BitVec 64)) (H : RtReady)
     (ret : Nat) (s : State) (m kp kl v : BitVec 64) (f : AMap (Nat × Nat) (BitVec 64)),
@@ -164,14 +193,12 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (Nat × Nat) (BitVe
       (Extracted.program.contractAddr "runtime.mapassign_faststr") 8 M H ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, kp, kl, v] s ∧
-    pre M H m kp kl f s :=
-  ⟨implAt, MC _, HAssignS, ret, s0, mv, kp, kl, v, AMap.empty, MC_laws _, model, hret, setup, pre0⟩
-
-/-- So the guarantee is reached: the map now holds the key's content with `42`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (MC ckStr).Rep s'.mem MP (AMap.empty.set (strKey mmem SK 8) 42#64) :=
-  correctness implAt (MC _) (MC_laws _) HAssignS model mv kp kl v AMap.empty ret hret s0 setup pre0
-    |>.mono fun _ h => ⟨h.1, h.2.1⟩
+    pre M H m kp kl f s ∧
+    (∃ (f : AMap (Nat × Nat) (BitVec (8 * 8))) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapassign_faststr") ∧ AssignStrSite M H f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (M.Rep s'.mem m.toNat (f.set (strKey s.mem kp.toNat kl.toNat) v) ∧
+        M.Env s'.mem (s.regs 28)) :=
+  ⟨implAt, MC _, HAssignS, ret, s0, mv, kp, kl, v, AMap.empty, MC_laws _, model, hret, setup, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, correctness implAt (MC _) (MC_laws _) HAssignS model mv kp kl v AMap.empty ret hret s0 setup pre0⟩
 
 end Witness
 

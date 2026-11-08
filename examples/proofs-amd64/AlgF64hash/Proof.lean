@@ -343,19 +343,42 @@ theorem pre : HPre H0 (64 + 40) 2 s0 ∧ GoMXCSR s0 ∧ Input s0 (64 + 40) 2 (s0
     simp only [CallOK, Input, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
       outside_cons, outside_nil] <;> decide
 
-/-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (H : HashModel) (d : Nat) (s : State), H.Laws ∧
-    Rand (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.rand") H d ∧
-    Memhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memhash") H d ∧
-    s.rip = BitVec.ofNat 64 Extracted.entry ∧
-    (HPre H (d + 40) 2 s ∧ GoMXCSR s ∧ Input s (d + 40) 2 (s.regs 0).toNat 8) :=
-  ⟨implAt, H0, 64, s0, H0_laws, modelR 64, modelM 64, rfl, pre⟩
+/-- The call-site states of the `runtime.rand` / `runtime.memhash` contract hypotheses
+(U-WITNESS-CALLSITE): at the contracts' addresses, with their preconditions for the bound `d = 64`. -/
+def wsCallR : State := { s0 with rip := BitVec.ofNat 64 rAddr }
+def wsCallM : State := { s0 with rip := BitVec.ofNat 64 mAddr }
+
+theorem wsCallR_pre : HPre H0 64 0 wsCallR := by
+  refine ⟨wmem64_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩ <;>
+    simp only [wsCallR, s0, CallOK, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
+      outside_cons, outside_nil] <;> decide
+
+theorem wsCallM_pre : HPre H0 64 3 wsCallM ∧ Input wsCallM 64 3 (wsCallM.regs 0).toNat (wsCallM.regs 1).toNat := by
+  refine ⟨⟨wmem64_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, ?_⟩ <;>
+    simp only [wsCallM, s0, CallOK, Input, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
+      outside_cons, outside_nil] <;> decide
 
 /-- `correctness` at `s0`: the call returns a possible hash of the float at `VAL`. -/
 theorem returns : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0
     (fun s' => HRet H0 (64 + 40) 2 s0 s' fun r =>
       FHashIs H0 binary64 8 (s0.mem.readLE (s0.regs 0).toNat 8) (s0.regs 3).toNat (r 0).toNat) :=
   correctness implAt H0 H0_laws 64 (modelR 64) (modelM 64) s0 rfl pre
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (H : HashModel) (d : Nat) (s : State), H.Laws ∧
+    Rand (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.rand") H d ∧
+    Memhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memhash") H d ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.rand") ∧
+      HPre H d 0 s_c) ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memhash") ∧
+      HPre H d 3 s_c ∧ Input s_c d 3 (s_c.regs 0).toNat (s_c.regs 1).toNat) ∧
+    s.rip = BitVec.ofNat 64 Extracted.entry ∧
+    (HPre H (d + 40) 2 s ∧ GoMXCSR s ∧ Input s (d + 40) 2 (s.regs 0).toNat 8) ∧
+    ReachesRet (Extracted.program.link impl) (retAddrOf s) s
+      (fun s' => HRet H (d + 40) 2 s s' fun r =>
+        FHashIs H binary64 8 (s.mem.readLE (s.regs 0).toNat 8) (s.regs 3).toNat (r 0).toNat) :=
+  ⟨implAt, H0, 64, s0, H0_laws, modelR 64, modelM 64, ⟨wsCallR, rfl, wsCallR_pre⟩,
+    ⟨wsCallM, rfl, wsCallM_pre⟩, rfl, pre, returns⟩
 
 end Witness
 

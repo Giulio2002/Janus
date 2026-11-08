@@ -97,4 +97,36 @@ theorem correctness (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) :
           Nat.pow_zero, Nat.div_one, Nat.reducePow] at h0 ⊢
         omega, rfl⟩)
 
+namespace Witness
+
+def RET : Nat := 0x1000
+def a0 : BitVec 64 := 0x4008000000000000#64
+def b0 : BitVec 32 := 0x40000000#32
+def c0 : BitVec 64 := 0x3FF0000000000000#64
+
+def s0 : State :=
+  { regs := fun i => if i = 30 then BitVec.ofNat 64 RET else 0,
+    vregs := fun i => if i = 0 then BitVec.ofNat 128 a0.toNat else if i = 1 then BitVec.ofNat 128 b0.toNat
+      else if i = 2 then BitVec.ofNat 128 c0.toNat else 0,
+    sp := BitVec.ofNat 64 0x300000, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := ⟨fun _ => 0, []⟩, exclPass := fun _ => true }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem spre : SPre (vals a0 b0 c0) s0 :=
+  (spre_iff a0 b0 c0 s0).2 ⟨by decide, by decide, by decide, by decide, by decide, by decide⟩
+
+theorem call : CCallA (Extracted.program.withExit RET) Extracted.entry sig (vals a0 b0 c0) s0 :=
+  ⟨rfl, rfl, by decide, spre.1, by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr⟩
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) (ret : Nat) (s : State),
+    RetAddr Extracted.program ret ∧
+    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals a b c) s ∧ (s.fpcr = 0) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      (∃ v, Returned sig s s' v ∧ (v = (mul 0 a b c).1 % 2 ^ 64))) :=
+  ⟨a0, b0, c0, RET, s0, hret, call, rfl, correctness a0 b0 c0 RET hret s0 call rfl⟩
+
+end Witness
+
 end Proof

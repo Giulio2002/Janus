@@ -84,8 +84,10 @@ theorem hpre : GlobalsInit Extracted.program.globals s0.mem
 theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
     CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧
     GlobalsInit Extracted.program.globals s.mem
-      ["example.com/basic.karatsubaCut", "example.com/basic.mulBias"] :=
-  ⟨ret, s0, hret, setup, hpre⟩
+      ["example.com/basic.karatsubaCut", "example.com/basic.mulBias"] ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ s'.regs 0 = if (0#64).slt 40#64 then 1#64 else 2#64) :=
+  ⟨ret, s0, hret, setup, hpre, correctness 0#64 ret hret s0 setup hpre⟩
 
 /-- So the guarantee is reached: `MulAlgo(0)` returns `1` (schoolbook, `0 < 40`). -/
 theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>

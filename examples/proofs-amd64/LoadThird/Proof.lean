@@ -68,4 +68,34 @@ theorem faults :
   refine ⟨⟨hx, hst, _, hfetch, 16, 8, hstep, by decide⟩, 1, _, Program.run_succ_fault hx hst hfetch hstep,
     by simp⟩
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def p : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then p else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wmem64 }
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [p] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem hpre : (fun s => StackWritable s 0 8 ∧ s.mem.accessible (p.toNat + 16) 8 false = true ∧
+        p.toNat + 16 + 8 ≤ 2 ^ 48) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (p : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [p] s ∧ (StackWritable s 0 8 ∧ s.mem.accessible (p.toNat + 16) 8 false = true ∧
+        p.toNat + 16 + 8 ≤ 2 ^ 48) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ (s'.regs 0).toNat = s.mem.readLE (p.toNat + 16) 8) :=
+  ⟨ret, s0, p, hret, setup, hpre, correctness p ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

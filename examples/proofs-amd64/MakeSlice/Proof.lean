@@ -137,6 +137,38 @@ theorem pre : StackGuardOK s0 0 ∧ StackWritable s0 4136 16 ∧ Extracted.progr
     by simp only [rt, MakeW.rt, Janus.Contracts.AllocWitness.allocRt, MakeW.tys, outside_cons, outside_nil, List.map]; decide,
     by decide, by decide, hH⟩
 
+def cAddr : Nat := Extracted.program.contractAddr "runtime.makeslice"
+
+/-- The call state at `runtime.makeslice`'s entry (arguments `u64Type, 4, 4`, callee `SP` 40 below). -/
+def wsCall : Janus.Amd64.State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 tyA else if i = 3 then 4 else if i = 1 then 4
+      else if i = 4 then BitVec.ofNat 64 (sp0 - 40) else if i = 14 then BitVec.ofNat 64 g0 else 0,
+    rip := BitVec.ofNat 64 cAddr, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := s0.mem }
+
+@[reducible] def mkSite (rt : List (Nat × Nat)) (H : RtReady) (s_c : Janus.Amd64.State) : Prop :=
+  MakeslicePre64 4096 s_c ∧
+    Contracts.Ready64 H rt [(s_c.regs 0).toNat, (s_c.regs 3).toNat, (s_c.regs 1).toNat] s_c
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : mkSite rt H wsCall := by
+  have h := hH
+  have hpt : u64Type = tyA := by unfold tyA; decide
+  rw [hpt] at h
+  refine ⟨⟨⟨by decide, by decide, by decide, by decide, by decide⟩,
+    ⟨by decide, by decide⟩, by decide, by decide, by decide⟩, ?_⟩
+  exact h
+
+/-- The theorem fires: `MakeSlice(4)` returns a zeroed slice of length and capacity 4 inside `rt`. -/
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    s'.regs 3 = 4 ∧ s'.regs 1 = 4 ∧
+    (0 < (4 : BitVec 64).toNat → InRanges (s'.regs 0).toNat (8 * (4 : BitVec 64).toNat) rt ∧
+      (s'.regs 0).toNat % 8 = 0 ∧
+      s'.mem.accessible (s'.regs 0).toNat (8 * (4 : BitVec 64).toNat) true = true ∧
+      ∀ i, i < (4 : BitVec 64).toNat → s'.mem.readLE ((s'.regs 0).toNat + 8 * i) 8 = 0) ∧
+    MemFrame s0.mem s'.mem (rt ++ [((s0.regs 4).toNat - 4136, (s0.regs 4).toNat + 16)]) :=
+  correctness impl rt H 4 hmk ret hret s0 setup pre
+
 /-- The hypotheses are satisfiable: a `makeslice` meeting the contract (`hmk`), runtime ranges, a
 readiness predicate, and a call state of `MakeSlice(4)` that satisfies the precondition. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
@@ -149,18 +181,17 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (rt : List (Nat × Na
       Outside ((s.regs 4).toNat - 4136) 4152 rt ∧ (s.regs 4).toNat % 8 = 0 ∧
       (4 : BitVec 64).toNat ≤ 2 ^ 45 ∧
       H [u64Type, (4 : BitVec 64).toNat, (4 : BitVec 64).toNat] (s.regs 14).toNat
-        ((s.regs 4).toNat - 40) (rtView rt s.mem)) :=
-  ⟨impl, rt, H, ret, s0, hmk, hret, setup, pre⟩
-
-/-- The theorem fires: `MakeSlice(4)` returns a zeroed slice of length and capacity 4 inside `rt`. -/
-theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+        ((s.regs 4).toNat - 40) (rtView rt s.mem)) ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makeslice") ∧
+      mkSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
     s'.regs 3 = 4 ∧ s'.regs 1 = 4 ∧
     (0 < (4 : BitVec 64).toNat → InRanges (s'.regs 0).toNat (8 * (4 : BitVec 64).toNat) rt ∧
       (s'.regs 0).toNat % 8 = 0 ∧
       s'.mem.accessible (s'.regs 0).toNat (8 * (4 : BitVec 64).toNat) true = true ∧
       ∀ i, i < (4 : BitVec 64).toNat → s'.mem.readLE ((s'.regs 0).toNat + 8 * i) 8 = 0) ∧
-    MemFrame s0.mem s'.mem (rt ++ [((s0.regs 4).toNat - 4136, (s0.regs 4).toNat + 16)]) :=
-  correctness impl rt H 4 hmk ret hret s0 setup pre
+    MemFrame s.mem s'.mem (rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 16)]) :=
+  ⟨impl, rt, H, ret, s0, hmk, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 

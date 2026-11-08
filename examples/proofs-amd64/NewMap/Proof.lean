@@ -112,6 +112,28 @@ theorem pre : CallerOK (MC ck64) s0 16 8 ∧ HMake [] (s0.regs 14).toNat ((s0.re
     IsMap (MC ck64) s0.mem 0 emp :=
   ⟨callerOK, by unfold HMake; decide, by simp [IsMap, emp]⟩
 
+theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with rip := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+
+/-- The precondition of `MakeSmall`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def MakeSmallSite (M : MapModel (BitVec 64) (BitVec 64)) (H : Contracts.RtReady) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 0 s_c ∧ Contracts.Ready64 H M.priv [] s_c
+
+/-- The call state of the `makemap_small` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSatAmd64`, at the contract address. -/
+def wsCall : Janus.Amd64.State := { mstate64 mmem64Dead (args 0 0) with rip := BitVec.ofNat 64 cA }
+
+theorem wsCall_pre : MakeSmallSite (MC ck64) HMake wsCall :=
+  ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64Dead rfl _ 0 (by decide)
+      (show ZEnv mmem64Dead from mmem64_zenv.writeLE _ (by decide)) mmem64Dead_guard mmem64Dead_ret),
+    hMake_dead64 _ _ _⟩
+
+/-- The theorem fires: `NewMap()` returns what the theorem says. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    ((s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty ∧ (MC ck64).Env s'.mem (s0.regs 14)) :=
+  correctness implAt (MC ck64) (MC_laws _) HMake hcon ret hret s0 setup ⟨pre.1, pre.2.1⟩
+
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.makemap_small`
 meeting `MakeSmall` for it, and a call state of `NewMap()` that satisfies the precondition. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec 64)) (H : Contracts.RtReady) (ret : Nat)
@@ -120,13 +142,11 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec
       (Extracted.program.contractAddr "runtime.makemap_small") M H ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
-    (CallerOK M s 16 8 ∧ H [] (s.regs 14).toNat ((s.regs 4).toNat - 16) (Contracts.rtView M.priv s.mem) ∧ IsMap M s.mem 0 emp) :=
-  ⟨implAt, (MC ck64), HMake, ret, s0, (MC_laws _), hcon, hret, setup, pre⟩
-
-/-- The theorem fires: `NewMap()` returns what the theorem says. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    ((s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty ∧ (MC ck64).Env s'.mem (s0.regs 14)) :=
-  correctness implAt (MC ck64) (MC_laws _) HMake hcon ret hret s0 setup ⟨pre.1, pre.2.1⟩
+    (CallerOK M s 16 8 ∧ H [] (s.regs 14).toNat ((s.regs 4).toNat - 16) (Contracts.rtView M.priv s.mem) ∧ IsMap M s.mem 0 emp) ∧
+    (∃ (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makemap_small") ∧ MakeSmallSite M H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    ((s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧ M.Env s'.mem (s.regs 14)) :=
+  ⟨implAt, (MC ck64), HMake, ret, s0, (MC_laws _), hcon, hret, setup, pre, ⟨wsCall, by show BitVec.ofNat 64 cA = _; rw [addr], wsCall_pre⟩, returns⟩
 
 end Witness
 

@@ -1175,19 +1175,91 @@ theorem pre : Pre PW s0 1#64 := by
     have : defers0 wm = [] := by rw [defers0_eq, hnd]; rfl
     exact absurd hd (by rw [show PW.defers s0.mem (gOf s0) = defers0 wm from rfl, this]; simp)
 
-/-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime)
-    (U : Janus.Amd64.State → Nat → Nat → Prop) (ret : Nat) (s : Janus.Amd64.State), P.Laws ∧
-    DeferprocStackContract (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.deferprocStack") P ∧
-    DeferprocContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferproc") P ∧
-    GopanicContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.gopanic") P U
-      Extracted.funcs ∧
-    DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [11#64, 1#64, 0#64] s ∧
-    Pre P s 1#64 :=
-  ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hds, hdp, hpan, hdr, hret, setup, pre⟩
+/-- The call state at `runtime.deferprocStack`'s entry (the record at the stack word `0x41000`). -/
+def wsDs : Janus.Amd64.State := Janus.Contracts.PanicSatAmd64.sstate dsA wm 0x41000 0
+
+@[reducible] def dsSite (P : Spec.PanicRuntime) (s_c : Janus.Amd64.State) : Prop :=
+  PanicPre P 1 s_c ∧ 0 < P.room s_c.mem (gOf s_c) ∧ (s_c.regs 0).toNat + 48 ≤ 2 ^ 48 ∧
+    s_c.mem.accessible (s_c.regs 0).toNat 48 true = true ∧ Outside (s_c.regs 0).toNat 48 P.priv
+
+theorem wsDs_pre : dsSite PW wsDs :=
+  ⟨Janus.Contracts.PanicSatAmd64.sstate_pre 1 (by decide) dsA 0x41000 0 env_w (by decide) (by decide) (by decide) (by decide),
+    by show 0 < room0 wm; rw [room0_eq]; decide, by decide, by decide,
+    by simp only [P0_priv, outside_cons, outside_nil, and_true]; decide⟩
+
+/-- The call state at `runtime.deferproc`'s entry. -/
+def wsCall : Janus.Amd64.State := Janus.Contracts.PanicSatAmd64.sstate dpA wm 0 0
+
+@[reducible] def dpSite (P : Spec.PanicRuntime) (s_c : Janus.Amd64.State) : Prop :=
+  PanicPre P 1 s_c ∧ 0 < P.room s_c.mem (gOf s_c)
+
+theorem wsCall_pre : dpSite PW wsCall :=
+  ⟨Janus.Contracts.PanicSatAmd64.sstate_pre 1 (by decide) dpA 0 0 env_w (by decide) (by decide) (by decide) (by decide),
+    by show 0 < room0 wm; rw [room0_eq]; decide⟩
+
+def wfi : Spec.FuncInfo := Spec.FuncInfo.named Extracted.funcs "example.com/basic.DeferMix"
+
+/-- The call state at `runtime.gopanic`'s entry: `DeferMix`'s own frame (no open-coded defers), return address inside it. -/
+def wmG : Janus.Arm64.Memory :=
+  ⟨(witMemD (tabWords T0 ++ [(wsp, ret), (0x4ff00 - 96, loc_DeferMix_69)]) Extracted.data).bytes, -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+    (witMemD (tabWords T0 ++ [(wsp, ret), (0x4ff00 - 96, loc_DeferMix_69)]) Extracted.data).regions ++ [⟨accA, 8, true⟩]⟩
+
+def wsG : Janus.Amd64.State :=
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 (0x4ff00 - 96) else if i = 14 then BitVec.ofNat 64 wg else if i = 0 then 1#64 else 0, -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+    rip := BitVec.ofNat 64 gA, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := wmG }
+
+theorem wsG_find : Spec.FuncInfo.find T0 (wsG.mem.readLE (wsG.regs 4).toNat 8) = some wfi := by decide
+
+theorem defers_G : defers0 wmG = [] := by
+  have hnd : ndef wmG = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem env_G : Env0 T0 wmG := by
+  unfold Env0
+  have hnd : ndef wmG = 0 := by decide
+  refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
+  · omega
+  · unfold TableOK
+    exact ⟨by decide, by decide, by decide⟩
+
+theorem wsG_pre : GopanicPre PW wfi wsG := by
+  refine ⟨⟨env_G, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, rfl, rfl, by decide, ?_⟩, by decide, ?_, ?_, ?_⟩
+  · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · show 0 < room0 wmG
+    rw [room0_eq]; decide
+  · intro h
+    have hod : wfi.openDefer = none := by rfl
+    rw [hod] at h; exact absurd h (by decide)
+  · have hs : fspOf wsG = 0x4ff00 - 88 := by decide -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+    have hr : PW.defers wmG (gOf wsG) = [] := defers_G
+    have f_frame : wfi.frame = 88 := by rfl
+    have f_od : wfi.openDefer = none := by rfl
+    have f_res : wfi.resume = Extracted.entry + 0x49 := by rfl
+    have hbd : wfi.bound (0x4ff00 - 88) = 0x4ff00 := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+      unfold Spec.FuncInfo.bound; rw [f_frame]; try rfl
+    have hF : Panic.frameOf wfi (0x4ff00 - 88) wmG = ⟨0x4ff00 - 88, 0x4ff00, Extracted.entry + 0x49, none⟩ := by -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+      unfold Panic.frameOf; rw [hbd, f_res, f_od]
+    show FrameOK PW wmG (frameOf wfi (fspOf wsG) wmG) (frameItems wmG (frameOf wfi (fspOf wsG) wmG) (PW.defers wmG (gOf wsG)))
+    rw [hs, hr]
+    unfold frameOf
+    rw [hF]
+    unfold FrameOK Panic.FrameOK
+    simp [frameItems, recItems]
+
+/-- The call state at `runtime.deferreturn`'s entry. -/
+def wsRet : Janus.Amd64.State := Janus.Contracts.PanicSatAmd64.sstate (Extracted.program.contractAddr "runtime.deferreturn") wm 0 0
+
+theorem defers_R : defers0 wm = [] := by
+  have hnd : ndef wm = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem saved_R : saved0 wm = none := by rw [saved0_eq]; decide
+
+theorem wsRet_pre : DeferreturnPre PW wsRet := by
+  refine ⟨Janus.Contracts.PanicSatAmd64.sstate_pre 0 (by decide) _ 0 0 env_w (by decide) (by decide) (by decide) (by decide), ?_⟩
+  show FrameOK (P0 T0 RPa) wm _ _
+  have hm : wsRet.mem = wm := rfl
+  simp [hm, retFrame, Panic.frameItems, Panic.recItems, P0_defers, P0_saved, Janus.Contracts.PanicSatAmd64.sstate, defers_R, saved_R, gOf, FrameOK, Panic.FrameOK]
 
 /-- So the guarantee is reached: with `x = 11` `DeferMix` panics with `e`, after the deferred
 calls ran in LIFO order. -/
@@ -1200,6 +1272,36 @@ theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goCla
         s'.mem.readLE accA 8 = mix (s0.mem.readLE accA 8)
     | .goexited _ => False :=
   correctness implW PW (P0_laws T0 RPa) U1 hds hdp hpan hdr 11#64 1#64 0#64 ret hret s0 setup pre
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime)
+    (U : Janus.Amd64.State → Nat → Nat → Prop) (ret : Nat) (s : Janus.Amd64.State), P.Laws ∧
+    DeferprocStackContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.deferprocStack") P ∧
+    DeferprocContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferproc") P ∧
+    GopanicContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.gopanic") P U
+      Extracted.funcs ∧
+    DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [11#64, 1#64, 0#64] s ∧
+    Pre P s 1#64 ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferprocStack") ∧
+      dsSite P s_c) ∧
+    (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferproc") ∧
+      dpSite P s_c) ∧
+    (∃ (s_c : Janus.Amd64.State) (fi : Spec.FuncInfo), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic") ∧
+      Spec.FuncInfo.find Extracted.funcs (s_c.mem.readLE (s_c.regs 4).toNat 8) = some fi ∧ GopanicPre P fi s_c) ∧
+    (∃ s_r : Janus.Amd64.State, s_r.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") ∧
+      DeferreturnPre P s_r) ∧
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClassU P U s) s fun o =>
+    match o with
+    | .returned s' => ABIReturn s s' ∧ ((11#64 : BitVec 64).toNat ≤ 10 ∧
+        (s'.regs 0).toNat = (11#64 : BitVec 64).toNat ∧ s'.mem.readLE accA 8 = mix (s.mem.readLE accA 8))
+    | .panicked v s' => 10 < (11#64 : BitVec 64).toNat ∧
+        v = ⟨(1#64 : BitVec 64).toNat, (0#64 : BitVec 64).toNat⟩ ∧
+        s'.mem.readLE accA 8 = mix (s.mem.readLE accA 8)
+    | .goexited _ => False :=
+  ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hds, hdp, hpan, hdr, hret, setup, pre, ⟨wsDs, rfl, wsDs_pre⟩, ⟨wsCall, rfl, wsCall_pre⟩, ⟨wsG, wfi, rfl, wsG_find, wsG_pre⟩, ⟨wsRet, rfl, wsRet_pre⟩, returns⟩
 
 end Witness
 

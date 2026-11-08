@@ -425,4 +425,45 @@ theorem correctness :
   simp only [State.getV] at *
   exact ⟨‹_›, ‹_›⟩
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def sp0 : Nat := 0x108000
+def g0 : Nat := 0x200000
+
+
+def bytes0 (a : Nat) : BitVec 8 :=
+  if a = infAddr + 6 then 0xf0 else
+  if a = infAddr + 7 then 0x7f else
+  0
+
+def mem0 : Janus.Arm64.Memory := ⟨bytes0, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x1000, false⟩, ⟨infAddr, 8, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 g0 else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
+  ⟨rfl, rfl, by intro i h; simp at h⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `correctness` hold together at a concrete call, and it returns. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Arm64.State) , RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (GuardOK s 0 ∧ StackOK s 56 0 ∧ Disjoint ((s.regs 28).toNat + 16) 8 (s.sp.toNat - 56) 56 ∧
+        s.fpcr = 0 ∧ RuntimeInf s.mem infAddr ∧ Disjoint infAddr 8 (s.sp.toNat - 56) 56) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (ResultIs binary64 (cdiv true (s.getV 0 64) (s.getV 1 64) (s.getV 2 64) (s.getV 3 64)).1 (s'.getV 0 64) ∧
+        ResultIs binary64 (cdiv true (s.getV 0 64) (s.getV 1 64) (s.getV 2 64) (s.getV 3 64)).2 (s'.getV 1 64))) := by
+  refine ⟨ret, s0, hret, setup, ?pre, correctness  ret hret s0 setup ?pre⟩
+  case pre =>
+    try unfold Janus.Spec.GuardOK Janus.Spec.StackOK Janus.Spec.Disjoint Janus.Contracts.Misc.RuntimeInf
+    repeat' apply And.intro
+    all_goals decide +kernel
+
+end Witness
+
 end Proof

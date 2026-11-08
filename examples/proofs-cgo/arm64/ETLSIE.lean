@@ -44,4 +44,37 @@ theorem correctness (x : BitVec 64) :
   rw [show s.tpidr.toNat + 16 + 24 = s.tpidr.toNat + 40 by omega, Nat.add_comm _ x.toNat]
   exact ⟨rfl, rfl, rfl⟩
 
+namespace Witness
+
+def RET : Nat := 0x1000
+def SP0 : Nat := 0x300000
+def TP : Nat := 0x500000
+def x0 : BitVec 64 := 5#64
+
+/-- This thread's TLS block, writable. -/
+def s0 : State :=
+  { regs := fun i => if i = 0 then x0 else if i = 30 then BitVec.ofNat 64 RET else 0,
+    sp := BitVec.ofNat 64 SP0, pc := BitVec.ofNat 64 Extracted.entry, tpidr := BitVec.ofNat 64 TP,
+    flags := ⟨false, false, false, false⟩,
+    mem := ⟨fun _ => 0, [⟨TP + Extracted.tls.a64Off, Extracted.tls.size, true⟩]⟩,
+    exclPass := fun _ => true }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [x0] s0 :=
+  ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
+
+theorem pre : TLSBlock Extracted.tls s0 := ⟨by decide +kernel, by decide +kernel⟩
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (x : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [x] s ∧ (TLSBlock Extracted.tls s) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      ((s'.regs 0).toNat = (s.mem.readLE (var s) 8 + x.toNat) % 2 ^ 64 ∧
+        s'.mem.readLE (var s) 8 = (s.mem.readLE (var s) 8 + x.toNat) % 2 ^ 64 ∧
+        s'.mem = s.mem.writeLE (var s) 8 ((s.mem.readLE (var s) 8 + x.toNat) % 2 ^ 64))) :=
+  ⟨x0, RET, s0, hret, call, pre, correctness x0 RET hret s0 call pre⟩
+
+end Witness
+
 end Proof

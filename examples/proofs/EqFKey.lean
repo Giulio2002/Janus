@@ -159,13 +159,26 @@ theorem hpre : CallerOK s0 64 16 0 ∧ s0.fpcr = 0 ∧ KeyInput 64 s0 k.toNat �
   ⟨⟨⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, by decide,
     by simp only [outside_cons, outside_nil, and_true]; decide⟩, rfl, keyInput, keyInput⟩
 
-/-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (d ret : Nat) (s : State) (p q : BitVec 64),
-    Memequal (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memequal") d ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, q] s ∧
-    (CallerOK s d 16 0 ∧ s.fpcr = 0 ∧ KeyInput d s p.toNat ∧ KeyInput d s q.toNat) :=
-  ⟨implAt, 64, ret, s0, k, k, model 64, hret, setup, hpre⟩
+theorem eqpre_pc {d n : Nat} {s : State} (a : BitVec 64) (h : Janus.Contracts.Mem.EqPre d n s) :
+    Janus.Contracts.Mem.EqPre d n { s with pc := a } := by
+  obtain ⟨⟨g1, g2, g3⟩, c, o⟩ := h
+  exact ⟨⟨g1, g2, g3⟩, c, o⟩
+
+theorem input_pc {d n x k : Nat} {s : State} (a : BitVec 64) (h : Janus.Contracts.Mem.Input s d n x k) :
+    Janus.Contracts.Mem.Input { s with pc := a } d n x k := by
+  obtain ⟨h1, h2, h3⟩ := h
+  exact ⟨h1, h2, h3⟩
+
+/-- The precondition of `Memequal`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def MemequalSite (d : Nat) (s_c : State) : Prop :=
+  Janus.Contracts.Mem.EqPre d 0 s_c ∧ Janus.Contracts.Mem.Input s_c d 0 (s_c.regs 0).toNat (s_c.regs 2).toNat ∧
+    Janus.Contracts.Mem.Input s_c d 0 (s_c.regs 1).toNat (s_c.regs 2).toNat
+
+/-- The call state of the `runtime.memequal` contract (U-WITNESS-CALLSITE): the stock witness state of `MemSat`, at the contract address. -/
+def wsCall : State := { Janus.Contracts.MemSat.wstate Janus.Contracts.MemSat.eqArgs with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : MemequalSite 64 wsCall :=
+  ⟨eqpre_pc _ (Janus.Contracts.MemSat.wstate_eqPre _ 0 (by decide)), input_pc _ (Janus.Contracts.MemSat.wstate_input _ 0 _ _ (by decide) (by decide)), input_pc _ (Janus.Contracts.MemSat.wstate_input _ 0 _ _ (by decide) (by decide))⟩
 
 /-- So the guarantee is reached: the key equals itself. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
@@ -173,6 +186,16 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
   refine (correctness implAt 64 (model 64) k k ret hret s0 setup hpre).mono ?_
   intro s' h
   exact ⟨h.1, by rw [h.2]; decide⟩
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (d ret : Nat) (s : State) (p q : BitVec 64),
+    Memequal (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memequal") d ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, q] s ∧
+    (CallerOK s d 16 0 ∧ s.fpcr = 0 ∧ KeyInput d s p.toNat ∧ KeyInput d s q.toNat) ∧
+    (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memequal") ∧ MemequalSite d s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat % 256 = (keyEq s.mem p.toNat q.toNat).toNat) :=
+  ⟨implAt, 64, ret, s0, k, k, model 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt 64 (model 64) k k ret hret s0 setup hpre⟩
 
 end Witness
 

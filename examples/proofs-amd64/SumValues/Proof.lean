@@ -313,15 +313,42 @@ theorem pre0 : CallerOK (MEi (BitVec 64)) s0 144 8 ∧ (MEi (BitVec 64)).Typ map
   · unfold Janus.Spec.Disjoint; decide
   · simp only [MEi, ME_priv, priv0, outside_cons, outside_nil, and_true]; decide
 
-/-- All hypotheses of `correctness` are satisfiable together, with a non-nil map. -/
-theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec 64))
-    (ret : Nat) (s : State) (m : BitVec 64) (f : AMap (BitVec 64) (BitVec 64)),
-    M.Laws ∧ IterStart (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapIterStart") M ∧
-    IterNext (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapIterNext") M ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m] s ∧ m.toNat ≠ 0 ∧
-    (CallerOK M s 144 8 ∧ M.Typ mapType ∧ IsMap M s.mem m.toNat f) :=
-  ⟨implAt, MEi _, ret, s0, mv, AMap.empty, MEi_laws _, modelS, modelN, hret, setup, by decide, pre0⟩
+theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with rip := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+
+/-- The precondition of `IterStart`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def IterStartSite (M : MapModel (BitVec 64) (BitVec 64)) (f : AMap (BitVec 64) (BitVec 64)) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 3).toNat f ∧
+    s_c.mem.accessible (s_c.regs 1).toNat iterSize true = true ∧
+    Outside (s_c.regs 1).toNat iterSize M.priv ∧ Outside (s_c.regs 1).toNat iterSize (calleeStack s_c M.depth 3) ∧
+    Outside (s_c.regs 1).toNat iterSize (retSlot s_c)
+
+/-- The precondition of `IterNext`'s summary at the call state `s_c`. -/
+@[reducible] def IterNextSite (M : MapModel (BitVec 64) (BitVec 64)) (mp : Nat) (f : AMap (BitVec 64) (BitVec 64))
+    (k : BitVec 64) (ks : List (BitVec 64)) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 1 s_c ∧ IsMap M s_c.mem mp f ∧ M.Iter s_c.mem (s_c.regs 0).toNat mp f (k :: ks) ∧
+    Outside (s_c.regs 0).toNat iterSize M.priv ∧ Outside (s_c.regs 0).toNat iterSize (calleeStack s_c M.depth 1) ∧
+    Outside (s_c.regs 0).toNat iterSize (retSlot s_c)
+
+/-- The call state of the `mapIterStart` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSatAmd64`, at the contract address. -/
+def wsCallS : Janus.Amd64.State := { mstate64 mmem64 (args (BitVec.ofNat 64 IT) 0) with rip := BitVec.ofNat 64 sAddr }
+
+/-- The call state of the `mapIterNext` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSatAmd64`, at the contract address. -/
+def wsCallN : Janus.Amd64.State := { mstate64 mmem64 (fun i => if i = 0 then BitVec.ofNat 64 IT else 0) with rip := BitVec.ofNat 64 nAddr }
+
+theorem wsCallS_pre : IterStartSite (MEi (BitVec 64)) AMap.empty wsCallS :=
+  ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64 rfl _ 3 (by decide) mmem64_zenv mmem64_guard mmem64_ret), trivial, (isMap_of_ne (by decide)).2 (mmem64_rep _), by decide,
+    by simp only [MEi, ME_priv, priv0, outside_cons, outside_nil, and_true]; decide,
+    by simp only [Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil, and_true]; decide,
+    by simp only [Janus.Contracts.MapAmd64.retSlot, outside_cons, outside_nil, and_true]; decide⟩
+
+theorem wsCallN_pre : IterNextSite (MEi (BitVec 64)) MP AMap.empty 0 [] wsCallN :=
+  ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64 rfl _ 1 (by decide) mmem64_zenv mmem64_guard mmem64_ret), (isMap_of_ne (by decide)).2 (mmem64_rep _), ⟨by decide, by decide⟩,
+    by simp only [MEi, ME_priv, priv0, outside_cons, outside_nil, and_true]; decide,
+    by simp only [Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil, and_true]; decide,
+    by simp only [Janus.Contracts.MapAmd64.retSlot, outside_cons, outside_nil, and_true]; decide⟩
 
 /-- So the guarantee is reached: the sum over the empty map is `0`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
@@ -331,6 +358,21 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
   intro s' h
   refine ⟨h.1, BitVec.eq_of_toNat_eq ?_⟩
   rw [h.2 [] keys_empty]; rfl
+
+/-- All hypotheses of `correctness` are satisfiable together, with a non-nil map. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec 64))
+    (ret : Nat) (s : State) (m : BitVec 64) (f : AMap (BitVec 64) (BitVec 64)),
+    M.Laws ∧ IterStart (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapIterStart") M ∧
+    IterNext (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapIterNext") M ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m] s ∧ m.toNat ≠ 0 ∧
+    (CallerOK M s 144 8 ∧ M.Typ mapType ∧ IsMap M s.mem m.toNat f) ∧
+    (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapIterStart") ∧ IterStartSite M f s_c) ∧
+    (∃ (mp : Nat) (f : AMap (BitVec 64) (BitVec 64)) (k : BitVec 64) (ks : List (BitVec 64)) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapIterNext") ∧ IterNextSite M mp f k ks s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (∀ ks, Keys f ks → (s'.regs 0).toNat = sumValues f ks % 2 ^ 64) :=
+  ⟨implAt, MEi _, ret, s0, mv, AMap.empty, MEi_laws _, modelS, modelN, hret, setup, by decide, pre0, ⟨AMap.empty, wsCallS, rfl, wsCallS_pre⟩, ⟨MP, AMap.empty, 0, [], wsCallN, rfl, wsCallN_pre⟩, correctness implAt (MEi _) (MEi_laws _) modelS modelN mv AMap.empty ret hret s0 setup pre0⟩
 
 end Witness
 

@@ -231,4 +231,37 @@ theorem correctness (p n c : BitVec 64) :
       exact ⟨⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, v8, v9, v10, v11, v12, v13,
         v14, v15⟩, h15, h14⟩)
 
+namespace Witness
+
+def RET : Nat := 0x1000
+def P : Nat := 0x100000
+def n0 : BitVec 64 := 4#64
+def c0 : BitVec 64 := 7#64
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 P else if i = 1 then n0 else if i = 2 then c0
+      else if i = 30 then BitVec.ofNat 64 RET else 0,
+    sp := BitVec.ofNat 64 0x300000, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := ⟨fun _ => 0, [⟨P, 16, false⟩]⟩, exclPass := fun _ => true }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [BitVec.ofNat 64 P, n0, c0] s0 :=
+  ⟨⟨rfl, rfl, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩,
+    by decide, by decide⟩
+
+theorem pre : (BitVec.ofNat 64 P).toNat + n0.toNat ≤ 2 ^ 48 ∧
+    s0.mem.accessible (BitVec.ofNat 64 P).toNat n0.toNat false = true :=
+  ⟨by decide, by decide⟩
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (p n c : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [p, n, c] s ∧
+    (p.toNat + n.toNat ≤ 2 ^ 48 ∧ s.mem.accessible p.toNat n.toNat false = true) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      ((s'.regs 0).toNat = countOf s.mem p.toNat (c.toNat % 256) n.toNat ∧ s'.mem = s.mem)) :=
+  ⟨_, n0, c0, RET, s0, hret, call, pre, correctness _ n0 c0 RET hret s0 call pre⟩
+
+end Witness
+
 end Proof

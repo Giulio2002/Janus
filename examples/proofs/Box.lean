@@ -127,14 +127,20 @@ theorem pre : CallerOK R0 s0 32 0 := by
   · unfold Disjoint; decide
   · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
 
-/-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (H : RtReady) (ret : Nat) (s : State),
-    R.Laws ∧
-    ConvT64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.convT64") R H ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [42#64] s ∧
-    CallerOK R s 32 0 ∧ H [42] (s.regs 28).toNat (s.sp.toNat - 32) (rtView R.priv s.mem) :=
-  ⟨implAt, R0, Htrue, ret, s0, R0_laws, model, hret, setup, pre, trivial⟩
+theorem rtpre_pc {n : Nat} {R : IfaceModel} {s : State} (a : BitVec 64) (h : RTPre R n s) :
+    RTPre R n { s with pc := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c, o⟩
+
+/-- The precondition of `ConvT64`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def ConvT64Site (R : IfaceModel) (H : Janus.Contracts.RtReady) (s_c : State) : Prop :=
+  RTPre R 1 s_c ∧ Ready H R.priv [(s_c.regs 0).toNat] s_c
+
+/-- The call state of the `runtime.convT64` contract (U-WITNESS-CALLSITE): the stock witness state of `IfaceSat`, at the contract address. -/
+def wsCall : State := { wstate (fun i => if i = 0 then 42#64 else 0) with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : ConvT64Site R0 Htrue wsCall :=
+  ⟨rtpre_pc _ (wstate_rtpre _ 1 (by decide)), trivial⟩
 
 /-- So the guarantee is reached: `Box(42)` returns a box holding `42`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
@@ -142,6 +148,19 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
       MemFrame s0.mem s'.mem (R0.priv ++ [(s0.sp.toNat - (R0.depth + 32), s0.sp.toNat)]) ∧
       R0.Env s'.mem (s0.regs 28) :=
   correctness implAt R0 R0_laws Htrue model 42#64 ret hret s0 setup ⟨pre, trivial⟩
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (H : RtReady) (ret : Nat) (s : State),
+    R.Laws ∧
+    ConvT64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.convT64") R H ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [42#64] s ∧
+    CallerOK R s 32 0 ∧ H [42] (s.regs 28).toNat (s.sp.toNat - 32) (rtView R.priv s.mem) ∧
+    (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.convT64") ∧ ConvT64Site R H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat = uint64Type ∧ BoxHolds R s'.mem (s'.regs 1).toNat 8 (42#64).toNat ∧
+        MemFrame s.mem s'.mem (R.priv ++ [(s.sp.toNat - (R.depth + 32), s.sp.toNat)]) ∧
+        R.Env s'.mem (s.regs 28)) :=
+  ⟨implAt, R0, Htrue, ret, s0, R0_laws, model, hret, setup, pre, trivial, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt R0 R0_laws Htrue model 42#64 ret hret s0 setup ⟨pre, trivial⟩⟩
 
 end Witness
 

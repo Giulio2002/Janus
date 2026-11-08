@@ -160,6 +160,37 @@ theorem pre : CallerOK (MC ck64) s0 40 32 ∧ (MC ck64).Typ mapType ∧ (BitVec.
     HAssign [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s0.regs 14).toNat ((s0.regs 4).toNat - 40) (Contracts.rtView (MC ck64).priv s0.mem) :=
   ⟨callerOK, trivial, by decide, ⟨rfl, by decide, by decide, Or.inl ⟨by decide, rfl⟩⟩, by unfold HAssign; decide⟩
 
+theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with rip := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+
+/-- The precondition of `Assign`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def AssignSite (M : MapModel (BitVec 64) (BitVec 64)) (H : Contracts.RtReady) (f : AMap (BitVec 64) (BitVec 64)) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 3).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 3).toNat f ∧
+    Contracts.Ready64 H M.priv [(s_c.regs 0).toNat, (s_c.regs 3).toNat, (s_c.regs 1).toNat] s_c
+
+/-- The precondition of `Access1`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def Access1Site (M : MapModel (BitVec 64) (BitVec 64)) (f : AMap (BitVec 64) (BitVec 64)) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 3).toNat f
+
+/-- The call state of the `mapassign_fast64` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSatAmd64`, at the contract address. -/
+def wsCallA : Janus.Amd64.State := { mstate64 mmem64 (args 7#64 0) with rip := BitVec.ofNat 64 cA }
+
+/-- The call state of the `mapaccess1_fast64` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSatAmd64`, at the contract address. -/
+def wsCallB : Janus.Amd64.State := { mstate64 mmem64 (args 7#64 0) with rip := BitVec.ofNat 64 cB }
+
+theorem wsCallA_pre : AssignSite (MC ck64) HAssign AMap.empty wsCallA :=
+  ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64 rfl _ 3 (by decide) mmem64_zenv mmem64_guard mmem64_ret), trivial, by decide, mmem64_repC _, hAssign_mmem64 _ _ _⟩
+
+theorem wsCallB_pre : Access1Site (MC ck64) AMap.empty wsCallB :=
+  ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64 rfl _ 3 (by decide) mmem64_zenv mmem64_guard mmem64_ret), trivial, (isMap_of_ne (by decide)).2 (mmem64_repC _)⟩
+
+/-- The theorem fires: `InsertGet(map, 5, 7)` returns what the theorem says. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    (s'.regs 0 = 7 ∧ (MC ck64).Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7)) :=
+  correctness implAt (MC ck64) (MC_laws _) HAssign hcon hB (BitVec.ofNat 64 MP) 5 7 AMap.empty ret hret s0 setup pre
+
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapassign_fast64`
 meeting `Assign` for it, and a call state of `InsertGet(map, 5, 7)` that satisfies the precondition. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec 64)) (H : Contracts.RtReady) (ret : Nat)
@@ -171,13 +202,14 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s ∧
     (CallerOK M s 40 32 ∧ M.Typ mapType ∧ (BitVec.ofNat 64 MP).toNat ≠ 0 ∧ M.Rep s.mem (BitVec.ofNat 64 MP).toNat AMap.empty ∧
-    H [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s.regs 14).toNat ((s.regs 4).toNat - 40) (Contracts.rtView M.priv s.mem)) :=
-  ⟨implAt, (MC ck64), HAssign, ret, s0, (MC_laws _), hcon, hB, hret, setup, pre⟩
-
-/-- The theorem fires: `InsertGet(map, 5, 7)` returns what the theorem says. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (s'.regs 0 = 7 ∧ (MC ck64).Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7)) :=
-  correctness implAt (MC ck64) (MC_laws _) HAssign hcon hB (BitVec.ofNat 64 MP) 5 7 AMap.empty ret hret s0 setup pre
+    H [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s.regs 14).toNat ((s.regs 4).toNat - 40) (Contracts.rtView M.priv s.mem)) ∧
+    (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapassign_fast64") ∧ AssignSite M H f s_c) ∧
+    (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess1_fast64") ∧ Access1Site M f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    (s'.regs 0 = 7 ∧ M.Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7)) :=
+  ⟨implAt, (MC ck64), HAssign, ret, s0, (MC_laws _), hcon, hB, hret, setup, pre, ⟨AMap.empty, wsCallA, by show BitVec.ofNat 64 cA = _; rw [addr], wsCallA_pre⟩, ⟨AMap.empty, wsCallB, by show BitVec.ofNat 64 cB = _; rw [addrB], wsCallB_pre⟩, returns⟩
 
 end Witness
 

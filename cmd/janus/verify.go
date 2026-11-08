@@ -96,6 +96,8 @@ type verifiedReport struct {
 	// itself (round 14): "NewobjectContract@runtime.newobject". Empty: the statement assumes
 	// nothing about the runtime, whatever the extraction left out (Contracts).
 	ContractHyps []string `json:"contractHyps,omitempty"`
+	// Refutation: the main theorem is a negation (UP3c); it claims no run, so no run-witness is required.
+	Refutation bool `json:"refutation,omitempty"`
 	// Kernel are the extraction's `.syscall` stubs ("name @ address"): the SVC/SYSCALL
 	// instructions, environment reads and vDSO clock functions whose effect only the kernel
 	// semantics of Janus/Contracts/Syscall*.lean gives (WP-C). Traps are its `.trap` stubs.
@@ -112,8 +114,7 @@ type verifiedReport struct {
 	Notes []string `json:"notes,omitempty"`
 	// NonVacuity (policy): "shown" (a kernel-checked non-vacuity witness, NonVacuityWitness, verified in the
 	// same run, supports THIS theorem), "not-shown" (none; only possible for a theorem without runtime-contract
-	// hypotheses, or when opted out), "opted-out" (--allow-no-witness: a contract-assuming theorem accepted
-	// without a witness) or "witness" (this report is itself a witness). Set after the run, never cached.
+	// hypotheses), "audit-only" (--audit-only: NOT a verification, no report is written) or "witness" (this report is itself a witness). Set after the run, never cached.
 	NonVacuity        string `json:"nonVacuity,omitempty"`
 	NonVacuityWitness string `json:"nonVacuityWitness,omitempty"`
 	// NonVacuityReturns names a verified Witness.returns for this theorem, when there is one (informational).
@@ -144,6 +145,7 @@ type auditResult struct {
 	MatchedMains      []string   `json:"matchedMains"`        // every main theorem of the module the witness supports
 	MatchedModules    []string   `json:"matchedModules"`      // the module declaring each of them
 	ContractHyps      []string   `json:"contractHyps"`        // round 14: the contracts the STATEMENT applies ("Contract@runtime.fn")
+	Refutation        bool       `json:"refutation"`          // UP3c: the main theorem is a negation (claims no run)
 	Imports           [][]string `json:"imports"`             // [module, direct imports…] for every non-core module
 }
 
@@ -277,7 +279,7 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "no-result-cache", "allow-no-witness", "allow-unchecked-provenance", "full-errors", "keep-workspace")
+	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "no-result-cache", "allow-no-witness", "audit-only", "allow-unchecked-provenance", "full-errors", "keep-workspace")
 	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root", "results")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -325,7 +327,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], err)
 	}
-	if err := nonVacuitySingle(outdir, r, flags["allow-no-witness"]); err != nil {
+	if err := nonVacuitySingle(outdir, r, flags["audit-only"]); err != nil {
 		return jsonFailure(stdout, flags["json"], err)
 	}
 	if flags["json"] {
@@ -393,7 +395,11 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 }
 
 func printVerifiedAt(stdout io.Writer, outdir, reportPath string, r *verifiedReport) {
-	fmt.Fprintf(stdout, "Verified: %s\n", termSafe(r.Theorem))
+	if r.NonVacuity == nvAuditOnly {
+		fmt.Fprintf(stdout, "Audit-only: %s (the proof and the statement audit passed; NOT A VERIFICATION: it assumes runtime contracts and no verified Witness.nonvacuous covers it)\n", termSafe(r.Theorem))
+	} else {
+		fmt.Fprintf(stdout, "Verified: %s\n", termSafe(r.Theorem))
+	}
 	fmt.Fprintf(stdout, "  Module: %s (%s)\n", r.MainModule, r.GoVersion)
 	if desc := describeEntry(r.EntryABI, r.EntrySource); desc != "" {
 		fmt.Fprintf(stdout, "  Entry: %s at %s (%s)\n", r.Symbol, r.Address, desc)
@@ -1046,7 +1052,7 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	// (it reads only pinned files; see speed.go). Its result is used below only for modules of
 	// the audited closure.
 	var early *earlyReplay
-	if tc.hasChecker {
+	if tc.hasChecker && os.Getenv("JANUS_STOP_AFTER_AUDIT") != "1" {
 		markers := map[string]string{
 			"Extracted":    earlyReplayMarker(tc.cacheID(), "Extracted", fwPins, trustedPins),
 			"JanusTrusted": earlyReplayMarker(tc.cacheID(), "JanusTrusted", fwPins, trustedPins),
@@ -1136,6 +1142,14 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 		byName[ar.Name] = i
 		ars[i] = ar
 		audited = append(audited, i)
+	}
+	// Development hook (UP3 corpus checks): JANUS_STOP_AFTER_AUDIT=1 ends the run after the statement audit. Every theorem the audit
+	// accepted is reported as failed with the marker "AUDIT-STAGE-OK"; it is never a verification and writes no report.
+	if os.Getenv("JANUS_STOP_AFTER_AUDIT") == "1" {
+		for _, i := range audited {
+			outs[i].Err = &diag{Invalid: true, Stage: "audit-stage-only", Msg: "AUDIT-STAGE-OK " + ars[i].Name}
+		}
+		audited = nil
 	}
 	if len(audited) == 0 {
 		return nil
@@ -1287,6 +1301,7 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			MatchedMains:      ar.MatchedMains,
 			MatchedModules:    ar.MatchedModules,
 			ContractHyps:      ar.ContractHyps,
+			Refutation:        ar.Refutation,
 			Notes:             ar.Notes,
 		}
 		report.Kernel, report.Traps = cr.Identity.kernelLists()
@@ -1461,12 +1476,15 @@ func cmdVerifyMany(outdir string, opts map[string]string, flags map[string]bool,
 		return jsonFailure(stdout, flags["json"], err)
 	}
 	checkWitnessSupport(outdir, outs)
-	applyNonVacuity(outdir, outs, flags["allow-no-witness"])
+	applyNonVacuity(outdir, outs, flags["audit-only"])
 	failed := 0
 	var aslErr error
 	mj := multiJSON{Schema: 1}
 	for _, o := range outs {
 		it := multiJSONItem{Theorem: o.Theorem, Status: "verified", Report: o.Report}
+		if o.Report != nil && o.Report.NonVacuity == nvAuditOnly {
+			it.Status = "audit-only"
+		}
 		if o.Err != nil {
 			f := toFailureJSON(o.Err)
 			it.Status, it.Failure = "failed", &f
@@ -1497,7 +1515,11 @@ func cmdVerifyMany(outdir string, opts map[string]string, flags map[string]bool,
 				printDiag(stdout, o.Err)
 				continue
 			}
-			fmt.Fprintf(stdout, "=== %s: verified ===\n", termSafe(o.Theorem))
+			if o.Report.NonVacuity == nvAuditOnly {
+				fmt.Fprintf(stdout, "=== %s: audit-only (NOT verified) ===\n", termSafe(o.Theorem))
+			} else {
+				fmt.Fprintf(stdout, "=== %s: verified ===\n", termSafe(o.Theorem))
+			}
 			rp := filepath.Join(outdir, verifiedDir, o.Theorem+".json")
 			if len(outs) == 1 {
 				rp = filepath.Join(outdir, "verified.json")

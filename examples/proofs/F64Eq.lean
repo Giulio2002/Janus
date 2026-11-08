@@ -61,18 +61,20 @@ theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0
 theorem hpre : s0.getV 0 64 = x.toNat ∧ s0.getV 1 64 = y.toNat ∧ s0.fpcr = 0 := by
   refine ⟨by decide, by decide, rfl⟩
 
-/-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧
-    (s.getV 0 64 = Witness.x.toNat ∧ s.getV 1 64 = Witness.y.toNat ∧ s.fpcr = 0) :=
-  ⟨ret, s0, hret, setup, hpre⟩
-
 /-- So the guarantee is reached: `+0 == -0` returns `true`. -/
 theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat % 256 = 1 := by
   refine (correctness x y ret hret s0 setup hpre).mono ?_
   intro s' h
   exact ⟨h.1, by rw [h.2]; decide⟩
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧
+    (s.getV 0 64 = Witness.x.toNat ∧ s.getV 1 64 = Witness.y.toNat ∧ s.fpcr = 0) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ (s'.regs 0).toNat % 256 = 1) :=
+  ⟨ret, s0, hret, setup, hpre, returns⟩
 
 end Witness
 

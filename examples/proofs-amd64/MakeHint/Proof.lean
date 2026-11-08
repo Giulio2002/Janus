@@ -120,19 +120,39 @@ theorem pre0 : pre (MC ck64) HMake n s0 := by
   · unfold Janus.Spec.Disjoint; decide
   · simp only [MC_priv, priv0, outside_cons, outside_nil, and_true]; decide
 
-/-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec 64))
-    (H : Contracts.RtReady) (ret : Nat) (s : State) (n : BitVec 64),
-    M.Laws ∧ MakeMap (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.makemap") M H ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [n] s ∧ pre M H n s :=
-  ⟨implAt, MC _, HMake, ret, s0, n, MC_laws _, model, hret, setup, pre0⟩
+theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with rip := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+
+/-- The precondition of `MakeMap`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def MakeMapSite (M : MapModel (BitVec 64) (BitVec 64)) (H : Contracts.RtReady) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 1).toNat = 0 ∧ Contracts.Ready64 H M.priv [(s_c.regs 0).toNat, (s_c.regs 3).toNat, 0] s_c
+
+/-- The call state of the `makemap` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSatAmd64`, at the contract address. -/
+def wsCall : Janus.Amd64.State := { mstate64 mmem64Dead (args 0 0) with rip := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : MakeMapSite (MC ck64) HMake wsCall :=
+  ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64Dead rfl _ 3 (by decide)
+      (show ZEnv mmem64Dead from mmem64_zenv.writeLE _ (by decide)) mmem64Dead_guard mmem64Dead_ret),
+    trivial, by decide, hMake_dead64 _ _ _⟩
 
 /-- So the guarantee is reached: a new, empty map. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty :=
   correctness implAt (MC _) (MC_laws _) HMake model n ret hret s0 setup pre0
     |>.mono fun _ h => ⟨h.1, h.2.1, h.2.2.1⟩
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec 64))
+    (H : Contracts.RtReady) (ret : Nat) (s : State) (n : BitVec 64),
+    M.Laws ∧ MakeMap (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.makemap") M H ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [n] s ∧ pre M H n s ∧
+    (∃ (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makemap") ∧ MakeMapSite M H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧
+        (∀ mp f, M.Rep s.mem mp f → mp ≠ (s'.regs 0).toNat) ∧ M.Env s'.mem (s.regs 14)) :=
+  ⟨implAt, MC _, HMake, ret, s0, n, MC_laws _, model, hret, setup, pre0, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt (MC _) (MC_laws _) HMake model n ret hret s0 setup pre0⟩
 
 end Witness
 

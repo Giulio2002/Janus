@@ -275,15 +275,6 @@ theorem hpreC (pc : Nat) : PreC 2#64 (s0 pc) := by
   refine ⟨by decide, ⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, ?_⟩ <;>
     simp only [regSP, regG, stackguard0, stackguard0Offset] <;> decide
 
-/-- All hypotheses of `correctness` hold together, for the three members. -/
-theorem nonvacuous : ∃ (ret : Nat) (sa sb sc : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [2#64] sa ∧ PreA 2#64 sa ∧
-    CallSetup (Extracted.program.withExit ret) (segAddr Extracted.program "example.com/basic.CycB")
-      [2#64] sb ∧ PreB 2#64 sb ∧
-    CallSetup (Extracted.program.withExit ret) (segAddr Extracted.program "example.com/basic.CycC")
-      [2#64, 5#64, 7#64] sc ∧ PreC 2#64 sc :=
-  ⟨ret, s0 _, s0 _, s0 _, hret, setup1 _, hpreA _, setup1 _, hpreB _, setup3 _, hpreC _⟩
-
 /-- So the guarantee is reached: `CycA(2) = 16260`, `CycB(2) = 16259`, `CycC(2, 5, 7) = 8462`. -/
 theorem returns :
     Returns (Extracted.program.withExit ret) (s0 Extracted.entry) (fun s' =>
@@ -298,6 +289,33 @@ theorem returns :
   refine ⟨(ha ret hret _ (setup1 _) (hpreA _)).mono ?_, (hb ret hret _ (setup1 _) (hpreB _)).mono ?_,
     (hc ret hret _ (setup3 _) (hpreC _)).mono ?_⟩
   all_goals intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
+
+/-- The three runs, with the posts exactly as `correctness` states them at `n = 2, k = 5, j = 7`. -/
+theorem returnsGen :
+    Returns (Extracted.program.withExit ret) (s0 Extracted.entry) (fun s' =>
+      ABIReturn (s0 Extracted.entry) s' ∧ s'.regs 0 = cA (2#64).toNat) ∧
+    Returns (Extracted.program.withExit ret) (s0 (segAddr Extracted.program "example.com/basic.CycB"))
+      (fun s' => ABIReturn (s0 (segAddr Extracted.program "example.com/basic.CycB")) s' ∧
+        s'.regs 0 = cB 2#64 (cA ((2#64).toNat - 1))) ∧
+    Returns (Extracted.program.withExit ret) (s0 (segAddr Extracted.program "example.com/basic.CycC"))
+      (fun s' => ABIReturn (s0 (segAddr Extracted.program "example.com/basic.CycC")) s' ∧
+        s'.regs 0 = cC 2#64 5#64 7#64 (cA ((2#64).toNat - 1))) := by
+  obtain ⟨ha, hb, hc⟩ := correctness 2#64 5#64 7#64
+  exact ⟨ha ret hret _ (setup1 _) (hpreA _), hb ret hret _ (setup1 _) (hpreB _),
+    hc ret hret _ (setup3 _) (hpreC _)⟩
+
+/-- All hypotheses of `correctness` hold together, for the three members, and the three runs return. -/
+theorem nonvacuous : ∃ (ret : Nat) (sa sb sc : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [2#64] sa ∧ PreA 2#64 sa ∧
+    CallSetup (Extracted.program.withExit ret) (segAddr Extracted.program "example.com/basic.CycB")
+      [2#64] sb ∧ PreB 2#64 sb ∧
+    CallSetup (Extracted.program.withExit ret) (segAddr Extracted.program "example.com/basic.CycC")
+      [2#64, 5#64, 7#64] sc ∧ PreC 2#64 sc ∧
+    Returns (Extracted.program.withExit ret) sa (fun t => ABIReturn sa t ∧ t.regs 0 = cA (2#64).toNat) ∧
+    Returns (Extracted.program.withExit ret) sb (fun t => ABIReturn sb t ∧ t.regs 0 = cB 2#64 (cA ((2#64).toNat - 1))) ∧
+    Returns (Extracted.program.withExit ret) sc (fun t => ABIReturn sc t ∧ t.regs 0 = cC 2#64 5#64 7#64 (cA ((2#64).toNat - 1))) :=
+  ⟨ret, s0 _, s0 _, s0 _, hret, setup1 _, hpreA _, setup1 _, hpreB _, setup3 _, hpreC _,
+    returnsGen.1, returnsGen.2.1, returnsGen.2.2⟩
 
 end Witness
 

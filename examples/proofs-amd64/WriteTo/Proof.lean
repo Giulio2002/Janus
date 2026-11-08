@@ -74,6 +74,14 @@ theorem hc : ICallContract64 (Extracted.program.link impl) A0 4 16 56 rt0 (fun _
     (fun _ _ => True) (fun _ => trivial)
   exact Summary.of_codeIn64 (codeIn_link64 Extracted.program _ (by decide)) h
 
+/-- The call state of the writer contract (U-WITNESS-CALLSITE): at the callee's entry `A0`, with the contract's precondition. -/
+def wsCall : State :=
+  { Janus.Contracts.ICallSatAmd64.wstate with regs := fun i => if i = 4 then 0x1800#64 else if i = 0 then 0x600000#64 else if i = 3 then 0x500000#64 else if i = 1 then 3#64 else if i = 7 then 3#64 else 0#64 }
+
+theorem wsCall_pre : Janus.Contracts.ICall.ICallPre64 4 16 56 rt0 (fun sc => sc.regs 0 = 0x600000 ∧ sc.regs 3 = 0x500000 ∧ sc.regs 1 = 3 ∧ sc.regs 7 = 3) wsCall :=
+  ⟨⟨by decide, by decide, by decide, by decide, by decide⟩, by decide,
+    by show Janus.Outside 0x1800 56 rt0; simp [rt0], rfl, rfl, rfl, rfl⟩
+
 theorem hret : RetAddr (Extracted.program.link impl) ret := RetAddr.of_check (by decide)
 
 theorem setup : CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry
@@ -97,10 +105,21 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (fn stack : Nat) (rt 
       (tab.toNat + 32 ≤ (s.regs 4).toNat - 48 ∨ (s.regs 4).toNat + 32 ≤ tab.toNat + 24) ∧
       StackGuardOK s 0 ∧ StackWritable s (48 + stack) 32 ∧ SPAligned s ∧
       tab.toNat + 32 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 8 false = true ∧
-      s.mem.readLE (tab.toNat + 24) 8 = fn ∧ Outside ((s.regs 4).toNat - 48) 56 rt) :=
-  ⟨impl, A0, 16, rt0, R0, ret, s0, BitVec.ofNat 64 tabA, 0x600000, 0x500000, 3, 3, hc, hret, setup,
-    by decide, (by unfold CodePtrOK64; decide), by decide, ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
-    (by unfold SPAligned; decide), by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩
+      s.mem.readLE (tab.toNat + 24) 8 = fn ∧ Outside ((s.regs 4).toNat - 48) 56 rt) ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 fn ∧
+      Janus.Contracts.ICall.ICallPre64 4 stack 56 rt (fun sc => sc.regs 0 = w ∧ sc.regs 3 = ptr ∧ sc.regs 1 = len ∧ sc.regs 7 = cap) s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+      ∃ n e1 e2, R w ptr len cap n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 3 = e1 ∧ s'.regs 1 = e2 :=
+  have pre : (8 ≤ 16 ∧ CodePtrOK64 A0 ∧
+      ((BitVec.ofNat 64 tabA).toNat + 32 ≤ (s0.regs 4).toNat - 48 ∨ (s0.regs 4).toNat + 32 ≤ (BitVec.ofNat 64 tabA).toNat + 24) ∧
+      StackGuardOK s0 0 ∧ StackWritable s0 (48 + 16) 32 ∧ SPAligned s0 ∧
+      (BitVec.ofNat 64 tabA).toNat + 32 ≤ 2 ^ 48 ∧ s0.mem.accessible ((BitVec.ofNat 64 tabA).toNat + 24) 8 false = true ∧
+      s0.mem.readLE ((BitVec.ofNat 64 tabA).toNat + 24) 8 = A0 ∧ Outside ((s0.regs 4).toNat - 48) 56 rt0) :=
+    ⟨by decide, (by unfold CodePtrOK64; decide), by decide, ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
+      (by unfold SPAligned; decide), by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩
+  ⟨impl, A0, 16, rt0, R0, ret, s0, BitVec.ofNat 64 tabA, 0x600000, 0x500000, 3, 3, hc, hret, setup, pre,
+    ⟨wsCall, rfl, wsCall_pre⟩,
+    correctness impl A0 16 rt0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc ret hret s0 setup pre⟩
 
 /-- The theorem fires: the concrete call of `WriteTo` (the concrete writer serves the itab) returns, and its results are the ones
 `correctness` describes. -/

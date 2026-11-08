@@ -224,6 +224,146 @@ theorem putTail (impl : List Amd64.Segment) (R : RtInv)
       (fun _ _ h => h), ?_⟩
   simpa [hSg] using hinv3
 
+/-- The pre of `correctness` without the shape equation. -/
+@[reducible] def PreS (R : RtInv) (L : List (Nat × Nat)) (bud : Nat) (s : State) : Prop :=
+  StackGuardOK s 4136 ∧ StackWritable s 4136 24 ∧ (s.regs 4).toNat % 8 = 0 ∧
+        Extracted.program.DataLoaded s.mem ∧
+        Outside ((s.regs 14).toNat + 16) 8 (((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24) :: R.rt) ∧
+        LiveSep [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)] R.rt ∧
+        LiveSep L [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)] ∧
+        (∀ r ∈ R.rt, 0 < r.1) ∧ (poolAddr + 40 ≤ (s.regs 4).toNat - 4136 ∨ (s.regs 4).toNat + 24 ≤ poolAddr) ∧
+        Outside bufType 16 R.rt ∧
+        R.ok (Extracted.program.contractAddr "sync.(*Pool).Get") [poolAddr] ∧
+        R.ok (Extracted.program.contractAddr "sync.(*Pool).Put") [poolAddr] ∧
+        R.ok (Extracted.program.contractAddr "runtime.newobject") [bufType] ∧
+        s.mem.readLE (poolAddr + newOffset) 8 = 0 ∧
+        R.inv bud L (s.regs 14).toNat (view R.rt L s.mem) ∧ 32 ≤ bud
+
+/-- The precondition of `sync.(*Pool).Get` at its call state `S`. -/
+@[reducible] def getSite (R : RtInv) (L : List (Nat × Nat)) (b : Nat) (S : State) : Prop :=
+  CallOK64 S 4096 1 ∧ StackRoom64 S 4096 1 ∧ S.mem.readLE ((S.regs 0).toNat + newOffset) 8 = 0 ∧
+    LiveAt R (Extracted.program.contractAddr "sync.(*Pool).Get") [(S.regs 0).toNat] L b 0 (S.regs 14).toNat S.mem
+      (liveWin64 S 4096 1)
+
+/-- The precondition of `runtime.newobject` at its call state `S`. -/
+@[reducible] def newSite (R : RtInv) (L : List (Nat × Nat)) (b : Nat) (S : State) : Prop :=
+  NewobjectPre64 4096 S ∧ StackRoom64 S 4096 1 ∧
+    LiveAt R (Extracted.program.contractAddr "runtime.newobject") [(S.regs 0).toNat] L b (newobjectRound64 S)
+      (S.regs 14).toNat S.mem (liveWin64 S 4096 1)
+
+/-- The precondition of `sync.(*Pool).Put` at its call state `S`. -/
+@[reducible] def putSite (R : RtInv) (L : List (Nat × Nat)) (b : Nat) (rs : List (Nat × Nat)) (S : State) : Prop :=
+  CallOK64 S 4096 3 ∧ StackRoom64 S 4096 3 ∧ (S.regs 3).toNat = ptrType ∧ BufObj S.mem (S.regs 1).toNat rs ∧
+    (∀ r ∈ rs, r ∈ L) ∧
+    LiveAt R (Extracted.program.contractAddr "sync.(*Pool).Put") [(S.regs 0).toNat] L b 0 (S.regs 14).toNat S.mem
+      (liveWin64 S 4096 3)
+
+set_option maxHeartbeats 8000000 in
+set_option maxRecDepth 20000 in
+/-- The call-site precondition of `Get`, for every state `S` that is the call's entry from `s`. -/
+theorem siteGet (R : RtInv) (L : List (Nat × Nat)) (bud : Nat) (s : State) (hPre : PreS R L bud s) :
+    ∀ S : State, MemFrame s.mem S.mem [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)] →
+      S.regs 14 = s.regs 14 → (S.regs 4).toNat + 40 = (s.regs 4).toNat → (S.regs 0).toNat = (poolN) →
+      S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47 → getSite R L bud S := by
+  obtain ⟨hg, ⟨hb4, ha4, hw4⟩, hal, hd, hgo, hwrt, hwL, hrt0, hpin, hbin, hokG, hokP, hokN,
+    hnew0, hinv, hbud⟩ := hPre
+  janus_eval_nat hP : poolAddr
+  janus_eval_nat hT : ptrType
+  janus_eval_nat hB : bufType
+  have hgl := hg.load
+  have hgb := hg.below
+  have hnw2 := hg.noWrap
+  have hgr := hg.readable
+  simp only [regSP, regG, stackguard0Offset, stackguard0] at hgl hgb hnw2 hgr hb4 ha4 hw4 hal
+  janus64_data hd [hw4]
+  have hsp40 : (s.regs 4 - 40#64).toNat = (s.regs 4).toNat - 40 := by
+    rw [BitVec.toNat_sub]; simp; omega
+  have hpw := hpin
+  rw [hP] at hokG hokP hnew0
+  rw [hB] at hbin
+  intro S hf hg' hsp h0 hra
+  have h := call_pre64 R L bud 0 (Extracted.program.contractAddr "sync.(*Pool).Get") [(S.regs 0).toNat]
+    (s := s) (S := S) (lo := (s.regs 4).toNat - 4136) (hi := (s.regs 4).toNat + 24) (stack := 4096) (nargs := 1)
+    (fr := 40) hnw2 hgr (by omega) hgo (hf.widen R.rt) hg' hsp (by omega) hra (by omega) (by omega) (by omega)
+    ha4 (by rw [show (s.regs 4).toNat + 24 - ((s.regs 4).toNat - 4136) = 4136 + 24 by omega]; exact hw4)
+    hwrt hwL (by rw [h0]; exact hokG) (by rw [hg']; exact RtInv.inv_frame hf hwrt hinv) (Nat.zero_le _)
+  refine ⟨h.1, h.2.1, ?_, h.2.2⟩
+  rw [h0, hf.readLE _ _ (by simp only [newOffset, outside_cons, outside_nil, and_true]; omega)]
+  exact hnew0
+
+set_option maxHeartbeats 8000000 in
+set_option maxRecDepth 20000 in
+/-- The call-site precondition of `newobject`, for every state `S` that is the call's entry from `s`
+(memory `m1`, reached from `s` inside the runtime and the window, plus the return address). -/
+theorem siteNew (R : RtInv) (L : List (Nat × Nat)) (bud : Nat) (s : State) (hPre : PreS R L bud s)
+    (m1 : Arm64.Memory) (hF1 : MemFrame s.mem m1 (R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)]))
+    (hinvG : R.inv bud L (s.regs 14).toNat (view R.rt L m1)) :
+    ∀ S : State, S.mem = m1.writeLE ((s.regs 4).toNat - 40) 8 (janus_eval% (Extracted.entry + 71)) →
+        S.regs 14 = s.regs 14 → (S.regs 4).toNat + 40 = (s.regs 4).toNat → (S.regs 0).toNat = (bufN) →
+        newSite R L bud S ∧ 0 < typSize S.mem (S.regs 0).toNat := by
+  obtain ⟨hg, ⟨hb4, ha4, hw4⟩, hal, hd, hgo, hwrt, hwL, hrt0, hpin, hbin, hokG, hokP, hokN,
+    hnew0, hinv, hbud⟩ := hPre
+  janus_eval_nat hP : poolAddr
+  janus_eval_nat hT : ptrType
+  janus_eval_nat hB : bufType
+  have hgl := hg.load
+  have hgb := hg.below
+  have hnw2 := hg.noWrap
+  have hgr := hg.readable
+  simp only [regSP, regG, stackguard0Offset, stackguard0] at hgl hgb hnw2 hgr hb4 ha4 hw4 hal
+  janus64_data hd [hw4]
+  have hsp40 : (s.regs 4 - 40#64).toNat = (s.regs 4).toNat - 40 := by
+    rw [BitVec.toNat_sub]; simp; omega
+  have hpw := hpin
+  rw [hP] at hokG hokP hnew0
+  rw [hB] at hbin
+  have hdesc : s.mem.readLE (bufN) 8 = 32 ∧ s.mem.readLE ((bufN) + 8) 8 = 0 :=
+    ⟨by rw [h_rodata (bufN) 8 (by decide +kernel)]; decide +kernel,
+      by rw [h_rodata ((bufN) + 8) 8 (by decide +kernel)]; decide +kernel⟩
+  have hbW : Outside (bufN) 16 [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)] := by
+    simp only [outside_cons, outside_nil, and_true]; omega
+  have hbw : (s.regs 4).toNat - 4136 + ((s.regs 4).toNat + 24 - ((s.regs 4).toNat - 4136)) ≤ (bufN) ∨
+      (bufN) + 16 ≤ (s.regs 4).toNat - 4136 := by omega
+  have hoB : ∀ a k, (bufN) ≤ a → a + k ≤ (bufN) + 16 →
+      Outside a k (R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)]) := fun a k h1 h2 => by
+    simp only [outside_append]
+    exact ⟨Outside.of_sub hbin h1 h2, Outside.of_sub hbW h1 h2⟩
+  have hsz : m1.readLE (bufN) 8 = 32 := by
+    rw [hF1.readLE _ _ (hoB _ _ (Nat.le_refl _) (by omega))]; exact hdesc.1
+  have hpb : m1.readLE ((bufN) + 8) 8 = 0 := by
+    rw [hF1.readLE _ _ (hoB _ _ (by omega) (by omega))]; exact hdesc.2
+  have hmC : MemFrame m1 (m1.writeLE ((s.regs 4).toNat - 40) 8 (janus_eval% (Extracted.entry + 71)))
+      [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)] := by janus_frame
+  have hsz2 : (m1.writeLE ((s.regs 4).toNat - 40) 8 (janus_eval% (Extracted.entry + 71))).readLE (bufN) 8 = 32 := by
+    rw [hmC.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]; exact hsz
+  have hpb2 : (m1.writeLE ((s.regs 4).toNat - 40) 8 (janus_eval% (Extracted.entry + 71))).readLE ((bufN) + 8) 8 = 0 := by
+    rw [hmC.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]; exact hpb
+  intro S hm hg' hsp h0
+  have hr : typSize S.mem (S.regs 0).toNat = 32 := by simp only [typSize, hm, h0]; exact hsz2
+  have hp : typPtrBytes S.mem (S.regs 0).toNat = 0 := by simp only [typPtrBytes, hm, h0]; exact hpb2
+  have hround : newobjectRound64 S = 32 := by
+    simp only [newobjectRound64, hr, typNoscan, hp]; decide
+  have hFS : MemFrame s.mem S.mem (R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)]) := by
+    rw [hm]
+    exact MemFrame.trans (rs := R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)]) hF1
+      (hmC.widen R.rt) (fun a n h => ⟨h, h⟩)
+  have hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47 := by
+    have e : (S.regs 4).toNat = (s.regs 4).toNat - 40 := by omega
+    rw [hm, e, Arm64.Memory.readLE_writeLE_self]; omega
+  have h := call_pre64 R L bud 32 (Extracted.program.contractAddr "runtime.newobject") [(S.regs 0).toNat]
+    (s := s) (S := S) (lo := (s.regs 4).toNat - 4136) (hi := (s.regs 4).toNat + 24) (stack := 4096)
+    (nargs := 1) (fr := 40) hnw2 hgr (by omega) hgo hFS hg' hsp (by omega) hra (by omega) (by omega)
+    (by omega) ha4
+    (by rw [show (s.regs 4).toNat + 24 - ((s.regs 4).toNat - 4136) = 4136 + 24 by omega]; exact hw4)
+    hwrt hwL (by rw [h0]; exact hokN)
+    (by rw [hg', hm]; exact RtInv.inv_frame hmC hwrt hinvG) hbud
+  unfold newSite
+  rw [hround]
+  refine ⟨⟨⟨h.1, ⟨by omega, ?_⟩, ?_⟩, h.2.1, h.2.2⟩, by omega⟩
+  · rw [hFS.accessible, h0]
+    exact Arm64.Memory.accessible_sub _ h_data1 (Or.inl rfl) (Nat.le_refl _) (by omega)
+  · rw [hr]; simp [maxAlloc]
+
 set_option maxHeartbeats 8000000 in
 set_option maxRecDepth 20000 in
 theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : PoolShape)
@@ -773,6 +913,123 @@ theorem pre : StackGuardOK s0 4136 ∧ StackWritable s0 4136 24 ∧ (s0.regs 4).
   · exact Or.inr (Or.inr ⟨rfl, rfl⟩)
   · rw [hP']; unfold newOffset; decide
 
+theorem P_bv : (BitVec.ofNat 64 P).toNat = poolN := by unfold P; decide
+theorem P_bv' : (BitVec.ofNat 64 P).toNat = poolAddr := by rw [hP]; unfold P; decide
+theorem bT_bv : (BitVec.ofNat 64 bT).toNat = bufN := by unfold bT; decide
+theorem pT_bv : (BitVec.ofNat 64 pT).toNat = ptrType := by rw [hPT]; unfold pT; decide
+
+theorem stk_frame (v : Nat) : MemFrame s0.mem (mem0.writeLE ((s0.regs 4).toNat - 40) 8 v)
+    [((s0.regs 4).toNat - 4136, (s0.regs 4).toNat + 24)] := by
+  rw [s0_sp]
+  exact (MemFrame.refl _ _).writeLE v (List.mem_singleton_self _) (by simp only [sp0]; omega) (by simp only [sp0]; omega)
+
+theorem stk_ra (m : Arm64.Memory) (v : Nat) (hv : v < 2 ^ 47) (S : State) (h4 : S.regs 4 = s0.regs 4 - 40#64)
+    (hm : S.mem = m.writeLE ((s0.regs 4).toNat - 40) 8 v) : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47 := by
+  have : (S.regs 4).toNat = (s0.regs 4).toNat - 40 := by
+    rw [h4, BitVec.toNat_sub]; simp [s0, sp0]
+  rw [hm, this, Arm64.Memory.readLE_writeLE_self, Nat.mod_eq_of_lt (by omega)]
+  exact hv
+
+/-- The call state at `sync.(*Pool).Get`'s entry: `ScratchSum`'s frame (40 below, return address written),
+the pool in `RAX`. -/
+def wsG : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 P else if i = 4 then s0.regs 4 - 40#64
+      else if i = 14 then BitVec.ofNat 64 g0 else 0,
+    rip := BitVec.ofNat 64 (Extracted.program.contractAddr "sync.(*Pool).Get"),
+    flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := mem0.writeLE ((s0.regs 4).toNat - 40) 8 ret }
+
+theorem wsG_pre : getSite R [] 0x400 wsG :=
+  siteGet R [] 0x400 s0 pre wsG (stk_frame _) (by simp [wsG, s0]) (by simp [wsG, s0, sp0])
+    (by simp [wsG]; exact P_bv) (stk_ra _ _ (by simp [ret]) wsG rfl rfl)
+
+/-- The call state at `runtime.newobject`'s entry (`scratch`'s descriptor in `RAX`). -/
+def wsN : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 bT else if i = 4 then s0.regs 4 - 40#64
+      else if i = 14 then BitVec.ofNat 64 g0 else 0,
+    rip := BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject"),
+    flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := mem0.writeLE ((s0.regs 4).toNat - 40) 8 (janus_eval% (Extracted.entry + 71)) }
+
+theorem wsN_pre : newSite R [] 0x400 wsN :=
+  (siteNew R [] 0x400 s0 pre mem0 (MemFrame.refl _ _) inv0 wsN rfl (by simp [wsN, s0]) (by simp [wsN, s0, sp0])
+    (by simp [wsN]; exact bT_bv)).1
+
+/-! ### The `Put` call state: the buffer `[HEAP, HEAP+32)` is live, the bump pointer at `HEAP+32` -/
+
+def memP : Arm64.Memory := mem0.writeLE BUMP 8 (HEAP + 32)
+
+theorem invP : R.inv 0x400 [(HEAP, HEAP + 32)] (s0.regs 14).toNat (view R.rt [(HEAP, HEAP + 32)] memP) := by
+  show toyInv tys 0x400 [(HEAP, HEAP + 32)] (s0.regs 14).toNat (view (toyRt tys) [(HEAP, HEAP + 32)] memP)
+  have hb : Outside BUMP 8 [(HEAP, HEAP + 32)] := by
+    simp only [outside_cons, outside_nil, and_true, BUMP, HEAP]; decide
+  refine ⟨HEAP + 32, ?_, by simp [HEAP], by simp [HEAP], by simp [HEAP, HEND, HSIZE], ?_, fun i hi hi' => ?_, ?_, ?_, ?_,
+    fun t ht => absurd ht (by simp [tys])⟩
+  · rw [readLE_view (inRanges_bump tys) hb, memP, Arm64.Memory.readLE_writeLE_self]
+    exact Nat.mod_eq_of_lt (by simp [HEAP])
+  · intro r hr; simp only [List.mem_singleton] at hr; subst hr; simp [HEAP]
+  · have ho : Outside i 1 [(HEAP, HEAP + 32)] := by
+      simp only [outside_cons, outside_nil, and_true]; omega
+    rw [readLE_view (inRanges_heap (n := 1) (by simp only [HEAP] at *; omega) (by omega)) ho, memP,
+      Arm64.Memory.readLE_writeLE_of_disjoint mem0 (a := BUMP) (n := 8) (b := i) (k := 1) (HEAP + 32)
+        (by simp only [BUMP, HEAP] at *; omega), Arm64.Memory.readLE_one]
+    show (bytes0 i).toNat = 0
+    simp only [bytes0, dataByte_none i (by simp only [HEAP] at hi; omega)]
+    rw [if_neg (by simp only [BUMP, HEAP] at *; omega), if_neg (by simp only [sp0, HEAP] at *; omega)]; rfl
+  · rw [view_accessible, memP, Arm64.Memory.accessible_writeLE]; decide
+  · rw [view_accessible, memP, Arm64.Memory.accessible_writeLE]; decide
+  · rw [view_accessible, memP, Arm64.Memory.accessible_writeLE]; decide
+
+/-- The call state at `sync.(*Pool).Put`'s entry: the pooled buffer `HEAP` (the allocator's only
+object) in `RCX`. -/
+def wsP : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 P else if i = 3 then BitVec.ofNat 64 pT
+      else if i = 1 then BitVec.ofNat 64 HEAP else if i = 4 then s0.regs 4 - 40#64
+      else if i = 14 then BitVec.ofNat 64 g0 else 0,
+    rip := BitVec.ofNat 64 (Extracted.program.contractAddr "sync.(*Pool).Put"),
+    flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := memP.writeLE ((s0.regs 4).toNat - 40) 8 ret }
+
+theorem wsP_pre : putSite R [(HEAP, HEAP + 32)] 0x400 [(HEAP, HEAP + 32)] wsP := by
+  obtain ⟨hg, ⟨hb4, ha4, hw4⟩, hal, hd, hgo, hwrt, hwL, hrt0, hpin, hbin, hokG, hokP, hokN,
+    hnew0, hinv, hbud⟩ := pre
+  have hgl := hg.load
+  have hgb := hg.below
+  have hnw2 := hg.noWrap
+  have hgr := hg.readable
+  simp only [regSP, regG, stackguard0Offset, stackguard0] at hgl hgb hnw2 hgr hb4 ha4 hw4 hal
+  have hfr : MemFrame s0.mem wsP.mem (R.rt ++ [((s0.regs 4).toNat - 4136, (s0.regs 4).toNat + 24)]) := by
+    show MemFrame mem0 (memP.writeLE _ 8 ret) _
+    refine (((MemFrame.refl _ _).writeLE_inRanges _ ((inRanges_bump tys).append_left _))).writeLE_inRanges _ ?_
+    exact ⟨((s0.regs 4).toNat - 4136, (s0.regs 4).toNat + 24), List.mem_append_right _ (List.mem_singleton_self _),
+      by rw [s0_sp]; simp only [sp0]; omega, by rw [s0_sp]; simp only [sp0]; omega⟩
+  have hra := stk_ra memP ret (by simp [ret]) wsP rfl rfl
+  exact putPre64 R [] 0x400 HEAP (Extracted.program.contractAddr "sync.(*Pool).Put") s0 wsP hnw2 hgr (by omega) ha4 hw4
+    hal hb4 hgo hwrt hokP hfr (by simp [wsP, s0]) (by simp [wsP, s0, sp0]) hra
+    (by simp [wsP]; exact P_bv') (by simp [wsP]; exact pT_bv) (by simp [wsP, HEAP])
+    ⟨by simp [HEAP], by simp [HEAP], by simp [HEAP], by simp only [wsP, memP, Arm64.Memory.accessible_writeLE]; decide, rfl⟩
+    (by
+      rw [s0_sp]
+      simp only [List.nil_append, liveSep_cons, liveSep_nil, outside_cons, outside_nil, and_true, HEAP, sp0]; decide)
+    (by
+      have hf : MemFrame memP (memP.writeLE ((s0.regs 4).toNat - 40) 8 ret)
+          [((s0.regs 4).toNat - 4136, (s0.regs 4).toNat + 24)] :=
+        (MemFrame.refl memP _).writeLE ret (List.mem_singleton_self _) (by rw [s0_sp]; simp only [sp0]; omega)
+          (by rw [s0_sp]; simp only [sp0]; omega)
+      exact RtInv.inv_frame hf hwrt invP)
+
+/-- So the guarantee is reached: `ScratchSum(3, 5)` returns `3 ^ 5 = 6`, with the runtime's invariant
+again for the same (empty) live set. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (s'.regs 0).toNat = (3#64 ^^^ 5#64).toNat ∧
+      ∃ d b', (b' = 0x400 ∨ b' = 0x400 - 32) ∧
+        MemFrame s0.mem s'.mem (R.rt ++ [((s0.regs 4).toNat - 4136, (s0.regs 4).toNat + 24), (d, d + 32)]) ∧
+        LiveFrame s0.mem s'.mem [] [] ∧ R.inv b' [] (s0.regs 14).toNat (view R.rt [] s'.mem) := by
+  have h := correctness implAt R BufObj (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
+    (by rw [aN]; exact hnew) 3 5 [] 0x400
+    ret hret s0 setup ⟨rfl, pre⟩
+  exact h
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (ret : Nat) (s : State) (L : List (Nat × Nat))
     (bud : Nat),
@@ -795,23 +1052,19 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (ret : Nat) (s 
       R.ok (Extracted.program.contractAddr "sync.(*Pool).Put") [poolAddr] ∧
       R.ok (Extracted.program.contractAddr "runtime.newobject") [bufType] ∧
       s.mem.readLE (poolAddr + newOffset) 8 = 0 ∧
-      R.inv bud L (s.regs 14).toNat (view R.rt L s.mem) ∧ 32 ≤ bud) := by
-  refine ⟨implAt, R, ret, s0, [], 0x400, ?_, ?_, ?_, hret, setup, ⟨rfl, pre⟩⟩
-  · rw [aG, hPT]; exact hget
-  · rw [aP, hPT]; exact hput
-  · rw [aN]; exact hnew
-
-/-- So the guarantee is reached: `ScratchSum(3, 5)` returns `3 ^ 5 = 6`, with the runtime's invariant
-again for the same (empty) live set. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = (3#64 ^^^ 5#64).toNat ∧
-      ∃ d b', (b' = 0x400 ∨ b' = 0x400 - 32) ∧
-        MemFrame s0.mem s'.mem (R.rt ++ [((s0.regs 4).toNat - 4136, (s0.regs 4).toNat + 24), (d, d + 32)]) ∧
-        LiveFrame s0.mem s'.mem [] [] ∧ R.inv b' [] (s0.regs 14).toNat (view R.rt [] s'.mem) := by
-  have h := correctness implAt R BufObj (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
-    (by rw [aN]; exact hnew) 3 5 [] 0x400
-    ret hret s0 setup ⟨rfl, pre⟩
-  exact h
+      R.inv bud L (s.regs 14).toNat (view R.rt L s.mem) ∧ 32 ≤ bud) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "sync.(*Pool).Get") ∧
+      getSite R L b s_c) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
+      newSite R L b s_c) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (rs : List (Nat × Nat)) (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "sync.(*Pool).Put") ∧
+      putSite R L b rs s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (s'.regs 0).toNat = (3#64 ^^^ 5#64).toNat ∧
+      ∃ d b', (b' = bud ∨ b' = bud - 32) ∧
+        MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24), (d, d + 32)]) ∧
+        LiveFrame s.mem s'.mem L [] ∧ R.inv b' L (s.regs 14).toNat (view R.rt L s'.mem) :=
+  ⟨implAt, R, ret, s0, [], 0x400, (by rw [aG, hPT]; exact hget), (by rw [aP, hPT]; exact hput),
+    (by rw [aN]; exact hnew), hret, setup, ⟨rfl, pre⟩, ⟨[], 0x400, wsG, rfl, wsG_pre⟩, ⟨[], 0x400, wsN, rfl, wsN_pre⟩, ⟨[(HEAP, HEAP + 32)], 0x400, [(HEAP, HEAP + 32)], wsP, rfl, wsP_pre⟩, returns⟩
 
 end Witness
 

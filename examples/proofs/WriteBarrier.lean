@@ -244,19 +244,25 @@ theorem callOK (n : Nat) : CallOK s0 232 0 := by
   refine ⟨by decide, by decide, by decide, by decide, by decide, by decide,
     Memory.accessible_mono _ hw (by decide) (by decide)⟩
 
-/-- The real `gcWriteBarrier1` meets its contract for `Witness.rt`, and for every `N = 1 … 8` the
-precondition of `gcWriteBarrierN`'s contract, with `HRoom`, holds at the concrete state `s0`, so
-the `wbN_meets` are not vacuous. -/
-theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s : State),
-    WbContract Extracted.program wb1 rt 232 (HRoom rt 1) 1 ∧
-    ∀ n, n ≤ 8 → CallOK s 232 0 ∧ Ready (HRoom rt n) rt [n] s :=
-  ⟨rt, s0, wb1_meets rt, fun n hn => ⟨callOK n, ready n hn⟩⟩
-
 /-- From that state (at `gcWriteBarrier1`) the real code returns, with `R25` the reserved slot. -/
 theorem returns : ReachesRet Extracted.program (s0.regs 30) s0 fun s' =>
     s'.pc = s0.regs 30 ∧ ∃ buf : W64, s'.regs 25 = buf ∧ WbSlots rt s'.mem buf.toNat 1 :=
   rr_mono' (wb1_meets rt s0 rfl ⟨callOK 1, ready 1 (by decide)⟩) fun s' ⟨buf, junk, f, v, m, _, _, hs, _, hw⟩ =>
     ⟨by rw [hs], buf, by rw [hs]; simp [wbRegs], by rw [hs]; exact hw⟩
+
+/-- The real `gcWriteBarrier1` meets its contract for `Witness.rt`, and for every `N = 1 … 8` the
+precondition of `gcWriteBarrierN`'s contract, with `HRoom`, holds at the concrete state `s0`, so
+the `wbN_meets` are not vacuous. -/
+theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s : State),
+    WbContract Extracted.program wb1 rt 232 (HRoom rt 1) 1 ∧
+    (∀ n, n ≤ 8 → CallOK s 232 0 ∧ Ready (HRoom rt n) rt [n] s) ∧
+    (ReachesRet Extracted.program (s.regs 30) s fun s' =>
+      ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+        (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+      s' = { s with regs := wbRegs s.regs junk buf, pc := s.regs 30, flags := f, vregs := v, mem := m,
+                    excl := ex, exclPass := ep } ∧
+      MemFrame s.mem m (rt ++ [(s.sp.toNat - 232, s.sp.toNat - 8)]) ∧ WbSlots rt m buf.toNat 1) :=
+  ⟨rt, s0, wb1_meets rt, fun n hn => ⟨callOK n, ready n hn⟩, wb1_meets rt s0 rfl ⟨callOK 1, ready 1 (by decide)⟩⟩
 
 end Witness
 

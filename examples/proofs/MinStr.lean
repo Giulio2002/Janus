@@ -83,6 +83,24 @@ theorem pre : GuardOK s0 80 ∧ StackOK s0 144 40 ∧ StrOK s0.mem (0 : BitVec 6
   ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
     Or.inl rfl, Or.inl rfl, Or.inl rfl, Or.inl rfl, by simp [Disjoint, s0, sp0, g0]⟩
 
+def cAddr : Nat := Extracted.program.contractAddr "runtime.cmpstring"
+
+/-- The call state at `runtime.cmpstring`'s entry (`cmpstring("", "")`). -/
+def wsCall : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 g0 else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (sp0 - 48), pc := BitVec.ofNat 64 cAddr,
+    flags := ⟨false, false, false, false⟩, mem := s0.mem }
+
+theorem wsCall_pre : Janus.Contracts.Cmpstring.CmpstringPre 16 wsCall :=
+  ⟨⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, Or.inl rfl, Or.inl rfl⟩
+
+/-- The theorem fires: `MinStr("", "")` returns the first string. -/
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    (if strCmp s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat < 0
+      then s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64)
+      else s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64)) :=
+  correctness impl 0 0 0 0 hcmp ret hret s0 setup pre
+
 /-- The hypotheses are satisfiable: a `runtime.cmpstring` meeting the contract (`hcmp`) and a call
 state of `MinStr("", "")` that satisfies the precondition. -/
 theorem nonvacuous : ∃ (impl : List Segment) (ret : Nat) (s : State),
@@ -94,15 +112,14 @@ theorem nonvacuous : ∃ (impl : List Segment) (ret : Nat) (s : State),
       StrOK s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat ∧
       ((0 : BitVec 64).toNat = 0 ∨ Disjoint (0 : BitVec 64).toNat (0 : BitVec 64).toNat (s.sp.toNat - 144) 184) ∧
       ((0 : BitVec 64).toNat = 0 ∨ Disjoint (0 : BitVec 64).toNat (0 : BitVec 64).toNat (s.sp.toNat - 144) 184) ∧
-      Disjoint ((s.regs 28).toNat + 16) 8 (s.sp.toNat - 144) 184) :=
-  ⟨impl, ret, s0, hcmp, hret, setup, pre⟩
-
-/-- The theorem fires: `MinStr("", "")` returns the first string. -/
-theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (if strCmp s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat < 0
+      Disjoint ((s.regs 28).toNat + 16) 8 (s.sp.toNat - 144) 184) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.cmpstring") ∧
+      Janus.Contracts.Cmpstring.CmpstringPre 16 s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    (if strCmp s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat < 0
       then s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64)
       else s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64)) :=
-  correctness impl 0 0 0 0 hcmp ret hret s0 setup pre
+  ⟨impl, ret, s0, hcmp, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 

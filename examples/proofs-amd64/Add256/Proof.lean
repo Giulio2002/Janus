@@ -43,4 +43,38 @@ theorem correctness (z x y : BitVec 64) :
   simp (disch := omega) only [carry_toNat]
   omega
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def z : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+def x : BitVec 64 := 0x30900#64
+def y : BitVec 64 := 0x30a00#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then z else if i = 3 then x else if i = 1 then y else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wmem64 }
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [z, x, y] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
+theorem hpre : (fun s => StackWritable s 0 8 ∧ Buffer s z 32 true ∧ Buffer s x 32 false ∧
+        Buffer s y 32 false ∧ Disjoint z 32 x 32 ∧ Disjoint z 32 y 32 ∧
+        Disjoint z 32 (s.regs regSP) 8) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (z : BitVec 64) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [z, x, y] s ∧ (StackWritable s 0 8 ∧ Buffer s z 32 true ∧ Buffer s x 32 false ∧
+        Buffer s y 32 false ∧ Disjoint z 32 x 32 ∧ Disjoint z 32 y 32 ∧
+        Disjoint z 32 (s.regs regSP) 8) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ valueAt s' z 32 = (valueAt s x 32 + valueAt s y 32) % 2 ^ 256) :=
+  ⟨ret, s0, z, x, y, hret, setup, hpre, correctness z x y ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

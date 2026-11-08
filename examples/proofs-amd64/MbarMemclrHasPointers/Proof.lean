@@ -357,6 +357,32 @@ theorem pre : TPre M0 WB (64 + 48) 2 s0 ∧ (s0.regs 0).toNat % 8 = 0 ∧ (s0.re
     simp only [CallOK, Input, Dest, M0, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
       outside_cons, outside_nil] <;> decide
 
+/-- The call-site states of the `runtime.bulkBarrierPreWrite` and `runtime.memclrNoHeapPointers`
+contract hypotheses (U-WITNESS-CALLSITE): at the contracts' addresses, with their preconditions
+for the stack bound `d = 64`. -/
+def wsCallB : State := { s0 with rip := BitVec.ofNat 64 bAddr }
+def wsCallM : State := { s0 with rip := BitVec.ofNat 64 cAddr }
+
+theorem wsCallB_pre : TPre M0 WB 64 4 wsCallB ∧ (wsCallB.regs 0).toNat % 8 = 0 ∧
+    (wsCallB.regs 3).toNat % 8 = 0 ∧ (wsCallB.regs 1).toNat % 8 = 0 := by
+  refine ⟨⟨trivial, ⟨by decide, by decide, by decide⟩, ?_, trivial, ?_, wmem64_wbOff, ?_, trivial⟩,
+    by decide, by decide, by decide⟩ <;>
+    simp only [wsCallB, s0, CallOK, Input, M0, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
+      outside_cons, outside_nil] <;> decide
+
+theorem wsCallM_pre : M0.Env wsCallM.mem (wsCallM.regs 14) ∧ EqPre 64 2 wsCallM ∧
+    Outside ((wsCallM.regs 4).toNat - 64) (64 + 8 + 8 * 2) M0.priv ∧
+    Dest M0 wsCallM 64 2 (wsCallM.regs 0).toNat (wsCallM.regs 3).toNat := by
+  refine ⟨trivial, ⟨⟨by decide, by decide, by decide⟩, ?_, ?_⟩, ?_, ?_⟩ <;>
+    simp only [wsCallM, s0, CallOK, Input, Dest, M0, calleeStack,
+      Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil] <;> decide
+
+/-- `correctness` at `s0`: the 64 bytes at `DST` are cleared. -/
+theorem returns : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0
+    (fun s' => TRet M0 (64 + 48) 2 [((s0.regs 0).toNat, (s0.regs 0).toNat + (s0.regs 3).toNat)] s0 s'
+      fun m => Zeroed m (s0.regs 0).toNat (s0.regs 3).toNat) :=
+  correctness implAt M0 M0_laws WB 64 (modelB 64) (model 64) s0 rfl pre
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MemModel) (wb d : Nat) (s : State),
     M.Laws ∧
@@ -364,16 +390,21 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MemModel) (wb d 
       (Extracted.program.contractAddr "runtime.bulkBarrierPreWrite") M wb d ∧
     MemclrNoHeapPointers (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") M d ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.bulkBarrierPreWrite") ∧
+      TPre M wb d 4 s_c ∧ (s_c.regs 0).toNat % 8 = 0 ∧ (s_c.regs 3).toNat % 8 = 0 ∧
+      (s_c.regs 1).toNat % 8 = 0) ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") ∧
+      M.Env s_c.mem (s_c.regs 14) ∧ EqPre d 2 s_c ∧
+      Outside ((s_c.regs 4).toNat - d) (d + 8 + 8 * 2) M.priv ∧
+      Dest M s_c d 2 (s_c.regs 0).toNat (s_c.regs 3).toNat) ∧
     s.rip = BitVec.ofNat 64 Extracted.entry ∧
     (TPre M wb (d + 48) 2 s ∧ (s.regs 0).toNat % 8 = 0 ∧ (s.regs 3).toNat % 8 = 0 ∧
-      Dest M s (d + 48) 2 (s.regs 0).toNat (s.regs 3).toNat) :=
-  ⟨implAt, M0, WB, 64, s0, M0_laws, modelB 64, model 64, rfl, pre⟩
-
-/-- `correctness` at `s0`: the 64 bytes at `DST` are cleared. -/
-theorem returns : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0
-    (fun s' => TRet M0 (64 + 48) 2 [((s0.regs 0).toNat, (s0.regs 0).toNat + (s0.regs 3).toNat)] s0 s'
-      fun m => Zeroed m (s0.regs 0).toNat (s0.regs 3).toNat) :=
-  correctness implAt M0 M0_laws WB 64 (modelB 64) (model 64) s0 rfl pre
+      Dest M s (d + 48) 2 (s.regs 0).toNat (s.regs 3).toNat) ∧
+    ReachesRet (Extracted.program.link impl) (retAddrOf s) s
+      (fun s' => TRet M (d + 48) 2 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 3).toNat)] s s'
+        fun m => Zeroed m (s.regs 0).toNat (s.regs 3).toNat) :=
+  ⟨implAt, M0, WB, 64, s0, M0_laws, modelB 64, model 64, ⟨wsCallB, rfl, wsCallB_pre⟩,
+    ⟨wsCallM, rfl, wsCallM_pre⟩, rfl, pre, returns⟩
 
 end Witness
 

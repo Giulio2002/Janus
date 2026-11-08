@@ -196,4 +196,52 @@ theorem correctness (x y : BitVec 64) :
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) :=
   (go_spec x y).refine refines
 
+namespace Witness
+
+def RET : Nat := 0x1000
+def SP0 : Nat := 0x108000
+def G0 : Nat := 0x200000
+def TP : Nat := 0x400000
+def x0 : BitVec 64 := 3#64
+def y0 : BitVec 64 := 4#64
+
+/-- The Go stack, the `g` struct (stack guard `0`), the TLS `g` slot, the cgo function-pointer
+variable (holding the wrapper) and `runtime.cgoAlwaysFalse` (zero). -/
+def mem0 : Memory :=
+  ⟨fun a => if fnVar ≤ a ∧ a < fnVar + 8 then BitVec.ofNat 8 (wrapper / 256 ^ (a - fnVar)) else 0,
+    [⟨SP0 - 0x8000, 0x10000, true⟩, ⟨G0, 0x1c8, false⟩, ⟨TP + 16, 8, false⟩, ⟨fnVar, 8, false⟩,
+     ⟨alwaysFalse, 1, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then x0 else if i = 1 then y0 else if i = 28 then BitVec.ofNat 64 G0
+      else if i = 29 then BitVec.ofNat 64 (SP0 - 8) else if i = 30 then BitVec.ofNat 64 RET else 0,
+    sp := BitVec.ofNat 64 SP0, pc := BitVec.ofNat 64 Extracted.entry, tpidr := BitVec.ofNat 64 TP,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem setup : CallSetup (Extracted.program.withExit RET) Extracted.entry [x0, y0] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
+
+set_option maxRecDepth 100000 in
+theorem pre : GoPre s0 := by
+  unfold GoPre
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  all_goals first
+    | decide +kernel
+    | (simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, outside_cons, outside_nil, and_true];
+       decide +kernel)
+
+/-- All hypotheses of `correctness` hold together at a concrete call, and the call returns. -/
+theorem nonvacuous : ∃ (x y : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ GoPre s ∧
+    ReturnsC (Extracted.program.withExit ret) (CgoCall Extracted.program) (fun s' =>
+      ABIReturnC s s' ∧ ((s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64)) s :=
+  ⟨x0, y0, RET, s0, hret, setup, pre, correctness x0 y0 RET hret s0 setup pre⟩
+
+end Witness
+
 end Proof

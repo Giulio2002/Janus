@@ -468,15 +468,17 @@ theorem pre : Pre 0 0 s0 := by
   have hw : wmem.accessible (wsp - 0x2000) 0x2100 true = true := by decide
   exact Memory.accessible_mono _ hw (by decide) (by decide)
 
-/-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0, 0] s ∧ Pre 0 0 s :=
-  ⟨ret, s0, hret, setup, pre⟩
-
 /-- The witness call returns, with the conclusion of `correctness`. -/
 theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat = countRunes (strBytes s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
   correctness 0 0 ret hret s0 setup pre
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [0, 0] s ∧ Pre 0 0 s ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ (s'.regs 0).toNat = countRunes (strBytes s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat)) :=
+  ⟨ret, s0, hret, setup, pre, returns⟩
 
 end Witness
 

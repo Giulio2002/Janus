@@ -111,4 +111,52 @@ theorem correctness (ptr len cap : BitVec 64) :
   janus64_run calls [xor_summary]
   simp (disch := omega) only [xorWords_writeLE]
 
+namespace Witness
+
+def ret : Nat := 0x200000
+def sp0 : Nat := 0x100000
+def g0 : Nat := 0x300000
+def tls0 : Nat := 0x400000
+def dat : Nat := 0x500000
+
+def bytes (a : Nat) : Byte :=
+  if a = sp0 + 2 then 0x20 else if a = tls0 + 2 then 0x30 else if a = dat then 5 else if a = dat + 8 then 6 else 0
+
+def s0 : Janus.Amd64.State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 dat else if i = 3 then 2 else if i = 1 then 2 else if i = 4 then BitVec.ofNat 64 sp0 else if i = 14 then BitVec.ofNat 64 g0 else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := ⟨bytes, [⟨sp0 - 0x100, 0x200, true⟩, ⟨g0, 0x100, false⟩, ⟨tls0, 0x100, false⟩, ⟨dat, 0x100, false⟩]⟩,
+    fsBase := BitVec.ofNat 64 (tls0 + 8) }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry
+    [(0x500000 : BitVec 64), 2, 2] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> first | rfl | decide, rfl⟩
+
+theorem hpre : StackWritable s0 48 16 ∧ TlsG s0 ∧
+    Buffer s0 (0x500000 : BitVec 64) (8 * (2 : BitVec 64).toNat) false ∧
+    Janus.Spec.Disjoint (0x500000 : BitVec 64).toNat (8 * (2 : BitVec 64).toNat) ((s0.regs 4).toNat - 48) 64 ∧
+    Janus.Spec.Disjoint (s0.fsBase.toNat - 8) 8 ((s0.regs 4).toNat - 48) 64 := by
+  unfold Buffer Janus.Spec.Disjoint
+  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
+    ⟨by decide, by decide⟩, by decide, by decide⟩
+
+/-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Amd64.State) (ptr len cap : BitVec 64),
+    RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap] s ∧
+    (StackWritable s 48 16 ∧ TlsG s ∧
+      Buffer s ptr (8 * len.toNat) false ∧
+      Janus.Spec.Disjoint ptr.toNat (8 * len.toNat) ((s.regs 4).toNat - 48) 64 ∧
+      Janus.Spec.Disjoint (s.fsBase.toNat - 8) 8 ((s.regs 4).toNat - 48) 64) ∧
+    Returns (Extracted.program.withExit ret) s
+      (fun s' => ABIReturn s s' ∧ results 1 s' = [xorWords s.mem ptr.toNat len.toNat]) :=
+  ⟨ret, s0, 0x500000, 2, 2, hret, setup, hpre, correctness 0x500000 2 2 ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

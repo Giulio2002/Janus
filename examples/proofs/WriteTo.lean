@@ -81,6 +81,14 @@ theorem hc : ICallContract (Extracted.program.link impl) A0 4 16 48 rt0 (fun _ =
     (fun _ _ => True) (fun _ => trivial)
   exact Summary.of_codeIn (codeIn_link Extracted.program _ (by decide)) h
 
+/-- The call state of the writer contract (U-WITNESS-CALLSITE): at the callee's entry `A0`, with the contract's precondition. -/
+def wsCall : State :=
+  { Janus.Contracts.ICallSat.wstate with regs := fun i => if i = 30 then 0x200000#64 else if i = 0 then 0x600000#64 else if i = 1 then 0x500000#64 else if i = 2 then 3#64 else if i = 3 then 3#64 else 0#64 }
+
+theorem wsCall_pre : ICallPre 4 16 48 rt0 (fun sc => sc.regs 0 = 0x600000 ∧ sc.regs 1 = 0x500000 ∧ sc.regs 2 = 3 ∧ sc.regs 3 = 3) wsCall :=
+  ⟨⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, by decide,
+    by show Janus.Outside 0x17f8 56 rt0; simp [rt0], rfl, rfl, rfl, rfl⟩
+
 theorem hret : RetAddr (Extracted.program.link impl) ret := RetAddr.of_check (by decide)
 
 theorem setup : CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry
@@ -98,10 +106,18 @@ theorem nonvacuous : ∃ (impl : List Segment) (fn stack : Nat) (rt : List (Nat 
     (8 ≤ stack ∧ CodePtrOK fn ∧ Disjoint (tab.toNat + 24) 8 (s.sp.toNat - 56) 88 ∧
       GuardOK s 0 ∧ StackOK s (48 + stack) 40 ∧
       tab.toNat + 32 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 8 false = true ∧ s.mem.readLE (tab.toNat + 24) 8 = fn ∧
-      Outside (s.sp.toNat - 56) 56 rt) :=
+      Outside (s.sp.toNat - 56) 56 rt) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 fn ∧
+      ICallPre 4 stack 48 rt (fun sc => sc.regs 0 = w ∧ sc.regs 1 = ptr ∧ sc.regs 2 = len ∧ sc.regs 3 = cap) s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+      ∃ n e1 e2, R w ptr len cap n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 1 = e1 ∧ s'.regs 2 = e2 :=
   ⟨impl, A0, 16, rt0, R0, ret, s0, BitVec.ofNat 64 tabA, 0x600000, 0x500000, 3, 3, hc, hret, setup,
-    by decide, ⟨by decide, by decide⟩, (by unfold Janus.Spec.Disjoint; decide), ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
-    by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩
+    ⟨by decide, ⟨by decide, by decide⟩, (by unfold Janus.Spec.Disjoint; decide), ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
+    by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩,
+    ⟨wsCall, rfl, wsCall_pre⟩,
+    correctness impl A0 16 rt0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc ret hret s0 setup
+    ⟨by decide, ⟨by decide, by decide⟩, (by unfold Janus.Spec.Disjoint; decide), ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
+    by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩⟩
 
 /-- The theorem fires: the concrete call of `WriteTo` (the concrete writer serves the itab) returns, and its results are the ones
 `correctness` describes. -/

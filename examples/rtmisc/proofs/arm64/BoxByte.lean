@@ -56,4 +56,54 @@ theorem correctness (b : BitVec 64) :
   rw [hr, hT, hA]
   exact ⟨rfl, rfl, hst.accessible hlt, hst.read hlt⟩
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def sp0 : Nat := 0x108000
+def g0 : Nat := 0x200000
+
+
+
+def dbyte (a : Nat) : Option Nat :=
+  Extracted.program.data.findSome? fun d =>
+    if d.base ≤ a ∧ a < d.base + d.bytes.length then d.bytes[a - d.base]? else none
+
+def bytes0 (a : Nat) : BitVec 8 := BitVec.ofNat 8 ((dbyte a).getD (0))
+
+def mem0 : Janus.Arm64.Memory := ⟨bytes0, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x1000, false⟩] ++ Extracted.program.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+
+theorem dataLoaded : Extracted.program.DataLoaded mem0 :=
+  Program.DataLoaded_of_dataSegByte (by unfold DataSegsDisjoint; decide +kernel) (by decide +kernel) (by decide +kernel) fun a n h => by
+    have h' : dbyte a = some n := h
+    show (bytes0 a).toNat = n % 256
+    simp only [bytes0, h', Option.getD_some, BitVec.toNat_ofNat]
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then (0x42 : BitVec 64) else if i = 28 then BitVec.ofNat 64 g0 else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x42 : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0) with rfl <;> rfl⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `correctness` hold together at a concrete call, and it returns. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Arm64.State) (b : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [b] s ∧ (Extracted.program.DataLoaded s.mem) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ ((s'.regs 0).toNat = uint8Type ∧ (s'.regs 1).toNat = staticAddr + 8 * (b.toNat % 256) ∧
+        s'.mem.accessible (s'.regs 1).toNat 8 false = true ∧
+        s'.mem.readLE (s'.regs 1).toNat 8 = b.toNat % 256 ∧ s'.mem = s.mem)) := by
+  refine ⟨ret, s0, 0x42, hret, setup, ?pre, correctness 0x42 ret hret s0 setup ?pre⟩
+  case pre =>
+    exact dataLoaded
+
+end Witness
+
 end Proof

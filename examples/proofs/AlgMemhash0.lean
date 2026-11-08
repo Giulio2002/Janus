@@ -50,8 +50,10 @@ theorem pre : HPre H0 64 2 s0 := by
   refine ⟨wmem_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩ <;>
     simp only [CallOK, H0_priv, calleeStack, outside_cons, outside_nil] <;> decide
 
-theorem nonvacuous : ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ HPre H0 64 2 s :=
-  ⟨s0, rfl, pre⟩
+theorem nonvacuous : ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ HPre H0 64 2 s ∧
+    (ReachesRet Extracted.program (s.regs 30) s
+    (fun s' => HRet H0 64 2 s s' fun r => r 0 = s.regs 1)) :=
+  ⟨s0, rfl, pre, correctness H0 64 s0 rfl pre⟩
 
 /-- `correctness` at `s0`: the call returns the seed 7. -/
 theorem returns : ReachesRet Extracted.program (s0.regs 30) s0

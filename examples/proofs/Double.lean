@@ -60,14 +60,6 @@ theorem pre0 : GlobalBytesIs Extracted.program.globals (s0 mem0).mem "example.co
 theorem pre1 : GlobalBytesIs Extracted.program.globals (s0 mem1).mem "example.com/basic.useFast" 0 1 1 :=
   ⟨_, rfl, by decide, by decide, by decide⟩
 
-/-- The hypotheses of `correctness` hold together, for the flag clear and for the flag set. -/
-theorem nonvacuous : ∃ (ret : Nat) (s s' : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] s ∧
-    GlobalBytesIs Extracted.program.globals s.mem "example.com/basic.useFast" 0 1 0 ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] s' ∧
-    GlobalBytesIs Extracted.program.globals s'.mem "example.com/basic.useFast" 0 1 1 :=
-  ⟨ret, s0 mem0, s0 mem1, hret, setup _, pre0, setup _, pre1⟩
-
 /-- So the guarantee is reached on both paths: `Double(21)` returns `42`. -/
 theorem returns :
     Returns (Extracted.program.withExit ret) (s0 mem0) (fun s' => ABIReturn (s0 mem0) s' ∧ s'.regs 0 = 42#64) ∧
@@ -75,6 +67,17 @@ theorem returns :
   refine ⟨(correctness 21#64 0 ret hret _ (setup _) pre0).mono ?_,
     (correctness 21#64 1 ret hret _ (setup _) pre1).mono ?_⟩
   all_goals intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
+
+/-- The hypotheses of `correctness` hold together, for the flag clear and for the flag set, and both runs return. -/
+theorem nonvacuous : ∃ (ret : Nat) (s s' : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] s ∧
+    GlobalBytesIs Extracted.program.globals s.mem "example.com/basic.useFast" 0 1 0 ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] s' ∧
+    GlobalBytesIs Extracted.program.globals s'.mem "example.com/basic.useFast" 0 1 1 ∧
+    Returns (Extracted.program.withExit ret) s (fun t => ABIReturn s t ∧ t.regs 0 = 21#64 + 21#64) ∧
+    Returns (Extracted.program.withExit ret) s' (fun t => ABIReturn s' t ∧ t.regs 0 = 21#64 + 21#64) :=
+  ⟨ret, s0 mem0, s0 mem1, hret, setup _, pre0, setup _, pre1,
+    correctness 21#64 0 ret hret _ (setup _) pre0, correctness 21#64 1 ret hret _ (setup _) pre1⟩
 
 end Witness
 

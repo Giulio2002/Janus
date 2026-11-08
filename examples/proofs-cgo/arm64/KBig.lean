@@ -97,4 +97,35 @@ theorem correctness (x y : BitVec 64) :
         by simp only [Returned, sig, result, ResultAt, size_big, hm, bigMem_read], rfl,
         by rw [hm]; unfold bigMem; janus_frame⟩)
 
+namespace Witness
+
+def RET : Nat := 0x1000
+def P : Nat := 0x100000
+def x0 : BitVec 64 := 5#64
+def y0 : BitVec 64 := 3#64
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then x0 else if i = 1 then y0 else if i = 8 then BitVec.ofNat 64 P
+      else if i = 30 then BitVec.ofNat 64 RET else 0,
+    sp := BitVec.ofNat 64 0x300000, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := ⟨fun _ => 0, [⟨P, 32, true⟩]⟩, exclPass := fun _ => true }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem spre : SPre (vals x0 y0) s0 :=
+  (spre_iff x0 y0 s0).2 ⟨by decide, by decide, by decide, by decide, by decide, by decide⟩
+
+theorem call : CCallA (Extracted.program.withExit RET) Extracted.entry sig (vals x0 y0) s0 :=
+  ⟨rfl, rfl, by decide, spre.1, spre.2.1⟩
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (x y : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals x y) s ∧ True ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      (∃ v, Returned sig s s' v ∧ (v = quad (x + y) (x - y) (x * y) (x ^^^ y) ∧
+        MemFrame s.mem s'.mem [((s.regs 8).toNat, (s.regs 8).toNat + 32)]))) :=
+  ⟨x0, y0, RET, s0, hret, call, trivial, correctness x0 y0 RET hret s0 call trivial⟩
+
+end Witness
+
 end Proof

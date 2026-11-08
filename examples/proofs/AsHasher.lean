@@ -465,18 +465,33 @@ theorem pre : CallerOK R0 s0 48 24 ∧ TADescOK R0 s0.mem desc ∧ taCanFail s0.
   · decide +kernel
   · simp only [outside_cons, outside_nil, and_true]; decide +kernel
 
-/-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (H : RtReady) (ret : Nat) (s : State)
-    (t x : BitVec 64),
-    R.Laws ∧ TypeAssert (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typeAssert") R H ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [t, x] s ∧
-    (CallerOK R s 48 24 ∧ TADescOK R s.mem desc ∧ taCanFail s.mem desc = true ∧
-      Outside desc 24 [(s.sp.toNat - (R.depth + 48), s.sp.toNat + 24)] ∧
-      (t.toNat ≠ 0 → R.IsType t.toNat) ∧
-      H [desc, t.toNat] (s.regs 28).toNat (s.sp.toNat - 48) (rtView R.priv s.mem)) :=
-  ⟨implAt, R0, Htrue, ret, s0, td, val, R0_laws, model, hret, setup,
-    pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩
+theorem rtpre_pc {n : Nat} {R : IfaceModel} {s : State} (a : BitVec 64) (h : RTPre R n s) :
+    RTPre R n { s with pc := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c, o⟩
+
+/-- The precondition of `TypeAssert`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def TypeAssertSite (R : IfaceModel) (H : Janus.Contracts.RtReady) (s_c : State) : Prop :=
+  RTPre R 2 s_c ∧ TADescOK R s_c.mem (s_c.regs 0).toNat ∧ (s_c.regs 1).toNat ≠ 0 ∧
+    ((s_c.regs 1).toNat ≠ 0 → R.IsType (s_c.regs 1).toNat ∧
+      (taCanFail s_c.mem (s_c.regs 0).toNat = true ∨
+        (R.itab (taInter s_c.mem (s_c.regs 0).toNat) (s_c.regs 1).toNat).isSome)) ∧
+    Ready H R.priv [(s_c.regs 0).toNat, (s_c.regs 1).toNat] s_c
+
+/-- The call state of the `runtime.typeAssert` contract (U-WITNESS-CALLSITE): `desc` and the type word `td`, in the witness memory. -/
+def wsCall : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 desc else if i = 1 then td else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 cAddr,
+    flags := ⟨false, false, false, false⟩, mem := mem1 }
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : TypeAssertSite R0 Htrue wsCall := by
+  refine ⟨⟨mem1_env (wsCall.regs 28), ⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩,
+    by show TADescOK R0 mem1 (BitVec.ofNat 64 desc).toNat; rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt (by decide)]; exact mem1_desc,
+    ?_, fun _ => ⟨Or.inl rfl, Or.inl ?_⟩, trivial⟩
+  all_goals first
+    | decide +kernel
+    | (simp only [R0_priv, outside_cons, outside_nil, and_true]; decide +kernel)
 
 /-- So the guarantee is reached: the assertion succeeds with the model's itab `TAB`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
@@ -490,6 +505,23 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
   have h0' : (s'.regs 0).toNat = TAB := by rw [h0]; decide +kernel
   refine ⟨habi, h0', h1, ?_⟩
   rw [h2, h0']; decide +kernel
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (H : RtReady) (ret : Nat) (s : State)
+    (t x : BitVec 64),
+    R.Laws ∧ TypeAssert (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typeAssert") R H ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [t, x] s ∧
+    (CallerOK R s 48 24 ∧ TADescOK R s.mem desc ∧ taCanFail s.mem desc = true ∧
+      Outside desc 24 [(s.sp.toNat - (R.depth + 48), s.sp.toNat + 24)] ∧
+      (t.toNat ≠ 0 → R.IsType t.toNat) ∧
+      H [desc, t.toNat] (s.regs 28).toNat (s.sp.toNat - 48) (rtView R.priv s.mem)) ∧
+    (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.typeAssert") ∧ TypeAssertSite R H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (Post R t x s s' ∧
+        (StaticItabs R Extracted.program.data → taInter s.mem desc = hasherInter →
+          t.toNat = mulHasherType → (s'.regs 0).toNat = mulHasherItab ∧ (s'.regs 2).toNat = 1)) :=
+  ⟨implAt, R0, Htrue, ret, s0, td, val, R0_laws, model, hret, setup,
+    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt R0 R0_laws Htrue model td val ret hret s0 setup ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩⟩
 
 end Witness
 

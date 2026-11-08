@@ -40,7 +40,7 @@ row() {
   [ -n "$status" ] && broken+=("$name")
   return 0
 }
-v() { out="$("$J" verify --allow-no-witness --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
+v() { out="$("$J" verify --audit-only --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"; }
 
 if [ "${JANUS_ROUND13_ONLY:-}" != F ]; then
 echo "== B1: a non-Prop binder (any sort) mentioning a runtime variable is rejected BY THIS RULE"

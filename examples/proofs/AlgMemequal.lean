@@ -437,8 +437,10 @@ theorem pre : EqPre 64 0 s0 ∧ Input s0 64 0 (s0.regs 0).toNat (s0.regs 2).toNa
 
 theorem nonvacuous : ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧
     (EqPre 64 0 s ∧ Input s 64 0 (s.regs 0).toNat (s.regs 2).toNat ∧
-      Input s 64 0 (s.regs 1).toNat (s.regs 2).toNat) :=
-  ⟨s0, rfl, pre⟩
+      Input s 64 0 (s.regs 1).toNat (s.regs 2).toNat) ∧
+    (ReachesRet Extracted.program (s.regs 30) s
+    (fun s' => EqRet 64 0 s s' fun r => BoolRes r (s.mem.readLE (s.regs 0).toNat (s.regs 2).toNat == s.mem.readLE (s.regs 1).toNat (s.regs 2).toNat))) :=
+  ⟨s0, rfl, pre, correctness 64 s0 rfl pre⟩
 
 /-- `correctness` at `s0`: the call returns whether the 8 bytes at `VAL` and `DST` agree. -/
 theorem returns : ReachesRet Extracted.program (s0.regs 30) s0

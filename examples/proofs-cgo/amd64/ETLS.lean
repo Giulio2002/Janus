@@ -60,4 +60,51 @@ theorem correctness (x : BitVec 64) :
   rw [show (s.regs 4).toNat - 8 + 8 = (s.regs 4).toNat by omega] at h1
   exact ⟨rfl, rfl, memFrame_trans (rs := [_]) (rs' := [_]) h1 (memFrame_writeLE _ _ _ _)⟩
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x20008  -- addr-ok: a chosen stack window, not a binary address
+def F : Nat := 0x500000  -- addr-ok: a chosen thread control block
+def x0 : BitVec 64 := 5#64
+
+/-- The stack (return address at `[wsp]`), this thread's TLS block below `FS` (writable) and the
+thread control block whose first word holds `FS`. -/
+def smem : Janus.Arm64.Memory :=
+  ⟨fun a => if wsp ≤ a ∧ a < wsp + 8 then BitVec.ofNat 8 (ret / 256 ^ (a - wsp))
+    else if F ≤ a ∧ a < F + 8 then BitVec.ofNat 8 (F / 256 ^ (a - F)) else 0,
+   [⟨wsp - 64, 128, true⟩, ⟨F - Extracted.tls.x64Off, Extracted.tls.x64Off, true⟩, ⟨F, 8, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 7 then x0 else if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, fsBase := BitVec.ofNat 64 F, mem := smem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [x0] s0 :=
+  ⟨rfl, by decide, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
+
+theorem tls : TLSBlock Extracted.tls s0 :=
+  ⟨⟨by decide +kernel, by decide⟩, by decide +kernel, by decide +kernel, by decide +kernel⟩
+
+theorem pre : TLSBlock Extracted.tls s0 ∧ CStack s0 8 8 ∧
+    Outside (var s0) 8 [((s0.regs 4).toNat - 8, (s0.regs 4).toNat + 8)] ∧
+    Outside s0.fsBase.toNat 8 [((s0.regs 4).toNat - 8, (s0.regs 4).toNat)] := by
+  refine ⟨tls, ⟨by decide, by decide, by decide, by decide⟩, ?_, ?_⟩ <;>
+  · simp only [outside_cons, outside_nil, and_true]; decide +kernel
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (x : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [x] s ∧
+    (TLSBlock Extracted.tls s ∧ CStack s 8 8 ∧
+      Outside (var s) 8 [((s.regs 4).toNat - 8, (s.regs 4).toNat + 8)] ∧
+      Outside s.fsBase.toNat 8 [((s.regs 4).toNat - 8, (s.regs 4).toNat)]) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      ((s'.regs 0).toNat = (s.mem.readLE (var s) 8 + x.toNat) % 2 ^ 64 ∧
+        s'.mem.readLE (var s) 8 = (s.mem.readLE (var s) 8 + x.toNat) % 2 ^ 64 ∧
+        MemFrame s.mem s'.mem [((s.regs 4).toNat - 8, (s.regs 4).toNat), (var s, var s + 8)])) :=
+  ⟨x0, ret, s0, hret, call, pre, correctness x0 ret hret s0 call pre⟩
+
+end Witness
+
 end Proof

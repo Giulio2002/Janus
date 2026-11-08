@@ -124,13 +124,23 @@ theorem wstate_eq (r : Nat → W64) : wstate r = PrintFn.Witness.wstate PrintCod
 """)
     nv_stmt = fix(s_nv)
     ret_stmt = fix(s_ret).replace("wstate Extracted.entry ", "wstate ").replace("(P.link implAt)", "(Extracted.program.link implAt)")
+    cs_tr = lambda nm: f"""  · obtain ⟨sc, hpc, hco, hlp, hn⟩ := {nm}
+    refine ⟨sc, ?_, hco, hlp, hn⟩
+    rw [equiv.contractAddr]; exact hpc"""
     out.append("\n" + d_nv + nv_stmt + f""":= by
-  obtain ⟨impl, rt, ret, s, h1, h2, h3, h4, h5, hp⟩ := {nsm}.Witness.nonvacuous
-  refine ⟨impl, rt, ret, s, {PRN}Lock2Contract.of_equiv equiv.symm impl rt 1024 h1, {PRN}Unlock2Contract.of_equiv equiv.symm impl rt 1024 h2,
-    {PRN}MemmoveContract.of_equiv equiv.symm impl h3, equiv.symm.retAddr impl h4, ?_, ?_⟩
+  obtain ⟨impl, rt, ret, s, E, k, h1, h2, h3, h4, h5, hp, hl2, hu2, hm2, hrun, hrun2⟩ := {nsm}.Witness.nonvacuous
+  refine ⟨impl, rt, ret, s, E, k, {PRN}Lock2Contract.of_equiv equiv.symm impl rt 1024 h1, {PRN}Unlock2Contract.of_equiv equiv.symm impl rt 1024 h2,
+    {PRN}MemmoveContract.of_equiv equiv.symm impl h3, equiv.symm.retAddr impl h4, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · {nl_fwd}exact {SETUP}
   · {eqs_fwd}
     exact {xfer_pre.replace('equiv.dataLoaded', 'equiv.symm.dataLoaded').replace('of_equiv equiv ', 'of_equiv equiv.symm ')}
+{cs_tr('hl2')}
+{cs_tr('hu2')}
+  · obtain ⟨sc, hpc, hmv⟩ := hm2
+    refine ⟨sc, ?_, hmv⟩
+    rw [equiv.contractAddr]; exact hpc
+  · {nl_fwd}exact (((equiv.sim impl).withExit ret).symm).returnsK hrun
+  · {nl_fwd}exact (((equiv.sim impl).withExit ret).symm).returnsK hrun2
 """)
     out.append("\n" + d_ret + ret_stmt + f""":= by
   rw [implAt_eq, wstate_eq]

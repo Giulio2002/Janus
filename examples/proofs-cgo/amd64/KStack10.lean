@@ -99,4 +99,54 @@ theorem correctness (a b c d e f g h : BitVec 64) (i : BitVec 32) (j : BitVec 64
       ⟨CReturn.of_eqs hsp h3 h5 h12 h13 h14 h15 hdf hmx hfw, _,
         by simp only [Returned, sig, result, ResultAt, PiecesAt, and_true, pieceAt_gpr_word, h0], rfl⟩)
 
+namespace Witness
+
+def ret : Nat := 0x1000
+def wsp : Nat := 0x20008  -- addr-ok: a chosen stack window, not a binary address
+def i0 : BitVec 32 := 11#32
+def j0 : BitVec 64 := 12#64
+
+/-- The stack: the return address at `[wsp]`, then the stacked arguments `7`, `8` (words), `11`
+(a dword at `wsp+24`) and `12`. -/
+def smem : Janus.Arm64.Memory :=
+  ⟨fun a => if wsp ≤ a ∧ a < wsp + 8 then BitVec.ofNat 8 (ret / 256 ^ (a - wsp))
+    else if wsp + 8 ≤ a ∧ a < wsp + 16 then BitVec.ofNat 8 (7 / 256 ^ (a - (wsp + 8)))
+    else if wsp + 16 ≤ a ∧ a < wsp + 24 then BitVec.ofNat 8 (8 / 256 ^ (a - (wsp + 16)))
+    else if wsp + 24 ≤ a ∧ a < wsp + 28 then BitVec.ofNat 8 (11 / 256 ^ (a - (wsp + 24)))
+    else if wsp + 32 ≤ a ∧ a < wsp + 40 then BitVec.ofNat 8 (12 / 256 ^ (a - (wsp + 32))) else 0,
+   [⟨wsp - 64, 128, true⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 7 then 1#64 else if i = 6 then 2#64 else if i = 2 then 3#64
+      else if i = 1 then 4#64 else if i = 8 then 5#64 else if i = 9 then 6#64
+      else if i = 4 then BitVec.ofNat 64 wsp else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := smem }
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+theorem spre : SPre (vals 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0) s0 :=
+  (spre_iff 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0 s0).2
+    ⟨by decide, by decide, by decide, by decide, by decide, by decide,
+      ⟨by decide, by decide, by decide +kernel⟩, ⟨by decide, by decide, by decide +kernel⟩,
+      ⟨by decide, by decide, by decide +kernel⟩, ⟨by decide, by decide, by decide +kernel⟩,
+      by decide, by decide, by decide +kernel, by decide⟩
+
+theorem call : CCallA (Extracted.program.withExit ret) Extracted.entry sig
+    (vals 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0) s0 :=
+  ⟨rfl, by decide +kernel, by decide, rfl, spre.1, (by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr), (by intro h; simp [sig] at h)⟩
+
+theorem stack : CStack s0 0 8 := ⟨by decide, by decide, by decide, by decide⟩
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (a b c d e f g h : BitVec 64) (i : BitVec 32) (j : BitVec 64) (ret : Nat) (s : State),
+    RetAddr Extracted.program ret ∧
+    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals a b c d e f g h i j) s ∧ (CStack s 0 8) ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      (∃ v, Returned sig s s' v ∧ (v = (spec a b c d e f g h i j).toNat))) :=
+  ⟨1#64, 2#64, 3#64, 4#64, 5#64, 6#64, 7#64, 8#64, i0, j0, ret, s0, hret, call, stack,
+    correctness 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0 ret hret s0 call stack⟩
+
+end Witness
+
 end Proof

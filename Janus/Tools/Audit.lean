@@ -97,6 +97,8 @@ structure Record where
   computed from the statement, not from the extraction. A main theorem has them as hypotheses; a
   witness claims them. Empty: the statement assumes nothing about the runtime. -/
   contractHyps : Array String := #[]
+  /-- UP3c: the main theorem is a refutation (its statement, under its binders, is a negation `¬ …`): it claims no run, so no run-witness is required. -/
+  refutation : Bool := false
   /-- The import graph of every module outside the toolchain core (`Init`, `Std`, `Lean`,
   `Lake`): `[module, direct import, …]`. The Go side kernel-replays each of these modules and
   keys its replay cache on the module's bytes and those of its imports. -/
@@ -1826,6 +1828,82 @@ partial def ensuresPres (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
   | .mdata _ b | .proj _ _ b => ensuresPres b acc
   | _ => acc
 
+/-- The theorems of the non-trusted modules (and of the module being elaborated) whose statement mentions `ICallPre`/`ICallPre64`
+and whose axioms are among propext / Classical.choice / Quot.sound: the candidate inhabitation lemmas. Computed in the FULL
+environment (the statement audit later runs in a clean environment that does not contain the proof module). -/
+def inhabCandidates (env : Environment) : MetaM (Array (Name × Expr)) := do
+  let pres := #[`Janus.Contracts.ICall.ICallPre, `Janus.Contracts.ICall.ICallPre64]
+  let modNames := env.header.moduleNames
+  let mut names : Array Name := #[]
+  names := env.const2ModIdx.fold (init := names) fun acc n idx =>
+    match modNames[idx.toNat]? with
+    | some m =>
+      if !trustedModule m && !n.isInternal then
+        match env.find? n with
+        | some (.thmInfo ci) => if ci.type.getUsedConstants.any pres.contains then acc.push n else acc
+        | _ => acc
+      else acc
+    | none => acc
+  names := env.constants.map₂.foldl (init := names) fun acc n ci =>
+    match ci with
+    | .thmInfo t => if !n.isInternal && t.type.getUsedConstants.any pres.contains then acc.push n else acc
+    | _ => acc
+  let mut out : Array (Name × Expr) := #[]
+  for n in names do
+    let some ci := env.find? n | continue
+    let axs ← collectAxioms n
+    if axs.all fun a => a == ``propext || a == ``Classical.choice || a == ``Quot.sound then out := out.push (n, ci.type)
+  return out
+
+initialize inhabRef : IO.Ref (Array (Name × Expr)) ← IO.mkRef #[]
+
+/-- UP3 (honesty of the call-site property): an `ICallContract[64]` whose `P` is anything but `fun _ => True` is a hypothesis
+with an AUTHOR-CHOSEN predicate; `P := False` (or any unsatisfiable `P`) makes the contract's call precondition unsatisfiable, so
+the hypothesis holds vacuously. The proof module must contain a kernel-checked theorem
+`∃ …, ∃ s, ICallPre[64] nargs stack above rt P s` (any leading `∀`/`∃`; the family's own precondition, `CallOK` included) that
+unifies with the statement's contract at SOME instantiation of the statement's variables (they are mvars here: the contract may
+not be unsatisfiable for every instantiation). Found by statement among the theorems of the non-trusted modules, whose axioms
+must be among propext / Classical.choice / Quot.sound. Returns the names of the lemmas tried when none matches. -/
+def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM (Except String Name) := do
+  let cands0 ← inhabRef.get
+  let cands0 ← if cands0.isEmpty then inhabCandidates env else pure cands0
+  let pre := if c == `Janus.Contracts.ICall.ICallContract then `Janus.Contracts.ICall.ICallPre else `Janus.Contracts.ICall.ICallPre64
+  -- the statement's own variables become mvars: the instantiation is existential
+  let args ← args.mapM instantiateMVars
+  let fvs : Array FVarId := (args.foldl (fun st a => collectFVars st a) ({} : CollectFVars.State)).fvarIds
+  let mut mvs : Array Expr := #[]
+  for v in fvs do mvs := mvs.push (← Meta.mkFreshExprMVar (← Meta.inferType (.fvar v)))
+  let tgt := args.map fun a => (a.abstract (fvs.map Expr.fvar)).instantiateRev mvs
+  -- ICallContract p fn nargs stack above rt keep R P preserves
+  let want := #[tgt[2]!, tgt[3]!, tgt[4]!, tgt[5]!, tgt[8]!]
+  let mut dbg : Array String := #[]
+  for (n, cty) in cands0 do
+    let st ← Meta.saveState
+    let ok ← try
+      let lps := (collectLevelParams {} cty).params
+      let ty := cty.instantiateLevelParams lps.toList (← lps.toList.mapM fun _ => Meta.mkFreshLevelMVar)
+      let (_, _, b) ← Meta.forallMetaTelescope ty
+      let mut b := (← instantiateMVars b).consumeMData
+      -- peel the `∃`s
+      for _ in [0:64] do
+        if b.isAppOfArity ``Exists 2 then
+          let x ← Meta.mkFreshExprMVar (b.getArg! 0)
+          b := (← instantiateMVars (Expr.headBeta (mkApp (b.getArg! 1) x))).consumeMData
+        else break
+      if b.getAppFn.isConstOf pre then dbg := dbg.push s!"{n}: head ok, {b.getAppNumArgs} args"
+      if b.getAppFn.isConstOf pre && b.getAppNumArgs == 6 then
+        let ba := b.getAppArgs
+        let mut all := true
+        for j in [0:5] do
+          unless ← Meta.isDefEq ba[j]! want[j]! do all := false; break
+        pure all
+      else pure false
+    catch _ => pure false
+    st.restore
+    if ok then return .ok n
+  return .error s!"no kernel-checked theorem of the proof module states `∃ s, {pre.getString!} nargs stack above rt P s` for this contract at some instantiation of the statement's variables (candidates: {dbg})"
+
+
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
 Round 14 (V2): with `main` (the default; every theorem that is not a `Witness.nonvacuous`/`Witness.returns`)
 the runtime implementation must also be a variable of the statement (`concreteRuntime`) and every such
@@ -1853,6 +1931,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
     let bound : Std.HashSet FVarId := xs.foldl (fun s x => s.insert x.fvarId!) {}
     let mut rtVars : Std.HashSet FVarId := {}
     let mut sizeVars : Array (String × FVarId × Nat) := #[]  -- U-ICALL-STACK: variables used as nargs/stack/above
+    let mut appSizes : Array (Array (String × Sum Nat FVarId)) := #[]  -- U-ICALL-STACK joint check: per contract, its nargs/stack/above
     let mut icallFns : Array FVarId := #[]  -- U-ICALL: the callee-address variables of the abstract-callee contracts
     let mut icallFree : Array Expr := #[]  -- U-ICALL: the `P` and `keep` arguments, checked once `rtVars` is complete
     -- the implementation variables no recognised contract mentions (round 14)
@@ -1893,6 +1972,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
       -- constrains beyond a numeral lower bound (checked once the premises are known); anything else could make the contract
       -- hold vacuously.
       let bnames := forallBinderNames ci.type #[]
+      let mut thisSizes : Array (String × Sum Nat FVarId) := #[]
       let mut nargsV : Option Nat := none
       for i in [0:bnames.size] do
         if bnames[i]! == `nargs then nargsV := ← icallNatValue? args[i]!
@@ -1903,13 +1983,17 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
         let limit := if nm == "nargs" then 64 else 2 ^ 47
         match (← icallNatValue? a) with
         | some n =>
+          thisSizes := thisSizes.push (nm, .inl n)
           let low := if nm == "stack" then 8 else if nm == "above" then 8 + 8 * (nargsV.getD 0) else 0
           if n < low || (nm != "nargs" && n ≥ limit) || (nm == "nargs" && n > limit) then
             return some s!"assumes the runtime contract {c} with the {nm} `{(← Meta.ppExpr a).pretty 10000}` = {n}, outside the satisfiable range ({if nm == "nargs" then "at most 64" else if nm == "stack" then "8 ≤ stack < 2^47" else s!"{low} ≤ above < 2^47"}): the call precondition would be unsatisfiable, so the hypothesis would hold vacuously (U-ICALL-STACK)"
         | none =>
-          if isVar a then sizeVars := sizeVars.push (nm, a.fvarId!, limit)
+          if isVar a then
+            sizeVars := sizeVars.push (nm, a.fvarId!, limit)
+            thisSizes := thisSizes.push (nm, .inr a.fvarId!)
           else
             return some s!"assumes the runtime contract {c} with the {nm} `{(← Meta.ppExpr a).pretty 10000}`, which is neither a closed numeral term nor a variable of the statement: its value could make the call precondition unsatisfiable (U-ICALL-STACK)"
+      appSizes := appSizes.push thisSizes
       -- Spec binding: the spec (and live data) a contract carries must describe the function it is stated at
       if let some (prog, fn) := contractAddrOf? app then
         unless prog.isConstOf `Extracted.program do
@@ -2104,6 +2188,92 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
           else pure false
         unless lowerBound || belowFree do
           return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}) about the {what} `{(← v.getUserName)}` of a runtime contract: such a size may be constrained only by a numeral lower bound (`c ≤ {(← v.getUserName)}`) within the satisfiable range; an equality or upper bound can pin it to a value that makes the call precondition unsatisfiable, and the contract would hold vacuously (U-ICALL-STACK)"
+    -- U-ICALL-STACK (UP3, red team n11 N10-N18, N60-N65): a size variable `v` (and every bounding variable `w` of a
+    -- `v ≤ w` premise) occurs NOWHERE ELSE in the statement of a main theorem: not in a non-Prop binder (`PLift (k = 7)`,
+    -- `PProd`, `Fin w → …`, a structure, a def-wrapped type: the type mentions `v`), not in the precondition (or the
+    -- entry/arguments) of the conclusion, where it is an assumption (`Ensures … (fun _ => k = 7)`, a `let` copy of it).
+    -- Uniform: no list of wrappers, any occurrence is a possible pin. The POST of an `Ensures` is the theorem's obligation,
+    -- not an assumption, so a size may be mentioned there (it only strengthens the theorem); a size may occur in other
+    -- contract hypotheses (one size shared by several calls); a `w` may not (`onlyLowerBounded`).
+    if main then
+      let mut wVars : Std.HashSet FVarId := {}
+      for (_, t) in premises do
+        let t' := t.consumeMData
+        if (t'.isAppOfArity ``LE.le 4 || t'.isAppOfArity ``LT.lt 4) && (t'.getArg! 0).isConstOf ``Nat then
+          if let .fvar w := (t'.getArg! 3).consumeMData then
+            if !sizeVarIds.contains w && (t'.getArg! 2).hasAnyFVar (sizeVarIds.contains ·) then
+              wVars := wVars.insert w
+      let mut guarded : Array FVarId := sizeVarIds
+      for w in wVars do guarded := guarded.push w
+      let stripPost (e : Expr) : Expr := e.replace fun sub =>
+        if (sub.getAppFn.constName?.any fun n => n == `Janus.GoABI.Ensures || n == `Janus.Amd64.GoABI.Ensures) && sub.getAppNumArgs == 5 then
+          some (mkAppN sub.getAppFn (sub.getAppArgs.set! 4 (mkConst ``True)))
+        else none
+      for x in xs do
+        let t ← instantiateMVars (← Meta.inferType x)
+        if ← Meta.isProp t then continue
+        if let some g := guarded.find? (fun g => t.hasAnyFVar (· == g) && x.fvarId! != g) then
+          return some s!"has the non-Prop binder `{(← x.fvarId!.getUserName)} : {(← Meta.ppExpr t).pretty 10000}` whose type mentions `{(← g.getUserName)}`, a size (or the variable bounding a size) of a runtime contract: such a binder (`PLift`, `PProd`, `Fin`, `Subtype`, a structure, a def-wrapped type) could pin the size to a value that makes the call precondition unsatisfiable, and the contract would hold vacuously (U-ICALL-STACK)"
+      -- (the conclusion's precondition may legitimately mention a size: frame facts `8 ≤ stack`, `StackOK s (48 + stack) …`; pins there
+      -- are caught by the tied run witness, U-WITNESS-RUN, not syntactically)
+      -- joint satisfiability: the least solution of `stack ≥ 8`, `above ≥ 8 + 8·nargs` over the numeral lower bounds
+      -- of the premises must meet the upper bounds (`nargs ≤ 64`, every other size `< 2^47`) and the literals
+      let mut lo : Std.HashMap FVarId Nat := {}
+      let mut hi : Std.HashMap FVarId Nat := {}
+      for (what, v, limit) in sizeVars do
+        hi := hi.insert v (min (hi.getD v (2 ^ 47)) (if what == "nargs" then limit else limit - 1))
+      for (_, t) in premises do
+        let t' := t.consumeMData
+        let isLT := t'.isAppOfArity ``LT.lt 4
+        if (t'.isAppOfArity ``LE.le 4 || isLT) && (t'.getArg! 0).isConstOf ``Nat then
+          if let .fvar v := (t'.getArg! 3).consumeMData then
+            if sizeVarIds.contains v then
+              if let some n ← icallNatValue? (t'.getArg! 2) then
+                lo := lo.insert v (max (if isLT then n + 1 else n) (lo.getD v 0))
+      let val (lo : Std.HashMap FVarId Nat) : Sum Nat FVarId → Nat
+        | .inl k => k
+        | .inr v => lo.getD v 0
+      let mut converged := false
+      for _ in [0:300] do
+        let mut changed := false
+        for sz in appSizes do
+          let need := 8 + 8 * (match sz.find? (·.1 == "nargs") with | some (_, n) => val lo n | none => 0)
+          for (nm, e) in sz do
+            if nm == "above" then
+              match e with
+              | .inl k =>
+                if k < need then
+                  return some s!"assumes a runtime contract whose `above` = {k} is below 8 + 8·nargs = {need} (with the least nargs the premises allow): the caller-frame precondition is unsatisfiable, and the contract would hold vacuously (U-ICALL-STACK, joint)"
+              | .inr v =>
+                if lo.getD v 0 < need then
+                  lo := lo.insert v need
+                  changed := true
+            else if nm == "stack" then
+              match e with
+              | .inr v =>
+                if lo.getD v 0 < 8 then
+                  lo := lo.insert v 8
+                  changed := true
+              | .inl _ => pure ()
+        for (v, h) in hi.toList do
+          if lo.getD v 0 > h then
+            return some s!"assumes runtime contracts whose sizes are jointly unsatisfiable: the variable `{(← v.getUserName)}` must be at least {lo.getD v 0} (numeral lower bounds, `stack ≥ 8`, `above ≥ 8 + 8·nargs`) but at most {h} (`nargs ≤ 64`, every other size `< 2^47`): the call precondition is unsatisfiable, and the contract would hold vacuously (U-ICALL-STACK, joint)"
+        if !changed then
+          converged := true
+          break
+      if !converged then
+        return some "assumes runtime contracts whose size arguments feed each other (`above ≥ 8 + 8·nargs` through a shared variable) without a solution (U-ICALL-STACK, joint)"
+    -- UP3: a call-site property `P := False` is rejected outright; any other author-chosen `P` is held honest by the tied
+    -- call-site conjunct of the witness (U-WITNESS-CALLSITE), which replaces the untied inhabitation lemma
+    if main then
+      for app in apps do
+        let .const c _ := app.getAppFn | continue
+        unless isICallContract c do continue
+        let args := app.getAppArgs
+        if args.size < 9 then continue
+        let pBody ← Meta.lambdaTelescope args[8]! fun _ b => do pure (← Meta.whnfR b).consumeMData
+        if pBody.isConstOf ``False then
+          return some s!"assumes the abstract-callee contract {c} with the call-site property `fun _ => False`: its call precondition is unsatisfiable and the hypothesis holds vacuously (U-ICALL-INHABITED)"
     -- U-ICALL red team B1/B2: the callee address `fn` of an abstract-callee contract appears only inside contract
     -- hypotheses (and the statement's own body); any other premise mentioning it (`fn = Extracted.entry`, `fn = 0x100000`,
     -- an inequality, …) would pin the abstract callee to code the statement chooses
@@ -2284,11 +2454,15 @@ def roundTrip (thm : Name) (thmType : Expr) (sig : String) : MetaM (Option Strin
 /-- Print the signature of `thm` (whose type is `thmType`) so that it round-trips: first with the
 current options, then, if a numeral's type is what the plain print loses (`5 ≠ 7` at
 `BitVec 64` reads back at `Nat`), with `pp.numericTypes` too. The first print that round-trips
-is the statement; if none does, the error of the plain print. -/
+is the statement; if none does, the error of the plain print. Every print is made with `pp.deepTerms`
+(UP3b): the default depth limit elides a deep subterm as `⋯`, which reads back as a hole, so a statement
+with several call-site conjuncts in front of the run (a witness) would never round-trip. -/
 def printFaithful (thm : Name) (thmType : Expr) : MetaM (Except String String) := do
   let mut firstErr := none
   for numeric in [false, true] do
-    let sig ← withOptions (fun o => if numeric then o.setBool `pp.numericTypes true else o)
+    let sig ← withOptions (fun o =>
+        let o := (o.setBool `pp.deepTerms true).insert `pp.maxSteps (100000 : Nat)
+        if numeric then o.setBool `pp.numericTypes true else o)
       (PrettyPrinter.ppSignature thm)
     let sigStr := sig.fmt.pretty 10000
     match ← roundTrip thm thmType sigStr with
@@ -2863,13 +3037,25 @@ address, call state, precondition conjuncts) must be a conjunct of the witness t
 def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) := do
   let (ms, _, concl) ← Meta.forallMetaTelescope mty
   let hyps ← premisesOf ms
-  let concls := flattenAnd (← instantiateMVars concl)
+  let allConcls := flattenAnd (← instantiateMVars concl)
+  -- UP3c: a conjunct that only claims a PANIC (`Panics p s ↔ y = 0`, `len ≤ i → Panics p s`: mentions `Panics`, no `Returns`/`ReachesRet`) is
+  -- witnessed symmetrically to a returning conjunct: the witness exhibits an instance where the guard / the premises of that conjunct hold
+  -- together with the main theorem's premises, and the `Panics p s` claim itself (both sides of an `↔`), so a panic claim guarded by an
+  -- unsatisfiable condition is not vacuous either.
+  let claimsRun := fun (c : Expr) =>
+    let used := c.getUsedConstants
+    used.any fun n => n == `Janus.GoABI.Returns || n == `Janus.Amd64.GoABI.Returns || n == `Janus.Tactic.ReachesRet || n == `Janus.Amd64.Tactic.ReachesRet
+  let panicOnly := fun (c : Expr) =>
+    let used := c.getUsedConstants
+    (used.contains `Janus.GoABI.Panics || used.contains `Janus.Amd64.GoABI.Panics) && !claimsRun c
+  let concls := allConcls
   for (c, idx) in concls.toList.zip (List.range concls.size) do
     let st ← Meta.saveState
-    let body ← unfoldToForall c
-    let (ms2, _, _) ← Meta.forallMetaTelescope body
+    let isPan := panicOnly c
+    let body ← if isPan then pure c else unfoldToForall c
+    let (ms2, _, lastConcl) ← Meta.forallMetaTelescope body
     let which := if concls.size > 1 then s!" (conjunct {idx + 1} of {concls.size})" else ""
-    if ms2.isEmpty then
+    if ms2.isEmpty && !isPan then
       return some s!"the conclusion of the main theorem{which} does not unfold to a `∀ ret, … → ∀ s, CallSetup … → pre s → …` statement"
     let calls ← premisesOf ms2
     -- the premise `s.pc = entry` / `s.rip = entry` of a `Summary`-style contract is the call setup; a witness
@@ -2879,6 +3065,17 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
     let pcPrem := fun (e : Expr) => e.isAppOfArity ``Eq 3 && isPcProj (e.getArg! 1)
     let core := all.filter (!pcPrem ·)
     let ps := core.filter (!arithPremise ·) ++ core.filter arithPremise
+    -- a panic-only conjunct is anchored on its own claim: the instance is the one the witness's `Panics p s` conjunct names (the
+    -- premises of the main theorem are then matched at THAT state, not at the first state the returning conjunct used)
+    if isPan then
+      let panSide := if lastConcl.isAppOfArity ``Iff 2 then
+          (if (lastConcl.getArg! 0).getUsedConstants.any (fun n => n == `Janus.GoABI.Panics || n == `Janus.Amd64.GoABI.Panics) then lastConcl.getArg! 0 else lastConcl.getArg! 1)
+        else lastConcl
+      for w in wconjs do
+        let st0 ← Meta.saveState
+        if ← defEqTry panSide w then
+          if (← matchPremises ps wconjs).isNone then break
+        st0.restore
     match ← matchPremises ps wconjs with
     | none =>
       -- Round 14 (rt-auditv2, F2): a binder of the main theorem that is not a proposition and that the
@@ -2891,6 +3088,86 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
         if (← instantiateMVars m) != m then continue
         unless ← inhabSafe env t do
           return some s!"the main theorem{which} has a binder of type `{(← Meta.ppExpr t).pretty 200}`, which no conjunct of the witness exhibits and which is not a type with an element by construction (an empty type makes the main theorem vacuous): state the witness's value for it in the premises (round 14, rt-auditv2)"
+      -- U-WITNESS-CALLSITE (UP3): for EVERY contract hypothesis `c` of the main theorem the witness exhibits, at the same
+      -- instantiation, a state at the callee's entry satisfying the contract's Summary precondition:
+      -- `∃ s_c, s_c.pc = <entry> ∧ <pre> s_c` (`rip` on amd64). Read generically off the contract's definition (it unfolds to a
+      -- `Summary p entry pre post`). A size/P/keep pin makes that pre uninhabited; an empty R is refuted because the witness
+      -- also proves the contract for a concrete implementation, which with an inhabited pre must return related by R.
+      -- The caller's path to the call is NOT demanded (not a vacuity matter).
+      for h in hyps do
+        let h ← instantiateMVars h
+        let .const c _ := h.getAppFn | continue
+        unless isRuntimeContract (← getEnv) c do continue
+        -- the contract's shape (checked over every family of Janus/Contracts): `Summary p entry pre post`, or
+        -- `∀ xs, Summary p entry pre post` (the live and map families), or `∀ xs, H₁ → … → Hₙ → concl` (the panic engine contracts, morestack)
+        let mut u := h
+        let mut xs : Array Expr := #[]
+        let mut prems : Array Expr := #[]
+        let mut isSummary := false
+        for _ in [0:8] do
+          let (ms, _, body) ← Meta.forallMetaTelescope u
+          for m in ms do
+            let mt ← instantiateMVars (← Meta.inferType m)
+            if ← Meta.isProp mt then prems := prems.push mt else xs := xs.push m
+          u := body.consumeMData
+          if u.getAppFn.isConstOf `Janus.Tactic.Summary || u.getAppFn.isConstOf `Janus.Amd64.Tactic.Summary then isSummary := true; break
+          if !prems.isEmpty then break
+          match ← Meta.unfoldDefinition? u with
+          | some u2 => u := u2.consumeMData
+          | none => break
+        if !isSummary then
+          -- not a `Summary`: the call state is the instantiation of the premises (the first one fixes the entry, `s.pc = addr`)
+          if prems.isEmpty then
+            return some s!"the contract hypothesis `{c}` does not unfold to a `Summary` or a `∀ xs, premises → …` claim, so the witness cannot be required to exhibit its call-site state (U-WITNESS-CALLSITE)"
+          for q0 in prems do
+           let q0 ← instantiateMVars q0
+           let qs := if ← findConj q0 wconjs then #[] else flattenAnd q0
+           for q in qs do
+            let q ← instantiateMVars q
+            unless ← findConj q wconjs do
+              return some s!"the witness does not exhibit a call-site state for the contract hypothesis `{(← Meta.ppExpr h).pretty 200}`: it must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr q).pretty 400}` (the contract's premise; U-WITNESS-CALLSITE)"
+          continue
+        unless u.getAppNumArgs == 4 do
+          return some s!"the contract hypothesis `{c}` does not unfold to a `Summary`, so the witness cannot be required to exhibit its call-site state (U-WITNESS-CALLSITE)"
+        let entry := u.getArg! 1
+        let pre := u.getArg! 2
+        let arm := u.getAppFn.isConstOf `Janus.Tactic.Summary
+        let stT := if arm then mkConst `Janus.Arm64.State else mkConst `Janus.Amd64.State
+        -- `withConjs` has already opened the witness's `∃ s_c` as a local and flattened its body, so the state is a metavariable
+        -- matched against the conjuncts `s_c.pc = <entry>` and `<pre> s_c` (the same state for both)
+        let sm ← Meta.mkFreshExprMVar stT
+        let pcE ← if arm then Meta.mkAppM `Janus.Arm64.State.pc #[sm] else Meta.mkAppM `Janus.Amd64.State.rip #[sm]
+        let ent ← Meta.mkAppM ``BitVec.ofNat #[mkNatLit 64, entry]
+        let e1 ← Meta.mkEq pcE ent
+        let e2 := (mkApp pre sm).headBeta
+        let expected ← Meta.mkAppM ``And #[e1, e2]
+        let mut ok := false
+        for w in wconjs do
+          if ok then break
+          let st ← Meta.saveState
+          if ← defEqTry e1 (← instantiateMVars w) then
+            -- the pre of most families is a conjunction (`HPre H d 3 s ∧ Input s d 3 …`) and the witness's conjuncts are flattened:
+            -- every conjunct of the pre must be one of the witness's
+            -- (a witness may also state the whole pre as ONE conjunct, e.g. through a `@[reducible] def …Site` wrapper: tried first)
+            if ← findConj (← instantiateMVars e2) wconjs then ok := true
+            else
+              let mut all := true
+              for q in flattenAnd (← instantiateMVars e2) do
+                unless ← findConj (← instantiateMVars q) wconjs do all := false; break
+              if all then ok := true
+          if !ok then st.restore
+        unless ok do
+          return some s!"the witness does not exhibit a call-site state for the contract hypothesis `{(← Meta.ppExpr h).pretty 200}`: it must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr (← instantiateMVars expected)).pretty 400}` (a state at the callee's entry satisfying the contract's call precondition; U-WITNESS-CALLSITE)"
+      -- U-WITNESS-RUN (UP3): the witness must also state the RUN: the unfolded conclusion's final `Returns`-style claim
+      -- (`Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')`) at the SAME instantiation the premises fixed. A
+      -- vacuous contract, an unsatisfiable pre or an empty `R` admits no such run through the call, so a witness that only exhibits
+      -- satisfiability (provable by `exfalso`) no longer matches.
+      let lastC ← instantiateMVars lastConcl
+      -- a panic-only conjunct: the claim is `Panics p s` (an `↔` states it on one side and its guard on the other: both are required)
+      let lastCs := if isPan then (if lastC.isAppOfArity ``Iff 2 then #[lastC.getArg! 0, lastC.getArg! 1] else #[lastC]) else #[lastC]
+      for lastC in lastCs do
+       unless ← findConj lastC wconjs do
+        return some s!"the main theorem{which} is not exhibited as a RUN: the witness must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr lastC).pretty 300}` (a concrete run from the precondition state to the return with the post holding; U-WITNESS-RUN)"
       -- the pc premises: matched if the witness states them, else they must be about a state the other
       -- premises fixed
       for q in all.filter pcPrem do
@@ -2997,9 +3274,127 @@ def contractMains (env : Environment) (proofMod : Name) (self : Name) : Array Na
     | none => acc
   all.qsort Name.lt
 
-/-- Round 14 (W2): check the shape of a witness theorem (see the section comment); the matched main
-theorem on success. -/
-def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmType : Expr) :
+/-- UP3: bring a proof term to the head form `Exists.intro w h` / `And.intro a b` the witness walk reads, looking through what the
+elaborator and the tactics wrap a proof in. Steps (at most `fuel`): metadata, `let` (zeta), beta, projections of constructor
+applications, the casts `Eq.mpr`/`Eq.mp`/`cast`/`id`/`Eq.rec`/`Eq.ndrec`/`Eq.recOn`/`Eq.casesOn`/`HEq`-free `Eq.subst`/`▸` (the cast
+value is the proof of the same sizes), `Exists.casesOn`/`And.casesOn`/`And.rec`-style eliminations (reduced by whnf when their
+major premise is a constructor), and the unfolding of a constant (a theorem or definition, by its kernel value; instances of a
+lemma). Returns the head form, or the head symbol it got stuck on. -/
+partial def proofHead (val : Expr) (fuel : Nat := 400) : MetaM (Except String Expr) := do
+  if fuel == 0 then return .error "the proof term is too deep to read (400 unfolding steps)"
+  let val := (← instantiateMVars val).consumeMData
+  if val.isAppOfArity ``Exists.intro 4 || val.isAppOfArity ``And.intro 4 then return .ok val
+  let f := val.getAppFn
+  let args := val.getAppArgs
+  let castArg? : Option Nat :=
+    match f with
+    | .const c _ =>
+      if c == ``Eq.mpr || c == ``Eq.mp || c == ``cast then (if args.size ≥ 4 then some 3 else none)
+      else if c == ``id then (if args.size ≥ 2 then some 1 else none)
+      else if c == ``Eq.rec || c == ``Eq.ndrec then (if args.size ≥ 6 then some 3 else none)
+      else if c == ``Eq.recOn || c == ``Eq.casesOn then (if args.size ≥ 6 then some 5 else none)
+      else if c == ``Eq.subst || c == ``Eq.substr then (if args.size ≥ 8 then some 7 else none)
+      else if c == ``Eq.symm || c == ``Eq.trans then none
+      else none
+    | _ => none
+  if let some i := castArg? then
+    let v := args[i]!
+    let rest := args.extract (i + 1) args.size
+    return ← proofHead (mkAppN v rest) (fuel - 1)
+  -- UP3b: an elimination `obtain ⟨w, h⟩ := core; …` (`Exists.rec`/`Exists.casesOn`/`And.rec`/`And.casesOn`) of a lemma whose proof is itself a
+  -- constructor application after unfolding: read the major premise to its head form, then apply the continuation to its components
+  if let .const c _ := f then
+    let elim? : Option (Nat × Nat × Nat) :=   -- (total args before extras, index of the major premise, index of the minor premise)
+      if c == ``Exists.rec then some (5, 4, 3) else if c == ``Exists.casesOn then some (5, 3, 4)
+      else if c == ``And.rec then some (5, 4, 3) else if c == ``And.casesOn then some (5, 3, 4) else none
+    if let some (n, imaj, imin) := elim? then
+      if args.size ≥ n then
+        if let .ok mh ← proofHead args[imaj]! (fuel - 1) then
+          let comps := mh.getAppArgs
+          if comps.size == 4 then
+            return ← proofHead (mkAppN (mkAppN args[imin]! #[comps[2]!, comps[3]!]) (args.extract n args.size)) (fuel - 1)
+  -- beta / zeta / projection / iota
+  let w ← Meta.whnfCore val
+  if w != val then return ← proofHead w (fuel - 1)
+  -- unfold a head constant to its kernel value (theorems too)
+  if let .const c ls := f then
+    if let some ci := (← getEnv).find? c then
+      match ci with
+      | .thmInfo _ | .defnInfo _ =>
+        let v? := match ci with | .thmInfo t => some t.value | .defnInfo d => some d.value | _ => none
+        if let some v := v? then
+          let v := v.instantiateLevelParams ci.levelParams ls
+          return ← proofHead (v.beta args) (fuel - 1)
+      | _ => pure ()
+    -- a recursor / casesOn / matcher on a constructor: let the evaluator reduce it
+    let w' ← Meta.withTransparency .all (Meta.whnf val)
+    if w' != val then return ← proofHead w' (fuel - 1)
+    return .error s!"stuck at the constant `{c}`"
+  match f with
+  | .fvar _ => return .error "stuck at a local hypothesis"
+  | .lam .. => return .error "stuck at a lambda"
+  | _ =>
+    let w' ← Meta.withTransparency .all (Meta.whnf val)
+    if w' != val then return ← proofHead w' (fuel - 1)
+    return .error "stuck at a term of an unknown form"
+
+/-- UP3 (red team n11, WIT1): the sizes a non-vacuity witness INSTANTIATES for a runtime contract. A contract whose call
+precondition is unsatisfiable at its sizes (`stack = 7 < 8`, `above < 8 + 8·nargs`, `nargs > 64`, a size ≥ 2^47) is vacuously
+inhabited (`exfalso`), so a witness that instantiates it shows nothing. The check reads the PROOF TERM of the witness
+(`proofHead` sees through lemmas, casts, lets): it walks the statement and the proof together (`∃` → the `Exists.intro` witness,
+`∧` → `And.intro`), so the sizes are the values the proof really supplies, whatever route they took (a literal, a `def`, a `let`,
+a pin through the witness's own `∃`), and each size of each contract in a leaf must evaluate (`icallNatValue?`) into the
+satisfiable range. A position the walk cannot read is rejected, naming the contract, the position and the stuck term. -/
+partial def witnessSizes (env : Environment) (ty val : Expr) (pos : String := "witness") : MetaM (Option String) := do
+  let ty := (← instantiateMVars ty).consumeMData
+  let apps := contractApps env ty
+  if apps.isEmpty then return none
+  let names := ", ".intercalate (apps.toList.map fun a => match a.getAppFn with | .const c _ => c.toString | _ => "?")
+  if ty.isAppOfArity ``Exists 2 || ty.isAppOfArity ``And 2 then
+    let h ← proofHead val
+    match h with
+    | .error why =>
+      return some s!"cannot read the sizes this witness instantiates for the runtime contract(s) {names} at position `{pos}` (statement `{(← Meta.ppExpr ty).pretty 160}`): the proof term {why}; state the contracts' instantiation as an explicit `Exists.intro`/`⟨…⟩` or a lemma whose value is one (U-ICALL-STACK, witness)"
+    | .ok h =>
+      if ty.isAppOfArity ``Exists 2 then
+        unless h.isAppOfArity ``Exists.intro 4 do
+          return some s!"the proof at position `{pos}` is not an `Exists.intro` for the `∃` carrying {names}"
+        return ← witnessSizes env (Expr.headBeta (mkApp (ty.getArg! 1) (h.getArg! 2))) (h.getArg! 3) (pos ++ " ∃")
+      else
+        unless h.isAppOfArity ``And.intro 4 do
+          return some s!"the proof at position `{pos}` is not an `And.intro` for the `∧` carrying {names}"
+        if let some m ← witnessSizes env (ty.getArg! 0) (h.getArg! 2) (pos ++ " ∧.1") then return some m
+        return ← witnessSizes env (ty.getArg! 1) (h.getArg! 3) (pos ++ " ∧.2")
+  -- a leaf: every contract application in it
+  for app in apps do
+    let .const c _ := app.getAppFn | continue
+    let some ci := env.find? c | continue
+    let bnames := forallBinderNames ci.type #[]
+    let args := app.getAppArgs
+    -- UP3 (WIT5-P): the call-site property of an abstract-callee contract must not be (reducibly) `False`: the call
+    -- precondition would be unsatisfiable. A numeric/syntactic pre-filter only; the principled check (a kernel-checked
+    -- inhabitation obligation per contract instance) is designed in NOTES-UP3.md.
+    if c == `Janus.Contracts.ICall.ICallContract || c == `Janus.Contracts.ICall.ICallContract64 then
+      if args.size > 8 then
+        let pBody ← Meta.lambdaTelescope args[8]! fun _ b => do pure (← Meta.whnfR b).consumeMData
+        if pBody.isConstOf ``False then
+          return some s!"instantiates the runtime contract {c} (position `{pos}`) with the call-site property P = `fun _ => False`: its call precondition is unsatisfiable, the contract is vacuously inhabited, and the witness would show nothing (U-ICALL-STACK, witness)"
+    let mut nargsV : Nat := 0
+    for j in [0:bnames.size] do
+      if bnames[j]! == `nargs && j < args.size then nargsV := (← icallNatValue? args[j]!).getD 0
+    for j in [0:bnames.size] do
+      let nm := bnames[j]!.toString
+      unless (nm == "stack" || nm == "d" || nm == "nargs" || nm == "above") && j < args.size do continue
+      match (← icallNatValue? args[j]!) with
+      | none =>
+        return some s!"instantiates the runtime contract {c} (position `{pos}`) with the {nm} `{(← Meta.ppExpr args[j]!).pretty 200}`, which does not evaluate to a closed natural number: the sizes the witness supplies must (U-ICALL-STACK, witness)"
+      | some n =>
+        let low := if nm == "stack" then 8 else if nm == "above" then 8 + 8 * nargsV else 0
+        if n < low || (nm != "nargs" && n ≥ 2 ^ 47) || (nm == "nargs" && n > 64) then
+          return some s!"instantiates the runtime contract {c} (position `{pos}`) with the {nm} = {n}, outside the satisfiable range ({if nm == "nargs" then "at most 64" else if nm == "stack" then "8 ≤ stack < 2^47" else if nm == "d" then "d < 2^47" else s!"8 + 8·nargs = {low} ≤ above < 2^47"}): its call precondition is unsatisfiable there, the contract is vacuously inhabited, and the witness would show nothing (U-ICALL-STACK, witness)"
+  return none
+
+def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmType : Expr) (thmVal : Expr) :
     MetaM (Except String (Name × Array Name)) := do
   let cands0 := mainCandidates env proofMod thm
   -- further main theorems of the module that assume runtime contracts (`full_write` next to `correctness`):
@@ -3013,6 +3408,7 @@ def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmTyp
     unless (thmType.consumeMData.isAppOfArity ``Exists 2) do
       return .error "is not of the form `∃ …, …` (a state and runtime exhibiting the main theorem's hypotheses)"
     withConjs thmType fun wconjs => do
+      if let some m ← witnessSizes env thmType thmVal then return .error m
       let mut whys : Array String := #[]
       let mut ok : Array Name := #[]
       for c in cands do
@@ -3056,6 +3452,7 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     let auditImports : Array Import :=
       #[{ module := `Extracted }, { module := trusted.toName }, { module := proofModN }]
     let (envA, cleanState) ← (auditEnv auditImports (pre?.map (·.1)) : IO _)
+    inhabRef.set (← runCore envA (Meta.MetaM.run' (inhabCandidates envA)))
     -- 1. kind and module
     let some ci := envA.find? thmN | fail s!"the proof does not define {thm}"
     let kind := match ci with
@@ -3111,7 +3508,7 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     let (matchedMain, matchedMains, matchedModules) ← match role with
       | .main => pure ("", #[], #[])
       | _ => do
-        match ← runCore envA (Meta.MetaM.run' (checkWitness envA proofModN thmN role ci.type)) with
+        match ← runCore envA (Meta.MetaM.run' (checkWitness envA proofModN thmN role ci.type (match ci with | .thmInfo t => t.value | .defnInfo d => d.value | _ => ci.type))) with
         | .ok (c, cs) =>
           let modOf := fun (n : Name) => match envA.getModuleIdxFor? n with
             | some i => modNames[i.toNat]!.toString
@@ -3140,7 +3537,13 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
              statement, statementExplicit, definitions := defs,
              modules := modNames.map (·.toString),
              external := externalNames.filterMap external.get?, externalDefinitions := extOut,
-             notes, role := role.label, matchedMain, matchedMains, matchedModules, contractHyps, imports := importGraph envA }
+             notes, role := role.label, matchedMain, matchedMains, matchedModules, contractHyps,
+             refutation := role == .main && (let rec go : Expr → Bool
+               | .forallE _ _ b _ => go b
+               | .mdata _ b => go b
+               | e => e.isAppOfArity ``Not 1 || e.isConstOf ``False
+               go ci.type),
+             imports := importGraph envA }
   ).run
   match result with
   | .ok rec => IO.println (marker ++ (toJson rec).compress)

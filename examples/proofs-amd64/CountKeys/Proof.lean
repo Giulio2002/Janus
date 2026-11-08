@@ -34,4 +34,38 @@ theorem correctness {V : Type} (M : MapModel (BitVec 64) V) (hl : M.Laws)
     janus64_run
     intro ks hks; rw [hlen ks hks]
 
+namespace Witness
+
+open Janus.Contracts.MapModel0 Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+/-- The nil map, holding the empty abstract map. -/
+def m : BitVec 64 := 0#64
+def f : AMap (BitVec 64) (BitVec 64) := AMap.empty
+
+def s0 : State :=
+  { regs := fun r_ => if r_ = 0 then m else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wmem64 }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [m] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+
+theorem hpre : StackWritable s0 0 8 ∧ IsMap (ME (BitVec 64)) s0.mem m.toNat f :=
+  ⟨⟨by decide, by decide, by decide⟩, by unfold IsMap; simp [m]; rfl⟩
+
+/-- All hypotheses of `correctness` hold together (the nil map, empty). -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (M : MapModel (BitVec 64) (BitVec 64)) (m : BitVec 64), M.Laws ∧ RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [m] s ∧
+    (StackWritable s 0 8 ∧ IsMap M s.mem m.toNat Witness.f) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ ∀ ks : List (BitVec 64), Keys Witness.f ks → (s'.regs 0).toNat = ks.length) :=
+  ⟨ret, s0, ME (BitVec 64), m, ME_laws _, hret, setup, hpre,
+    correctness (ME (BitVec 64)) (ME_laws _) m f ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

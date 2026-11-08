@@ -141,6 +141,27 @@ theorem pre : CallerOK R0 s0 24 8 := by
   · unfold Janus.Spec.Disjoint; decide
   · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
 
+theorem rtpre_pc {n : Nat} {R : IfaceModel} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre R n s) :
+    RTPre R n { s with rip := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+
+/-- The precondition of `ConvT64`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def ConvT64Site (R : IfaceModel) (H : Janus.Contracts.RtReady) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre R 1 s_c ∧ Janus.Contracts.Ready64 H R.priv [(s_c.regs 0).toNat] s_c
+
+/-- The call state of the `runtime.convT64` contract (U-WITNESS-CALLSITE): the stock witness state of `IfaceSat`, at the contract address. -/
+def wsCall : Janus.Amd64.State := { wstate (fun i => if i = 0 then 42#64 else 0) with rip := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : ConvT64Site R0 Htrue wsCall :=
+  ⟨rtpre_pc _ (wstate_rtpre _ 1 (by decide)), trivial⟩
+
+/-- So the guarantee is reached: `Box(42)` returns a box holding `42`. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (s'.regs 0).toNat = uint64Type ∧ BoxHolds R0 s'.mem (s'.regs 3).toNat 8 42 :=
+  (correctness implAt R0 R0_laws Htrue model 42#64 ret hret s0 setup ⟨pre, trivial⟩).mono fun _ h =>
+    ⟨h.1, h.2.1, h.2.2.1⟩
+
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (H : Janus.Contracts.RtReady)
     (ret : Nat) (s : Janus.Amd64.State), R.Laws ∧
@@ -148,14 +169,12 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (H :
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [42#64] s ∧
     CallerOK R s 24 8 ∧
-    H [42] (s.regs 14).toNat ((s.regs 4).toNat - 24) (Janus.Contracts.rtView R.priv s.mem) :=
-  ⟨implAt, R0, Htrue, ret, s0, R0_laws, model, hret, setup, pre, trivial⟩
-
-/-- So the guarantee is reached: `Box(42)` returns a box holding `42`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = uint64Type ∧ BoxHolds R0 s'.mem (s'.regs 3).toNat 8 42 :=
-  (correctness implAt R0 R0_laws Htrue model 42#64 ret hret s0 setup ⟨pre, trivial⟩).mono fun _ h =>
-    ⟨h.1, h.2.1, h.2.2.1⟩
+    H [42] (s.regs 14).toNat ((s.regs 4).toNat - 24) (Janus.Contracts.rtView R.priv s.mem) ∧
+    (∃ (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.convT64") ∧ ConvT64Site R H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat = uint64Type ∧ BoxHolds R s'.mem (s'.regs 3).toNat 8 (42#64).toNat ∧
+        MemFrame s.mem s'.mem (R.priv ++ [((s.regs 4).toNat - (R.depth + 24), (s.regs 4).toNat + 8)]) ∧
+        R.Env s'.mem (s.regs 14)) :=
+  ⟨implAt, R0, Htrue, ret, s0, R0_laws, model, hret, setup, pre, trivial, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt R0 R0_laws Htrue model 42#64 ret hret s0 setup ⟨pre, trivial⟩⟩
 
 end Witness
 

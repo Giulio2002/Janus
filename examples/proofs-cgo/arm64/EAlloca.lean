@@ -426,4 +426,41 @@ theorem correctness (n : BitVec 64) :
       (hInv _ (fun i h1 h2 h3 => by simp only [setReg]; split <;> (try split) <;> (try split) <;> first | omega | rfl)
       (by simp [setReg]) rfl rfl rfl)
 
+namespace Witness
+
+def RET : Nat := 0x1000
+def SP0 : Nat := 0x1000000
+def G : Nat := 0x500000
+def n0 : BitVec 64 := 2#64
+
+/-- The C stack frame, the guard's GOT slot (holding `G`) and the guard word at `G`. -/
+def s0 : State :=
+  { regs := fun i => if i = 0 then n0 else if i = 30 then BitVec.ofNat 64 RET else 0,
+    sp := BitVec.ofNat 64 SP0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩,
+    mem := ⟨fun a => if gslot ≤ a ∧ a < gslot + 8 then BitVec.ofNat 8 (G / 256 ^ (a - gslot)) else 0,
+      [⟨SP0 - (48 + T 2), 48 + T 2, true⟩, ⟨gslot, 8, false⟩, ⟨G, 8, false⟩]⟩,
+    exclPass := fun _ => true }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [n0] s0 :=
+  ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
+
+set_option maxRecDepth 100000 in
+theorem pre : Pre n0 s0 := by
+  refine ⟨by decide, ⟨by decide, by decide, by decide, by decide +kernel⟩, by decide +kernel,
+    by decide +kernel, ?_, ?_⟩ <;>
+  · simp only [outside_cons, outside_nil, and_true]; decide +kernel
+
+/-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
+theorem nonvacuous : ∃ (n : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [n] s ∧ Pre n s ∧
+    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+      ((s'.regs 0).toNat = n.toNat * (n.toNat - 1) / 2 % 2 ^ 64 ∧
+        MemFrame s.mem s'.mem [(s.sp.toNat - (48 + T n.toNat), s.sp.toNat)])) :=
+  ⟨n0, RET, s0, hret, call, pre, correctness n0 RET hret s0 call pre⟩
+
+end Witness
+
 end Proof

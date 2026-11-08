@@ -54,13 +54,15 @@ theorem pre : HPre H0 64 2 s0 := by
     simp only [CallOK, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack, outside_cons,
       outside_nil] <;> decide
 
-theorem nonvacuous : ∃ s, s.rip = BitVec.ofNat 64 Extracted.entry ∧ HPre H0 64 2 s :=
-  ⟨s0, rfl, pre⟩
-
 /-- `correctness` at `s0`: the call returns the seed 7. -/
 theorem returns : ReachesRet Extracted.program (retAddrOf s0) s0
     (fun s' => HRet H0 64 2 s0 s' fun r => r 0 = 7) :=
   correctness H0 64 s0 rfl pre
+
+theorem nonvacuous : ∃ s, s.rip = BitVec.ofNat 64 Extracted.entry ∧ HPre H0 64 2 s ∧
+    (ReachesRet Extracted.program (retAddrOf s) s
+    (fun s' => HRet H0 64 2 s s' fun r => r 0 = s.regs 3)) :=
+  ⟨s0, rfl, pre, correctness H0 64 s0 rfl pre⟩
 
 end Witness
 

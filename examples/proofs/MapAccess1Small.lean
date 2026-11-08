@@ -230,4 +230,59 @@ theorem correctness (t : Nat) (heap : Nat × Nat) :
         simp only [Option.getD_some, BitVec.toNat_ofNat]
         exact (Nat.mod_eq_of_lt (Memory.readLE_lt _ _ 8)).symm
 
+
+namespace Witness
+
+open Janus.Contracts.MapModel0
+
+def ret : Nat := 0x1000
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+def sp0 : Nat := 0x108000
+def g0 : Nat := 0x200000
+def hp : Nat := 0x300000
+
+def tt : BitVec 64 := 0x600000
+def emp : AMap (BitVec 64) (BitVec 64) := AMap.empty
+
+def wbytes (a : Nat) : Byte := if a = 0x600058 then 16 else 0 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+
+def wmem : Memory := ⟨wbytes, [⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩, ⟨sp0 - 0x8000, 0x10000, true⟩, ⟨g0, 0x100, false⟩, ⟨hp, 0x10000, true⟩, ⟨0x600058, 8, false⟩, ⟨zeroVal, 8, false⟩]⟩ -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then (tt) else if i = 1 then (0) else if i = 2 then (5) else if i = 28 then BitVec.ofNat 64 g0 else if i = 29 then BitVec.ofNat 64 (sp0 - 8)
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(tt : BitVec 64), (0 : BitVec 64), (5 : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by
+    intro i h
+    simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 8000000 in
+theorem hpre : RTPre (smallModel 0x600000 zeroVal (0x500000, 0x1000)) 3 s0 ∧ (smallModel 0x600000 zeroVal (0x500000, 0x1000)).Typ (s0.regs 0).toNat ∧ IsMap (smallModel 0x600000 zeroVal (0x500000, 0x1000)) s0.mem (s0.regs 1).toNat emp := by
+  refine ⟨⟨?_, ⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩, ?_, ?_⟩
+  all_goals (try simp only [smallModel_env, smallModel_typ, smallModel_priv, smallModel_depth, SmallEnv, outside_cons, outside_nil, and_true, Janus.GoABI.stackguard0, s0, wmem, wbytes, sp0, g0, hp, tt])
+  all_goals first | decide | (simp [IsMap, emp, s0, tt])
+
+set_option maxRecDepth 100000 in
+/-- All hypotheses of `correctness` hold together: a call state of the map access, and the contract's summary. -/
+theorem nonvacuous : ∃ (t : Nat) (heap : Nat × Nat) (f : AMap (BitVec 64) (BitVec 64)) (s : State),
+    s.pc = BitVec.ofNat 64 Extracted.entry ∧
+    (RTPre (smallModel t zeroVal heap) 3 s ∧ (smallModel t zeroVal heap).Typ (s.regs 0).toNat ∧
+      IsMap (smallModel t zeroVal heap) s.mem (s.regs 1).toNat f) ∧
+    Summary Extracted.program Extracted.entry
+      (fun s => RTPre (smallModel t zeroVal heap) 3 s ∧ (smallModel t zeroVal heap).Typ (s.regs 0).toNat ∧
+        IsMap (smallModel t zeroVal heap) s.mem (s.regs 1).toNat f)
+      (fun s s' => RTReturn (smallModel t zeroVal heap) 3 [] (s.regs 1).toNat s s' fun r m =>
+        IsMap (smallModel t zeroVal heap) m (s.regs 1).toNat f ∧
+          SlotHolds (smallModel t zeroVal heap) m (r 0).toNat ((f (s.regs 2)).getD 0)) :=
+  ⟨0x600000, (0x500000, 0x1000), emp, s0, rfl, hpre, correctness 0x600000 (0x500000, 0x1000) emp⟩
+
+end Witness
+
 end Proof

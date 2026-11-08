@@ -124,7 +124,7 @@ theorem wstate_eq (r : Nat → W64) : wstate r = PrintFn.Witness.wstate PrintCod
 
 /-- All hypotheses of `correctness` hold together: the witness code at the three contract
 addresses, the ranges `wrt`, an admissible return address and a call state ready to print. -/
-theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (ret : Nat) (s : State),
+theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (ret : Nat) (s : State) (E : KEnv) (k : Kern),
     Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024 ∧
     Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024 ∧
     MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove") ∧
@@ -134,13 +134,34 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (r
       (BitVec.ofNat 64 NL : BitVec 64).toNat + (1#64 : BitVec 64).toNat ≤ 2 ^ 48 ∧ (1#64 : BitVec 64).toNat < 2 ^ 31 ∧
       Outside (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat rt ∧
       Sep (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat [((s.regs 4).toNat - 1088, 1112),
-        (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 264, 16), (BI, 8), (BL, 512)]) := by
-  obtain ⟨impl, rt, ret, s, h1, h2, h3, h4, h5, hp⟩ := PrintFn.Str.Witness.nonvacuous
-  refine ⟨impl, rt, ret, s, Amd64.Print.Lock2Contract.of_equiv equiv.symm impl rt 1024 h1, Amd64.Print.Unlock2Contract.of_equiv equiv.symm impl rt 1024 h2,
-    Amd64.Print.MemmoveContract.of_equiv equiv.symm impl h3, equiv.symm.retAddr impl h4, ?_, ?_⟩
+        (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 264, 16), (BI, 8), (BL, 512)]) ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.lock2") ∧ CallOK64 s_c 1024 1 ∧
+      Amd64.Print.LockPre rt 0 s_c ∧ ¬ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.unlock2") ∧ CallOK64 s_c 1024 1 ∧
+      Amd64.Print.LockPre rt 1 s_c ∧ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.memmove") ∧ Amd64.Print.MemmovePre s_c) ∧
+    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn s s' ∧ ∃ es, k' = k.appendTrace es ∧
+          Emits 2 [readBytes s.mem (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat, [10#8]] es)
+      (fun _ _ => False) s k ∧
+    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn s s' ∧ ((k'.output 2).length = (k.output 2).length + (readBytes s.mem (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat ++ [10#8]).length → k'.output 2 = k.output 2 ++ (readBytes s.mem (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat ++ [10#8])))
+      (fun _ _ => False) s k := by
+  obtain ⟨impl, rt, ret, s, E, k, h1, h2, h3, h4, h5, hp, hl2, hu2, hm2, hrun, hrun2⟩ := PrintFn.Str.Witness.nonvacuous
+  refine ⟨impl, rt, ret, s, E, k, Amd64.Print.Lock2Contract.of_equiv equiv.symm impl rt 1024 h1, Amd64.Print.Unlock2Contract.of_equiv equiv.symm impl rt 1024 h2,
+    Amd64.Print.MemmoveContract.of_equiv equiv.symm impl h3, equiv.symm.retAddr impl h4, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · rw [nl_eq]; exact ⟨h5.rip, h5.ret, h5.zero, h5.len, h5.args, h5.df⟩
   · rw [pk_eq, bi_eq, bl_eq, ow_eq, dl_eq, nl_eq]
     exact ⟨hp.1, equiv.symm.dataLoaded hp.2.1, Janus.Amd64.Print.DataOutside.of_equiv equiv.symm hp.2.2.1, hp.2.2.2.1, hp.2.2.2.2.1, hp.2.2.2.2.2.1, hp.2.2.2.2.2.2.1, hp.2.2.2.2.2.2.2⟩
+  · obtain ⟨sc, hpc, hco, hlp, hn⟩ := hl2
+    refine ⟨sc, ?_, hco, hlp, hn⟩
+    rw [equiv.contractAddr]; exact hpc
+  · obtain ⟨sc, hpc, hco, hlp, hn⟩ := hu2
+    refine ⟨sc, ?_, hco, hlp, hn⟩
+    rw [equiv.contractAddr]; exact hpc
+  · obtain ⟨sc, hpc, hmv⟩ := hm2
+    refine ⟨sc, ?_, hmv⟩
+    rw [equiv.contractAddr]; exact hpc
+  · rw [nl_eq]; exact (((equiv.sim impl).withExit ret).symm).returnsK hrun
+  · rw [nl_eq]; exact (((equiv.sim impl).withExit ret).symm).returnsK hrun2
 
 
 /-- So the guarantee is reached: from the witness state, for every kernel, `println(s)` for the one-byte string at the program's `"\n"` returns and the trace gains what the two writes may append. -/

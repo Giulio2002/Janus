@@ -206,19 +206,69 @@ theorem pre : Pre rtA HA 0 0 0 s0 := by
     exact Memory.accessible_mono _ hw (by decide) (by decide)
   · rw [ptType_eq]; exact ⟨rfl, by decide, by decide, by decide⟩
 
-/-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
-    RtContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.growslice")
-      rt 4096 H growsliceSpec ∧ RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0, 0, 0] s ∧
-    Pre rt H 0 0 0 s :=
-  ⟨implAt, rtA, HA, ret, s0, model, hret, setup, pre⟩
+/-- The call state at `runtime.growslice`'s entry (`growslice(nil, 1, 0, 1, pt)`, callee `SP` 112 below). -/
+def wsCall : State :=
+  { regs := (wstate (args [0, 1, 0, 1, PT])).regs, sp := BitVec.ofNat 64 (wsp - 112),
+    pc := BitVec.ofNat 64 cAddr, flags := ⟨false, false, false, false⟩, mem := wmemD }
+
+@[reducible] def rpSite (rt : List (Nat × Nat)) (H : RtReady) (s_c : State) : Prop :=
+  RtPre rt 4096 H growsliceSpec s_c
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : rpSite rtA HA wsCall := by
+  have ha : argWords wsCall growsliceSpec.nargs = [0, 1, 0, 1, PT] := by decide
+  have hw : wmemD.accessible (wsp - 0x2000) 0x2100 true = true := by decide
+  refine ⟨⟨by decide, by decide, by decide, by decide, by decide, by decide,
+    Memory.accessible_mono _ hw (by decide) (by decide)⟩, ?_, ?_, trivial, ?_⟩
+  · rw [ha]
+    show ElemOK wsCall.mem PT ∧ 1 ≤ 1 ∧ 1 - 1 ≤ 0 ∧ 0 < 1 ∧ 1 * typSize wsCall.mem PT < 2 ^ 46 ∧
+      Readable wsCall.mem 0 ((1 - 1) * typSize wsCall.mem PT)
+    rw [← ptType_eq]
+    refine ⟨⟨⟨by decide, by decide⟩, by decide, by decide⟩, by decide, by decide, by decide, by decide, ?_⟩
+    simp [Readable]
+  · rw [ha]; intro r hr
+    simp only [growsliceSpec, arg, List.mem_cons, List.not_mem_nil, or_false] at hr
+    rcases hr with rfl | rfl
+    · show Outside PT 16 _
+      rw [← ptType_eq]; simp only [calleeStack, outside_cons, outside_nil, wsCall]; decide
+    · show Outside 0 ((1 - 1) * typSize wsCall.mem PT) _
+      simp [outside_zero]
+  · exact ready_intro rfl ⟨ha, by decide, by decide, by decide⟩
 
 /-- The witness call returns: the result has length 1 (the full theorem's conclusion holds;
 this states its first part). -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 1).toNat = 1 :=
   (correctness implAt rtA HA 0 0 0 0 0 0 model ret hret s0 setup pre).mono fun _ h => ⟨h.1, by simpa using h.2.1⟩
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
+    RtContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.growslice")
+      rt 4096 H growsliceSpec ∧ RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0, 0, 0] s ∧
+    Pre rt H 0 0 0 s ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.growslice") ∧
+      rpSite rt H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+      ((s'.regs 1).toNat = (0 : BitVec 64).toNat + 1 ∧
+        ((0 : BitVec 64).toNat < (0 : BitVec 64).toNat → s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 2 = (0 : BitVec 64) ∧
+          s'.mem.readLE ((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat) 8 = (0 : BitVec 64).toNat ∧
+          s'.mem.readLE ((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat + 8) 8 = (0 : BitVec 64).toNat ∧
+          s'.mem.readLE ((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat + 16) 8 = (0 : BitVec 64).toNat ∧
+          MemFrame s.mem s'.mem [((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat, (0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat + 24),
+            (s.sp.toNat - 4208, s.sp.toNat + 56)]) ∧
+        ((0 : BitVec 64).toNat ≤ (0 : BitVec 64).toNat →
+          (s'.regs 2).toNat = growCap 24 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat ∧
+          InRanges (s'.regs 0).toNat (growCap 24 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat * 24) rt ∧
+          s'.mem.accessible (s'.regs 0).toNat (growCap 24 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat * 24) true = true ∧
+          (∀ i, i < 24 * (0 : BitVec 64).toNat → s'.mem.bytes ((s'.regs 0).toNat + i) = s.mem.bytes ((0 : BitVec 64).toNat + i)) ∧
+          s'.mem.readLE ((s'.regs 0).toNat + 24 * (0 : BitVec 64).toNat) 8 = (0 : BitVec 64).toNat ∧
+          s'.mem.readLE ((s'.regs 0).toNat + 24 * (0 : BitVec 64).toNat + 8) 8 = (0 : BitVec 64).toNat ∧
+          s'.mem.readLE ((s'.regs 0).toNat + 24 * (0 : BitVec 64).toNat + 16) 8 = (0 : BitVec 64).toNat ∧
+          ZeroBytes s'.mem ((s'.regs 0).toNat + 24 * ((0 : BitVec 64).toNat + 1))
+            (growCap 24 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat * 24 - 24 * ((0 : BitVec 64).toNat + 1)) ∧
+          MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4208, s.sp.toNat + 56)]))) :=
+  ⟨implAt, rtA, HA, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt rtA HA 0 0 0 0 0 0 model ret hret s0 setup pre⟩
 
 end Witness
 

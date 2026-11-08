@@ -64,4 +64,37 @@ theorem correctness (p : BitVec 64) :
   generalize s.mem.readLE (p.toNat + 28) 4 = w7
   simp only [Nat.max_assoc, Nat.max_comm, Nat.max_left_comm]
 
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+def ret : Nat := wret
+
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+def p : BitVec 64 := 0x30800#64 -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+
+def s0 : State :=
+  { regs := fun r_ => if r_ = 0 then p else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := ⟨fun a => if a = 200450 then 5#8 else wmem64.bytes a, wmem64.regions ++ []⟩, fsBase := 0x30f08#64 } -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [p] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+set_option maxRecDepth 100000 in
+theorem hpre : (fun s => Buffer s p 32 false ∧ StackGuardOK s 0 ∧ StackWritable s 32 8 ∧ TlsG s ∧
+        ((s.regs 4).toNat + 8 ≤ p.toNat ∨ p.toNat + 32 ≤ (s.regs 4).toNat - 32) ∧
+        ((s.regs 4).toNat + 8 ≤ s.fsBase.toNat - 8 ∨ s.fsBase.toNat ≤ (s.regs 4).toNat - 32)) s0 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State) (p : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [p] s ∧ (Buffer s p 32 false ∧ StackGuardOK s 0 ∧ StackWritable s 32 8 ∧ TlsG s ∧
+        ((s.regs 4).toNat + 8 ≤ p.toNat ∨ p.toNat + 32 ≤ (s.regs 4).toNat - 32) ∧
+        ((s.regs 4).toNat + 8 ≤ s.fsBase.toNat - 8 ∨ s.fsBase.toNat ≤ (s.regs 4).toNat - 32)) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ (s'.regs 0).toNat = maxWords s.mem p.toNat 8) :=
+  ⟨ret, s0, p, hret, setup, hpre, correctness p ret hret s0 setup hpre⟩
+
+end Witness
+
 end Proof

@@ -185,7 +185,7 @@ theorem setup : GoABI.CallSetup ((P.link implAt).withExit ret) PrintCode.entryPr
 
 /-- All hypotheses of `correctness` hold together: the witness code at the three contract
 addresses, the ranges `wrt`, an admissible return address and a call state ready to print. -/
-theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (ret : Nat) (s : State),
+theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (ret : Nat) (s : State) (E : KEnv) (k : Kern),
     Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024 ∧
     Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024 ∧
     MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove") ∧
@@ -195,9 +195,22 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (r
       (BitVec.ofNat 64 NL : BitVec 64).toNat + (1#64 : BitVec 64).toNat ≤ 2 ^ 48 ∧ (1#64 : BitVec 64).toNat < 2 ^ 31 ∧
       Outside (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat rt ∧
       Sep (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat [((s.regs 4).toNat - 1088, 1112),
-        (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 264, 16), (BI, 8), (BL, 512)]) :=
-  ⟨implAt, wrt, ret, wstate PrintCode.entryPrintStr (fun i => if i = 0 then BitVec.ofNat 64 NL else if i = 3 then 1#64 else 0), lock2_model wrt 1024, unlock2_model wrt 1024, memmove_model,
-    hret, setup, ⟨ready _ _ 24 (Or.inr (Or.inr rfl)), wmem_data, wrt_data, str_facts⟩⟩
+        (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 264, 16), (BI, 8), (BL, 512)]) ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.lock2") ∧ CallOK64 s_c 1024 1 ∧
+      Amd64.Print.LockPre rt 0 s_c ∧ ¬ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.unlock2") ∧ CallOK64 s_c 1024 1 ∧
+      Amd64.Print.LockPre rt 1 s_c ∧ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.memmove") ∧ Amd64.Print.MemmovePre s_c) ∧
+    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn s s' ∧ ∃ es, k' = k.appendTrace es ∧
+          Emits 2 [readBytes s.mem (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat, [10#8]] es)
+      (fun _ _ => False) s k ∧
+    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn s s' ∧ ((k'.output 2).length = (k.output 2).length + (readBytes s.mem (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat ++ [10#8]).length → k'.output 2 = k.output 2 ++ (readBytes s.mem (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat ++ [10#8])))
+      (fun _ _ => False) s k := by
+  refine ⟨implAt, wrt, ret, wstate PrintCode.entryPrintStr (fun i => if i = 0 then BitVec.ofNat 64 NL else if i = 3 then 1#64 else 0), ⟨[], 0⟩, {}, lock2_model wrt 1024, unlock2_model wrt 1024, memmove_model, hret, setup, ?pre,
+    ⟨_, rfl, site_lock _⟩, ⟨_, rfl, site_unlock _⟩, ⟨_, rfl, site_memmove _⟩, ?run, ?run2⟩
+  case pre => exact (⟨ready _ _ 24 (Or.inr (Or.inr rfl)), wmem_data, wrt_data, str_facts⟩)
+  case run => exact correctness implAt wrt ⟨[], 0⟩ (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model (BitVec.ofNat 64 NL) 1#64 ret hret _ {} setup ((⟨ready _ _ 24 (Or.inr (Or.inr rfl)), wmem_data, wrt_data, str_facts⟩))
+  case run2 => exact full_output implAt wrt ⟨[], 0⟩ (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model (BitVec.ofNat 64 NL) 1#64 ret hret _ {} setup ((⟨ready _ _ 24 (Or.inr (Or.inr rfl)), wmem_data, wrt_data, str_facts⟩))
 
 /-- So the guarantee is reached: from the witness state, for every kernel, `println(s)` for the one-byte string at the program's `"\n"` returns and the trace gains what the two writes may append. -/
 theorem returns (E : KEnv) (k : Kern) :

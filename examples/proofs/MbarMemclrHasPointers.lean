@@ -251,17 +251,24 @@ theorem pre : TPre M0 WB 64 2 s0 ∧ (s0.regs 0).toNat % 8 = 0 ∧ (s0.regs 1).t
     (try simp only [CallOK, Input, Dest, WriteBarrierOff, calleeStack, M0, outside_cons, outside_nil]) <;>
     decide
 
-/-- All hypotheses of `correctness` hold together (`M0`, `wb = WB`, `db = dc = 16`, `d = 64`). -/
-theorem nonvacuous : ∃ (impl : List Segment) (M : MemModel) (wb d db dc : Nat), M.Laws ∧ 8 ≤ db ∧
-    db + 48 ≤ d ∧ 8 ≤ dc ∧ dc + 48 ≤ d ∧
-    BulkBarrierOff (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.bulkBarrierPreWrite") M wb db ∧
-    MemclrNoHeapPointers (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") M dc ∧
-    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (TPre M wb d 2 s ∧ (s.regs 0).toNat % 8 = 0 ∧ (s.regs 1).toNat % 8 = 0 ∧
-    Dest M s d 2 (s.regs 0).toNat (s.regs 1).toNat) :=
-  ⟨implAt, M0, WB, 64, 16, 16, M0_laws, by decide, by decide, by decide, by decide, modelB WB 16,
-    model 16, s0, rfl, pre⟩
+/-- The call-site state of the `runtime.bulkBarrierPreWrite` contract hypothesis (U-WITNESS-CALLSITE), at the
+contract's address, with its precondition for the stack bound `db = 16`. -/
+def wsB : State := { s0 with pc := BitVec.ofNat 64 bAddr }
+
+theorem wsB_pre : TPre M0 WB 16 4 wsB ∧ (wsB.regs 0).toNat % 8 = 0 ∧ (wsB.regs 1).toNat % 8 = 0 ∧
+    (wsB.regs 2).toNat % 8 = 0 := by
+  refine ⟨⟨trivial, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_, ?_⟩ <;>
+    (try simp only [wsB, s0, r, MemSat.wstate, CallOK, Input, Dest, WriteBarrierOff, calleeStack, M0, outside_cons, outside_nil]) <;> decide
+
+/-- The call-site state of the `runtime.memclrNoHeapPointers` contract hypothesis: `memclr(DST, 64)` at the
+contract's address, with its precondition for the stack bound `dc = 16`. -/
+def wsM : State := { s0 with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsM_pre : M0.Env wsM.mem (wsM.regs 28) ∧ EqPre 16 2 wsM ∧
+    Outside (wsM.sp.toNat - 16) (16 + 8 + 8 * 2) M0.priv ∧
+    Dest M0 wsM 16 2 (wsM.regs 0).toNat (wsM.regs 1).toNat := by
+  refine ⟨trivial, ⟨⟨by decide, by decide, by decide⟩, ?_, ?_⟩, ?_, ?_⟩ <;>
+    (try simp only [wsM, s0, r, MemSat.wstate, CallOK, Input, Dest, WriteBarrierOff, calleeStack, M0, outside_cons, outside_nil]) <;> decide
 
 /-- `correctness` at `s0`: the 64 bytes at `DST` become zero. -/
 theorem returns : ReachesRet (Extracted.program.link implAt) (s0.regs 30) s0
@@ -269,6 +276,27 @@ theorem returns : ReachesRet (Extracted.program.link implAt) (s0.regs 30) s0
       fun m => Zeroed m (s0.regs 0).toNat (s0.regs 1).toNat) :=
   correctness implAt M0 M0_laws WB 64 16 16 (by decide) (by decide) (by decide) (by decide)
     (modelB WB 16) (model 16) s0 rfl pre
+
+/-- All hypotheses of `correctness` hold together (`M0`, `wb = WB`, `db = dc = 16`, `d = 64`). -/
+theorem nonvacuous : ∃ (impl : List Segment) (M : MemModel) (wb d db dc : Nat), M.Laws ∧ 8 ≤ db ∧
+    db + 48 ≤ d ∧ 8 ≤ dc ∧ dc + 48 ≤ d ∧
+    BulkBarrierOff (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.bulkBarrierPreWrite") M wb db ∧
+    MemclrNoHeapPointers (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") M dc ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.bulkBarrierPreWrite") ∧
+      TPre M wb db 4 s_c ∧ (s_c.regs 0).toNat % 8 = 0 ∧ (s_c.regs 1).toNat % 8 = 0 ∧
+      (s_c.regs 2).toNat % 8 = 0) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") ∧
+      M.Env s_c.mem (s_c.regs 28) ∧ EqPre dc 2 s_c ∧ Outside (s_c.sp.toNat - dc) (dc + 8 + 8 * 2) M.priv ∧
+      Dest M s_c dc 2 (s_c.regs 0).toNat (s_c.regs 1).toNat) ∧
+    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (TPre M wb d 2 s ∧ (s.regs 0).toNat % 8 = 0 ∧ (s.regs 1).toNat % 8 = 0 ∧
+    Dest M s d 2 (s.regs 0).toNat (s.regs 1).toNat) ∧
+      ReachesRet (Extracted.program.link impl) (s.regs 30) s
+        (fun s' => TRet M d 2 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 1).toNat)] s s'
+      fun m => Zeroed m (s.regs 0).toNat (s.regs 1).toNat) :=
+  ⟨implAt, M0, WB, 64, 16, 16, M0_laws, by decide, by decide, by decide, by decide, modelB WB 16,
+    model 16, ⟨wsB, rfl, wsB_pre⟩, ⟨wsM, rfl, wsM_pre⟩, s0, rfl, pre, returns⟩
 
 end Witness
 
