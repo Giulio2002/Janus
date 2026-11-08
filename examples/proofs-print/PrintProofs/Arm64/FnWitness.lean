@@ -176,6 +176,61 @@ theorem ready (e : Nat) (r : Nat → W64) (above : Nat) (ha : above = 16 ∨ abo
     PrintReady ⟨PK, BI, BL, OW, DL⟩ wrt 1088 above 256 (wstate e r) :=
   ready_of rfl rfl rfl (ready0 above ha)
 
+/-! ### Call-site states of the three contracts
+
+A state at each callee's entry that meets the contract's call precondition, on the same memory
+(`Witness.nonvacuous` of every example exhibits them: nothing may be vacuous about a contract
+hypothesis that no call can satisfy). -/
+
+/-- `X0 = &debuglock`. -/
+def rL : Nat → W64 := fun i => if i = 0 then BitVec.ofNat 64 DL else 0
+
+/-- `runtime.lock2(&debuglock)` with the lock free. -/
+theorem site_lock (e : Nat) :
+    CallOK (wstate e rL) 1024 1 ∧ LockPre wrt 0 (wstate e rL) ∧
+      ¬ lockHeld (wstate e rL).mem ((wstate e rL).regs 0).toNat := by
+  have h : CallOK (wstate 0 rL) 1024 1 ∧ LockPre wrt 0 (wstate 0 rL) ∧
+      ¬ lockHeld (wstate 0 rL).mem ((wstate 0 rL).regs 0).toNat := by
+    unfold CallOK LockPre
+    simp only [sep_cons, sep_nil, and_true, wrt, outside_cons, outside_nil, InRanges, lockHeld, Apart,
+      gM, gWritebuf, mLocks, mDying, mPrintlock, List.mem_cons, List.mem_nil_iff, or_false,
+      exists_eq_or_imp, exists_eq_left, mLocksOf]
+    repeat' apply And.intro
+    all_goals decide +kernel
+  exact h
+
+/-- The memory with the lock held and `m.locks = 1`. -/
+def heldMem : Memory :=
+  ⟨fun a => if a = DL then 1 else if a = WM + 264 then 1 else wmem.bytes a, wmem.regions⟩
+
+/-- `X0 = &debuglock`, lock held, one lock. -/
+def hstate (e : Nat) : State := { wstate e rL with mem := heldMem }
+
+/-- `runtime.unlock2(&debuglock)` with the lock held. -/
+theorem site_unlock (e : Nat) :
+    CallOK (hstate e) 1024 1 ∧ LockPre wrt 1 (hstate e) ∧ lockHeld (hstate e).mem ((hstate e).regs 0).toNat := by
+  have h : CallOK (hstate 0) 1024 1 ∧ LockPre wrt 1 (hstate 0) ∧
+      lockHeld (hstate 0).mem ((hstate 0).regs 0).toNat := by
+    unfold CallOK LockPre hstate
+    simp only [sep_cons, sep_nil, and_true, wrt, outside_cons, outside_nil, InRanges, lockHeld, Apart,
+      gM, gWritebuf, mLocks, mDying, mPrintlock, List.mem_cons, List.mem_nil_iff, or_false,
+      exists_eq_or_imp, exists_eq_left, mLocksOf]
+    repeat' apply And.intro
+    all_goals decide +kernel
+  exact h
+
+/-- `X0 = printBacklog`, `X1 = g`, `X2 = 4`. -/
+def rM : Nat → W64 := fun i => if i = 0 then BitVec.ofNat 64 BL else if i = 1 then BitVec.ofNat 64 WG
+  else if i = 2 then 4#64 else 0
+
+/-- `runtime.memmove(printBacklog, g, 4)`. -/
+theorem site_memmove (e : Nat) : MemmovePre (wstate e rM) := by
+  have h : MemmovePre (wstate 0 rM) := by
+    unfold MemmovePre
+    repeat' apply And.intro
+    all_goals decide +kernel
+  exact h
+
 end Witness
 
 end PrintFn
