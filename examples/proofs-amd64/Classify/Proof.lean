@@ -503,17 +503,31 @@ theorem pre : CallerOK R0 s0 48 24 ∧ Extracted.program.DataLoaded s0.mem ∧
   · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide +kernel
   · simp only [window, outside_cons, outside_nil, and_true]; decide +kernel
 
-/-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (H : Janus.Contracts.RtReady)
-    (c : Nat) (ret : Nat) (s : Janus.Amd64.State) (t x : BitVec 64), R.Laws ∧
-    InterfaceSwitch (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.interfaceSwitch") R H ∧
-    RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [t, x] s ∧
-    (CallerOK R s 48 24 ∧ Extracted.program.DataLoaded s.mem ∧
-      ISDescOK R s.mem desc [c] ∧ Outside desc 24 (window R s) ∧ (t.toNat ≠ 0 → R.IsType t.toNat) ∧
-      H [desc, t.toNat] (s.regs 14).toNat ((s.regs 4).toNat - 48) (Janus.Contracts.rtView R.priv s.mem)) :=
-  ⟨implAt, R0, Htrue, ID, ret, s0, td, val, R0_laws, model, hret, setup,
-    pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩
+theorem rtpre_pc {n : Nat} {R : IfaceModel} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre R n s) :
+    RTPre R n { s with rip := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+
+/-- The precondition of `InterfaceSwitch`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def InterfaceSwitchSite (R : IfaceModel) (H : Janus.Contracts.RtReady) (cs : List Nat) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre R 2 s_c ∧ ISDescOK R s_c.mem (s_c.regs 0).toNat cs ∧ (s_c.regs 3).toNat ≠ 0 ∧
+    R.IsType (s_c.regs 3).toNat ∧ Janus.Contracts.Ready64 H R.priv [(s_c.regs 0).toNat, (s_c.regs 3).toNat] s_c
+
+/-- The call state of the `runtime.interfaceSwitch` contract (U-WITNESS-CALLSITE): `desc` and the type word `td`, in the witness memory. -/
+def wsCall : Janus.Amd64.State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 desc else if i = 3 then td else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 cAddr, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := mem2 }
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : InterfaceSwitchSite R0 Htrue [ID] wsCall := by
+  refine ⟨⟨mem2_env (wsCall.regs 14), ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩,
+    by show ISDescOK R0 mem2 (BitVec.ofNat 64 desc).toNat [ID]; rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt (by decide)]; exact mem2_desc,
+    ?_, ?_, trivial⟩
+  all_goals first
+    | decide +kernel
+    | (simp only [R0_priv, outside_cons, outside_nil, and_true]; decide +kernel)
+    | exact Or.inl rfl
 
 /-- So the guarantee is reached: a box of `TD` takes the interface case `ID` (`3`). -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
@@ -527,6 +541,22 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
   janus_eval_nat hS : strT
   simp only [result, hU, hS]
   decide +kernel
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (H : Janus.Contracts.RtReady)
+    (c : Nat) (ret : Nat) (s : Janus.Amd64.State) (t x : BitVec 64), R.Laws ∧
+    InterfaceSwitch (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.interfaceSwitch") R H ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [t, x] s ∧
+    (CallerOK R s 48 24 ∧ Extracted.program.DataLoaded s.mem ∧
+      ISDescOK R s.mem desc [c] ∧ Outside desc 24 (window R s) ∧ (t.toNat ≠ 0 → R.IsType t.toNat) ∧
+      H [desc, t.toNat] (s.regs 14).toNat ((s.regs 4).toNat - 48) (Janus.Contracts.rtView R.priv s.mem)) ∧
+    (∃ (cs : List Nat) (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.interfaceSwitch") ∧ InterfaceSwitchSite R H cs s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (Post R c t s s' ∧
+        (StaticItabs R Extracted.program.data → c = hasherInter → t.toNat = mulHasherType →
+          (s'.regs 0).toNat = 3)) :=
+  ⟨implAt, R0, Htrue, ID, ret, s0, td, val, R0_laws, model, hret, setup,
+    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩, ⟨[ID], wsCall, rfl, wsCall_pre⟩, correctness implAt R0 R0_laws Htrue model ID td val ret hret s0 setup ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩⟩
 
 end Witness
 

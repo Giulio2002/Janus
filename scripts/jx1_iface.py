@@ -97,3 +97,24 @@ theorem wsCall_pre : {nm} R0 Htrue wsCall := by
     go(isa,'AsHasher',RTPRE_PC[isa]+'\n'+st+'\n'+ws,[conj(isa,nm,'runtime.typeAssert','R H')],['⟨wsCall, rfl, wsCall_pre⟩'],[],
        'correctness implAt R0 R0_laws Htrue model td val ret hret s0 setup ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩',
        fix=('pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial, ⟨wsCall','⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩, ⟨wsCall'))
+
+CLOSE2=CLOSE+'    | exact Or.inl rfl\n'
+def classify(isa):
+    t='1' if isa=='arm64' else '3'
+    rd='Ready' if isa=='arm64' else 'Janus.Contracts.Ready64'
+    nm='InterfaceSwitchSite'
+    body=f'''RTPre R 2 s_c ∧ ISDescOK R s_c.mem (s_c.regs 0).toNat cs ∧ (s_c.regs {t}).toNat ≠ 0 ∧
+    R.IsType (s_c.regs {t}).toNat ∧ {rd} H R.priv [(s_c.regs 0).toNat, (s_c.regs {t}).toNat] s_c'''
+    st=site(isa,nm,'InterfaceSwitch','(R : IfaceModel) (H : Janus.Contracts.RtReady) (cs : List Nat) ',body)
+    ws=wsdef(isa,['if i = 0 then BitVec.ofNat 64 desc',f'if i = {t} then td'],'mem2',
+      'The call state of the `runtime.interfaceSwitch` contract (U-WITNESS-CALLSITE): `desc` and the type word `td`, in the witness memory.')
+    ws+=f'''
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : {nm} R0 Htrue [ID] wsCall := by
+  refine ⟨{rtpre_refine(isa,'mem2_env (wsCall.regs '+('28' if isa=='arm64' else '14')+')',2)},
+    by show ISDescOK R0 mem2 (BitVec.ofNat 64 desc).toNat [ID]; rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt (by decide)]; exact mem2_desc,
+    ?_, ?_, trivial⟩
+{CLOSE2}'''
+    go(isa,'Classify',RTPRE_PC[isa]+'\n'+st+'\n'+ws,[conj(isa,nm,'runtime.interfaceSwitch','R H cs','(cs : List Nat) ')],['⟨[ID], wsCall, rfl, wsCall_pre⟩'],[],
+       'correctness implAt R0 R0_laws Htrue model ID td val ret hret s0 setup ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩',
+       fix=('pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial, ⟨[ID]','⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩, ⟨[ID]'))
