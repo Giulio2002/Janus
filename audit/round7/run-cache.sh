@@ -76,9 +76,10 @@ want rc3 && par_run '
 echo "== RC3: a tampered entry is ignored"
 mkdir -p $W/RC3; cp examples/proofs/Add.lean $W/RC3/Add.lean
 out="$(v $W/Add4 --proof $W/RC3/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"
-f=$(grep -rl "RC3/Add.lean" "$C/v1/result" --include=*.json | head -1)
+f=$(grep -rl "RC3/Add.lean" "$C/v1/result" --include=*.json)
 if [ -n "$f" ]; then
-  sed -i "s/x.toNat + y.toNat/x.toNat * y.toNat/" "$f"
+  # every recorded entry of the run (correctness and its witness are two entries) is tampered with
+  for ff in $f; do sed -i "s/x.toNat + y.toNat/x.toNat * y.toNat/" "$ff"; done
   out="$(v $W/Add4 --proof $W/RC3/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"
   ok=yes; cached "$out" && ok=no; grep -q "x.toNat \* y.toNat" <<<"$out" && ok=no
   row RC3_tampered_entry "$(verdict "$out") [cached: $(cached "$out" && echo YES || echo no), statement: $(grep -qF "x.toNat + y.toNat" <<<"$out" && echo honest || echo WRONG)]" $ok
