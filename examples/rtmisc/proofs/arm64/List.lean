@@ -283,6 +283,76 @@ theorem pre : GuardOK s0 4160 ∧ StackOK s0 4168 16 ∧ Extracted.program.DataL
   · rw [addr_new]; exact Or.inl ⟨rfl, rfl⟩
   · rw [addr_wb]; exact Or.inr ⟨rfl, rfl⟩
 
+/-! ### The call-site states of the two runtime contracts -/
+
+/-- A call state at the runtime entry `addr` (word `x` in `X0`), in the witness's world: the heap and the
+invariant are those of `s0`; the callee's frame lies just below the caller's. -/
+def callS (addr x : Nat) : State :=
+  { s0 with
+    pc := BitVec.ofNat 64 addr
+    sp := BitVec.ofNat 64 (sp0 - 16)
+    regs := fun i => if i = 0 then BitVec.ofNat 64 x else s0.regs i }
+
+theorem cs_sp (a x : Nat) : (callS a x).sp.toNat = sp0 - 16 := by rfl
+theorem cs_g (a x : Nat) : ((callS a x).regs 28).toNat = g0 := by rfl
+theorem cs_x30 (a x : Nat) : ((callS a x).regs 30).toNat = ret := by rfl
+theorem cs_mem (a x : Nat) : (callS a x).mem = mem0 := rfl
+
+theorem cs_callOK (a x n : Nat) (hn : n ≤ 3) : CallOK (callS a x) 4096 n := by
+  have hw : mem0.accessible (sp0 - 16 - 4096) (4096 + 8 + 8 * 3) true = true := by decide
+  simp only [CallOK, cs_x30, cs_sp, cs_mem]
+  refine ⟨by decide, by decide, by decide, by decide, by decide, by first | decide | (unfold sp0; omega), ?_⟩
+  exact Memory.accessible_mono _ hw (Nat.le_refl _) (by omega)
+
+theorem cs_room (a x n : Nat) (hn : n ≤ 3) : StackRoom (callS a x) 4096 n := by
+  simp only [StackRoom, GuardOK, cs_g, cs_sp, cs_mem, calleeStack]
+  refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
+  simp only [outside_cons, outside_nil, and_true, sp0, g0]
+  omega
+
+theorem cs_winR (a x n : Nat) (hn : n ≤ 3) : LiveSep (calleeStack (callS a x) 4096 n) R.rt := by
+  intro x' hx
+  simp only [calleeStack, cs_sp, List.mem_cons, List.not_mem_nil, or_false] at hx
+  rw [rt_eq]
+  rcases hx with rfl | rfl <;>
+    simp only [outside_cons, outside_nil, and_true, sp0, HEAP, HEND, BUMP, WBUF] <;> omega
+
+def sNew : State := callS newA nodeType
+def sWb : State := callS wbA 0
+
+@[reducible] def newSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : State) : Prop :=
+  NewobjectPre 4096 s ∧ StackRoom s 4096 1 ∧
+    LiveAt R addr [(s.regs 0).toNat] L b (newobjectRound s) (s.regs 28).toNat s.mem (calleeStack s 4096 1)
+
+theorem site_new : newSite R newA [] 0x400 sNew := by
+  refine ⟨⟨cs_callOK _ _ 1 (by omega), ⟨by decide, by decide⟩, by decide⟩,
+    cs_room _ _ 1 (by omega), ?_, inv0, by decide, fun r hr => absurd hr (by simp), cs_winR _ _ 1 (by omega)⟩
+  exact Or.inl ⟨rfl, rfl⟩
+
+@[reducible] def wbSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : State) : Prop :=
+  CallOK s 4096 0 ∧ R.ok addr [1] ∧ R.inv b L (s.regs 28).toNat (view R.rt L s.mem) ∧
+    LiveSep L [(s.sp.toNat - 4096, s.sp.toNat - 8)] ∧ LiveSep [(s.sp.toNat - 4096, s.sp.toNat - 8)] R.rt
+
+theorem site_wb : wbSite R wbA [] 0x400 sWb := by
+  refine ⟨cs_callOK _ _ 0 (by omega), Or.inr ⟨rfl, rfl⟩, inv0, fun r hr => absurd hr (by simp), ?_⟩
+  intro x hx
+  simp only [sWb, cs_sp, List.mem_singleton] at hx
+  subst hx
+  rw [rt_eq]
+  simp only [outside_cons, outside_nil, and_true, sp0, HEAP, HEND, BUMP, WBUF]
+  omega
+
+/-- The returning run, exactly as `correctness` states it at the witness. -/
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (((3 : BitVec 64).toNat = 0 → (s'.regs 0).toNat = 0) ∧
+      (0 < (3 : BitVec 64).toNat → InRanges (s'.regs 0).toNat 16 R.rt ∧
+        s'.mem.readLE ((s'.regs 0).toNat + 8) 8 = (3 : BitVec 64).toNat - 1) ∧
+      ∃ b' L', 0x400 - 16 * (3 : BitVec 64).toNat ≤ b' ∧ R.inv b' L' (s0.regs 28).toNat (view R.rt L' s'.mem) ∧
+        (0 < (3 : BitVec 64).toNat → InRanges (s'.regs 0).toNat 16 L') ∧
+        MemFrame s0.mem s'.mem (R.rt ++ [(s0.sp.toNat - 4168, s0.sp.toNat + 16)])) :=
+  correctness implAt R 0x400 3 (by rw [addr_new]; exact model_new) (by rw [addr_wb]; exact model_wb)
+    ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` hold together: a runtime (`impl`, `R`), a budget and a call of
 `List(3)` satisfying the precondition. -/
 theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (b : Nat) (ret : Nat) (s : State),
@@ -298,15 +368,29 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (b : Nat) (ret : Nat)
       Outside nodeType 16 R.rt ∧ (3 : BitVec 64).toNat < 2 ^ 40 ∧
       R.ok (Extracted.program.contractAddr "runtime.newobject") [nodeType] ∧
       R.ok (Extracted.program.contractAddr "runtime.gcWriteBarrier1") [1] ∧
-      R.inv b [] (s.regs 28).toNat (view R.rt [] s.mem) ∧ 16 * (3 : BitVec 64).toNat ≤ b) :=
-  ⟨implAt, R, 0x400, ret, s0, by rw [addr_new]; exact model_new, by rw [addr_wb]; exact model_wb, hret, setup, pre⟩
+      R.inv b [] (s.regs 28).toNat (view R.rt [] s.mem) ∧ 16 * (3 : BitVec 64).toNat ≤ b) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
+      newSite R (Extracted.program.contractAddr "runtime.newobject") L b s_c) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gcWriteBarrier1") ∧
+      wbSite R (Extracted.program.contractAddr "runtime.gcWriteBarrier1") L b s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (((3 : BitVec 64).toNat = 0 → (s'.regs 0).toNat = 0) ∧
+        (0 < (3 : BitVec 64).toNat → InRanges (s'.regs 0).toNat 16 R.rt ∧
+          s'.mem.readLE ((s'.regs 0).toNat + 8) 8 = (3 : BitVec 64).toNat - 1) ∧
+        ∃ b' L', b - 16 * (3 : BitVec 64).toNat ≤ b' ∧ R.inv b' L' (s.regs 28).toNat (view R.rt L' s'.mem) ∧
+          (0 < (3 : BitVec 64).toNat → InRanges (s'.regs 0).toNat 16 L') ∧
+          MemFrame s.mem s'.mem (R.rt ++ [(s.sp.toNat - 4168, s.sp.toNat + 16)])) :=
+  ⟨implAt, R, 0x400, ret, s0, by rw [addr_new]; exact model_new, by rw [addr_wb]; exact model_wb, hret, setup, pre,
+    ⟨[], 0x400, sNew, by rw [addr_new]; rfl, by rw [addr_new]; exact site_new⟩,
+    ⟨[], 0x400, sWb, by rw [addr_wb]; rfl, by rw [addr_wb]; exact site_wb⟩, returnsF⟩
 
 /-- So the guarantee is reached: `List(3)` returns a non-nil node of value `2` inside `R.rt`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat ≠ 0 ∧ InRanges (s'.regs 0).toNat 16 R.rt ∧
       s'.mem.readLE ((s'.regs 0).toNat + 8) 8 = 2 :=
-  (correctness implAt R 0x400 3 (by rw [addr_new]; exact model_new) (by rw [addr_wb]; exact model_wb)
-    ret hret s0 setup pre).mono
+  returnsF.mono
     fun _ ⟨habi, _, hv, hrest⟩ => by
       obtain ⟨hr, hv2⟩ := hv (by decide)
       refine ⟨habi, ?_, hr, hv2⟩

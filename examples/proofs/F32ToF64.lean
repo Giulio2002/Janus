@@ -79,6 +79,18 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State) , RetAddr Extracted.program ret
     try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp]
     all_goals decide
 
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `exact` hold together at a concrete call, and the call returns. -/
+theorem exact : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (s.getV 0 32 = c_x.toNat ∧ s.fpcr = 0) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (∀ rm, ResultIs binary64 (convertFormat binary32 binary64 rm c_x.toNat) (s'.getV 0 64))) := by
+  refine ⟨ret, s0, hret, setup, ?pre, Proof.exact c_x ret hret s0 setup ?pre⟩
+  case pre =>
+    try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp]
+    all_goals decide
+
 end Witness
 
 end Proof

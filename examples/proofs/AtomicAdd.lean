@@ -156,4 +156,19 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State) (p : BitVec 64) (d : BitVec 64)
   case pre =>
     simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, hasAtomics] <;> decide
 
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- All hypotheses of `anyCPU` hold together at a concrete call (the CPU has the atomics), and the call returns. -/
+theorem anyCPU : ∃ (ret : Nat) (s : State) (p : BitVec 64) (d : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [p, d] s ∧
+    (s.mem.accessible hasAtomics 1 false = true ∧ Ptr s.mem p 8 true ∧ p.toNat % 8 = 0 ∧
+        (s.mem.readLE hasAtomics 1 % 2 = 1 ∨ ∃ k, s.exclPass k = true)) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ ((s'.regs 0).toNat = (s.mem.readLE p.toNat 8 + d.toNat) % 2 ^ 64 ∧
+        s'.mem = s.mem.writeLE p.toNat 8 ((s.mem.readLE p.toNat 8 + d.toNat) % 2 ^ 64))) := by
+  refine ⟨ret, s0, (0x300000), (5), hret, setup, ?pre, Proof.anyCPU (0x300000) (5) ret hret s0 setup ?pre⟩
+  case pre =>
+    refine ⟨?_, ?_, ?_, Or.inl ?_⟩ <;>
+    (try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, hasAtomics]) <;> decide
+
 end Witness

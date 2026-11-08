@@ -111,7 +111,7 @@ def s0 : Amd64.State :=
       else if i = 14 then BitVec.ofNat 64 g0 else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0,
-    mem := ⟨bytes, [⟨sp0 - 4144, 4168, true⟩, ⟨g0, 0x100, false⟩, ⟨dA, dlen, false⟩,
+    mem := ⟨bytes, [⟨sp0 - 4144, 4176, true⟩, ⟨g0, 0x100, false⟩, ⟨dA, dlen, false⟩,
       ⟨heap, 0x10000, true⟩]⟩ }
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
@@ -138,6 +138,31 @@ theorem pre : StackGuardOK s0 0 ∧ StackWritable s0 4144 24 ∧ Extracted.progr
   ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, dataLoaded,
     by simp only [rt, outside_cons, outside_nil]; decide, by decide, hH⟩
 
+/-- The call state of the `mallocgcSmallNoScanSC2` contract: at its entry, with `(size, typ, needzero) = (16, pairType, 1)`. -/
+def sCall : Amd64.State :=
+  { s0 with
+    rip := BitVec.ofNat 64 cA
+    regs := fun i => if i = 0 then 16 else if i = 3 then BitVec.ofNat 64 pairType else if i = 1 then 1 else s0.regs i }
+
+theorem sCall_pre : MallocgcSCPre64 (NoScanArgs 2) rt 4096 Hmalloc sCall := by
+  have hw : s0.mem.accessible (sp0 - 4096) (4096 + 8 + 8 * 3) true = true := by decide
+  refine ⟨⟨⟨⟨?_, by decide, by decide, by decide, ?_⟩, by decide,
+    Or.inr ⟨⟨by decide, by decide⟩, fun h => absurd h (by decide)⟩⟩, ?_⟩, ?_⟩
+  · show s0.mem.readLE sp0 8 < 2 ^ 47
+    decide
+  · have e : (sCall.regs 4).toNat = sp0 := rfl
+    rw [e]
+    exact Janus.Arm64.Memory.accessible_mono _ hw (Nat.le_refl _) (by omega)
+  · exact hH
+  · unfold NoScanArgs; decide
+
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+        s'.mem.accessible ptr 16 true = true ∧
+        s'.mem.readLE ptr 8 = (3 : BitVec 64).toNat ∧ s'.mem.readLE (ptr + 8) 8 = (5 : BitVec 64).toNat ∧
+        MemFrame s0.mem s'.mem (rt ++ [((s0.regs 4).toNat - 4144, (s0.regs 4).toNat + 24)])) :=
+  correctness implAt rt Hmalloc 3 5 model ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat)
     (s : Amd64.State), MallocgcSmallNoScanSCContract64 2 (Extracted.program.link impl)
@@ -146,14 +171,22 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
     (StackGuardOK s 0 ∧ StackWritable s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside ((s.regs 4).toNat - 4144) 4168 rt ∧ (s.regs 4).toNat % 8 = 0 ∧
-      H [16, pairType, 1] (s.regs 14).toNat ((s.regs 4).toNat - 48) (rtView rt s.mem)) :=
-  ⟨implAt, rt, Hmalloc, ret, s0, model, hret, setup, pre⟩
+      H [16, pairType, 1] (s.regs 14).toNat ((s.regs 4).toNat - 48) (rtView rt s.mem)) ∧
+    (∃ s_c : Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mallocgcSmallNoScanSC2") ∧
+      MallocgcSCPre64 (NoScanArgs 2) rt 4096 H s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
+        s'.mem.accessible ptr 16 true = true ∧
+        s'.mem.readLE ptr 8 = (3 : BitVec 64).toNat ∧ s'.mem.readLE (ptr + 8) 8 = (5 : BitVec 64).toNat ∧
+        MemFrame s.mem s'.mem (rt ++ [((s.regs 4).toNat - 4144, (s.regs 4).toNat + 24)])) :=
+  ⟨implAt, rt, Hmalloc, ret, s0, model, hret, setup, pre,
+    ⟨sCall, by rw [addr]; rfl, sCall_pre⟩, returnsF⟩
 
 /-- So the guarantee is reached: `NewPair(3, 5)` returns a fresh object holding 3 and 5. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧
       s'.mem.readLE ptr 8 = 3 ∧ s'.mem.readLE (ptr + 8) 8 = 5 :=
-  (correctness implAt rt Hmalloc 3 5 model ret hret s0 setup pre).mono
+  returnsF.mono
     fun _ ⟨habi, ptr, h0, hin, _, _, ha, hb, _⟩ => ⟨habi, ptr, h0, hin, ha, hb⟩
 
 end Witness

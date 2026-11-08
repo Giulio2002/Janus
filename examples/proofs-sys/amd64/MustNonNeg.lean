@@ -79,6 +79,27 @@ theorem nonvacuous : ∃ (ret : Nat) (s : Amd64.State) (x : BitVec 64), RetAddr 
     Returns (Extracted.program.withExit ret) s (fun s' => ABIReturn s s' ∧ s'.regs 0 = x) :=
   ⟨ret, s0, 5, hret, setup, by decide, hpre, correctness 5 (by decide) ret hret s0 setup hpre⟩
 
+def sT : Amd64.State :=
+  { regs := fun i => if i = 0 then 0xFFFFFFFFFFFFFFFF else if i = 4 then BitVec.ofNat 64 sp0 else if i = 14 then BitVec.ofNat 64 g0 else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := ⟨bytes, [⟨sp0 - 0x100, 0x200, true⟩, ⟨g0, 0x100, false⟩]⟩ }
+
+
+theorem setupT : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0xFFFFFFFFFFFFFFFF : BitVec 64)] sT :=
+  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+
+theorem hpreT : StackGuardOK sT 0 ∧ StackWritable sT 16 16 :=
+  ⟨⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩,
+    ⟨by decide, by decide, by decide⟩⟩
+
+
+/-- All the hypotheses of `traps` hold together at a concrete call with a negative `x`, and the call traps. -/
+theorem traps : ∃ (ret : Nat) (s : Amd64.State) (x : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s ∧ x.toInt < 0 ∧
+    (StackGuardOK s 0 ∧ StackWritable s 16 16) ∧
+    Janus.Amd64.Kernel.Traps (Extracted.program.withExit ret) s :=
+  ⟨ret, sT, 0xFFFFFFFFFFFFFFFF, hret, setupT, by decide, hpreT, Proof.traps 0xFFFFFFFFFFFFFFFF (by decide) ret hret sT setupT hpreT.1 hpreT.2⟩
+
 end Witness
 
 end Proof

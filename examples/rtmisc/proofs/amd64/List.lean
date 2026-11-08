@@ -294,6 +294,80 @@ theorem pre : StackGuardOK s0 4144 ∧ StackWritable s0 4144 16 ∧ (s0.regs 4).
   · rw [addr_new]; exact Or.inl ⟨rfl, rfl⟩
   · rw [addr_wb]; exact Or.inr ⟨rfl, rfl⟩
 
+/-! ### The call-site states of the two runtime contracts -/
+
+def callS (addr x : Nat) : Amd64.State :=
+  { s0 with
+    rip := BitVec.ofNat 64 addr
+    regs := fun i => if i = 0 then BitVec.ofNat 64 x else s0.regs i }
+
+theorem cs_rsp (a x : Nat) : ((callS a x).regs 4).toNat = sp0 := by rfl
+theorem cs_g (a x : Nat) : ((callS a x).regs 14).toNat = g0 := by rfl
+theorem cs_mem (a x : Nat) : (callS a x).mem = mem0 := rfl
+
+theorem cs_callOK (a x n : Nat) (hn : n ≤ 1) : CallOK64 (callS a x) 4096 n := by
+  have hw : mem0.accessible (sp0 - 4096) (4096 + 8 + 8 * 1) true = true := by decide
+  have h1 : mem0.readLE sp0 8 < 2 ^ 47 := by decide
+  simp only [CallOK64, cs_rsp, cs_mem]
+  refine ⟨h1, by first | decide | (unfold sp0; omega), by first | decide | (unfold sp0; omega),
+    by first | decide | (unfold sp0; omega), ?_⟩
+  exact Janus.Arm64.Memory.accessible_mono _ hw (Nat.le_refl _) (by omega)
+
+theorem cs_room (a x : Nat) : StackRoom64 (callS a x) 4096 1 := by
+  simp only [StackRoom64, GuardOK64, cs_g, cs_rsp, cs_mem, calleeStack64]
+  refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
+  simp only [outside_cons, outside_nil, and_true, sp0, g0]
+  omega
+
+theorem cs_winL (a x n : Nat) : LiveSep ([] : List (Nat × Nat)) (liveWin64 (callS a x) 4096 n) := by
+  intro r hr; simp at hr
+
+theorem cs_winR (a x n : Nat) (hn : n ≤ 1) : LiveSep (liveWin64 (callS a x) 4096 n) R.rt := by
+  intro x' hx
+  simp only [liveWin64, calleeStack64, cs_rsp, List.mem_append, List.mem_cons, List.not_mem_nil, or_false] at hx
+  rw [rt_eq]
+  rcases hx with (rfl | rfl) | rfl <;>
+    simp only [outside_cons, outside_nil, and_true, sp0, HEAP, HEND, BUMP, WBUF] <;> omega
+
+def sNew : Amd64.State := callS newA nodeType
+def sWb : Amd64.State := callS wbA 0
+
+@[reducible] def newSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : Amd64.State) : Prop :=
+  NewobjectPre64 4096 s ∧ StackRoom64 s 4096 1 ∧
+    LiveAt R addr [(s.regs 0).toNat] L b (newobjectRound64 s) (s.regs 14).toNat s.mem (liveWin64 s 4096 1)
+
+theorem site_new : newSite R newA [] 0x400 sNew := by
+  have h0 : (sNew.regs 0).toNat = nodeType := by decide
+  refine ⟨⟨cs_callOK _ _ _ (by omega), ?_, ?_⟩, cs_room _ _, ?_, inv0, ?_, cs_winL _ _ _, cs_winR _ _ _ (by omega)⟩
+  · rw [h0]; exact ⟨by decide, by decide⟩
+  · rw [h0]; show typSize mem0 nodeType ≤ maxAlloc; decide
+  · rw [h0]; exact Or.inl ⟨rfl, rfl⟩
+  · simp only [newobjectRound64, h0, cs_mem]; decide
+
+@[reducible] def wbSite (R : RtInv) (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : Amd64.State) : Prop :=
+  CallOK64 s 4096 0 ∧ R.ok addr [1] ∧ R.inv b L (s.regs 14).toNat (view R.rt L s.mem) ∧
+    LiveSep L [((s.regs 4).toNat - 4096, (s.regs 4).toNat + 8)] ∧
+    LiveSep [((s.regs 4).toNat - 4096, (s.regs 4).toNat + 8)] R.rt
+
+theorem site_wb : wbSite R wbA [] 0x400 sWb := by
+  refine ⟨cs_callOK _ _ _ (by omega), Or.inr ⟨rfl, rfl⟩, inv0, fun r hr => by simp at hr, ?_⟩
+  intro x hx
+  simp only [sWb, cs_rsp, List.mem_singleton] at hx
+  subst hx
+  rw [rt_eq]
+  simp only [outside_cons, outside_nil, and_true, sp0, HEAP, HEND, BUMP, WBUF]
+  omega
+
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (((3 : BitVec 64).toNat = 0 → (s'.regs 0).toNat = 0) ∧
+        (0 < (3 : BitVec 64).toNat → InRanges (s'.regs 0).toNat 16 R.rt ∧
+          s'.mem.readLE ((s'.regs 0).toNat + 8) 8 = (3 : BitVec 64).toNat - 1) ∧
+        ∃ b' L', 0x400 - 16 * (3 : BitVec 64).toNat ≤ b' ∧ R.inv b' L' (s0.regs 14).toNat (view R.rt L' s'.mem) ∧
+          (0 < (3 : BitVec 64).toNat → InRanges (s'.regs 0).toNat 16 L') ∧
+          MemFrame s0.mem s'.mem (R.rt ++ [((s0.regs 4).toNat - 4144, (s0.regs 4).toNat + 16)])) :=
+  correctness implAt R 0x400 3 (by rw [addr_new]; exact model_new) (by rw [addr_wb]; exact model_wb)
+    ret hret s0 setup pre
+
 /-- All hypotheses of `correctness` hold together: a runtime (`impl`, `R`), a budget and a call of
 `List(3)` satisfying the precondition. -/
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (ret : Nat) (s : Amd64.State),
@@ -310,15 +384,29 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (ret 
       s.mem.accessible flagAddr 4 false = true ∧ Outside nodeType 16 R.rt ∧ (3 : BitVec 64).toNat < 2 ^ 40 ∧
       R.ok (Extracted.program.contractAddr "runtime.newobject") [nodeType] ∧
       R.ok (Extracted.program.contractAddr "runtime.gcWriteBarrier1") [1] ∧
-      R.inv b [] (s.regs 14).toNat (view R.rt [] s.mem) ∧ 16 * (3 : BitVec 64).toNat ≤ b) :=
-  ⟨implAt, R, 0x400, ret, s0, by rw [addr_new]; exact model_new, by rw [addr_wb]; exact model_wb, hret, setup, pre⟩
+      R.inv b [] (s.regs 14).toNat (view R.rt [] s.mem) ∧ 16 * (3 : BitVec 64).toNat ≤ b) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
+      newSite R (Extracted.program.contractAddr "runtime.newobject") L b s_c) ∧
+    (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gcWriteBarrier1") ∧
+      wbSite R (Extracted.program.contractAddr "runtime.gcWriteBarrier1") L b s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (((3 : BitVec 64).toNat = 0 → (s'.regs 0).toNat = 0) ∧
+        (0 < (3 : BitVec 64).toNat → InRanges (s'.regs 0).toNat 16 R.rt ∧
+          s'.mem.readLE ((s'.regs 0).toNat + 8) 8 = (3 : BitVec 64).toNat - 1) ∧
+        ∃ b' L', b - 16 * (3 : BitVec 64).toNat ≤ b' ∧ R.inv b' L' (s.regs 14).toNat (view R.rt L' s'.mem) ∧
+          (0 < (3 : BitVec 64).toNat → InRanges (s'.regs 0).toNat 16 L') ∧
+          MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4144, (s.regs 4).toNat + 16)])) :=
+  ⟨implAt, R, 0x400, ret, s0, by rw [addr_new]; exact model_new, by rw [addr_wb]; exact model_wb, hret, setup, pre,
+    ⟨[], 0x400, sNew, by rw [addr_new]; rfl, by rw [addr_new]; exact site_new⟩,
+    ⟨[], 0x400, sWb, by rw [addr_wb]; rfl, by rw [addr_wb]; exact site_wb⟩, returnsF⟩
 
 /-- So the guarantee is reached: `List(3)` returns a non-nil node of value `2` inside `R.rt`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat ≠ 0 ∧ InRanges (s'.regs 0).toNat 16 R.rt ∧
       s'.mem.readLE ((s'.regs 0).toNat + 8) 8 = 2 :=
-  (correctness implAt R 0x400 3 (by rw [addr_new]; exact model_new) (by rw [addr_wb]; exact model_wb)
-    ret hret s0 setup pre).mono
+  returnsF.mono
     fun _ ⟨habi, _, hv, hrest⟩ => by
       obtain ⟨hr, hv2⟩ := hv (by decide)
       refine ⟨habi, ?_, hr, hv2⟩

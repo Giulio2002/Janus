@@ -82,6 +82,15 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State) , RetAddr Extracted.program ret
     ABIReturn s s' ∧ (s'.regs 0).toInt = Witness.i) :=
   ⟨ret, s0, hret, setup, hi, h0, h1, hpre, correctness x i hi h0 h1 ret hret s0 setup hpre⟩
 
+/-- All hypotheses of `outOfRange` hold together, and the call returns. -/
+theorem outOfRange : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (StackWritable s 0 8 ∧ (s.xmm 0).toNat % 2 ^ 64 = Witness.x.toNat ∧ GoMXCSR s) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ ((∀ i, truncInt binary64 Witness.x.toNat = some i → (i < -(2 ^ 63 : Int) ∨ 2 ^ 63 ≤ i) →
+          (s'.regs 0).toNat = 2 ^ 63) ∧
+        (truncInt binary64 Witness.x.toNat = none → (s'.regs 0).toNat = 2 ^ 63))) :=
+  ⟨ret, s0, hret, setup, hpre, Proof.outOfRange Witness.x ret hret s0 setup hpre⟩
+
 end Witness
 
 end Proof

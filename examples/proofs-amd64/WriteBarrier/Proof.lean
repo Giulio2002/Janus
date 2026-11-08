@@ -232,13 +232,52 @@ theorem returns : ReachesRet Extracted.program (retAddrOf s0) s0 fun s' =>
   rr_mono' (wb1_meets rt s0 rfl ⟨callOK, ready 1 (by decide)⟩) fun s' ⟨buf, f, x, yh, m, zh, kr, hs, _, hw⟩ =>
     ⟨buf, by rw [hs]; simp, by rw [hs]; exact hw⟩
 
-/-- The real `gcWriteBarrier1` meets its contract for `Witness.rt`, and for every `N = 1 … 8` the
-precondition of `gcWriteBarrierN`'s contract, with `HRoom`, holds at the concrete state `s0`. -/
-theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s : State),
-    WbContract64 Extracted.program wb1 rt 120 (HRoom rt 1) 1 ∧
-    (∀ n, n ≤ 8 → CallOK64 s 120 0 ∧ Ready64 (HRoom rt n) rt [n] s) ∧
-    (ReachesRet Extracted.program (retAddrOf s) s (WbPost64 rt 120 1 s)) :=
-  ⟨rt, s0, wb1_meets rt, fun n hn => ⟨callOK, ready n hn⟩, wb1_meets rt s0 rfl ⟨callOK, ready 1 (by decide)⟩⟩
+/-- The call state at `gcWriteBarrierN`: `s0` with the entry of barrier `N`. -/
+def wbs : Nat → Nat
+  | 0 => wb1 | 1 => wb1 | 2 => wb2 | 3 => wb3 | 4 => wb4 | 5 => wb5 | 6 => wb6 | 7 => wb7 | _ => wb8
+
+def sN (n : Nat) : State := { s0 with rip := BitVec.ofNat 64 (wbs n) }
+
+theorem readyN (n m : Nat) (hn : m ≤ 8) : Ready64 (HRoom rt m) rt [m] (sN n) := ready m hn
+
+theorem callOKN (n : Nat) : CallOK64 (sN n) 120 0 := callOK
+
+/-- Every one of the eight barriers meets its contract for `Witness.rt`, and from the call state at each
+the real code returns with its `N` slots reserved (the call states are `s0` with the barrier's entry). -/
+theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s1 s2 s3 s4 s5 s6 s7 s8 : State),
+    (WbContract64 Extracted.program wb1 rt 120 (HRoom rt 1) 1 ∧
+    WbContract64 Extracted.program wb2 rt 120 (HRoom rt 2) 2 ∧
+    WbContract64 Extracted.program wb3 rt 120 (HRoom rt 3) 3 ∧
+    WbContract64 Extracted.program wb4 rt 120 (HRoom rt 4) 4 ∧
+    WbContract64 Extracted.program wb5 rt 120 (HRoom rt 5) 5 ∧
+    WbContract64 Extracted.program wb6 rt 120 (HRoom rt 6) 6 ∧
+    WbContract64 Extracted.program wb7 rt 120 (HRoom rt 7) 7 ∧
+    WbContract64 Extracted.program wb8 rt 120 (HRoom rt 8) 8) ∧
+    (s1.rip = BitVec.ofNat 64 wb1 ∧ CallOK64 s1 120 0 ∧ Ready64 (HRoom rt 1) rt [1] s1 ∧
+      ReachesRet Extracted.program (retAddrOf s1) s1 (WbPost64 rt 120 1 s1)) ∧
+    (s2.rip = BitVec.ofNat 64 wb2 ∧ CallOK64 s2 120 0 ∧ Ready64 (HRoom rt 2) rt [2] s2 ∧
+      ReachesRet Extracted.program (retAddrOf s2) s2 (WbPost64 rt 120 2 s2)) ∧
+    (s3.rip = BitVec.ofNat 64 wb3 ∧ CallOK64 s3 120 0 ∧ Ready64 (HRoom rt 3) rt [3] s3 ∧
+      ReachesRet Extracted.program (retAddrOf s3) s3 (WbPost64 rt 120 3 s3)) ∧
+    (s4.rip = BitVec.ofNat 64 wb4 ∧ CallOK64 s4 120 0 ∧ Ready64 (HRoom rt 4) rt [4] s4 ∧
+      ReachesRet Extracted.program (retAddrOf s4) s4 (WbPost64 rt 120 4 s4)) ∧
+    (s5.rip = BitVec.ofNat 64 wb5 ∧ CallOK64 s5 120 0 ∧ Ready64 (HRoom rt 5) rt [5] s5 ∧
+      ReachesRet Extracted.program (retAddrOf s5) s5 (WbPost64 rt 120 5 s5)) ∧
+    (s6.rip = BitVec.ofNat 64 wb6 ∧ CallOK64 s6 120 0 ∧ Ready64 (HRoom rt 6) rt [6] s6 ∧
+      ReachesRet Extracted.program (retAddrOf s6) s6 (WbPost64 rt 120 6 s6)) ∧
+    (s7.rip = BitVec.ofNat 64 wb7 ∧ CallOK64 s7 120 0 ∧ Ready64 (HRoom rt 7) rt [7] s7 ∧
+      ReachesRet Extracted.program (retAddrOf s7) s7 (WbPost64 rt 120 7 s7)) ∧
+    (s8.rip = BitVec.ofNat 64 wb8 ∧ CallOK64 s8 120 0 ∧ Ready64 (HRoom rt 8) rt [8] s8 ∧
+      ReachesRet Extracted.program (retAddrOf s8) s8 (WbPost64 rt 120 8 s8)) :=
+  ⟨rt, sN 1, sN 2, sN 3, sN 4, sN 5, sN 6, sN 7, sN 8, ⟨wb1_meets rt, wb2_meets rt, wb3_meets rt, wb4_meets rt, wb5_meets rt, wb6_meets rt, wb7_meets rt, wb8_meets rt⟩,
+    ⟨rfl, callOKN 1, readyN 1 1 (by decide), wb1_meets rt (sN 1) rfl ⟨callOKN 1, readyN 1 1 (by decide)⟩⟩,
+    ⟨rfl, callOKN 2, readyN 2 2 (by decide), wb2_meets rt (sN 2) rfl ⟨callOKN 2, readyN 2 2 (by decide)⟩⟩,
+    ⟨rfl, callOKN 3, readyN 3 3 (by decide), wb3_meets rt (sN 3) rfl ⟨callOKN 3, readyN 3 3 (by decide)⟩⟩,
+    ⟨rfl, callOKN 4, readyN 4 4 (by decide), wb4_meets rt (sN 4) rfl ⟨callOKN 4, readyN 4 4 (by decide)⟩⟩,
+    ⟨rfl, callOKN 5, readyN 5 5 (by decide), wb5_meets rt (sN 5) rfl ⟨callOKN 5, readyN 5 5 (by decide)⟩⟩,
+    ⟨rfl, callOKN 6, readyN 6 6 (by decide), wb6_meets rt (sN 6) rfl ⟨callOKN 6, readyN 6 6 (by decide)⟩⟩,
+    ⟨rfl, callOKN 7, readyN 7 7 (by decide), wb7_meets rt (sN 7) rfl ⟨callOKN 7, readyN 7 7 (by decide)⟩⟩,
+    ⟨rfl, callOKN 8, readyN 8 8 (by decide), wb8_meets rt (sN 8) rfl ⟨callOKN 8, readyN 8 8 (by decide)⟩⟩⟩
 
 end Witness
 

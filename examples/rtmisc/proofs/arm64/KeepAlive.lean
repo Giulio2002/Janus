@@ -79,16 +79,17 @@ theorem pre : RTPre softEnv 2 s0 ∧ Misc.CgoAlwaysFalse s0.mem cgoAddr ∧
     by decide, by decide⟩, ?_⟩, ⟨by decide, by decide, by decide⟩, by unfold Spec.Disjoint; decide⟩
   simp [softEnv, outside_nil]
 
-/-- The hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ s : State, s.pc = BitVec.ofNat 64 Extracted.entry ∧ RTPre softEnv 2 s ∧
-    Misc.CgoAlwaysFalse s.mem cgoAddr ∧
-    Spec.Disjoint cgoAddr 1 (s.sp.toNat - softDepth) (softDepth + 8 + 8 * 2) :=
-  ⟨s0, rfl, pre⟩
-
 /-- So the guarantee is reached: the call returns to `X30`, changing only its frame. -/
 theorem returns : ReachesRet Extracted.program (s0.regs regLR) s0
     (fun s' => SoftRet 2 s0 s' fun _ => True) :=
   correctness s0 rfl pre
+
+/-- The hypotheses of `correctness` hold together, and the call returns. -/
+theorem nonvacuous : ∃ s : State, s.pc = BitVec.ofNat 64 Extracted.entry ∧ RTPre softEnv 2 s ∧
+    Misc.CgoAlwaysFalse s.mem cgoAddr ∧
+    Spec.Disjoint cgoAddr 1 (s.sp.toNat - softDepth) (softDepth + 8 + 8 * 2) ∧
+    ReachesRet Extracted.program (s.regs regLR) s (fun s' => SoftRet 2 s s' fun _ => True) :=
+  ⟨s0, rfl, pre.1, pre.2.1, pre.2.2, returns⟩
 
 end Witness
 
