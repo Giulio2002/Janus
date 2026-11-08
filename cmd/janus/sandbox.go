@@ -192,7 +192,7 @@ func (s *sandbox) selfTest() error {
 		}
 	}
 	script := "(echo x > " + shQuote(filepath.Join(probe, "ok")) + ") 2>/dev/null; " +
-		"if (echo x > " + shQuote(filepath.Join(tmp, "denied")) + ") 2>/dev/null; then echo LEAK; fi; "
+		"if (echo x > /usr/janus-sbx-denied) 2>/dev/null; then echo LEAK; fi; "
 	for _, p := range private {
 		script += "(echo x > " + shQuote(p) + ") 2>/dev/null; "
 	}
@@ -539,7 +539,9 @@ func hermeticEnv(env []string) []string {
 			continue
 		}
 		switch {
-		case k == "PATH", k == "LANG", k == "TZ", k == "TERM", k == "JANUS_LEAN_SYSROOT",
+		case k == "PATH":
+			out = append(out, "PATH="+hermeticPath(strings.TrimPrefix(e, "PATH=")))
+		case k == "JANUS_REAL_LAKE", strings.HasPrefix(k, "JANUS_LAKEGUARD_"), k == "LANG", k == "TZ", k == "TERM", k == "JANUS_LEAN_SYSROOT",
 			strings.HasPrefix(k, "LEAN_"), strings.HasPrefix(k, "LAKE_"), strings.HasPrefix(k, "LC_"),
 			strings.HasPrefix(k, "GIT_"):
 			out = append(out, e)
@@ -568,4 +570,24 @@ func hermeticProbePaths(probeDir string) []string {
 		out = append(out, c)
 	}
 	return out
+}
+
+// hermeticPath keeps of a PATH only the system directories, the toolchain's bin (".../toolchains/.../bin") and
+// the lakeguard wrapper directory; no host-specific entry (~/.cargo/bin, ~/.local/bin, ...) crosses over.
+func hermeticPath(p string) string {
+	var keep []string
+	seen := map[string]bool{}
+	for _, d := range filepath.SplitList(p) {
+		sys := d == "/usr/bin" || d == "/bin" || d == "/usr/sbin" || d == "/sbin"
+		if (sys || strings.Contains(d, "/toolchains/") || strings.Contains(d, "lakeguard")) && !seen[d] {
+			seen[d] = true
+			keep = append(keep, d)
+		}
+	}
+	for _, d := range []string{"/usr/bin", "/bin"} {
+		if !seen[d] {
+			keep = append(keep, d)
+		}
+	}
+	return strings.Join(keep, string(os.PathListSeparator))
 }
