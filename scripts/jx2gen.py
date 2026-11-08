@@ -4,7 +4,7 @@ patch(path, defs, sites, isa='arm64'): defs = Lean text inserted before the nonv
 sites = list of (conjunct_text, proof_text). The `returns` theorem is moved before nonvacuous and
 instantiated at the bound state `s` as a Returns conjunct (unless already a conjunct)."""
 import re,sys
-def patch(path, defs, sites, st='s', has_returns_conj=False, retproof='returns', norun=False, runconj=None):
+def patch(path, defs, sites, st='s', has_returns_conj=False, retproof='returns', norun=False, runconj=None, subs=None):
     t=open(path).read()
     # tail "end Witness ... end Proof"
     m=re.search(r'\nend Witness\s*\nend Proof\s*$',t)
@@ -29,6 +29,7 @@ def patch(path, defs, sites, st='s', has_returns_conj=False, retproof='returns',
     rm=re.search(r'theorem returns :(.*?):=(?: by)?\n',retblk,re.S)
     stmt=rm.group(1)
     conj=re.sub(r'\bs0\b',st,stmt).strip().replace('link implAt','link impl')
+    for a_,b_ in (subs or {}).items(): conj=re.sub(r'(?<![\w.])'+re.escape(a_)+r'\b',b_,conj)
     t=t[:nvd]+defs.rstrip()+"\n\n"+retblk.rstrip()+"\n\n"+t[nvd:]
     # nonvacuous: find ':=\n  ⟨' at the end
     k=t.rindex(':=\n  ⟨')
