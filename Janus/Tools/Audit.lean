@@ -3042,12 +3042,18 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
   -- witnessed symmetrically to a returning conjunct: the witness exhibits an instance where the guard / the premises of that conjunct hold
   -- together with the main theorem's premises, and the `Panics p s` claim itself (both sides of an `↔`), so a panic claim guarded by an
   -- unsatisfiable condition is not vacuous either.
-  let claimsRun := fun (c : Expr) =>
-    let used := c.getUsedConstants
-    used.any fun n => n == `Janus.GoABI.Returns || n == `Janus.Amd64.GoABI.Returns || n == `Janus.Tactic.ReachesRet || n == `Janus.Amd64.Tactic.ReachesRet
+  -- the HEAD of the claim decides, never an occurrence: strip `∀`/`→` premises; the claim is `Panics p s` or an `↔` with a side headed by
+  -- `Panics` (an `Ensures …` whose post merely mentions `Panics` is a returning/total-correctness claim and needs the run)
+  let isPanicsApp := fun (e : Expr) =>
+    let e := e.consumeMData
+    e.getAppFn.isConstOf `Janus.GoABI.Panics || e.getAppFn.isConstOf `Janus.Amd64.GoABI.Panics
+  let rec claimBody : Expr → Expr
+    | .forallE _ _ b _ => claimBody b
+    | .mdata _ b => claimBody b
+    | e => e
   let panicOnly := fun (c : Expr) =>
-    let used := c.getUsedConstants
-    (used.contains `Janus.GoABI.Panics || used.contains `Janus.Amd64.GoABI.Panics) && !claimsRun c
+    let b := claimBody c
+    isPanicsApp b || (b.isAppOfArity ``Iff 2 && (isPanicsApp (claimBody (b.getArg! 0)) || isPanicsApp (claimBody (b.getArg! 1))))
   let concls := allConcls
   for (c, idx) in concls.toList.zip (List.range concls.size) do
     let st ← Meta.saveState
@@ -3069,7 +3075,7 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
     -- premises of the main theorem are then matched at THAT state, not at the first state the returning conjunct used)
     if isPan then
       let panSide := if lastConcl.isAppOfArity ``Iff 2 then
-          (if (lastConcl.getArg! 0).getUsedConstants.any (fun n => n == `Janus.GoABI.Panics || n == `Janus.Amd64.GoABI.Panics) then lastConcl.getArg! 0 else lastConcl.getArg! 1)
+          (if (lastConcl.getArg! 0).consumeMData.getAppFn.constName? |>.any (fun n => n == `Janus.GoABI.Panics || n == `Janus.Amd64.GoABI.Panics) then lastConcl.getArg! 0 else lastConcl.getArg! 1)
         else lastConcl
       for w in wconjs do
         let st0 ← Meta.saveState
