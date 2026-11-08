@@ -257,15 +257,20 @@ theorem pre : HPre H0 64 2 s0 ∧ s0.fpcr = 0 ∧ Input s0 64 2 (s0.regs 0).toNa
   refine ⟨⟨wmem_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, rfl, ?_⟩ <;>
     simp only [CallOK, Input, calleeStack, H0_priv, outside_cons, outside_nil] <;> decide
 
-/-- All hypotheses of `correctness` hold together (bounds `dr = dm = 16`, `d = 64`). -/
-theorem nonvacuous : ∃ (impl : List Segment) (H : HashModel) (d dr dm : Nat), H.Laws ∧ 8 ≤ dr ∧
-    dr + 48 ≤ d ∧ 8 ≤ dm ∧ dm + 48 ≤ d ∧
-    Rand (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.rand") H dr ∧
-    Memhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memhash") H dm ∧
-    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧
-      (HPre H d 2 s ∧ s.fpcr = 0 ∧ Input s d 2 (s.regs 0).toNat 4) :=
-  ⟨implAt, H0, 64, 16, 16, H0_laws, by decide, by decide, by decide, by decide, modelR 16, modelM 16,
-    s0, rfl, pre⟩
+/-- The call-site state of the `runtime.rand` contract hypothesis (U-WITNESS-CALLSITE). -/
+def wsRand : State := { s0 with pc := BitVec.ofNat 64 rAddr }
+
+theorem wsRand_pre : HPre H0 16 0 wsRand := by
+  refine ⟨wmem_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩ <;>
+    simp only [wsRand, s0, r, MemSat.wstate, CallOK, Input, calleeStack, H0_priv, outside_cons, outside_nil] <;> decide
+
+/-- The call-site state of the `runtime.memhash` contract hypothesis: `memhash(VAL, 7, 4)`. -/
+def rM : Nat → W64 := fun i => if i = 0 then BitVec.ofNat 64 VAL else if i = 1 then 7 else if i = 2 then 4 else 0
+def wsMem : State := { MemSat.wstate rM with pc := BitVec.ofNat 64 mAddr }
+
+theorem wsMem_pre : HPre H0 16 3 wsMem ∧ Input wsMem 16 3 (wsMem.regs 0).toNat (wsMem.regs 2).toNat := by
+  refine ⟨⟨wmem_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, ?_⟩ <;>
+    simp only [wsMem, rM, MemSat.wstate, CallOK, Input, calleeStack, H0_priv, outside_cons, outside_nil] <;> decide
 
 /-- `correctness` at `s0`: the result is `FHashIs` of the float at `VAL`. -/
 theorem returns : ReachesRet (Extracted.program.link implAt) (s0.regs 30) s0
@@ -273,6 +278,22 @@ theorem returns : ReachesRet (Extracted.program.link implAt) (s0.regs 30) s0
       FHashIs H0 binary32 4 (s0.mem.readLE (s0.regs 0).toNat 4) (s0.regs 1).toNat (r 0).toNat) :=
   correctness implAt H0 H0_laws 64 16 16 (by decide) (by decide) (by decide) (by decide) (modelR 16)
     (modelM 16) s0 rfl pre
+
+/-- All hypotheses of `correctness` hold together (bounds `dr = dm = 16`, `d = 64`). -/
+theorem nonvacuous : ∃ (impl : List Segment) (H : HashModel) (d dr dm : Nat), H.Laws ∧ 8 ≤ dr ∧
+    dr + 48 ≤ d ∧ 8 ≤ dm ∧ dm + 48 ≤ d ∧
+    Rand (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.rand") H dr ∧
+    Memhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memhash") H dm ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.rand") ∧ HPre H dr 0 s_c) ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memhash") ∧
+      HPre H dm 3 s_c ∧ Input s_c dm 3 (s_c.regs 0).toNat (s_c.regs 2).toNat) ∧
+    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧
+      (HPre H d 2 s ∧ s.fpcr = 0 ∧ Input s d 2 (s.regs 0).toNat 4)  ∧
+      ReachesRet (Extracted.program.link impl) (s.regs 30) s
+        (fun s' => HRet H d 2 s s' fun r =>
+          FHashIs H binary32 4 (s.mem.readLE (s.regs 0).toNat 4) (s.regs 1).toNat (r 0).toNat) :=
+  ⟨implAt, H0, 64, 16, 16, H0_laws, by decide, by decide, by decide, by decide, modelR 16, modelM 16,
+    ⟨wsRand, rfl, wsRand_pre⟩, ⟨wsMem, rfl, wsMem_pre⟩, s0, rfl, pre, returns⟩
 
 end Witness
 

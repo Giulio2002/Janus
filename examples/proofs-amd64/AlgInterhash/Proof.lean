@@ -387,9 +387,28 @@ theorem pre : HPre H0 (64 + 56) 2 s0 ∧ Input s0 (64 + 56) 2 (s0.regs 0).toNat 
   all_goals simp only [CallOK, Input, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
       outside_cons, outside_nil] <;> decide
 
+/-- The call-site state of the `runtime.typehash` contract hypothesis (U-WITNESS-CALLSITE): at the
+contract's address, with its precondition for the stack bound `d = 64`. -/
+def wsCall : State :=
+  { s0 with rip := BitVec.ofNat 64 tAddr,
+            regs := fun i => if i = 0 then BitVec.ofNat 64 TD else s0.regs i }
+
+theorem wsCall_pre : HPre H0 64 3 wsCall ∧ H0.Hashable (wsCall.regs 0).toNat wsCall.mem (wsCall.regs 3).toNat := by
+  refine ⟨⟨wmem64_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, by simp only [H0_hashable]; decide⟩ <;>
+    simp only [wsCall, s0, CallOK, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
+      outside_cons, outside_nil] <;> decide
+
+/-- `correctness` at `s0`: the call returns the interface hash of the value at `IFV`. -/
+theorem returns : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0
+    (fun s' => HRet H0 (64 + 56) 2 s0 s' fun r =>
+      IHashIs H0 s0.mem (itabType s0.mem (s0.regs 0).toNat) (s0.regs 0).toNat (s0.regs 3).toNat (r 0).toNat) :=
+  correctness implAt H0 H0_laws 64 (model 64) s0 rfl pre
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (H : HashModel) (d : Nat) (s : State), H.Laws ∧
     Typehash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typehash") H d ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.typehash") ∧
+      HPre H d 3 s_c ∧ H.Hashable (s_c.regs 0).toNat s_c.mem (s_c.regs 3).toNat) ∧
     s.rip = BitVec.ofNat 64 Extracted.entry ∧ (HPre H (d + 56) 2 s ∧ Input s (d + 56) 2 (s.regs 0).toNat 16 ∧
       (s.mem.readLE (s.regs 0).toNat 8 ≠ 0 →
         Input s (d + 56) 2 (s.mem.readLE (s.regs 0).toNat 8) 16 ∧
@@ -398,14 +417,11 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (H : HashModel) (d : 
           (dataAt s.mem (itabType s.mem (s.regs 0).toNat) (s.regs 0).toNat) ∧
         HashFrame H (itabType s.mem (s.regs 0).toNat) s.mem
           (dataAt s.mem (itabType s.mem (s.regs 0).toNat) (s.regs 0).toNat)
-          (calleeStack s (d + 56) 2))) :=
-  ⟨implAt, H0, 64, s0, H0_laws, model 64, rfl, pre⟩
-
-/-- `correctness` at `s0`: the call returns the interface hash of the value at `IFV`. -/
-theorem returns : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0
-    (fun s' => HRet H0 (64 + 56) 2 s0 s' fun r =>
-      IHashIs H0 s0.mem (itabType s0.mem (s0.regs 0).toNat) (s0.regs 0).toNat (s0.regs 3).toNat (r 0).toNat) :=
-  correctness implAt H0 H0_laws 64 (model 64) s0 rfl pre
+          (calleeStack s (d + 56) 2))) ∧
+    ReachesRet (Extracted.program.link impl) (retAddrOf s) s
+      (fun s' => HRet H (d + 56) 2 s s' fun r =>
+        IHashIs H s.mem (itabType s.mem (s.regs 0).toNat) (s.regs 0).toNat (s.regs 3).toNat (r 0).toNat) :=
+  ⟨implAt, H0, 64, s0, H0_laws, model 64, ⟨wsCall, rfl, wsCall_pre⟩, rfl, pre, returns⟩
 
 end Witness
 

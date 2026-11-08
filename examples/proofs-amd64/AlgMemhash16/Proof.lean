@@ -172,11 +172,31 @@ theorem pre : HPre H0 (64 + 40) 2 s0 ∧ Input s0 (64 + 40) 2 (s0.regs 0).toNat 
     simp only [CallOK, Input, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
       outside_cons, outside_nil] <;> decide
 
+/-- The call-site state of the `runtime.memhash` contract hypothesis (U-WITNESS-CALLSITE): at the
+contract's address, with its precondition for the stack bound `d = 64`. -/
+def wsCall : State := { s0 with rip := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : HPre H0 64 3 wsCall ∧ Input wsCall 64 3 (wsCall.regs 0).toNat (wsCall.regs 1).toNat := by
+  refine ⟨⟨wmem64_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, ?_⟩ <;>
+    simp only [wsCall, s0, CallOK, Input, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
+      outside_cons, outside_nil] <;> decide
+
+/-- `correctness` at `s0`. -/
+theorem returns0 : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0
+    (fun s' => HRet H0 (64 + 40) 2 s0 s' fun r => (r 0).toNat =
+      H0.mem (s0.regs 3).toNat 2 (s0.mem.readLE (s0.regs 0).toNat 2)) :=
+  correctness implAt H0 H0_laws 64 (model 64) s0 rfl pre
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (H : HashModel) (d : Nat) (s : State), H.Laws ∧
     Memhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memhash") H d ∧
-    s.rip = BitVec.ofNat 64 Extracted.entry ∧ (HPre H (d + 40) 2 s ∧ Input s (d + 40) 2 (s.regs 0).toNat 2) :=
-  ⟨implAt, H0, 64, s0, H0_laws, model 64, rfl, pre⟩
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memhash") ∧
+      HPre H d 3 s_c ∧ Input s_c d 3 (s_c.regs 0).toNat (s_c.regs 1).toNat) ∧
+    s.rip = BitVec.ofNat 64 Extracted.entry ∧ (HPre H (d + 40) 2 s ∧ Input s (d + 40) 2 (s.regs 0).toNat 2) ∧
+    ReachesRet (Extracted.program.link impl) (retAddrOf s) s
+      (fun s' => HRet H (d + 40) 2 s s' fun r => (r 0).toNat =
+        H.mem (s.regs 3).toNat 2 (s.mem.readLE (s.regs 0).toNat 2)) :=
+  ⟨implAt, H0, 64, s0, H0_laws, model 64, ⟨wsCall, rfl, wsCall_pre⟩, rfl, pre, returns0⟩
 
 /-- So the guarantee is reached: in `H0` every hash is its seed. -/
 theorem returns : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0

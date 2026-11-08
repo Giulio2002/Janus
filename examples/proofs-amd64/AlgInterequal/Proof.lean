@@ -255,9 +255,38 @@ theorem pre : IfacePre R0 (R0.depth + 40) s0 ∧ Input s0 (R0.depth + 40) 2 (s0.
   all_goals simp only [CallOK, Input, R0_priv, R0_depth, calleeStack,
       Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil] <;> decide
 
+/-- The call-site state of the `runtime.ifaceeq` contract hypothesis (U-WITNESS-CALLSITE): at the
+contract's address, with its precondition. -/
+def wsCall : State :=
+  { s0 with rip := BitVec.ofNat 64 cAddr,
+            regs := fun i => if i = 0 then BitVec.ofNat 64 TAB else if i = 3 then BitVec.ofNat 64 VAL else if i = 1 then BitVec.ofNat 64 VAL else s0.regs i }
+
+theorem wsCall_pre : Janus.Contracts.IfaceAmd64.RTPre R0 3 wsCall ∧ ((wsCall.regs 0).toNat ≠ 0 →
+      (wsCall.regs 0).toNat + 16 ≤ 2 ^ 48 ∧ wsCall.mem.accessible (wsCall.regs 0).toNat 16 false = true ∧
+      (wsCall.mem.readLE ((wsCall.regs 0).toNat + 8) 8 ≠ 0) ∧
+      Janus.Contracts.Iface.EqOK R0 wsCall.mem (wsCall.mem.readLE ((wsCall.regs 0).toNat + 8) 8)
+        (wsCall.regs 3).toNat (wsCall.regs 1).toNat) := by
+  refine ⟨⟨wmem64_env0 (wsCall.regs 14), ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩,
+    fun _ => ⟨?_, ?_, by decide, ?_⟩⟩ <;>
+    simp only [wsCall, s0, R0_priv, R0_depth, outside_cons, outside_nil] <;> first | decide | exact eqOK_wit64
+
+/-- `correctness` at `s0`: the call returns. -/
+theorem returns : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0
+    (fun s' => IfaceRet R0 (R0.depth + 40) s0 s' fun r => Janus.Contracts.Mem.BoolRes r
+      (s0.mem.readLE (s0.regs 0).toNat 8 == s0.mem.readLE (s0.regs 3).toNat 8 &&
+        Janus.Contracts.Iface.ifaceEqual R0 s0.mem (s0.mem.readLE (s0.regs 0).toNat 8)
+          (s0.mem.readLE ((s0.regs 0).toNat + 8) 8) (s0.mem.readLE ((s0.regs 3).toNat + 8) 8))) :=
+  correctness implAt R0 R0_laws model s0 rfl pre
+
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (s : State), R.Laws ∧
     Janus.Contracts.IfaceAmd64.Ifaceeq (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.ifaceeq") R ∧
+    (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.ifaceeq") ∧
+      Janus.Contracts.IfaceAmd64.RTPre R 3 s_c ∧ ((s_c.regs 0).toNat ≠ 0 →
+        (s_c.regs 0).toNat + 16 ≤ 2 ^ 48 ∧ s_c.mem.accessible (s_c.regs 0).toNat 16 false = true ∧
+        (s_c.mem.readLE ((s_c.regs 0).toNat + 8) 8 ≠ 0) ∧
+        Janus.Contracts.Iface.EqOK R s_c.mem (s_c.mem.readLE ((s_c.regs 0).toNat + 8) 8)
+          (s_c.regs 3).toNat (s_c.regs 1).toNat)) ∧
     s.rip = BitVec.ofNat 64 Extracted.entry ∧ (IfacePre R (R.depth + 40) s ∧ Input s (R.depth + 40) 2 (s.regs 0).toNat 16 ∧
     Input s (R.depth + 40) 2 (s.regs 3).toNat 16 ∧
     (s.mem.readLE (s.regs 0).toNat 8 = s.mem.readLE (s.regs 3).toNat 8 →
@@ -268,16 +297,13 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (s :
         (s.mem.readLE ((s.regs 0).toNat + 8) 8) (s.mem.readLE ((s.regs 3).toNat + 8) 8) ∧
       EqFrame R (s.mem.readLE (s.mem.readLE (s.regs 0).toNat 8 + 8) 8) s.mem
         (s.mem.readLE ((s.regs 0).toNat + 8) 8) (s.mem.readLE ((s.regs 3).toNat + 8) 8)
-        (calleeStack s (R.depth + 40) 2))) :=
-  ⟨implAt, R0, s0, R0_laws, model, rfl, pre⟩
-
-/-- `correctness` at `s0`: the call returns. -/
-theorem returns : ReachesRet (Extracted.program.link implAt) (retAddrOf s0) s0
-    (fun s' => IfaceRet R0 (R0.depth + 40) s0 s' fun r => Janus.Contracts.Mem.BoolRes r
-      (s0.mem.readLE (s0.regs 0).toNat 8 == s0.mem.readLE (s0.regs 3).toNat 8 &&
-        Janus.Contracts.Iface.ifaceEqual R0 s0.mem (s0.mem.readLE (s0.regs 0).toNat 8)
-          (s0.mem.readLE ((s0.regs 0).toNat + 8) 8) (s0.mem.readLE ((s0.regs 3).toNat + 8) 8))) :=
-  correctness implAt R0 R0_laws model s0 rfl pre
+        (calleeStack s (R.depth + 40) 2))) ∧
+    ReachesRet (Extracted.program.link impl) (retAddrOf s) s
+      (fun s' => IfaceRet R (R.depth + 40) s s' fun r => Janus.Contracts.Mem.BoolRes r
+      (s.mem.readLE (s.regs 0).toNat 8 == s.mem.readLE (s.regs 3).toNat 8 &&
+        Janus.Contracts.Iface.ifaceEqual R s.mem (s.mem.readLE (s.regs 0).toNat 8)
+          (s.mem.readLE ((s.regs 0).toNat + 8) 8) (s.mem.readLE ((s.regs 3).toNat + 8) 8))) :=
+  ⟨implAt, R0, s0, R0_laws, model, ⟨wsCall, rfl, wsCall_pre⟩, rfl, pre, returns⟩
 
 end Witness
 

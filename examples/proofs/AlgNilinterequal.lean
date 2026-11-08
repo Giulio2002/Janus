@@ -231,17 +231,16 @@ theorem pre : IfacePre R0 112 s0 ∧ IfaceInput s0 112 (s0.regs 0).toNat ∧ Ifa
   rw [ht, hv]
   exact ⟨wmem_eqOK, by rw [← em]; exact eqFrame⟩
 
-/-- All hypotheses of `correctness` hold together (the model `R0`, `R0.depth = 64`, `d = 112`). -/
-theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (d : Nat), R.Laws ∧ 8 ≤ R.depth ∧
-    R.depth + 48 ≤ d ∧
-    Iface.Efaceeq (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.efaceeq") R ∧
-    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (IfacePre R d s ∧ IfaceInput s d (s.regs 0).toNat ∧ IfaceInput s d (s.regs 1).toNat ∧
-    (s.mem.readLE (s.regs 0).toNat 8 = s.mem.readLE (s.regs 1).toNat 8 →
-      Iface.EqOK R s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.mem.readLE ((s.regs 0).toNat + 8) 8)
-        (s.mem.readLE ((s.regs 1).toNat + 8) 8) ∧
-      EqFrame R (s.mem.readLE (s.regs 0).toNat 8) s.mem (s.mem.readLE ((s.regs 0).toNat + 8) 8)
-        (s.mem.readLE ((s.regs 1).toNat + 8) 8) (calleeStack s d 2))) :=
-  ⟨implAt, R0, 112, R0_laws, by decide, by decide, model, s0, rfl, pre⟩
+/-- The call-site state of the `runtime.efaceeq` contract hypothesis (U-WITNESS-CALLSITE): `efaceeq(TD, VAL, VAL)` at the
+contract's address (the stock `IfaceSat.wstate`, whose `RTPre` holds). -/
+def rC : Nat → W64 := fun i => if i = 0 then BitVec.ofNat 64 TD
+  else if i = 1 ∨ i = 2 then BitVec.ofNat 64 VAL else 0
+def wsCall : State := { IfaceSat.wstate rC with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : RTPre R0 3 wsCall ∧ Iface.EqOK R0 wsCall.mem (wsCall.regs 0).toNat (wsCall.regs 1).toNat (wsCall.regs 2).toNat :=
+  ⟨by
+    refine ⟨EqHashModel.wmem_env0 (wsCall.regs 28), ⟨by decide, by decide, by decide⟩, ?_, ?_⟩ <;>
+      simp only [wsCall, rC, IfaceSat.wstate, CallOK, calleeStack, R0_priv, outside_cons, outside_nil] <;> decide, fun _ => ⟨Or.inl rfl, rfl, by decide, by decide⟩⟩
 
 /-- `correctness` at `s0`. -/
 theorem returns : ReachesRet (Extracted.program.link implAt) (s0.regs 30) s0
@@ -250,6 +249,25 @@ theorem returns : ReachesRet (Extracted.program.link implAt) (s0.regs 30) s0
         Iface.efaceEqual R0 s0.mem (s0.mem.readLE (s0.regs 0).toNat 8)
           (s0.mem.readLE ((s0.regs 0).toNat + 8) 8) (s0.mem.readLE ((s0.regs 1).toNat + 8) 8))) :=
   correctness implAt R0 R0_laws 112 (by decide) (by decide) model s0 rfl pre
+
+/-- All hypotheses of `correctness` hold together (the model `R0`, `R0.depth = 64`, `d = 112`). -/
+theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (d : Nat), R.Laws ∧ 8 ≤ R.depth ∧
+    R.depth + 48 ≤ d ∧
+    Iface.Efaceeq (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.efaceeq") R ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.efaceeq") ∧
+      RTPre R 3 s_c ∧ Iface.EqOK R s_c.mem (s_c.regs 0).toNat (s_c.regs 1).toNat (s_c.regs 2).toNat) ∧
+    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (IfacePre R d s ∧ IfaceInput s d (s.regs 0).toNat ∧ IfaceInput s d (s.regs 1).toNat ∧
+    (s.mem.readLE (s.regs 0).toNat 8 = s.mem.readLE (s.regs 1).toNat 8 →
+      Iface.EqOK R s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.mem.readLE ((s.regs 0).toNat + 8) 8)
+        (s.mem.readLE ((s.regs 1).toNat + 8) 8) ∧
+      EqFrame R (s.mem.readLE (s.regs 0).toNat 8) s.mem (s.mem.readLE ((s.regs 0).toNat + 8) 8)
+        (s.mem.readLE ((s.regs 1).toNat + 8) 8) (calleeStack s d 2))) ∧
+      ReachesRet (Extracted.program.link impl) (s.regs 30) s
+        (fun s' => IfaceRet R d s s' fun r => BoolRes r
+      (s.mem.readLE (s.regs 0).toNat 8 == s.mem.readLE (s.regs 1).toNat 8 &&
+        Iface.efaceEqual R s.mem (s.mem.readLE (s.regs 0).toNat 8)
+          (s.mem.readLE ((s.regs 0).toNat + 8) 8) (s.mem.readLE ((s.regs 1).toNat + 8) 8))) :=
+  ⟨implAt, R0, 112, R0_laws, by decide, by decide, model, ⟨wsCall, rfl, wsCall_pre⟩, s0, rfl, pre, returns⟩
 
 end Witness
 

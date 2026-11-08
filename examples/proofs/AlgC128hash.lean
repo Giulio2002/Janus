@@ -257,14 +257,12 @@ theorem pre : HPre H0 64 2 s0 ∧ s0.fpcr = 0 ∧ Input s0 64 2 (s0.regs 0).toNa
   refine ⟨⟨wmem_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, rfl, ?_, ?_⟩ <;>
     simp only [CallOK, Input, calleeStack, H0_priv, outside_cons, outside_nil] <;> decide
 
-/-- All hypotheses of `correctness` hold together (bounds `d' = 32`, `d = 64`). -/
-theorem nonvacuous : ∃ (impl : List Segment) (H : HashModel) (d d' : Nat), H.Laws ∧ 8 ≤ d' ∧
-    d' + 32 ≤ d ∧
-    Fhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.f64hash") H d' binary64 8 ∧
-    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧
-      (HPre H d 2 s ∧ s.fpcr = 0 ∧ Input s d 2 (s.regs 0).toNat (2 * 8) ∧
-        Outside (s.regs 0).toNat (2 * 8) H.priv) :=
-  ⟨implAt, H0, 64, 32, H0_laws, by decide, by decide, model 32, s0, rfl, pre⟩
+/-- The call-site state of the `runtime.f64hash` contract hypothesis (U-WITNESS-CALLSITE). -/
+def wsCall : State := { s0 with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : HPre H0 32 2 wsCall ∧ wsCall.fpcr = 0 ∧ Input wsCall 32 2 (wsCall.regs 0).toNat 8 := by
+  refine ⟨⟨wmem_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, rfl, ?_⟩ <;>
+    simp only [wsCall, s0, r, MemSat.wstate, CallOK, Input, calleeStack, H0_priv, outside_cons, outside_nil] <;> decide
 
 /-- `correctness` at `s0`. -/
 theorem returns : ReachesRet (Extracted.program.link implAt) (s0.regs 30) s0
@@ -272,6 +270,21 @@ theorem returns : ReachesRet (Extracted.program.link implAt) (s0.regs 30) s0
       FHashIs H0 binary64 8 (s0.mem.readLE (s0.regs 0).toNat 8) (s0.regs 1).toNat h1 ∧
       FHashIs H0 binary64 8 (s0.mem.readLE ((s0.regs 0).toNat + 8) 8) h1 (r 0).toNat) :=
   correctness implAt H0 H0_laws 64 32 (by decide) (by decide) (model 32) s0 rfl pre
+
+/-- All hypotheses of `correctness` hold together (bounds `d' = 32`, `d = 64`). -/
+theorem nonvacuous : ∃ (impl : List Segment) (H : HashModel) (d d' : Nat), H.Laws ∧ 8 ≤ d' ∧
+    d' + 32 ≤ d ∧
+    Fhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.f64hash") H d' binary64 8 ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.f64hash") ∧
+      HPre H d' 2 s_c ∧ s_c.fpcr = 0 ∧ Input s_c d' 2 (s_c.regs 0).toNat 8) ∧
+    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧
+      (HPre H d 2 s ∧ s.fpcr = 0 ∧ Input s d 2 (s.regs 0).toNat (2 * 8) ∧
+        Outside (s.regs 0).toNat (2 * 8) H.priv) ∧
+      ReachesRet (Extracted.program.link impl) (s.regs 30) s
+        (fun s' => HRet H d 2 s s' fun r => ∃ h1,
+          FHashIs H binary64 8 (s.mem.readLE (s.regs 0).toNat 8) (s.regs 1).toNat h1 ∧
+          FHashIs H binary64 8 (s.mem.readLE ((s.regs 0).toNat + 8) 8) h1 (r 0).toNat) :=
+  ⟨implAt, H0, 64, 32, H0_laws, by decide, by decide, model 32, ⟨wsCall, rfl, wsCall_pre⟩, s0, rfl, pre, returns⟩
 
 end Witness
 

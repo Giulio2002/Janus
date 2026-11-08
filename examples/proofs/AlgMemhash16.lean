@@ -169,18 +169,30 @@ theorem pre : HPre H0 64 2 s0 ∧ Input s0 64 2 (s0.regs 0).toNat 2 := by
   refine ⟨⟨wmem_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, ?_⟩ <;>
     simp only [CallOK, Input, varlenSize, calleeStack, H0_priv, outside_cons, outside_nil] <;> decide
 
-/-- All hypotheses of `correctness` hold together: the model `H0` (its laws), the bounds
-`d' = 16`, `d = 64`, the model code at `runtime.memhash`, and a call state. -/
-theorem nonvacuous : ∃ (impl : List Segment) (H : HashModel) (d d' : Nat), H.Laws ∧ 8 ≤ d' ∧
-    d' + 48 ≤ d ∧
-    Memhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memhash") H d' ∧
-    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (HPre H d 2 s ∧ Input s d 2 (s.regs 0).toNat 2) :=
-  ⟨implAt, H0, 64, 16, H0_laws, by decide, by decide, model 16, s0, rfl, pre⟩
+/-- The call-site state of the `runtime.memhash` contract hypothesis (U-WITNESS-CALLSITE): at the contract's address, with its
+precondition for the stack bound `d' = 16`. -/
+def wsCall : State := { s0 with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : HPre H0 16 3 wsCall ∧ Input wsCall 16 3 (wsCall.regs 0).toNat (wsCall.regs 2).toNat := by
+  refine ⟨⟨wmem_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, ?_⟩ <;>
+    simp only [wsCall, s0, r, MemSat.wstate, CallOK, Input, varlenSize, calleeStack, H0_priv, outside_cons, outside_nil] <;> decide
 
 /-- `correctness` at `s0`: the call returns the contract's hash. -/
 theorem returns : ReachesRet (Extracted.program.link implAt) (s0.regs 30) s0
     (fun s' => HRet H0 64 2 s0 s' fun r => (r 0).toNat = H0.mem (s0.regs 1).toNat 2 (s0.mem.readLE (s0.regs 0).toNat 2)) :=
   correctness implAt H0 H0_laws 64 16 (by decide) (by decide) (model 16) s0 rfl pre
+
+/-- All hypotheses of `correctness` hold together: the model `H0` (its laws), the bounds
+`d' = 16`, `d = 64`, the model code at `runtime.memhash`, and a call state. -/
+theorem nonvacuous : ∃ (impl : List Segment) (H : HashModel) (d d' : Nat), H.Laws ∧ 8 ≤ d' ∧
+    d' + 48 ≤ d ∧
+    Memhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memhash") H d' ∧
+    (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memhash") ∧
+      HPre H d' 3 s_c ∧ Input s_c d' 3 (s_c.regs 0).toNat (s_c.regs 2).toNat) ∧
+    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (HPre H d 2 s ∧ Input s d 2 (s.regs 0).toNat 2) ∧
+      ReachesRet (Extracted.program.link impl) (s.regs 30) s
+        (fun s' => HRet H d 2 s s' fun r => (r 0).toNat = H.mem (s.regs 1).toNat 2 (s.mem.readLE (s.regs 0).toNat 2)) :=
+  ⟨implAt, H0, 64, 16, H0_laws, by decide, by decide, model 16, ⟨wsCall, rfl, wsCall_pre⟩, s0, rfl, pre, returns⟩
 
 end Witness
 
