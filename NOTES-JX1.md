@@ -23,3 +23,10 @@ Helpers per ISA: scripts/jx1_arm_map1.py/jx1_arm_map2.py (arm64), jx1_amd.py (am
 UP3c owns ALL RUN-conjunct rejects and the 29 arm64 Alg*/Mbar* examples (AlgMem*/AlgC*/AlgF*/AlgInter*/AlgNilinter*/AlgStr*/Mbar*). SKIP those, including AlgMemhash0 amd64 (TODO item 2) and the Alg* hash/Iface items in TODO 3/4.
 Still mine: K24 map pair (both ISAs), Iface: Box AsHasher Classify Equal; Hash: HashFKey, EqFKey (both ISAs).
 Returns post must match the main theorem's post text at the instantiation; pass `correctness ... hc ret hret s setup pre` directly.
+
+## JX1b progress (2026-11-08): ALL assigned items DONE, both ISAs, each `Verified` (correctness + Witness.nonvacuous) via scripts/jx1-verify.sh
+K24: InsertK24 LookupK24 (arm64 hand edit; amd64 scripts/jx1_k24amd.py). Iface: Box AsHasher Classify Equal. Hash/Mem: HashFKey EqFKey (scripts/jx1_iface.py; run one with scripts/jx1_do.sh FUNC Name arm64 amd64: regenerates from HEAD file and verifies).
+Skipped by UP3c scope: all Alg*/Mbar* (incl. AlgMemhash0 amd64, AlgInter*, AlgNilinter*, AlgMemhash*, AlgF*hash, AlgC*hash).
+Timings (warm, arm64): Equal before (audit REJECT) 9 s, after 10 s; LookupK24 9 s; InsertK24 13 s; Classify 85 s (unchanged cost, dominated by correctness); AsHasher 22 s.
+Pitfalls found: nonvacuous's pre conjunct is a parenthesised conjunction, so a flat `pre.1, pre.2.1, ...` term must be regrouped into one tuple when more conjuncts follow; amd64 wsCall_pre may need `set_option maxRecDepth 100000 in`; `simp only [...] ; decide` fails with "no goals" when simp closes the goal: use `<;> decide`.
+NOTE: `git commit -a` picks up tracked .sw/ files (427 tracked): commit only examples/ scripts/ NOTES.
