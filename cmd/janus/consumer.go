@@ -974,7 +974,37 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 			env = lakeBuildEnv(env)
 		}
 	}
-	cmd := ws.sb.commandOverlay(ws.Root, []string{ws.Dir}, nil, ws.protected(false), append([]string{ws.lake}, args...), env)
+	var toolRO []string
+	lakeBin := ws.lake
+	if ws.tc != nil && ws.tc.sysroot != "" {
+		toolRO = append(toolRO, ws.tc.sysroot)
+		// Hermetic sandbox: no ~/.elan, so the elan shim cannot run inside. Use the toolchain's own lake
+		// (the one the shim would exec) with its bin first on PATH.
+		if real := filepath.Join(ws.tc.sysroot, "bin", "lake"); fileExists(real) {
+			if hasPrefixEnv(env, "JANUS_REAL_LAKE=") {
+				// the lakeguard wrapper stays, but its real lake is the toolchain's, not the elan shim
+				for i, e := range env {
+					if strings.HasPrefix(e, "JANUS_REAL_LAKE=") {
+						env[i] = "JANUS_REAL_LAKE=" + real
+					}
+				}
+			} else {
+				lakeBin = real
+			}
+		}
+		for i, e := range env {
+			if strings.HasPrefix(e, "PATH=") {
+				env[i] = "PATH=" + filepath.Join(ws.tc.sysroot, "bin") + string(os.PathListSeparator) + strings.TrimPrefix(e, "PATH=")
+			}
+		}
+	}
+	if filepath.IsAbs(ws.lake) {
+		toolRO = append(toolRO, filepath.Dir(ws.lake))
+	}
+	if g := os.Getenv("JANUS_LAKEGUARD_ROOT"); g != "" {
+		toolRO = append(toolRO, g)
+	}
+	cmd := ws.sb.commandOverlay(ws.Root, []string{ws.Dir}, toolRO, ws.protected(false), append([]string{lakeBin}, args...), env)
 	var out bytes.Buffer
 	all := &lockedBuffer{}
 	cmd.Stdout = io.MultiWriter(&out, all)
@@ -2068,4 +2098,13 @@ func unfinishedNote(out string) string {
 		return ""
 	}
 	return " while compiling " + strings.Join(ms, ", ")
+}
+
+func hasPrefixEnv(env []string, pre string) bool {
+	for _, e := range env {
+		if strings.HasPrefix(e, pre) {
+			return true
+		}
+	}
+	return false
 }

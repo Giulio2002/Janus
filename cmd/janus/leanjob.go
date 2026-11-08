@@ -336,6 +336,10 @@ func leanCmdThreads(sb *sandbox, tc *toolchain, workDir string, roWritableExtra,
 	if len(argv) > 0 && filepath.IsAbs(argv[0]) {
 		ro = append(ro, filepath.Dir(argv[0]))
 	}
+	// The toolchain itself (hermetic sandbox: nothing else of the host is visible).
+	if tc.sysroot != "" {
+		ro = append(ro, tc.sysroot)
+	}
 	env := tc.jobEnv(envPath)
 	if len(argv) > 0 && argv[0] == tc.leanchecker {
 		if threads <= 0 {

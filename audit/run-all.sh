@@ -103,10 +103,11 @@ u1() { # u1 NAME EXPECT ATTACK MARKER…: no marker may reach the host; EXPECT i
   elif [ -n "$leaked" ]; then row "$name" blocked "accepted: written to the host:$leaked"
   else row "$name" "$expect" "$verdict"; fi
 }
-# U1: the plant into the read-only cache throws, so the proof does not compile (blocked).
+# U1: hermetic sandbox (UP4): JANUS_CACHE_DIR is not even in the proof's environment, so the plant is never attempted;
+# the honest theorem verifies and nothing reaches the host (the leak check below is the row; was: the write threw, blocked).
 # U1b: the proof catches its failed writes, so the honest theorem verifies (mitigated).
 # (U1 and U1b use separate caches; only U1b plants the host markers, so they run in parallel.)
-par_run 'u1 R2.U1_unshare_cache_write blocked audit/round2/attacks/U1_unshare_cache_write.lean'
+par_run 'u1 R2.U1_unshare_cache_write mitigated audit/round2/attacks/U1_unshare_cache_write.lean'
 par_run 'u1 R2.U1b_unshare_mounts mitigated audit/round2/attacks/U1b_unshare_mounts.lean \
   /tmp/janus-u1b-marker /dev/shm/janus-u1b-marker /boot/janus-u1b-marker /run/user/0/janus-u1b-marker /run/janus-u1b-marker'
 for t in t1 t3 t4; do
