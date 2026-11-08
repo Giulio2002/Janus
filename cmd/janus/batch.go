@@ -181,6 +181,10 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 				reqs[i].Err = &diag{Invalid: true, Msg: "A request with witnesses needs a proofRoot: single-file verifications cannot carry companion theorems.", Stage: "batch requests",
 					Next: "Set proofRoot (top level or on the request), or list the witness as its own single-file request in its own outdir."}
 				reqs[m].Err = reqs[i].Err
+			case !theoremNameRE.MatchString(it.theorem):
+				reqs[i].Err = &diag{Invalid: true, Msg: fmt.Sprintf("Witness %q of request %d is not a plain dotted Lean name.", it.theorem, m), Stage: "batch requests",
+					Next: "Name the companion theorem Namespace.name (no path separators or `..`)."}
+				reqs[m].Err = reqs[i].Err
 			case it.theorem == "" || theoremOrDefault(items[m].theorem) == it.theorem:
 				reqs[i].Err = &diag{Invalid: true, Msg: fmt.Sprintf("Witness %q of request %d is the request's own theorem or empty.", it.theorem, m), Stage: "batch requests",
 					Next: "List each companion theorem once, distinct from the request's theorem."}
@@ -194,8 +198,11 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 					}
 				}
 			}
-			if reqs[i].Err == nil {
-				_ = os.Remove(filepath.Join(reqs[i].Outdir, verifiedDir, it.theorem+".json"))
+			if reqs[i].Err == nil && theoremNameRE.MatchString(it.theorem) && !strings.ContainsAny(it.theorem, "/\\\x00") && !strings.Contains(it.theorem, "..") {
+				rm := filepath.Join(reqs[i].Outdir, verifiedDir, it.theorem+".json")
+				if rel, err := filepath.Rel(filepath.Join(reqs[i].Outdir, verifiedDir), rm); err == nil && !strings.HasPrefix(rel, "..") && !strings.ContainsRune(rel, filepath.Separator) {
+					_ = os.Remove(rm)
+				}
 			}
 			continue
 		}

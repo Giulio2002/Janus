@@ -1119,3 +1119,26 @@ func thmArgs(thm string) []string {
 func verifiedOut(out, thm string) bool {
 	return strings.HasPrefix(out, "Verified: "+thm+"\n") || strings.Contains(out, "=== "+thm+": verified ===\nVerified: "+thm+"\n")
 }
+
+// TestVerifyBatchWitnessNameTraversal: a witness name from the requests file never reaches the filesystem unvalidated
+// (it once removed an arbitrary <outdir>/verified/<name>.json before the name check).
+func TestVerifyBatchWitnessNameTraversal(t *testing.T) {
+	defer parallel(t)()
+	needLean(t)
+	d := t.TempDir()
+	victim := filepath.Join(d, "victim.json")
+	writeFile(t, victim, "{}")
+	out := filepath.Join(d, "out", "AddT")
+	if err := os.MkdirAll(filepath.Join(out, "verified"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	man := `{"schema":1,"proofRoot":".","requests":[{"outdir":"out/AddT","proof":"P.lean","theorem":"P.correctness","witnesses":["../../../victim"]}]}`
+	writeFile(t, filepath.Join(d, "req.json"), man)
+	code, o, stderr := runJanus(t, "verify-batch", filepath.Join(d, "req.json"), "--janus-root", repoRoot)
+	if code == 0 || !strings.Contains(o+stderr, "plain dotted Lean name") {
+		t.Errorf("traversal witness name accepted: %d\n%s\n%s", code, o, stderr)
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Errorf("a file outside the outdir was removed: %v", err)
+	}
+}
