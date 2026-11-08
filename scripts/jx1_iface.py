@@ -131,3 +131,32 @@ theorem wsCall_pre : {nm} R0 wsCall :=
 '''
     go(isa,'Equal',RTPRE_PC[isa]+'\n'+st+'\n'+ws,[conj(isa,nm,'runtime.efaceeq','R')],['⟨wsCall, rfl, wsCall_pre⟩'],[],
        'correctness implAt R0 R0_laws model td val td val ret hret s0 setup pre')
+
+def pc_helpers(isa, inputns, eqns):
+    s=ST[isa]; f=PC[isa]
+    return f'''theorem eqpre_pc {{d n : Nat}} {{s : {s}}} (a : BitVec 64) (h : {eqns}.EqPre d n s) :
+    {eqns}.EqPre d n {{ s with {f} := a }} := by
+  obtain ⟨⟨g1, g2, g3⟩, c, o⟩ := h
+  exact ⟨⟨g1, g2, g3⟩, c, o⟩
+
+theorem input_pc {{d n x k : Nat}} {{s : {s}}} (a : BitVec 64) (h : {inputns}.Input s d n x k) :
+    {inputns}.Input {{ s with {f} := a }} d n x k := by
+  obtain ⟨h1, h2, h3⟩ := h
+  exact ⟨h1, h2, h3⟩
+'''
+def eqfkey(isa):
+    nm='MemequalSite'
+    ns='Janus.Contracts.Mem' if isa=='arm64' else 'Janus.Contracts.MemAmd64'
+    a,b,n=('0','1','2') if isa=='arm64' else ('0','3','1')
+    st=site(isa,nm,'Memequal','(d : Nat) ',f'{ns}.EqPre d 0 s_c ∧ {ns}.Input s_c d 0 (s_c.regs {a}).toNat (s_c.regs {n}).toNat ∧\n    {ns}.Input s_c d 0 (s_c.regs {b}).toNat (s_c.regs {n}).toNat')
+    ms='Janus.Contracts.MemSat' if isa=='arm64' else 'Janus.Contracts.MemSatAmd64'
+    args=f'{ms}.eqArgs' if isa=='arm64' else f'({ms}.args IfaceModel.VAL IfaceModel.VAL 8 0)'
+    inp=(lambda: f'{ms}.wstate_input _ 0 _ _ (by decide) (by decide)') if isa=='arm64' else (lambda: 'by inp')
+    ws=f'''/-- The call state of the `runtime.memequal` contract (U-WITNESS-CALLSITE): the stock witness state of `MemSat`, at the contract address. -/
+def wsCall : {ST[isa]} := {{ {ms}.wstate {args} with {PC[isa]} := BitVec.ofNat 64 cAddr }}
+
+theorem wsCall_pre : {nm} 64 wsCall :=
+  ⟨eqpre_pc _ ({ms}.wstate_eqPre _ 0 (by decide)), input_pc _ ({inp()}), input_pc _ ({inp()})⟩
+'''
+    go(isa,'EqFKey',pc_helpers(isa,ns,ns)+'\n'+st+'\n'+ws,[conj(isa,nm,'runtime.memequal','d')],['⟨wsCall, rfl, wsCall_pre⟩'],[],
+       'correctness implAt 64 (model 64) k k ret hret s0 setup hpre')
