@@ -306,9 +306,13 @@ func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protec
 		}
 		args := []string{"-Umrnipf", "--map-root-user", "--mount-proc", "--",
 			"/bin/sh", "-c", unshareScript(workDir, writable, ro, protected), "janus-sandbox"}
+		// The outer process keeps the caller's environment (the memory guard's systemd-run needs the user bus
+		// variables); the proof gets only the allowlisted one, through env -i inside the new root.
+		args = append(args, "/usr/bin/env", "-i")
+		args = append(args, hermeticEnv(env)...)
 		args = append(args, argv...)
 		cmd := s.newCmd("unshare", args...)
-		cmd.Env = hermeticEnv(env)
+		cmd.Env = env
 		return cmd
 	default: // "none"
 		cmd := s.newCmd(argv[0], argv[1:]...)
