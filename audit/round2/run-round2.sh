@@ -65,7 +65,7 @@ echo "(trusted cache on the /tmp mount, /tmp, /dev/shm, /boot, /run/user/0, /run
 markers=(/tmp/janus-u1b-marker /dev/shm/janus-u1b-marker /boot/janus-u1b-marker /run/user/0/janus-u1b-marker /run/janus-u1b-marker)
 for a in U1_unshare_cache_write U1b_unshare_mounts; do
   c=$(mktemp -d /tmp/janus-u1-cache.XXXXXX); rm -f "${markers[@]}"
-  out="$(JANUS_SANDBOX=unshare JANUS_CACHE_DIR="$c" "$J" verify --janus-root "$root" --proof audit/round2/attacks/$a.lean $W/Add 2>&1)"
+  out="$(JANUS_SANDBOX=unshare JANUS_CACHE_DIR="$c" "$J" verify --janus-root "$root" --proof audit/round2/attacks/$a.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous $W/Add 2>&1)"
   leaked=""; for m in "${markers[@]}" "$c/v1/replay/00/planted-by-sandboxed-proof"; do [ -e "$m" ] && leaked="$leaked $m"; done
   rm -f "${markers[@]}"; rm -rf "$c"
   printf '  %-24s %s\n' "$a" "$(grep -m1 -E '^(Verified|Invalid)' <<<"$out" | cut -c1-100)"
