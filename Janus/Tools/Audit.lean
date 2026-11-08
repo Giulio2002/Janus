@@ -99,6 +99,8 @@ structure Record where
   contractHyps : Array String := #[]
   /-- UP3c: the main theorem is a refutation (its statement, under its binders, is a negation `¬ …`): it claims no run, so no run-witness is required. -/
   refutation : Bool := false
+  /-- UP3c: the main statement makes no claim about running the program (no `Returns`/`Panics`/`ReachesRet`/`Reaches`/`Summary`/`Program.run` reachable through its definitions): `Extracted.entry = Extracted.entry`; nothing to witness. -/
+  runFree : Bool := false
   /-- The import graph of every module outside the toolchain core (`Init`, `Std`, `Lean`,
   `Lake`): `[module, direct import, …]`. The Go side kernel-replays each of these modules and
   keys its replay cache on the module's bytes and those of its imports. -/
@@ -1904,6 +1906,28 @@ def inhabitationLemma (env : Environment) (c : Name) (args : Array Expr) : MetaM
   return .error s!"no kernel-checked theorem of the proof module states `∃ s, {pre.getString!} nargs stack above rt P s` for this contract at some instantiation of the statement's variables (candidates: {dbg})"
 
 
+
+/-- UP3c: does `e` reach a run claim (`Returns`, `Panics`, `ReachesRet`, `Reaches`, `Summary`, `Program.run`) through the definitions it mentions? -/
+def reachesRunClaim (env : Environment) (e : Expr) : Bool := Id.run do
+  let base : List Name := [`Janus.GoABI.Returns, `Janus.GoABI.Panics, `Janus.Amd64.GoABI.Returns, `Janus.Amd64.GoABI.Panics,
+    `Janus.Tactic.ReachesRet, `Janus.Tactic.Reaches, `Janus.Tactic.Summary, `Janus.Amd64.Tactic.ReachesRet, `Janus.Amd64.Tactic.Reaches,
+    `Janus.Amd64.Tactic.Summary, `Janus.Program.run, `Janus.Amd64.Program.run]
+  let mut todo : Array Name := e.getUsedConstants
+  let mut seen : Std.HashSet Name := {}
+  let mut fuel := 20000
+  while !todo.isEmpty && fuel > 0 do
+    fuel := fuel - 1
+    let c := todo.back!
+    todo := todo.pop
+    if seen.contains c then continue
+    seen := seen.insert c
+    if base.contains c then return true
+    match env.find? c with
+    | some (.defnInfo d) => todo := todo ++ d.value.getUsedConstants ++ d.type.getUsedConstants
+    | some (.inductInfo _) | some (.thmInfo _) | some (.axiomInfo _) | some (.opaqueInfo _) | some (.quotInfo _) | some (.ctorInfo _) | some (.recInfo _) => pure ()
+    | none => pure ()
+  return false
+
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
 Round 14 (V2): with `main` (the default; every theorem that is not a `Witness.nonvacuous`/`Witness.returns`)
 the runtime implementation must also be a variable of the statement (`concreteRuntime`) and every such
@@ -3544,11 +3568,20 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
              modules := modNames.map (·.toString),
              external := externalNames.filterMap external.get?, externalDefinitions := extOut,
              notes, role := role.label, matchedMain, matchedMains, matchedModules, contractHyps,
-             refutation := role == .main && (let rec go : Expr → Bool
-               | .forallE _ _ b _ => go b
-               | .mdata _ b => go b
-               | e => e.isAppOfArity ``Not 1 || e.isConstOf ``False
-               go ci.type),
+             -- UP3c: a refutation is EXACTLY `¬ P` with no hypotheses of its own (no binder before the `¬`), `P` a `∀` over data binders only whose
+             -- final claim is not itself a negation / `False`, and `P` is a claim about the extracted program. `¬¬P`, `(h : ¬E) → False`, a
+             -- false hypothesis, or a program that appears only in a hypothesis are NOT refutations (they are vacuous in the way the witness closes)
+             runFree := role == .main && !reachesRunClaim envA ci.type,
+             refutation := role == .main && (
+               let t := ci.type.consumeMData
+               t.isAppOfArity ``Not 1 &&
+               (let rec body : Expr → Bool
+                  | .forallE _ d b _ => (d.consumeMData.getAppFn.constName?.any fun n => [`BitVec, `Nat, `Int, `Bool].contains n) && body b
+                  | .mdata _ b => body b
+                  | e => !(e.isAppOfArity ``Not 1) && !(e.isConstOf ``False)
+                body (t.appArg!)) &&
+               (let used := (t.appArg!).getUsedConstants
+                used.contains `Extracted.program || used.contains `Extracted.entry)),
              imports := importGraph envA }
   ).run
   match result with

@@ -53,7 +53,7 @@ func nonVacuityVerdict(r *verifiedReport, peers []*verifiedReport, auditOnly boo
 	if auditOnly {
 		return nvAuditOnly, "", returns, nil
 	}
-	if len(r.ContractHyps) == 0 && r.Refutation {
+	if len(r.ContractHyps) == 0 && (r.Refutation || r.RunFree) {
 		return nvNotShown, "", returns, nil // a refutation claims no run
 	}
 	if len(r.ContractHyps) == 0 {
