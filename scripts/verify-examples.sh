@@ -96,7 +96,7 @@ verify_one() {
   # reached); up to two verified at once (scripts/lib/theorems.sh).
   local -a thms=(Proof.correctness)
   local thm i st
-  for thm in $(grep -oE '^theorem (exact|saturation|faults|anyCPU|forAllValues)' "examples/proofs/$n.lean" | awk '{print $2}' || true); do thms+=("Proof.$thm"); done
+  for thm in $(grep -oE '^theorem (exact|saturation|faults|anyCPU|forAllValues)' "examples/proofs/$n.lean" | awk '{print $2}' || true); do thms+=("Proof.$thm" "Proof.Witness.$thm"); done
   if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then thms+=(Proof.Witness.nonvacuous); grep -q '^theorem returns' "examples/proofs/$n.lean" && thms+=(Proof.Witness.returns); fi
   # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs
   local -a ispec=($(incr_fw_embedded) --proof "examples/proofs/$n.lean" --art "$out" --arg "sym:$(example_symbol "$n")")

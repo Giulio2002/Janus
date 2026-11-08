@@ -250,19 +250,90 @@ theorem returns : ReachesRet Extracted.program (s0.regs 30) s0 fun s' =>
   rr_mono' (wb1_meets rt s0 rfl ⟨callOK 1, ready 1 (by decide)⟩) fun s' ⟨buf, junk, f, v, m, _, _, hs, _, hw⟩ =>
     ⟨by rw [hs], buf, by rw [hs]; simp [wbRegs], by rw [hs]; exact hw⟩
 
-/-- The real `gcWriteBarrier1` meets its contract for `Witness.rt`, and for every `N = 1 … 8` the
-precondition of `gcWriteBarrierN`'s contract, with `HRoom`, holds at the concrete state `s0`, so
-the `wbN_meets` are not vacuous. -/
-theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s : State),
-    WbContract Extracted.program wb1 rt 232 (HRoom rt 1) 1 ∧
-    (∀ n, n ≤ 8 → CallOK s 232 0 ∧ Ready (HRoom rt n) rt [n] s) ∧
-    (ReachesRet Extracted.program (s.regs 30) s fun s' =>
+def wbs : Nat → Nat
+  | 0 => wb1 | 1 => wb1 | 2 => wb2 | 3 => wb3 | 4 => wb4 | 5 => wb5 | 6 => wb6 | 7 => wb7 | _ => wb8
+
+def sN (n : Nat) : State := { s0 with pc := BitVec.ofNat 64 (wbs n) }
+
+theorem readyN (n m : Nat) (hn : m ≤ 8) : Ready (HRoom rt m) rt [m] (sN n) := ready m hn
+theorem callOKN (n : Nat) : CallOK (sN n) 232 0 := callOK n
+
+/-- Every one of the eight barriers meets its contract for `Witness.rt`, and from the call state at each
+(`s0` with the barrier's entry) the real code returns with its `N` slots reserved. -/
+theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s1 s2 s3 s4 s5 s6 s7 s8 : State),
+    (WbContract Extracted.program wb1 rt 232 (HRoom rt 1) 1 ∧
+    WbContract Extracted.program wb2 rt 232 (HRoom rt 2) 2 ∧
+    WbContract Extracted.program wb3 rt 232 (HRoom rt 3) 3 ∧
+    WbContract Extracted.program wb4 rt 232 (HRoom rt 4) 4 ∧
+    WbContract Extracted.program wb5 rt 232 (HRoom rt 5) 5 ∧
+    WbContract Extracted.program wb6 rt 232 (HRoom rt 6) 6 ∧
+    WbContract Extracted.program wb7 rt 232 (HRoom rt 7) 7 ∧
+    WbContract Extracted.program wb8 rt 232 (HRoom rt 8) 8) ∧
+    (s1.pc = BitVec.ofNat 64 wb1 ∧ CallOK s1 232 0 ∧ Ready (HRoom rt 1) rt [1] s1 ∧
+      ReachesRet Extracted.program (s1.regs 30) s1 fun s' =>
       ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
         (ex : Option (Nat × Nat)) (ep : Nat → Bool),
-      s' = { s with regs := wbRegs s.regs junk buf, pc := s.regs 30, flags := f, vregs := v, mem := m,
-                    excl := ex, exclPass := ep } ∧
-      MemFrame s.mem m (rt ++ [(s.sp.toNat - 232, s.sp.toNat - 8)]) ∧ WbSlots rt m buf.toNat 1) :=
-  ⟨rt, s0, wb1_meets rt, fun n hn => ⟨callOK n, ready n hn⟩, wb1_meets rt s0 rfl ⟨callOK 1, ready 1 (by decide)⟩⟩
+      s' = { s1 with regs := wbRegs s1.regs junk buf, pc := s1.regs 30, flags := f, vregs := v, mem := m,
+                        excl := ex, exclPass := ep } ∧
+      MemFrame s1.mem m (rt ++ [(s1.sp.toNat - 232, s1.sp.toNat - 8)]) ∧ WbSlots rt m buf.toNat 1) ∧
+    (s2.pc = BitVec.ofNat 64 wb2 ∧ CallOK s2 232 0 ∧ Ready (HRoom rt 2) rt [2] s2 ∧
+      ReachesRet Extracted.program (s2.regs 30) s2 fun s' =>
+      ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+        (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+      s' = { s2 with regs := wbRegs s2.regs junk buf, pc := s2.regs 30, flags := f, vregs := v, mem := m,
+                        excl := ex, exclPass := ep } ∧
+      MemFrame s2.mem m (rt ++ [(s2.sp.toNat - 232, s2.sp.toNat - 8)]) ∧ WbSlots rt m buf.toNat 2) ∧
+    (s3.pc = BitVec.ofNat 64 wb3 ∧ CallOK s3 232 0 ∧ Ready (HRoom rt 3) rt [3] s3 ∧
+      ReachesRet Extracted.program (s3.regs 30) s3 fun s' =>
+      ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+        (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+      s' = { s3 with regs := wbRegs s3.regs junk buf, pc := s3.regs 30, flags := f, vregs := v, mem := m,
+                        excl := ex, exclPass := ep } ∧
+      MemFrame s3.mem m (rt ++ [(s3.sp.toNat - 232, s3.sp.toNat - 8)]) ∧ WbSlots rt m buf.toNat 3) ∧
+    (s4.pc = BitVec.ofNat 64 wb4 ∧ CallOK s4 232 0 ∧ Ready (HRoom rt 4) rt [4] s4 ∧
+      ReachesRet Extracted.program (s4.regs 30) s4 fun s' =>
+      ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+        (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+      s' = { s4 with regs := wbRegs s4.regs junk buf, pc := s4.regs 30, flags := f, vregs := v, mem := m,
+                        excl := ex, exclPass := ep } ∧
+      MemFrame s4.mem m (rt ++ [(s4.sp.toNat - 232, s4.sp.toNat - 8)]) ∧ WbSlots rt m buf.toNat 4) ∧
+    (s5.pc = BitVec.ofNat 64 wb5 ∧ CallOK s5 232 0 ∧ Ready (HRoom rt 5) rt [5] s5 ∧
+      ReachesRet Extracted.program (s5.regs 30) s5 fun s' =>
+      ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+        (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+      s' = { s5 with regs := wbRegs s5.regs junk buf, pc := s5.regs 30, flags := f, vregs := v, mem := m,
+                        excl := ex, exclPass := ep } ∧
+      MemFrame s5.mem m (rt ++ [(s5.sp.toNat - 232, s5.sp.toNat - 8)]) ∧ WbSlots rt m buf.toNat 5) ∧
+    (s6.pc = BitVec.ofNat 64 wb6 ∧ CallOK s6 232 0 ∧ Ready (HRoom rt 6) rt [6] s6 ∧
+      ReachesRet Extracted.program (s6.regs 30) s6 fun s' =>
+      ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+        (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+      s' = { s6 with regs := wbRegs s6.regs junk buf, pc := s6.regs 30, flags := f, vregs := v, mem := m,
+                        excl := ex, exclPass := ep } ∧
+      MemFrame s6.mem m (rt ++ [(s6.sp.toNat - 232, s6.sp.toNat - 8)]) ∧ WbSlots rt m buf.toNat 6) ∧
+    (s7.pc = BitVec.ofNat 64 wb7 ∧ CallOK s7 232 0 ∧ Ready (HRoom rt 7) rt [7] s7 ∧
+      ReachesRet Extracted.program (s7.regs 30) s7 fun s' =>
+      ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+        (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+      s' = { s7 with regs := wbRegs s7.regs junk buf, pc := s7.regs 30, flags := f, vregs := v, mem := m,
+                        excl := ex, exclPass := ep } ∧
+      MemFrame s7.mem m (rt ++ [(s7.sp.toNat - 232, s7.sp.toNat - 8)]) ∧ WbSlots rt m buf.toNat 7) ∧
+    (s8.pc = BitVec.ofNat 64 wb8 ∧ CallOK s8 232 0 ∧ Ready (HRoom rt 8) rt [8] s8 ∧
+      ReachesRet Extracted.program (s8.regs 30) s8 fun s' =>
+      ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+        (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+      s' = { s8 with regs := wbRegs s8.regs junk buf, pc := s8.regs 30, flags := f, vregs := v, mem := m,
+                        excl := ex, exclPass := ep } ∧
+      MemFrame s8.mem m (rt ++ [(s8.sp.toNat - 232, s8.sp.toNat - 8)]) ∧ WbSlots rt m buf.toNat 8) :=
+  ⟨rt, sN 1, sN 2, sN 3, sN 4, sN 5, sN 6, sN 7, sN 8, ⟨wb1_meets rt, wb2_meets rt, wb3_meets rt, wb4_meets rt, wb5_meets rt, wb6_meets rt, wb7_meets rt, wb8_meets rt⟩,
+⟨rfl, callOKN 1, readyN 1 1 (by decide), wb1_meets rt (sN 1) rfl ⟨callOKN 1, readyN 1 1 (by decide)⟩⟩,
+    ⟨rfl, callOKN 2, readyN 2 2 (by decide), wb2_meets rt (sN 2) rfl ⟨callOKN 2, readyN 2 2 (by decide)⟩⟩,
+    ⟨rfl, callOKN 3, readyN 3 3 (by decide), wb3_meets rt (sN 3) rfl ⟨callOKN 3, readyN 3 3 (by decide)⟩⟩,
+    ⟨rfl, callOKN 4, readyN 4 4 (by decide), wb4_meets rt (sN 4) rfl ⟨callOKN 4, readyN 4 4 (by decide)⟩⟩,
+    ⟨rfl, callOKN 5, readyN 5 5 (by decide), wb5_meets rt (sN 5) rfl ⟨callOKN 5, readyN 5 5 (by decide)⟩⟩,
+    ⟨rfl, callOKN 6, readyN 6 6 (by decide), wb6_meets rt (sN 6) rfl ⟨callOKN 6, readyN 6 6 (by decide)⟩⟩,
+    ⟨rfl, callOKN 7, readyN 7 7 (by decide), wb7_meets rt (sN 7) rfl ⟨callOKN 7, readyN 7 7 (by decide)⟩⟩,
+    ⟨rfl, callOKN 8, readyN 8 8 (by decide), wb8_meets rt (sN 8) rfl ⟨callOKN 8, readyN 8 8 (by decide)⟩⟩⟩
 
 end Witness
 

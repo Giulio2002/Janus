@@ -76,7 +76,7 @@ verify_one() {
   b="artifacts/examples-sys-$isa"; case "$n" in AESField|SVEField) b="artifacts/examples-sys-idreg-$isa" ;; esac
   bin/janus extract "$b" "example.com/sys.$n" "$out" ${args[@]+"${args[@]}"} >/dev/null 2>&1
   local thm
-  for thm in $(grep -oE '^theorem (correctness|traps|full_write)' "examples/proofs-sys/$isa/$n.lean" | awk '{print $2}'); do thms+=("Proof.$thm"); done
+  for thm in $(grep -oE '^theorem (correctness|traps|full_write)' "examples/proofs-sys/$isa/$n.lean" | awk '{print $2}'); do thms+=("Proof.$thm"); [ "$thm" = correctness ] || thms+=("Proof.Witness.$thm"); done
   # the non-vacuity witnesses (Proof.Witness.nonvacuous, Proof.Witness.returns) where there are some
   if grep -q '^namespace Witness' "examples/proofs-sys/$isa/$n.lean"; then
     thms+=(Proof.Witness.nonvacuous)
