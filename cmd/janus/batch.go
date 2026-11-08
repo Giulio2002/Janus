@@ -227,8 +227,13 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 			continue
 		}
 		seenOut[abs] = i
-		// Every request starts by withdrawing its previous report.
-		_ = os.Remove(filepath.Join(reqs[i].Outdir, "verified.json"))
+		// Every request starts by withdrawing ALL its previous reports, exactly like a single verify
+		// (verified.json and every verified/*.json, listed as a companion of this request or not): a stale
+		// companion of an unlisted witness must never survive next to a failed main.
+		if err := withdrawReports(reqs[i].Outdir); err != nil {
+			reqs[i].Err = err
+			continue
+		}
 	}
 
 	finish := func(i int) {

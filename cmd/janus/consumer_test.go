@@ -1161,3 +1161,37 @@ func TestVerifyBatchSymlinkedOutdir(t *testing.T) {
 		t.Errorf("symlinked outdir accepted: %d\n%s\n%s", code, o, stderr)
 	}
 }
+
+// TestVerifyBatchWithdrawsAllStaleReports (RT-N13 BS1): a batch request withdraws every verified.json and
+// verified/*.json of its outdir at the start, like a single verify, including the stale companion JSON of a
+// witness the request does not list; a FAILed main must not have any stale report next to it.
+func TestVerifyBatchWithdrawsAllStaleReports(t *testing.T) {
+	defer parallel(t)()
+	needLean(t)
+	d := t.TempDir()
+	out := filepath.Join(d, "out", "AddT")
+	stale := []string{
+		filepath.Join(out, "verified.json"),
+		filepath.Join(out, "verified", "P.Witness.listed.json"),
+		filepath.Join(out, "verified", "P.Witness.unlisted.json"),
+	}
+	for _, f := range stale {
+		writeFile(t, f, `{"stale":true,"status":"verified"}`)
+	}
+	other := filepath.Join(d, "out", "keep.json")
+	writeFile(t, other, "{}")
+	man := `{"schema":1,"proofRoot":".","requests":[{"outdir":"out/AddT","proof":"P.lean","theorem":"P.correctness","witnesses":["P.Witness.listed"]}]}`
+	writeFile(t, filepath.Join(d, "req.json"), man)
+	code, o, stderr := runJanus(t, "verify-batch", filepath.Join(d, "req.json"), "--janus-root", repoRoot)
+	if code == 0 {
+		t.Fatalf("a request without a proof file verified: %s\n%s", o, stderr)
+	}
+	for _, f := range stale {
+		if _, err := os.Stat(f); err == nil {
+			t.Errorf("stale report survived the batch request: %s", f)
+		}
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Errorf("a file outside the outdir reports was removed: %v", err)
+	}
+}
