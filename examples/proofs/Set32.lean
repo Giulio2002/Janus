@@ -254,6 +254,31 @@ theorem pre0 : pre (MCW ck32) HAssign mv kv AMap.empty s0 := by
   · show (rtView privW mmem).readLE MP 8 = 0
     rw [readLE_rtView (inPrivW (by decide) (by decide))]; decide
 
+theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with pc := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c, o⟩
+
+/-- The precondition of `AssignF32`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def AssignF32Site (M : MapModel (BitVec 32) (BitVec (8 * 1))) (H : RtReady) (f : AMap (BitVec 32) (BitVec (8 * 1))) (s_c : State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 1).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 1).toNat f ∧
+    Ready H M.priv [(s_c.regs 0).toNat, (s_c.regs 1).toNat, (key32 s_c).toNat] s_c
+
+/-- The call state of the `mapassign_fast32` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSat`, at the contract address. -/
+def wsCall : State := { mstate mmem (args kv 0) with pc := BitVec.ofNat 64 cAddr }
+
+theorem wsCall_pre : AssignF32Site (MCW ck32) HAssign AMap.empty wsCall :=
+  ⟨rtpre_pc _ (mstate_rtpre _ rfl rfl mmem rfl _ 3 (by decide) mmem_zenv mmem_guard), trivial, by decide,
+    ⟨rfl, by decide, by decide, Or.inl ⟨by decide, rfl⟩⟩,
+    by show (rtView privW mmem).readLE MP 8 = 0
+       rw [readLE_rtView (inPrivW (by decide) (by decide))]; decide⟩
+
+/-- So the guarantee is reached: the map now holds `7 ↦ true`. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (MCW ck32).Rep s'.mem MP (AMap.empty.set 7#32 1#8) :=
+  correctness implAt (MCW _) (MCW_laws _) HAssign model mv kv AMap.empty ret hret s0 setup pre0
+    |>.mono fun _ h => ⟨h.1, h.2.1⟩
+
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 32) (BitVec (8 * 1))) (H : RtReady)
     (ret : Nat) (s : State) (m k : BitVec 64) (f : AMap (BitVec 32) (BitVec (8 * 1))),
@@ -261,14 +286,11 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 32) (BitVec
       (Extracted.program.contractAddr "runtime.mapassign_fast32") 1 M H ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, k] s ∧
-    m.toNat ≠ 0 ∧ pre M H m k f s :=
-  ⟨implAt, MCW _, HAssign, ret, s0, mv, kv, AMap.empty, MCW_laws _, model, hret, setup, by decide, pre0⟩
-
-/-- So the guarantee is reached: the map now holds `7 ↦ true`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (MCW ck32).Rep s'.mem MP (AMap.empty.set 7#32 1#8) :=
-  correctness implAt (MCW _) (MCW_laws _) HAssign model mv kv AMap.empty ret hret s0 setup pre0
-    |>.mono fun _ h => ⟨h.1, h.2.1⟩
+    m.toNat ≠ 0 ∧ pre M H m k f s ∧
+    (∃ (f : AMap (BitVec 32) (BitVec (8 * 1))) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapassign_fast32") ∧ AssignF32Site M H f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (M.Rep s'.mem m.toNat (f.set (k.setWidth 32) 1#8) ∧ M.Env s'.mem (s.regs 28)) :=
+  ⟨implAt, MCW _, HAssign, ret, s0, mv, kv, AMap.empty, MCW_laws _, model, hret, setup, by decide, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, correctness implAt (MCW _) (MCW_laws _) HAssign model mv kv AMap.empty ret hret s0 setup pre0⟩
 
 end Witness
 

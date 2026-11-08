@@ -1,0 +1,46 @@
+=== Proof.correctness: verified ===
+Verified: Proof.correctness
+  Module: example.com/basic (go1.26.0)
+  Entry: example.com/basic.MakeHint at 0xab3f0
+  Binary: artifacts/examples-arm64 (SHA-256 27d22a5e74c1cbbe105dfa3e30229f13a3edaace504353238a9798d58bfec8c2)
+  Proof: examples/proofs/MakeHint.lean
+  Framework: directory (SHA-256 3b9800d8688d7862a97cc9188c88e230c8aabae4a84624dc8c0629295fcbfaad, 328 files, leanprover/lean4:v4.34.1)
+  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
+  Axioms: Classical.choice, Quot.sound, propext
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Amd64, Janus.Amd64.Bridge, Janus.Amd64.CABI, Janus.Amd64.CarryNorm, Janus.Amd64.Decode, Janus.Amd64.DecodeAVX, Janus.Amd64.DecodeCrypto, Janus.Amd64.DecodeEVEX, … and 316 more; 326 modules; 323 reused from the replay cache)
+  Lean: Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)
+  Role: main theorem (the runtime implementation is a variable of the statement, constrained only by the runtime contracts)
+  Runtime contracts assumed: Janus.Contracts.MapVar.MakeMap@runtime.makemap (not extracted; the statement applies them as hypotheses)
+  Non-vacuity: shown by Proof.Witness.nonvacuous (kernel-checked witness: a concrete state and runtime satisfying the whole precondition, contract hypotheses included)
+  Report: .sw/art/arm64-MakeHint/verified/Proof.correctness.json
+  Statement:
+    Proof.correctness (impl : List Janus.Segment) (M : Janus.Spec.Map.MapModel (BitVec 64) (BitVec 64)) (hl : M.Laws) (H : Janus.Contracts.RtReady) (hmk : Janus.Contracts.MapVar.MakeMap (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.makemap") M H) (n : BitVec 64) : Janus.GoABI.Ensures (Extracted.program.link impl) Extracted.entry [n] (Proof.pre M H n) fun s s' => BitVec.toNat (s'.regs 0) ≠ 0 ∧ M.Rep s'.mem (BitVec.toNat (s'.regs 0)) Janus.Spec.Map.AMap.empty ∧ (∀ (mp : Nat) (f : Janus.Spec.Map.AMap (BitVec 64) (BitVec 64)), M.Rep s.mem mp f → mp ≠ BitVec.toNat (s'.regs 0)) ∧ M.Env s'.mem (s.regs 28)
+  Proof-local definitions used by the statement (part of its meaning):
+    Proof.mapType : Nat := Janus.Spec.adrpLdTarget (Extracted.entry + 32) (Janus.Spec.segWord Extracted.program "example.com/basic.MakeHint" 8) (Janus.Spec.segWord Extracted.program "example.com/basic.MakeHint" 9) 0
+    Proof.pre : Janus.Spec.Map.MapModel (BitVec 64) (BitVec 64) → Janus.Contracts.RtReady → BitVec 64 → Janus.Arm64.State → Prop := fun M H n s => Janus.Contracts.Map.CallerOK M s 48 0 ∧ M.Typ Proof.mapType ∧ H [Proof.mapType, n.toNat, 0] (BitVec.toNat (s.regs 28)) (BitVec.toNat s.sp - 48) (Janus.Contracts.rtView M.priv s.mem)
+  Notes (standard Lean meaning that may read unexpectedly; not errors):
+    - in Proof.pre: Nat subtraction truncates at 0 (`a - b = 0` whenever `a ≤ b`): `BitVec.toNat s.sp - 48`
+  Report (also): .sw/art/arm64-MakeHint/verified.json
+=== Proof.Witness.nonvacuous: verified ===
+Verified: Proof.Witness.nonvacuous
+  Module: example.com/basic (go1.26.0)
+  Entry: example.com/basic.MakeHint at 0xab3f0
+  Binary: artifacts/examples-arm64 (SHA-256 27d22a5e74c1cbbe105dfa3e30229f13a3edaace504353238a9798d58bfec8c2)
+  Proof: examples/proofs/MakeHint.lean
+  Framework: directory (SHA-256 3b9800d8688d7862a97cc9188c88e230c8aabae4a84624dc8c0629295fcbfaad, 328 files, leanprover/lean4:v4.34.1)
+  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
+  Axioms: Classical.choice, Quot.sound, propext
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Amd64, Janus.Amd64.Bridge, Janus.Amd64.CABI, Janus.Amd64.CarryNorm, Janus.Amd64.Decode, Janus.Amd64.DecodeAVX, Janus.Amd64.DecodeCrypto, Janus.Amd64.DecodeEVEX, … and 316 more; 326 modules; 323 reused from the replay cache)
+  Lean: Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)
+  Role: WITNESS, not a correctness claim: a concrete instance showing its hypotheses and precondition are satisfiable together, for the main theorem Proof.correctness (it uses a concrete runtime implementation; the main theorem must be verified separately)
+  Runtime contracts assumed: Janus.Contracts.MapVar.MakeMap@runtime.makemap (not extracted; the statement applies them as hypotheses)
+  Non-vacuity: this is a witness (it is not a correctness claim)
+  Report: .sw/art/arm64-MakeHint/verified/Proof.Witness.nonvacuous.json
+  Statement:
+    Proof.Witness.nonvacuous : ∃ impl M H ret s n, M.Laws ∧ Janus.Contracts.MapVar.MakeMap (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.makemap") M H ∧ Janus.GoABI.RetAddr (Extracted.program.link impl) ret ∧ Janus.GoABI.CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [n] s ∧ Proof.pre M H n s ∧ (∃ s_c, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makemap") ∧ Proof.Witness.MakeMapSite M H s_c) ∧ Janus.GoABI.Returns ((Extracted.program.link impl).withExit ret) s fun s' => Janus.GoABI.ABIReturn s s' ∧ BitVec.toNat (s'.regs 0) ≠ 0 ∧ M.Rep s'.mem (BitVec.toNat (s'.regs 0)) Janus.Spec.Map.AMap.empty ∧ (∀ (mp : Nat) (f : Janus.Spec.Map.AMap (BitVec 64) (BitVec 64)), M.Rep s.mem mp f → mp ≠ BitVec.toNat (s'.regs 0)) ∧ M.Env s'.mem (s.regs 28)
+  Proof-local definitions used by the statement (part of its meaning):
+    Proof.Witness.MakeMapSite : Janus.Spec.Map.MapModel (BitVec 64) (BitVec 64) → Janus.Contracts.RtReady → Janus.Arm64.State → Prop := fun M H s_c => Janus.Contracts.Map.RTPre M 3 s_c ∧ M.Typ (BitVec.toNat (s_c.regs 0)) ∧ BitVec.toNat (s_c.regs 2) = 0 ∧ Janus.Contracts.Ready H M.priv [BitVec.toNat (s_c.regs 0), BitVec.toNat (s_c.regs 1), 0] s_c
+    Proof.mapType : Nat := Janus.Spec.adrpLdTarget (Extracted.entry + 32) (Janus.Spec.segWord Extracted.program "example.com/basic.MakeHint" 8) (Janus.Spec.segWord Extracted.program "example.com/basic.MakeHint" 9) 0
+    Proof.pre : Janus.Spec.Map.MapModel (BitVec 64) (BitVec 64) → Janus.Contracts.RtReady → BitVec 64 → Janus.Arm64.State → Prop := fun M H n s => Janus.Contracts.Map.CallerOK M s 48 0 ∧ M.Typ Proof.mapType ∧ H [Proof.mapType, n.toNat, 0] (BitVec.toNat (s.regs 28)) (BitVec.toNat s.sp - 48) (Janus.Contracts.rtView M.priv s.mem)
+  Notes (standard Lean meaning that may read unexpectedly; not errors):
+    - in Proof.pre: Nat subtraction truncates at 0 (`a - b = 0` whenever `a ≤ b`): `BitVec.toNat s.sp - 48`

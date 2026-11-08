@@ -1,0 +1,2 @@
+examples/proofs/InsertS.lean:179:29: error: Expected type must not contain metavariables
+  ?m.65

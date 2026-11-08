@@ -1,0 +1,71 @@
+examples/proofs/SumValues.lean:42:5: warning: Variable name `hret'` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _hret'
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+examples/proofs/SumValues.lean:106:38: warning: This simp argument is unused:
+  List.cons_append
+
+Hint: Omit it from the simp argument list.
+  [apply] simp only [rtWrites, calleeStack, List.nil_append, hsp160, setReg_apply, reduceIte, Nat.reduceEqDiff,
+    hsp104] at hfr2
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+examples/proofs/SumValues.lean:106:56: warning: This simp argument is unused:
+  List.nil_append
+
+Hint: Omit it from the simp argument list.
+  [apply] simp only [rtWrites, calleeStack, List.cons_append, hsp160, setReg_apply, reduceIte, Nat.reduceEqDiff,
+    hsp104] at hfr2
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+examples/proofs/SumValues.lean:124:29: warning: This simp argument is unused:
+  keepABI_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp only [setReg_apply, reduceIte, Nat.reduceEqDiff] at henv2
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+examples/proofs/SumValues.lean:178:38: warning: This simp argument is unused:
+  List.cons_append
+
+Hint: Omit it from the simp argument list.
+  [apply] simp only [rtWrites, calleeStack, List.nil_append, hsp160, setReg_apply, reduceIte, Nat.reduceEqDiff,
+    hsp104] at hfr hit hv henv' hmap'
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+examples/proofs/SumValues.lean:178:56: warning: This simp argument is unused:
+  List.nil_append
+
+Hint: Omit it from the simp argument list.
+  [apply] simp only [rtWrites, calleeStack, List.cons_append, hsp160, setReg_apply, reduceIte, Nat.reduceEqDiff,
+    hsp104] at hfr hit hv henv' hmap'
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+examples/proofs/SumValues.lean:324:23: error: Type mismatch
+  h
+has type
+  M.Env s.mem (s.regs 28) ∧
+    StackGuardOK s M.depth ∧ CallOK s M.depth n ∧ Outside (BitVec.toNat s.sp - M.depth) (M.depth + 8 + 8 * n) M.priv
+but is expected to have type
+  M.Env
+      { regs := s.regs, sp := s.sp, pc := a, flags := s.flags, mem := s.mem, dczid := s.dczid, vregs := s.vregs,
+          tpidr := s.tpidr, fpcr := s.fpcr, fpsr := s.fpsr, excl := s.excl, exclPass := s.exclPass }.mem
+      ({ regs := s.regs, sp := s.sp, pc := a, flags := s.flags, mem := s.mem, dczid := s.dczid, vregs := s.vregs,
+            tpidr := s.tpidr, fpcr := s.fpcr, fpsr := s.fpsr, excl := s.excl, exclPass := s.exclPass }.regs
+        28) ∧
+    StackGuardOK
+        { regs := s.regs, sp := s.sp, pc := a, flags := s.flags, mem := s.mem, dczid := s.dczid, vregs := s.vregs,
+          tpidr := s.tpidr, fpcr := s.fpcr, fpsr := s.fpsr, excl := s.excl, exclPass := s.exclPass }
+        M.depth ∧
+      CallOK
+          { regs := s.regs, sp := s.sp, pc := a, flags := s.flags, mem := s.mem, dczid := s.dczid, vregs := s.vregs,
+            tpidr := s.tpidr, fpcr := s.fpcr, fpsr := s.fpsr, excl := s.excl, exclPass := s.exclPass }
+          M.depth n ∧
+        Outside
+          (BitVec.toNat
+              { regs := s.regs, sp := s.sp, pc := a, flags := s.flags, mem := s.mem, dczid := s.dczid, vregs := s.vregs,
+                  tpidr := s.tpidr, fpcr := s.fpcr, fpsr := s.fpsr, excl := s.excl, exclPass := s.exclPass }.sp -
+            M.depth)
+          (M.depth + 8 + 8 * n) M.priv

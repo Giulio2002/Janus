@@ -126,6 +126,30 @@ theorem pre : CallerOK (ME (BitVec 128)) s0 48 0 ∧ (ME (BitVec 128)).Typ mapTy
   ⟨callerOK, trivial, (isMap_of_ne (by decide)).2 ⟨rfl, rfl, by decide, by decide⟩, by unfold Ptr; decide,
     by simp only [Disjoint, ME_depth]; decide⟩
 
+theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with pc := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c, o⟩
+
+/-- The precondition of `Access2Ptr`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def Access2PtrSite (M : MapModel (BitVec 128) (BitVec 64)) (f : AMap (BitVec 128) (BitVec 64)) (s_c : State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 1).toNat f ∧
+    s_c.mem.accessible (s_c.regs 2).toNat 16 false = true ∧ Outside (s_c.regs 2).toNat 16 (calleeStack s_c M.depth 3)
+
+/-- The call state of the `mapaccess2` contract (U-WITNESS-CALLSITE): the stock witness state of `MapSat`, at the contract address. -/
+def wsCall : State := { mstate mmem (args (BitVec.ofNat 64 IfaceModel.VAL) 0) with pc := BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess2") }
+
+theorem wsCall_pre : Access2PtrSite (ME (BitVec 128)) AMap.empty wsCall :=
+  ⟨rtpre_pc _ (mstate_rtpre _ rfl rfl mmem rfl _ 3 (by decide) mmem_zenv mmem_guard), trivial,
+    (isMap_of_ne (by decide)).2 (mmem_rep _), by decide,
+    by simp only [calleeStack, ME_depth, outside_cons, outside_nil, and_true]; decide⟩
+
+/-- The theorem fires: `LookupKey16(map, key)` returns what the theorem says. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    (let key := BitVec.ofNat 128 (s0.mem.readLE (BitVec.ofNat 64 IfaceModel.VAL).toNat 16)
+    s'.regs 0 = (emp128 key).getD 0 ∧ (s'.regs 1).toNat % 256 = (emp128 key).isSome.toNat) :=
+  correctness implAt (ME (BitVec 128)) (ME_laws _) hcon (BitVec.ofNat 64 MP) (BitVec.ofNat 64 IfaceModel.VAL) emp128 ret hret s0 setup pre
+
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapaccess2`
 meeting `Access2Ptr` for it, and a call state of `LookupKey16(map, key)` that satisfies the precondition. -/
 theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 128) (BitVec 64)) (ret : Nat)
@@ -135,14 +159,13 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 128) (BitVe
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP, BitVec.ofNat 64 IfaceModel.VAL] s ∧
     (CallerOK M s 48 0 ∧ M.Typ mapType ∧ IsMap M s.mem (BitVec.ofNat 64 MP).toNat AMap.empty ∧
-    Ptr s.mem (BitVec.ofNat 64 IfaceModel.VAL) 16 false ∧ Disjoint (BitVec.ofNat 64 IfaceModel.VAL).toNat 16 (s.sp.toNat - (M.depth + 48)) (M.depth + 48)) :=
-  ⟨implAt, (ME (BitVec 128)), ret, s0, (ME_laws _), hcon, hret, setup, pre⟩
-
-/-- The theorem fires: `LookupKey16(map, key)` returns what the theorem says. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (let key := BitVec.ofNat 128 (s0.mem.readLE (BitVec.ofNat 64 IfaceModel.VAL).toNat 16)
+    Ptr s.mem (BitVec.ofNat 64 IfaceModel.VAL) 16 false ∧ Disjoint (BitVec.ofNat 64 IfaceModel.VAL).toNat 16 (s.sp.toNat - (M.depth + 48)) (M.depth + 48)) ∧
+    (∃ (f : AMap (BitVec 128) (BitVec 64)) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess2") ∧ Access2PtrSite M f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    (let key := BitVec.ofNat 128 (s.mem.readLE (BitVec.ofNat 64 IfaceModel.VAL).toNat 16)
     s'.regs 0 = (emp128 key).getD 0 ∧ (s'.regs 1).toNat % 256 = (emp128 key).isSome.toNat) :=
-  correctness implAt (ME (BitVec 128)) (ME_laws _) hcon (BitVec.ofNat 64 MP) (BitVec.ofNat 64 IfaceModel.VAL) emp128 ret hret s0 setup pre
+  ⟨implAt, (ME (BitVec 128)), ret, s0, (ME_laws _), hcon, hret, setup, pre, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 

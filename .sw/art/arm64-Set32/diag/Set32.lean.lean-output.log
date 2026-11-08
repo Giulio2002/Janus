@@ -1,0 +1,8 @@
+examples/proofs/Set32.lean:272:4: error: Application type mismatch: The argument
+  mmem_repC ?m.37
+has type
+  (MC ?m.37).Rep mmem MP AMap.empty
+but is expected to have type
+  (MCW ck32).Rep wsCall.mem (BitVec.toNat (wsCall.regs 1)) AMap.empty
+in the application
+  And.intro (mmem_repC ?m.37)

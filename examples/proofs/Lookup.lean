@@ -113,16 +113,42 @@ theorem pre : CallerOK (ME (BitVec 64)) s0 48 0 ∧ (ME (BitVec 64)).Typ mapType
     IsMap (ME (BitVec 64)) s0.mem (BitVec.ofNat 64 MP).toNat AMap.empty :=
   ⟨callerOK, trivial, (isMap_of_ne (by decide)).2 ⟨rfl, rfl, by decide, by decide⟩⟩
 
+/-- The precondition of `Access2`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def Access2Site (M : MapModel (BitVec 64) (BitVec 64)) (f : AMap (BitVec 64) (BitVec 64)) (s_c : State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 1).toNat f
+
+/-- The call state of the `mapaccess2_fast64` contract (U-WITNESS-CALLSITE): at the callee's entry, the caller's frame lowered,
+with the contract's precondition. -/
+def wsCall : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 mapType else if i = 1 then BitVec.ofNat 64 MP else if i = 2 then 5
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (wsp - 48), pc := BitVec.ofNat 64 cA,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : Access2Site (ME (BitVec 64)) AMap.empty wsCall := by
+  refine ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
+    ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, ?_⟩, trivial, pre.2.2⟩
+  simp only [ME_priv, ME_depth, priv0, outside_cons, outside_nil, and_true]; decide
+
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapaccess2_fast64`
-meeting `Access2` for it, and a call state of `Lookup(map, 5)` that satisfies the precondition. -/
+meeting `Access2` for it, a call state of `Lookup(map, 5)` that satisfies the precondition, the call state of the
+`mapaccess2_fast64` contract, and the returning run. -/
 theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64)) (ret : Nat)
     (s : State), M.Laws ∧
     Access2 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.mapaccess2_fast64") M ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5] s ∧
-    (CallerOK M s 48 0 ∧ M.Typ mapType ∧ IsMap M s.mem (BitVec.ofNat 64 MP).toNat AMap.empty) :=
-  ⟨implAt, ME _, ret, s0, ME_laws _, hacc, hret, setup, pre⟩
+    (CallerOK M s 48 0 ∧ M.Typ mapType ∧ IsMap M s.mem (BitVec.ofNat 64 MP).toNat AMap.empty) ∧
+    (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess2_fast64") ∧ Access2Site M f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+      (s'.regs 0 = (emp 5).getD 0 ∧
+        (s'.regs 1).toNat % 256 = (emp 5).isSome.toNat) :=
+  ⟨implAt, ME _, ret, s0, ME_laws _, hacc, hret, setup, pre,
+    ⟨AMap.empty, wsCall, by simp only [wsCall]; exact addr.symm ▸ rfl, wsCall_pre⟩,
+    correctness implAt (ME _) (ME_laws _) hacc (BitVec.ofNat 64 MP) 5 AMap.empty ret hret s0 setup pre⟩
 
 /-- The theorem fires: `Lookup(map, 5)` on the empty map returns `0` and `false`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧

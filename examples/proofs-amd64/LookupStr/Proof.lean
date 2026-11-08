@@ -135,6 +135,37 @@ theorem pre0 : CallerOK MS0 s0 48 24 ∧ MS0.Typ mapType ∧ IsMap MS0 s0.mem (0
   · simp only [MS0, outside_cons, outside_nil, and_true]; decide
   · simp only [window, MS0, outside_cons, outside_nil, and_true]; decide
 
+theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
+    RTPre M n { s with rip := a } := by
+  obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
+  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+
+/-- The precondition of `Access2Str64`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def Access2Str64Site (M : MapModel (Nat × Nat) (BitVec 64)) (f : AMap (Nat × Nat) (BitVec 64)) (s_c : Janus.Amd64.State) : Prop :=
+  RTPre M 4 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 3).toNat f ∧
+    (s_c.regs 1).toNat + (s_c.regs 7).toNat ≤ 2 ^ 48 ∧ s_c.mem.accessible (s_c.regs 1).toNat (s_c.regs 7).toNat false = true ∧
+    Outside (s_c.regs 1).toNat (s_c.regs 7).toNat (calleeStack s_c M.depth 4)
+
+/-- The call state of the `mapaccess2_faststr` contract (U-WITNESS-CALLSITE): the stock witness state of `MapStrSatAmd64`, at the contract address. -/
+def wsCall : Janus.Amd64.State :=
+  { regs := fun i => if i = 1 then BitVec.ofNat 64 VAL else if i = 7 then 8#64
+      else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 cAddr, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
+    mem := Janus.Contracts.EqHashModel.wmem64 }
+
+theorem wsCall_pre : Access2Str64Site MS0 AMap.empty wsCall := by
+  refine ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide,
+      by decide, rfl, rfl, by decide, ?_⟩, trivial, by simp [IsMap, wsCall], by decide, by decide, ?_⟩
+  · simp only [MS0, outside_cons, outside_nil, and_true]; decide
+  · simp only [Janus.Contracts.MapAmd64.calleeStack, MS0, outside_cons, outside_nil, and_true]; decide
+
+/-- So the guarantee is reached: a lookup in a nil map gives `(0, false)`. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ s'.regs 0 = 0 ∧ (s'.regs 3).toNat % 256 = 0 := by
+  refine (correctness implAt MS0 MS0_laws model 0#64 kp kl AMap.empty ret hret s0 setup pre0).mono ?_
+  intro s' h
+  exact ⟨h.1, by simpa [AMap.empty] using h.2.1, by simpa [AMap.empty] using h.2.2⟩
+
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (Nat × Nat) (BitVec 64))
     (ret : Nat) (s : State) (m kp kl : BitVec 64) (f : AMap (Nat × Nat) (BitVec 64)),
@@ -144,15 +175,12 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (Nat ×
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, kp, kl] s ∧
     (CallerOK M s 48 24 ∧ M.Typ mapType ∧ IsMap M s.mem m.toNat f ∧
       kp.toNat + kl.toNat ≤ 2 ^ 48 ∧ s.mem.accessible kp.toNat kl.toNat false = true ∧
-      Outside kp.toNat kl.toNat (window M s)) :=
-  ⟨implAt, MS0, ret, s0, 0#64, kp, kl, AMap.empty, MS0_laws, model, hret, setup, pre0⟩
-
-/-- So the guarantee is reached: a lookup in a nil map gives `(0, false)`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ s'.regs 0 = 0 ∧ (s'.regs 3).toNat % 256 = 0 := by
-  refine (correctness implAt MS0 MS0_laws model 0#64 kp kl AMap.empty ret hret s0 setup pre0).mono ?_
-  intro s' h
-  exact ⟨h.1, by simpa [AMap.empty] using h.2.1, by simpa [AMap.empty] using h.2.2⟩
+      Outside kp.toNat kl.toNat (window M s)) ∧
+    (∃ (f : AMap (Nat × Nat) (BitVec 64)) (s_c : Janus.Amd64.State),
+      s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess2_faststr") ∧ Access2Str64Site M f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (s'.regs 0 = (f (strKey s.mem kp.toNat kl.toNat)).getD 0 ∧
+        (s'.regs 3).toNat % 256 = (f (strKey s.mem kp.toNat kl.toNat)).isSome.toNat) :=
+  ⟨implAt, MS0, ret, s0, 0#64, kp, kl, AMap.empty, MS0_laws, model, hret, setup, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, correctness implAt MS0 MS0_laws model 0#64 kp kl AMap.empty ret hret s0 setup pre0⟩
 
 end Witness
 

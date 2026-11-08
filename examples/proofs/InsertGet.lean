@@ -154,6 +154,47 @@ theorem pre : CallerOK (MC ck64) s0 48 32 ∧ (MC ck64).Typ mapType ∧ (BitVec.
     HAssign [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s0.regs 28).toNat (s0.sp.toNat - 48) (rtView (MC ck64).priv s0.mem) :=
   ⟨callerOK, trivial, by decide, ⟨rfl, by decide, by decide, Or.inl ⟨by decide, rfl⟩⟩, by unfold HAssign; decide⟩
 
+/-- The precondition of `Assign`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def AssignSite (M : MapModel (BitVec 64) (BitVec 64)) (H : RtReady) (f : AMap (BitVec 64) (BitVec 64)) (s_c : State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 1).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 1).toNat f ∧
+    Ready H M.priv [(s_c.regs 0).toNat, (s_c.regs 1).toNat, (s_c.regs 2).toNat] s_c
+
+/-- The precondition of `Access1`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def Access1Site (M : MapModel (BitVec 64) (BitVec 64)) (f : AMap (BitVec 64) (BitVec 64)) (s_c : State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 1).toNat f
+
+/-- The call state of the `mapassign_fast64` contract (U-WITNESS-CALLSITE): at the callee's entry, the caller's frame lowered. -/
+def wsCallA : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 mapType else if i = 1 then BitVec.ofNat 64 MP else if i = 2 then 5
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (wsp - 48), pc := BitVec.ofNat 64 cA,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+set_option maxRecDepth 100000 in
+theorem wsCallA_pre : AssignSite (MC ck64) HAssign AMap.empty wsCallA := by
+  refine ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
+    ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, ?_⟩, trivial, by decide,
+    ⟨rfl, by decide, by decide, Or.inl ⟨by decide, rfl⟩⟩, by unfold Ready HAssign; decide⟩
+  simp only [MC_priv, MC_depth, priv0, outside_cons, outside_nil, and_true]; decide
+
+/-- The call state of the `mapaccess1_fast64` contract (U-WITNESS-CALLSITE): at the callee's entry, the caller's frame lowered. -/
+def wsCallB : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 mapType else if i = 1 then BitVec.ofNat 64 MP else if i = 2 then 5
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (wsp - 48), pc := BitVec.ofNat 64 cB,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+set_option maxRecDepth 100000 in
+theorem wsCallB_pre : Access1Site (MC ck64) AMap.empty wsCallB := by
+  refine ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
+    ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, ?_⟩, trivial, pre.2.2.2.1⟩
+  simp only [MC_priv, MC_depth, priv0, outside_cons, outside_nil, and_true]; decide
+
+/-- The theorem fires: `InsertGet(map, 5, 7)` returns what the theorem says. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    (s'.regs 0 = 7 ∧ (MC ck64).Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7)) :=
+  correctness implAt (MC ck64) (MC_laws _) HAssign hcon hB (BitVec.ofNat 64 MP) 5 7 AMap.empty ret hret s0 setup pre
+
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapassign_fast64`
 meeting `Assign` for it, and a call state of `InsertGet(map, 5, 7)` that satisfies the precondition. -/
 theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64)) (H : RtReady) (ret : Nat)
@@ -165,13 +206,14 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s ∧
     (CallerOK M s 48 32 ∧ M.Typ mapType ∧ (BitVec.ofNat 64 MP).toNat ≠ 0 ∧ M.Rep s.mem (BitVec.ofNat 64 MP).toNat AMap.empty ∧
-    H [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s.regs 28).toNat (s.sp.toNat - 48) (rtView M.priv s.mem)) :=
-  ⟨implAt, (MC ck64), HAssign, ret, s0, (MC_laws _), hcon, hB, hret, setup, pre⟩
-
-/-- The theorem fires: `InsertGet(map, 5, 7)` returns what the theorem says. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (s'.regs 0 = 7 ∧ (MC ck64).Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7)) :=
-  correctness implAt (MC ck64) (MC_laws _) HAssign hcon hB (BitVec.ofNat 64 MP) 5 7 AMap.empty ret hret s0 setup pre
+    H [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s.regs 28).toNat (s.sp.toNat - 48) (rtView M.priv s.mem)) ∧
+    (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapassign_fast64") ∧ AssignSite M H f s_c) ∧
+    (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess1_fast64") ∧ Access1Site M f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    (s'.regs 0 = 7 ∧ M.Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7)) :=
+  ⟨implAt, (MC ck64), HAssign, ret, s0, (MC_laws _), hcon, hB, hret, setup, pre, ⟨AMap.empty, wsCallA, by simp only [wsCallA]; exact addr.symm ▸ rfl, wsCallA_pre⟩, ⟨AMap.empty, wsCallB, by simp only [wsCallB]; exact addrB.symm ▸ rfl, wsCallB_pre⟩, returns⟩
 
 end Witness
 

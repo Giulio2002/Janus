@@ -1,0 +1,42 @@
+=== Proof.correctness: verified ===
+Verified: Proof.correctness
+  Module: example.com/basic (go1.26.0)
+  Entry: example.com/basic.NewMap at 0xaaff0
+  Binary: artifacts/examples-arm64 (SHA-256 27d22a5e74c1cbbe105dfa3e30229f13a3edaace504353238a9798d58bfec8c2)
+  Proof: examples/proofs/NewMap.lean
+  Framework: directory (SHA-256 8bbf90825b94b272b1fbc0fd38793a852c6d9499fbce7393b205bfada4d42be3, 328 files, leanprover/lean4:v4.34.1)
+  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
+  Axioms: Classical.choice, Quot.sound, propext
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Amd64, Janus.Amd64.Bridge, Janus.Amd64.CABI, Janus.Amd64.CarryNorm, Janus.Amd64.Decode, Janus.Amd64.DecodeAVX, Janus.Amd64.DecodeCrypto, Janus.Amd64.DecodeEVEX, … and 316 more; 326 modules; 323 reused from the replay cache)
+  Lean: Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)
+  Role: main theorem (the runtime implementation is a variable of the statement, constrained only by the runtime contracts)
+  Runtime contracts assumed: Janus.Contracts.Map.MakeSmall@runtime.makemap_small (not extracted; the statement applies them as hypotheses)
+  Non-vacuity: shown by Proof.Witness.nonvacuous (kernel-checked witness: a concrete state and runtime satisfying the whole precondition, contract hypotheses included)
+  Report: .sw/art/arm64-NewMap/verified/Proof.correctness.json
+  Statement:
+    Proof.correctness (impl : List Janus.Segment) (M : Janus.Spec.Map.MapModel (BitVec 64) (BitVec 64)) (hl : M.Laws) (H : Janus.Contracts.RtReady) (hmk : Janus.Contracts.Map.MakeSmall (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.makemap_small") M H) : Janus.GoABI.Ensures (Extracted.program.link impl) Extracted.entry [] (fun s => Janus.Contracts.Map.CallerOK M s 16 0 ∧ H [] (BitVec.toNat (s.regs 28)) (BitVec.toNat s.sp - 16) (Janus.Contracts.rtView M.priv s.mem)) fun s s' => BitVec.toNat (s'.regs 0) ≠ 0 ∧ M.Rep s'.mem (BitVec.toNat (s'.regs 0)) Janus.Spec.Map.AMap.empty ∧ M.Env s'.mem (s.regs 28)
+  Notes (standard Lean meaning that may read unexpectedly; not errors):
+    - Nat subtraction truncates at 0 (`a - b = 0` whenever `a ≤ b`): `BitVec.toNat s.sp - 16`
+  Report (also): .sw/art/arm64-NewMap/verified.json
+=== Proof.Witness.nonvacuous: verified ===
+Verified: Proof.Witness.nonvacuous
+  Module: example.com/basic (go1.26.0)
+  Entry: example.com/basic.NewMap at 0xaaff0
+  Binary: artifacts/examples-arm64 (SHA-256 27d22a5e74c1cbbe105dfa3e30229f13a3edaace504353238a9798d58bfec8c2)
+  Proof: examples/proofs/NewMap.lean
+  Framework: directory (SHA-256 8bbf90825b94b272b1fbc0fd38793a852c6d9499fbce7393b205bfada4d42be3, 328 files, leanprover/lean4:v4.34.1)
+  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
+  Axioms: Classical.choice, Quot.sound, propext
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Amd64, Janus.Amd64.Bridge, Janus.Amd64.CABI, Janus.Amd64.CarryNorm, Janus.Amd64.Decode, Janus.Amd64.DecodeAVX, Janus.Amd64.DecodeCrypto, Janus.Amd64.DecodeEVEX, … and 316 more; 326 modules; 323 reused from the replay cache)
+  Lean: Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)
+  Role: WITNESS, not a correctness claim: a concrete instance showing its hypotheses and precondition are satisfiable together, for the main theorem Proof.correctness (it uses a concrete runtime implementation; the main theorem must be verified separately)
+  Runtime contracts assumed: Janus.Contracts.Map.MakeSmall@runtime.makemap_small (not extracted; the statement applies them as hypotheses)
+  Non-vacuity: this is a witness (it is not a correctness claim)
+  Report: .sw/art/arm64-NewMap/verified/Proof.Witness.nonvacuous.json
+  Statement:
+    Proof.Witness.nonvacuous : ∃ impl M H ret s, M.Laws ∧ Janus.Contracts.Map.MakeSmall (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.makemap_small") M H ∧ Janus.GoABI.RetAddr (Extracted.program.link impl) ret ∧ Janus.GoABI.CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧ (Janus.Contracts.Map.CallerOK M s 16 0 ∧ H [] (BitVec.toNat (s.regs 28)) (BitVec.toNat s.sp - 16) (Janus.Contracts.rtView M.priv s.mem) ∧ Janus.Spec.Map.IsMap M s.mem 0 Proof.Witness.emp) ∧ (∃ s_c, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makemap_small") ∧ Proof.Witness.MakeSmallSite M H s_c) ∧ Janus.GoABI.Returns ((Extracted.program.link impl).withExit ret) s fun s' => Janus.GoABI.ABIReturn s s' ∧ BitVec.toNat (s'.regs 0) ≠ 0 ∧ M.Rep s'.mem (BitVec.toNat (s'.regs 0)) Janus.Spec.Map.AMap.empty ∧ M.Env s'.mem (s.regs 28)
+  Proof-local definitions used by the statement (part of its meaning):
+    Proof.Witness.MakeSmallSite : Janus.Spec.Map.MapModel (BitVec 64) (BitVec 64) → Janus.Contracts.RtReady → Janus.Arm64.State → Prop := fun M H s_c => Janus.Contracts.Map.RTPre M 0 s_c ∧ Janus.Contracts.Ready H M.priv [] s_c
+    Proof.Witness.emp : Janus.Spec.Map.AMap (BitVec 64) (BitVec 64) := Janus.Spec.Map.AMap.empty
+  Notes (standard Lean meaning that may read unexpectedly; not errors):
+    - Nat subtraction truncates at 0 (`a - b = 0` whenever `a ≤ b`): `BitVec.toNat s.sp - 16`

@@ -1,0 +1,9 @@
+name = "kept"
+defaultTargets = ["Extracted"]
+
+[[require]]
+name = "janus"
+path = "/srv/janus-jx1"
+
+[[lean_lib]]
+name = "Extracted"

@@ -78,6 +78,11 @@ open Janus.Contracts.IfaceModel (wsp wg)
 local macro "cA" : term => `(janus_eval% (Extracted.program.contractAddr "runtime.mapassign_fast64"))
 theorem addr : Extracted.program.contractAddr "runtime.mapassign_fast64" = cA := by decide
 def implAt : List Segment := [assignSeg cA]
+/-- The precondition of `Assign`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def AssignSite (M : MapModel (BitVec 64) (BitVec 64)) (H : RtReady) (f : AMap (BitVec 64) (BitVec 64)) (s_c : State) : Prop :=
+  RTPre M 3 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ (s_c.regs 1).toNat ≠ 0 ∧ M.Rep s_c.mem (s_c.regs 1).toNat f ∧
+    Ready H M.priv [(s_c.regs 0).toNat, (s_c.regs 1).toNat, (s_c.regs 2).toNat] s_c
+
 def linked : Program := Extracted.program.link implAt
 
 theorem h0 : Assign linked cA (MC ck64) HAssign := by janus_map_assign
@@ -122,8 +127,24 @@ theorem pre : CallerOK (MC ck64) s0 48 32 ∧ (MC ck64).Typ mapType ∧ (BitVec.
     HAssign [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s0.regs 28).toNat (s0.sp.toNat - 48) (rtView (MC ck64).priv s0.mem) :=
   ⟨callerOK, trivial, by decide, ⟨rfl, by decide, by decide, Or.inl ⟨by decide, rfl⟩⟩, by unfold HAssign; decide⟩
 
+/-- The call state of the `mapassign_fast64` contract (U-WITNESS-CALLSITE): at the callee's entry, the map call's frame
+set up (`SP` lowered by the caller's frame), with the contract's precondition. -/
+def wsCall : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 mapType else if i = 1 then BitVec.ofNat 64 MP else if i = 2 then 7
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (wsp - 48), pc := BitVec.ofNat 64 cA,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : AssignSite (MC ck64) HAssign AMap.empty wsCall := by
+  refine ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
+    ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, ?_⟩, trivial, by decide,
+    ⟨rfl, by decide, by decide, Or.inl ⟨by decide, rfl⟩⟩, by unfold Ready HAssign; decide⟩
+  simp only [MC_priv, MC_depth, priv0, outside_cons, outside_nil, and_true]; decide
+
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapassign_fast64`
-meeting `Assign` for it, and a call state of `Insert(map, 5, 7)` that satisfies the precondition. -/
+meeting `Assign` for it, and a call state of `Insert(map, 5, 7)` that satisfies the precondition; the call state of the
+`mapassign_fast64` contract; and the returning run. -/
 theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64)) (H : RtReady) (ret : Nat)
     (s : State), M.Laws ∧
     Assign (Extracted.program.link impl)
@@ -131,8 +152,15 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s ∧
     (CallerOK M s 48 32 ∧ M.Typ mapType ∧ (BitVec.ofNat 64 MP).toNat ≠ 0 ∧ M.Rep s.mem (BitVec.ofNat 64 MP).toNat AMap.empty ∧
-    H [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s.regs 28).toNat (s.sp.toNat - 48) (rtView M.priv s.mem)) :=
-  ⟨implAt, (MC ck64), HAssign, ret, s0, (MC_laws _), hcon, hret, setup, pre⟩
+    H [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s.regs 28).toNat (s.sp.toNat - 48) (rtView M.priv s.mem)) ∧
+    (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapassign_fast64") ∧
+      AssignSite M H f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+      (M.Rep s'.mem (BitVec.ofNat 64 MP).toNat (AMap.empty.set 5 7) ∧ M.Env s'.mem (s.regs 28)) :=
+  ⟨implAt, (MC ck64), HAssign, ret, s0, (MC_laws _), hcon, hret, setup, pre,
+    ⟨AMap.empty, wsCall, by simp only [wsCall]; exact addr.symm ▸ rfl, wsCall_pre⟩,
+    correctness implAt (MC ck64) (MC_laws _) HAssign hcon (BitVec.ofNat 64 MP) 5 7 AMap.empty ret hret s0 setup pre⟩
 
 /-- The theorem fires: `Insert(map, 5, 7)` returns what the theorem says. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧

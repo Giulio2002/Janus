@@ -1,0 +1,22 @@
+examples/proofs/Insert.lean:138:12: error: failed to synthesize
+  Decidable ((MC ck64).Env wsCall.mem (wsCall.regs 28))
+
+Hint: Additional diagnostic information may be available using the `set_option diagnostics true` command.
+examples/proofs/Insert.lean:138:12: error: failed to synthesize
+  Decidable (StackGuardOK wsCall (MC ck64).depth)
+
+Hint: Additional diagnostic information may be available using the `set_option diagnostics true` command.
+examples/proofs/Insert.lean:138:12: error: failed to synthesize
+  Decidable (CallOK wsCall (MC ck64).depth 3)
+
+Hint: Additional diagnostic information may be available using the `set_option diagnostics true` command.
+examples/proofs/Insert.lean:138:12: error: failed to synthesize
+  Decidable (Outside (BitVec.toNat wsCall.sp - (MC ck64).depth) ((MC ck64).depth + 8 + 8 * 3) (MC ck64).priv)
+
+Hint: Additional diagnostic information may be available using the `set_option diagnostics true` command.
+examples/proofs/Insert.lean:138:12: error: failed to synthesize
+  Decidable
+    (Ready HAssign (MC ck64).priv
+      [BitVec.toNat (wsCall.regs 0), BitVec.toNat (wsCall.regs 1), BitVec.toNat (wsCall.regs 2)] wsCall)
+
+Hint: Additional diagnostic information may be available using the `set_option diagnostics true` command.

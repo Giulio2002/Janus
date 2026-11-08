@@ -1,0 +1,1 @@
+arm64 Insert rc=1 29s Invalid: Lean rejected the proof examples/proofs/Insert.lean.|Invalid: Lean rejected the proof examples/proofs/Insert.lean.|Invalid: 2 of 2 theorem(s) failed.|

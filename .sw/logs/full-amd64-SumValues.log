@@ -1,0 +1,41 @@
+=== Proof.correctness: verified ===
+Verified: Proof.correctness
+  Module: example.com/basic (go1.26.0)
+  Entry: example.com/basic.SumValues at 0x4a2520
+  Binary: artifacts/examples-amd64 (SHA-256 b840cdc7c074eb191a1c54ff6ccc5a053d54f16d5499c8a5e087981ed48ca6f3)
+  Proof: examples/proofs-amd64/SumValues/Proof.lean
+  Framework: directory (SHA-256 3b9800d8688d7862a97cc9188c88e230c8aabae4a84624dc8c0629295fcbfaad, 328 files, leanprover/lean4:v4.34.1)
+  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
+  Axioms: Classical.choice, Quot.sound, propext
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Amd64, Janus.Amd64.Bridge, Janus.Amd64.CABI, Janus.Amd64.CarryNorm, Janus.Amd64.Decode, Janus.Amd64.DecodeAVX, Janus.Amd64.DecodeCrypto, Janus.Amd64.DecodeEVEX, … and 316 more; 326 modules; 323 reused from the replay cache)
+  Lean: Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)
+  Role: main theorem (the runtime implementation is a variable of the statement, constrained only by the runtime contracts)
+  Runtime contracts assumed: Janus.Contracts.MapAmd64.IterStart@runtime.mapIterStart, Janus.Contracts.MapAmd64.IterNext@runtime.mapIterNext (not extracted; the statement applies them as hypotheses)
+  Non-vacuity: shown by Proof.Witness.nonvacuous (kernel-checked witness: a concrete state and runtime satisfying the whole precondition, contract hypotheses included)
+  Report: artifacts/amd64/SumValues/verified/Proof.correctness.json
+  Statement:
+    Proof.correctness (impl : List Janus.Amd64.Segment) (M : Janus.Spec.Map.MapModel (BitVec 64) (BitVec 64)) (hl : M.Laws) (hstart : Janus.Contracts.MapAmd64.IterStart (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapIterStart") M) (hnext : Janus.Contracts.MapAmd64.IterNext (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapIterNext") M) (m : BitVec 64) (f : Janus.Spec.Map.AMap (BitVec 64) (BitVec 64)) : Janus.Amd64.GoABI.Ensures (Extracted.program.link impl) Extracted.entry [m] (fun s => Janus.Contracts.MapAmd64.CallerOK M s 144 8 ∧ M.Typ Proof.mapType ∧ Janus.Spec.Map.IsMap M s.mem m.toNat f) fun x s' => ∀ (ks : List (BitVec 64)), Janus.Spec.Map.Keys f ks → BitVec.toNat (s'.regs 0) = Janus.Spec.Map.sumValues f ks % 2 ^ 64
+  Proof-local definitions used by the statement (part of its meaning):
+    Proof.mapType : Nat := Janus.Amd64.Tactic.ripTarget Extracted.program (Extracted.entry + 56)
+  Report (also): artifacts/amd64/SumValues/verified.json
+=== Proof.Witness.nonvacuous: verified ===
+Verified: Proof.Witness.nonvacuous
+  Module: example.com/basic (go1.26.0)
+  Entry: example.com/basic.SumValues at 0x4a2520
+  Binary: artifacts/examples-amd64 (SHA-256 b840cdc7c074eb191a1c54ff6ccc5a053d54f16d5499c8a5e087981ed48ca6f3)
+  Proof: examples/proofs-amd64/SumValues/Proof.lean
+  Framework: directory (SHA-256 3b9800d8688d7862a97cc9188c88e230c8aabae4a84624dc8c0629295fcbfaad, 328 files, leanprover/lean4:v4.34.1)
+  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
+  Axioms: Classical.choice, Quot.sound, propext
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Amd64, Janus.Amd64.Bridge, Janus.Amd64.CABI, Janus.Amd64.CarryNorm, Janus.Amd64.Decode, Janus.Amd64.DecodeAVX, Janus.Amd64.DecodeCrypto, Janus.Amd64.DecodeEVEX, … and 316 more; 326 modules; 323 reused from the replay cache)
+  Lean: Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)
+  Role: WITNESS, not a correctness claim: a concrete instance showing its hypotheses and precondition are satisfiable together, for the main theorem Proof.correctness (it uses a concrete runtime implementation; the main theorem must be verified separately)
+  Runtime contracts assumed: Janus.Contracts.MapAmd64.IterStart@runtime.mapIterStart, Janus.Contracts.MapAmd64.IterNext@runtime.mapIterNext (not extracted; the statement applies them as hypotheses)
+  Non-vacuity: this is a witness (it is not a correctness claim)
+  Report: artifacts/amd64/SumValues/verified/Proof.Witness.nonvacuous.json
+  Statement:
+    Proof.Witness.nonvacuous : ∃ impl M ret s m f, M.Laws ∧ Janus.Contracts.MapAmd64.IterStart (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapIterStart") M ∧ Janus.Contracts.MapAmd64.IterNext (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapIterNext") M ∧ Janus.Amd64.GoABI.RetAddr (Extracted.program.link impl) ret ∧ Janus.Amd64.GoABI.CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m] s ∧ m.toNat ≠ 0 ∧ (Janus.Contracts.MapAmd64.CallerOK M s 144 8 ∧ M.Typ Proof.mapType ∧ Janus.Spec.Map.IsMap M s.mem m.toNat f) ∧ (∃ f s_c, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapIterStart") ∧ Proof.Witness.IterStartSite M f s_c) ∧ (∃ mp f k ks s_c, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapIterNext") ∧ Proof.Witness.IterNextSite M mp f k ks s_c) ∧ Janus.Amd64.GoABI.Returns ((Extracted.program.link impl).withExit ret) s fun s' => Janus.Amd64.GoABI.ABIReturn s s' ∧ ∀ (ks : List (BitVec 64)), Janus.Spec.Map.Keys f ks → BitVec.toNat (s'.regs 0) = Janus.Spec.Map.sumValues f ks % 2 ^ 64
+  Proof-local definitions used by the statement (part of its meaning):
+    Proof.Witness.IterStartSite : Janus.Spec.Map.MapModel (BitVec 64) (BitVec 64) → Janus.Spec.Map.AMap (BitVec 64) (BitVec 64) → Janus.Amd64.State → Prop := fun M f s_c => Janus.Contracts.MapAmd64.RTPre M 3 s_c ∧ M.Typ (BitVec.toNat (s_c.regs 0)) ∧ Janus.Spec.Map.IsMap M s_c.mem (BitVec.toNat (s_c.regs 3)) f ∧ Janus.Arm64.Memory.accessible s_c.mem (BitVec.toNat (s_c.regs 1)) Janus.Spec.Map.iterSize Bool.true = Bool.true ∧ Janus.Outside (BitVec.toNat (s_c.regs 1)) Janus.Spec.Map.iterSize M.priv ∧ Janus.Outside (BitVec.toNat (s_c.regs 1)) Janus.Spec.Map.iterSize (Janus.Contracts.MapAmd64.calleeStack s_c M.depth 3) ∧ Janus.Outside (BitVec.toNat (s_c.regs 1)) Janus.Spec.Map.iterSize (Janus.Contracts.MapAmd64.retSlot s_c)
+    Proof.Witness.IterNextSite : Janus.Spec.Map.MapModel (BitVec 64) (BitVec 64) → Nat → Janus.Spec.Map.AMap (BitVec 64) (BitVec 64) → BitVec 64 → List (BitVec 64) → Janus.Amd64.State → Prop := fun M mp f k ks s_c => Janus.Contracts.MapAmd64.RTPre M 1 s_c ∧ Janus.Spec.Map.IsMap M s_c.mem mp f ∧ M.Iter s_c.mem (BitVec.toNat (s_c.regs 0)) mp f (k :: ks) ∧ Janus.Outside (BitVec.toNat (s_c.regs 0)) Janus.Spec.Map.iterSize M.priv ∧ Janus.Outside (BitVec.toNat (s_c.regs 0)) Janus.Spec.Map.iterSize (Janus.Contracts.MapAmd64.calleeStack s_c M.depth 1) ∧ Janus.Outside (BitVec.toNat (s_c.regs 0)) Janus.Spec.Map.iterSize (Janus.Contracts.MapAmd64.retSlot s_c)
+    Proof.mapType : Nat := Janus.Amd64.Tactic.ripTarget Extracted.program (Extracted.entry + 56)
