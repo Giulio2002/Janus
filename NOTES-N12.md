@@ -1,4 +1,21 @@
-# NOTES-N12 (JN-INT handover) -- branch agent/integ-n12, worktree /srv/janus-integ-n12
+# NOTES-N12 (JN-INT handover) -- FINAL STATE, branch agent/integ-n12, worktree /srv/janus-integ-n12
+
+## OPEN ITEMS (top priority first)
+1. TIGHTEN loose row matching (main's request, NOT started): `mitigated` rows in audit/run-all.sh (line ~51) already require `Verified*`, but every `blocked` row in ~25 scripts (round2,3,5-15a, roundbig/ds/fw/ofimpl/specbind/n9, rt-asl, rt-fp, ...) accepts ANY Invalid, including "Lean rejected the proof"/elaboration failures. Pin each to an exact reason string after confirming the current outcome is the intended one; treat elaboration errors as BROKEN. audit/round2/run-round2.sh's U1 block likewise only prints the verdict (a broken probe printed Invalid and still "as expected").
+2. FULL check-merge has NOT been re-run on the final head (see below), and the ISA-model lanes (x86, asl-*, rtasl-*, sail, decoder) were never run on n11/n12: a FULL gate is still owed before n12 can be a release head.
+3. UP4 committed a 23 MB binary `janus-up4` in 217f0136 (removed in n12, gitignored): tell its owner.
+4. Round 2 U1 expectation text says "U1 Invalid" but with the Add witness both U1 and U1b print Verified (cache under /tmp in the runner; the leak check passes). Confirm intended.
+
+## Head and lane results
+Merges: n11 b8ac6cca + up4 217f0136 + up3-vacuity 8b12261b (clean; only .gitignore conflict earlier, resolved by keeping both). Then commits: NOTES, round2 U1/U1b witness probes, hermetic probes/runner (latest commit on agent/integ-n12; see git log).
+check-merge -j 5 on 7fe7ff1f (before the probe fixes): FAIL only in the rounds lane (alla: R2.U1_unshare_cache_write, R2.U1b_unshare_mounts, the up3 x up4 interaction: probes had no witness). Lanes: govet 0.2s PASS, axiom 1.9s PASS, pre-lake 1m25s PASS, gotest 49m46s PASS, verify 1h45m PASS (483/483), rounds 1h16m FAIL, total 1h51m (6666s).
+SAT: contracts=247 witnessed=251 open=0 missing=0. audit/roundup3/run-verify-rows.sh: all as expected (642s).
+After the fixes (head above): audit/up4/run-hermetic.sh ALL ok (legit_Add, S1, U1, S4, U2_absent, U2_present, host file existed on host during run, invisible inside, outputs identical); audit/round2/run-round2.sh: all as expected. check-merge NOT re-run after these audit-only changes (they touch only audit/round2 and audit/up4, plus no Go/Lean code).
+
+## Expectation changes from up3 x up4
+Probes that verify with the default theorem now need a tied Witness.nonvacuous and the runner must pass `--theorem Proof.Witness.nonvacuous`: round2 U1/U1b, up4 S1/S4/U1/U2 (their theorem is now the plain Add one, no `link impl`). U1/U2 hermetic probes are templates (__ROOT__, __ROOT_NAME__).
+
+## Earlier notes
 n12 = n11 b8ac6cca + agent/up4-sandbox 217f0136 + agent/up3-vacuity (INTERIM 364b7ac6; take UP3c's final head once green, then fast-forward/merge and rerun check-merge + SAT).
 
 ## Merge decisions
