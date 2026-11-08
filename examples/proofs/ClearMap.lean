@@ -111,6 +111,28 @@ set_option maxRecDepth 100000 in
 theorem pre : CallerOK (ME (BitVec 64)) s0 32 0 ∧ (ME (BitVec 64)).Typ mapType ∧ IsMap (ME (BitVec 64)) s0.mem (BitVec.ofNat 64 MP).toNat emp :=
   ⟨callerOK, trivial, (isMap_of_ne (by decide)).2 ⟨rfl, rfl, by decide, by decide⟩⟩
 
+/-- The precondition of `Clear`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
+@[reducible] def ClearSite (M : MapModel (BitVec 64) (BitVec 64)) (f : AMap (BitVec 64) (BitVec 64)) (s_c : State) : Prop :=
+  RTPre M 2 s_c ∧ M.Typ (s_c.regs 0).toNat ∧ IsMap M s_c.mem (s_c.regs 1).toNat f
+
+/-- The call state of the `mapclear` contract (U-WITNESS-CALLSITE): at the callee's entry, the caller's frame lowered. -/
+def wsCall : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 mapType else if i = 1 then BitVec.ofNat 64 MP
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 (wsp - 32), pc := BitVec.ofNat 64 cA,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+set_option maxRecDepth 100000 in
+theorem wsCall_pre : ClearSite (ME (BitVec 64)) emp wsCall := by
+  refine ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
+    ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, ?_⟩, trivial, pre.2.2⟩
+  simp only [ME_priv, ME_depth, priv0, outside_cons, outside_nil, and_true]; decide
+
+/-- The theorem fires: `ClearMap(map)` returns what the theorem says. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+    (IsMap (ME (BitVec 64)) s'.mem (BitVec.ofNat 64 MP).toNat emp ∧ (ME (BitVec 64)).Env s'.mem (s0.regs 28)) :=
+  correctness implAt (ME (BitVec 64)) (ME_laws _) hcon (BitVec.ofNat 64 MP) emp ret hret s0 setup pre
+
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapclear`
 meeting `Contracts.Map.Clear` for it, and a call state of `ClearMap(map)` that satisfies the precondition. -/
 theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64)) (ret : Nat)
@@ -119,13 +141,12 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
       (Extracted.program.contractAddr "runtime.mapclear") M ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP] s ∧
-    (CallerOK M s 32 0 ∧ M.Typ mapType ∧ IsMap M s.mem (BitVec.ofNat 64 MP).toNat emp) :=
-  ⟨implAt, (ME (BitVec 64)), ret, s0, (ME_laws _), hcon, hret, setup, pre⟩
-
-/-- The theorem fires: `ClearMap(map)` returns what the theorem says. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (IsMap (ME (BitVec 64)) s'.mem (BitVec.ofNat 64 MP).toNat emp ∧ (ME (BitVec 64)).Env s'.mem (s0.regs 28)) :=
-  correctness implAt (ME (BitVec 64)) (ME_laws _) hcon (BitVec.ofNat 64 MP) emp ret hret s0 setup pre
+    (CallerOK M s 32 0 ∧ M.Typ mapType ∧ IsMap M s.mem (BitVec.ofNat 64 MP).toNat emp) ∧
+    (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : State),
+      s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapclear") ∧ ClearSite M f s_c) ∧
+    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    (IsMap M s'.mem (BitVec.ofNat 64 MP).toNat emp ∧ M.Env s'.mem (s.regs 28)) :=
+  ⟨implAt, (ME (BitVec 64)), ret, s0, (ME_laws _), hcon, hret, setup, pre, ⟨AMap.empty, wsCall, by simp only [wsCall]; exact addr.symm ▸ rfl, wsCall_pre⟩, returns⟩
 
 end Witness
 
