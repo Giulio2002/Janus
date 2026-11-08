@@ -123,7 +123,7 @@ def strfile(fn, site_name, ctr, addr, kind):
   obtain ⟨a, b, c⟩ := strIn_w SK (by decide) (by decide) (Or.inl (by decide)) 4 (by decide)
   exact ⟨{RT3%4}, trivial, by decide, mmem64_repC _, ⟨a, b, c⟩,
     Or.inr (inPriv0 (by decide) (by decide)),
-    ⟨by show (rtView priv0 mmem64).readLE MP 8 = 0
+    ⟨by show (Contracts.rtView priv0 mmem64).readLE MP 8 = 0
         rw [readLE_rtView0 (by decide) (by decide)]; decide,
       Or.inr (Or.inl (by decide))⟩⟩
 '''

@@ -171,7 +171,7 @@ theorem wsCall_pre : AssignStr64Site (MC ckStr) HAssignStr AMap.empty wsCall := 
   obtain ⟨a, b, c⟩ := strIn_w SK (by decide) (by decide) (Or.inl (by decide)) 4 (by decide)
   exact ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64 rfl _ 4 (by decide) mmem64_zenv mmem64_guard mmem64_ret), trivial, by decide, mmem64_repC _, ⟨a, b, c⟩,
     Or.inr (inPriv0 (by decide) (by decide)),
-    ⟨by show (rtView priv0 mmem64).readLE MP 8 = 0
+    ⟨by show (Contracts.rtView priv0 mmem64).readLE MP 8 = 0
         rw [readLE_rtView0 (by decide) (by decide)]; decide,
       Or.inr (Or.inl (by decide))⟩⟩
 
