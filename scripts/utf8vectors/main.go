@@ -1,4 +1,4 @@
-// Prints the Lean test vectors of JanusTests/String.lean, computed by the Go runtime itself:
+// Prints the Lean test vectors of test/lean/JanusTests/String.lean, computed by the Go runtime itself:
 //
 //	GOTOOLCHAIN=go1.26.0 go run -ldflags=-checklinkname=0 . > vectors.txt
 package main

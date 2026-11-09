@@ -495,7 +495,7 @@ func Edges(r *rand.Rand, n int) []EdgeCase {
 		}
 	}
 	// WP-C: the exact forms of the traps, the environment reads and PUSHFQ (POPFQ stays refused
-	// by the runner: a popped flag image poisons its single-step machinery; JanusTests/Amd64.lean
+	// by the runner: a popped flag image poisons its single-step machinery; test/lean/JanusTests/Amd64.lean
 	// pins the POPFQ semantics)
 	for round := 0; round < n; round++ {
 		for _, b := range [][]byte{{0xCC}, {0x0F, 0x0B}, {0xF4}, {0x0F, 0xA2}, {0x0F, 0x31}, {0x9C}} {

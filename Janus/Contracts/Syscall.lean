@@ -760,7 +760,7 @@ vacuous there. These theorems show that it never lacks one where its preconditio
 (`Effect.total`, `SiteNext.total`), and that the behaviour the specifications are about is among
 the allowed ones (a complete write, a read of available input, a monotonic clock reading, ...).
 The witnesses for the runtime contracts of the scheduler hooks and `convT64` (code that satisfies
-them) are in `JanusTests/Kernel.lean`. -/
+them) are in `test/lean/JanusTests/Kernel.lean`. -/
 
 theorem isErr_eperm : IsErr (2 ^ 64 - 1) := by unfold IsErr; omega
 

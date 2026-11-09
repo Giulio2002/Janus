@@ -305,7 +305,7 @@ def aesInvShiftRowsPerm : List Nat := [0, 13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 
 def xtime (b : Nat) : Nat := if b < 128 then 2 * b else (2 * b) ^^^ 0x11B
 
 /-- `FFmul02 .. FFmul0E`: multiplication of the byte `b` by `k ∈ {2, 3, 9, 11, 13, 14}`
-(sums of `xtime` powers; checked against the ASL tables in `JanusTests/Vector.lean`). -/
+(sums of `xtime` powers; checked against the ASL tables in `test/lean/JanusTests/Vector.lean`). -/
 def gfMul (k b : Nat) : Nat :=
   let b2 := xtime b
   let b4 := xtime b2

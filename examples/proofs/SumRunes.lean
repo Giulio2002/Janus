@@ -9,7 +9,7 @@ import Extracted
 the string readable and outside the window, and `g`'s guard word outside it: the call returns,
 obeys the ABI, and `X0` is `sumRunes (bytes of s)`: the sum, modulo `2^64`, of the runes Go's
 `for range` produces, with U+FFFD for every invalid UTF-8 sequence (`Janus/Spec/String.lean`,
-checked against the Go runtime in `JanusTests/String.lean`).
+checked against the Go runtime in `test/lean/JanusTests/String.lean`).
 
 In two layers. `correctness_of_contract` proves SumRunes from `decoderune`'s contract alone (`RtContract …
 decoderuneSpec`, `Janus/Contracts/String.lean`), for every `rt` the window, string and guard word

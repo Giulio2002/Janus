@@ -35,7 +35,7 @@ run_meta do
     let some e ← getSimpExtension? ext | throwError "missing simp set {ext}"
     for nm in [``Nat.add_zero, ``Nat.mul_zero, ``Nat.zero_mod] do
       if (e.getState env).lemmaNames.contains (.decl nm) then
-        throwError "{nm} (an rfl lemma) is in {ext}: kernel deep recursion hazard (see JanusTests/KernelSafe.lean)"
+        throwError "{nm} (an rfl lemma) is in {ext}: kernel deep recursion hazard (see test/lean/JanusTests/KernelSafe.lean)"
     -- the three replacements are present and are NOT rfl theorems
     for nm in [``Janus.Tactic.nat_add_zero', ``Janus.Tactic.nat_mul_zero', ``Janus.Tactic.nat_zero_mod'] do
       unless (e.getState env).lemmaNames.contains (.decl nm) do throwError "{nm} missing from {ext}"

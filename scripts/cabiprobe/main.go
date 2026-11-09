@@ -4,7 +4,7 @@
 // For a corpus of C prototypes (the ABI functions of the C corpus and of the cgo examples, the
 // classic edge cases of both ABIs, and seeded random prototypes) it
 //
-//  1. asks Janus (`lake env lean --run JanusTests/CABIProbe.lean`) where every argument and
+//  1. asks Janus (`lake env lean --run test/lean/JanusTests/CABIProbe.lean`) where every argument and
 //     the result go, the layout of every type, AL, and the va_list states of a variadic call;
 //  2. generates, for every prototype, a caller and a callee in C and compiles them with the
 //     compiler under test (gcc and clang, -O0 and -O2, arm64 and amd64), together with a fixed
@@ -148,7 +148,7 @@ func parsePassing(ws []string) Passing {
 
 // runLean feeds lines to the Lean probe and returns its output lines.
 func runLean(root string, lines []string) ([]string, error) {
-	cmd := exec.Command("lake", "env", "lean", "--run", "JanusTests/CABIProbe.lean")
+	cmd := exec.Command("lake", "env", "lean", "--run", "test/lean/JanusTests/CABIProbe.lean")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "LEAN_NUM_THREADS=4")
 	cmd.Stdin = strings.NewReader(strings.Join(lines, "\n") + "\n")

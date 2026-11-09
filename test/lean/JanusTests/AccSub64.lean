@@ -2,7 +2,7 @@ import Janus
 
 /-! # Accessibility across a callee frame, amd64 (U-ACCSUB)
 
-The twin of `JanusTests/AccSub.lean`: the facts about a buffer and about the stack window are stated about the memory
+The twin of `test/lean/JanusTests/AccSub.lean`: the facts about a buffer and about the stack window are stated about the memory
 before a call (`s.mem`) or after it (`S.mem`), related by `hfr : MemFrame s.mem S.mem rs`; the accessibility discharger of
 `janus64_run` follows the `MemFrame` links in both directions.
 

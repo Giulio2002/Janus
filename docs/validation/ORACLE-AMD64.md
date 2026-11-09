@@ -100,12 +100,12 @@ byte. `POPFQ`, `SYSCALL`, `XGETBV`, `RDTSCP` and `INT 3` (`CD 03`) stay refused 
 (`layout.Forbidden`): a popped flag image breaks the runner's single-step machinery (every later
 case of that runner process escapes with `SIGSEGV`), so `POPFQ`'s semantics (status flags and `DF`
 from the popped value, `Fault.systemFlag` for `TF`/`NT`/`AC`/`ID`) is pinned by the unit tests of
-`JanusTests/Amd64.lean` instead.
+`test/lean/JanusTests/Amd64.lean` instead.
 
 **Bugs found.** The native oracle found one real bug. The first full run found 140 mismatches in 127 encodings, all from one
 model bug. A 32-bit shift, rotate, `SHLD` or `SHRD` whose masked count is 0 still writes its
 destination, so the upper 32 bits of the register are cleared. The model had treated count 0
-as "no change". `Exec.lean` now writes the destination back, and `JanusTests/Amd64.lean` pins
+as "no change". `Exec.lean` now writes the destination back, and `test/lean/JanusTests/Amd64.lean` pins
 the case. Separately, the formal cross-check (below) found two places where the model defined a
 flag that a formal model leaves undefined. Hardware agreed with the model's value in both, but
 the vendors do not fully pin them down, so the model was made stricter: SAR CF for an 8/16-bit
@@ -450,7 +450,7 @@ Every model gap is a deliberate rejection, checked by encoding: `66` together wi
 `0F 38 F6` (hardware executes it; the model refuses `66` with `F2`/`F3`), duplicated `F3`/`F2 F3`
 prefixes, the `67` address-size prefix, and `GF2P8MULB` (`66 0F 38 CF`, GFNI, not modelled). No
 gap is an alignment disagreement. The model was right the first time: the first run had no
-mismatch. Independently of the host, `JanusTests/X86Crypto.lean` checks the FIPS-197 and
+mismatch. Independently of the host, `test/lean/JanusTests/X86Crypto.lean` checks the FIPS-197 and
 FIPS 180-4 vectors and the Intel AES-NI white paper examples in the kernel.
 ### AVX, AVX2, FMA3 and F16C (WP-F, 2026-10-25)
 
@@ -757,7 +757,7 @@ something a single CPU can confirm. See "Limits".
   an x86-64-v3-class CPU (see `docs/AMD64.md`). `GOAMD64=v1` code only reaches them behind
   run-time CPU checks.
 * **GS** is never executed natively (it would reach the runner's own state); the decoder
-  rejects `65`, which only `JanusTests/Amd64.lean` checks. `FS` runs with the case's base.
+  rejects `65`, which only `test/lean/JanusTests/Amd64.lean` checks. `FS` runs with the case's base.
 * **Split locks.** This host runs `split_lock_detect=warn`: a locked access that straddles a
   cache line completes (with a kernel warning), so the model's `misaligned` fault for a locked
   access that is not naturally aligned is a model gap here. Under `fatal` the hardware side would

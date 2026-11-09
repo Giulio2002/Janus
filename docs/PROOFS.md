@@ -342,7 +342,7 @@ stack or outside every stack). Every grown precondition carries `NoStackPtr s.me
 pointer into a stack outside the stacks), which the contract's `MorestackPre.noptr` needs; a store
 to the stack keeps it (`NoStackPtr.writeLE`), and so does a move (`NoStackPtr.of_frame`).
 
-### Loops (`Sum`, `CopyWords`, `JanusTests/Tactic.lean`)
+### Loops (`Sum`, `CopyWords`, `test/lean/JanusTests/Tactic.lean`)
 
 1. Find the loop head in the disassembly (for Go: the `cmp` before the backward branch) and name
    it relative to the entry: `abbrev head : Nat := Extracted.entry + 0x1c`.
@@ -797,7 +797,7 @@ unfold Fv256.F.addmodSpec; rw [if_neg (by omega)]
 refine (Janus.Carry.mod_cases3 _ _ _ ?_ ?_).symm <;> janus_carry_nf at * <;> janus_omega_values
 ```
 
-(`JanusTests/AddModCarry.lean`: the two goals of the fast path that took 6 minutes and more than 30 minutes with
+(`test/lean/JanusTests/AddModCarry.lean`: the two goals of the fast path that took 6 minutes and more than 30 minutes with
 `omega` close in about 4 seconds each.) Do not run `janus_carry_nf` on the goal before `mod_cases3` (the modulus `M` is
 not a literal: the relation stays as it is, but the shape `S % M = E` is lost).
 
@@ -1154,7 +1154,7 @@ Tips:
 When symbolic execution cannot proceed, `janus_run` (and `janus64_run`) stops with an error that
 names the pc (with `function+offset`), the instruction (disassembled), what failed and which
 hypotheses would make it go through. It never ends in a bare `(deterministic) timeout`. The
-messages below are real; they come from `JanusTests/Diagnostics.lean` (which checks them) and
+messages below are real; they come from `test/lean/JanusTests/Diagnostics.lean` (which checks them) and
 from proofs with a hypothesis removed.
 
 **A memory access that is not known to be allowed.** `examples/proofs/Get.lean` without the
@@ -1305,7 +1305,7 @@ continue separately (sound, just without the saving). The same state with differ
 Without `join`, nothing changes. `janus.merge` (global, every pc, drops the branch conditions) is a different, older mechanism: after it
 the continuation does not know which arm it is on, which is why it cannot be used when the registers it generalises (a carry bit)
 are needed later. Choose the `pc`s from the `[janus] merged …`/`not merged: …` lines of `set_option trace.janus true`. Tests:
-`JanusTests/Join.lean`.
+`test/lean/JanusTests/Join.lean`.
 
 ### Branch pruning and read bounds
 
@@ -1314,4 +1314,4 @@ are needed later. Choose the `pc`s from the `[janus] merged …`/`not merged: �
 into the slow path (the AddMod fast path with the guard `x[3] ≤ m[3]` in the precondition did not finish in 15 minutes
 even for its first diamond). `janus_omega_prune` now adds `m.readLE a n < 256^n` (`Memory.readLE_lt`, a proved lemma) for the
 reads of the branch condition (at most 8), so such branches are pruned. AddModFast: not finished after 50 min before,
-about 4 minutes now. See `JanusTests/Join.lean` (`pruneLimb`).
+about 4 minutes now. See `test/lean/JanusTests/Join.lean` (`pruneLimb`).

@@ -4,7 +4,7 @@ import JanusTests.Exec
 /-!
 # Advanced SIMD and SIMD&FP loads/stores on concrete states
 
-Generated like `JanusTests/Exec.lean` (by a script that runs each word under `qemu-aarch64` with
+Generated like `test/lean/JanusTests/Exec.lean` (by a script that runs each word under `qemu-aarch64` with
 the oracle runner): every `example` is a hardware-vs-model agreement check re-checked by the
 kernel. The initial state is `JanusTests.Exec.st` plus `V[i]` = the bytes `16i .. 16i+15`
 (`vdef`) unless overridden, and TPIDR_EL0 = `0x7766554433221100`. `obsV` observes `X0..X30`,

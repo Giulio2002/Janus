@@ -586,7 +586,7 @@ statement, so the auditor now checks that the text means what the kernel proved:
 3. **Inspection**: `verified.json` has `statementExplicit`, the statement printed with
    `pp.explicit` (every implicit and instance argument shown).
 
-Either check alone rejects every S1 variant (`JanusTests/Audit.lean` tests each separately, and
+Either check alone rejects every S1 variant (`test/lean/JanusTests/Audit.lean` tests each separately, and
 each accepts honest statements with canonical instances, numerals, `if`, `<`, coercions and
 instance binders). All 20 arm64 example theorems (including the SIMD `A64Equal64`/`A64IndexByte`) and the 23 amd64 ones, the consumer examples and the
 deps tests still verify (no arm64 example statement needed the coercion or numeral annotations); A2 and A4 stay **verified-honest** (their

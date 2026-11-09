@@ -1169,7 +1169,7 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
 * **Moves:** `DUP` (element, general), `INS` (element, general), `UMOV`, `SMOV`, and `FMOV`
   between general and SIMD&FP registers (`Wn`↔`Sd`, `Xn`↔`Dd`, `Xn`↔`Vd.D[1]`).
 * **AES:** `AESE`, `AESD`, `AESMC`, `AESIMC`, with the S-boxes and row permutations copied from the
-  ASL and GF(2^8) multiplication checked against the ASL tables (`JanusTests/Vector.lean`).
+  ASL and GF(2^8) multiplication checked against the ASL tables (`test/lean/JanusTests/Vector.lean`).
   Accepting them assumes FEAT_AES; Go only runs its AES hash after testing `cpu.ARM64.HasAES`
   (`runtime.useAeshash`), so a proof through it assumes that flag, as for LSE.
 
@@ -1721,7 +1721,7 @@ no concurrent GC, no preemption):
   `Summary`s (`RtContract`, `RtContract64`). Trusted, as claims about the Go 1.26 runtime: each
   spec, with its panic and throw paths excluded by its precondition and, through `H`, the calls
   the runtime does not serve as described. Not trusted: the UTF-8 decoder `decodeRune` is checked
-  against the runtime's own output (`JanusTests/String.lean`), and `decoderune` and `countrunes`
+  against the runtime's own output (`test/lean/JanusTests/String.lean`), and `decoderune` and `countrunes`
   are proved from their machine code on both ISAs (`examples/proofs/SumRunes.lean`,
   `RuneLen.lean` and their amd64 counterparts). Every spec has a satisfiability witness
   (`Janus/Contracts/Sat.lean`, `SatAmd64.lean`, collected in `RtSat`); `audit/rtstr/run.sh`
@@ -2187,7 +2187,7 @@ None of these has a result the user-mode state determines. The design (WP-C,
   Each contract is satisfiable where its precondition holds (`Effect.total`, `SiteNext.total`
   on both ISAs) and allows the behaviour the specifications are about (`write_full`,
   `read_some`, `clock_monotonic`, `mmap_anon`); the runtime contracts around system calls are met
-  by concrete code (`JanusTests/Kernel.lean`).
+  by concrete code (`test/lean/JanusTests/Kernel.lean`).
 * **What is trusted.** That Linux behaves within these relations; that the vDSO clock functions
   return a clock reading and touch only the declared memory (their code is not in the binary);
   that `runtime.entersyscall`/`exitsyscall` (`SchedContract`) preserve the Go ABI registers and

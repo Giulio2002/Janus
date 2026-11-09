@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Ty is a C type in the probe's compact grammar (JanusTests/CABIProbe.lean): i1..i16, u1..u16,
+// Ty is a C type in the probe's compact grammar (test/lean/JanusTests/CABIProbe.lean): i1..i16, u1..u16,
 // p, h, f, d, ld, cf, cd, cld, v8, v16, s(t,...), u(t,...), a<n>(t).
 type Ty struct {
 	K     string // "i" "u" "p" "h" "f" "d" "ld" "cf" "cd" "cld" "v" "s" "un" "a"

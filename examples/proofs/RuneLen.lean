@@ -9,7 +9,7 @@ import Extracted
 the string readable and outside the window, and `g`'s guard word outside it: the call returns,
 obeys the ABI, and `X0` is `countRunes (bytes of s)`, the number of runes Go's `for range s`
 produces, U+FFFD counting once for every invalid UTF-8 sequence (`Janus/Spec/String.lean`,
-checked against the Go runtime in `JanusTests/String.lean`).
+checked against the Go runtime in `test/lean/JanusTests/String.lean`).
 
 **How.** In two layers. `correctness_of_contract` proves RuneLen from `runtime.countrunes`' contract alone
 (`RtContract … countrunesSpec`, `Janus/Contracts/String.lean`). `countrunes_meets` proves that the

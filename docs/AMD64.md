@@ -20,7 +20,7 @@ proofs.
 | proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies), `Janus/Amd64/TacticSSE.lean` (stepping `ExecSSE`, element lemmas), `Janus/Amd64/TacticAVX2.lean` (stepping `ExecAVX`, the zero-upper theorems, 256-bit element lemmas, `dot32`), `Janus/Amd64/TacticEVEX.lean` (stepping `ExecEVEX`, 512-bit re-assembly, the EVEX zero-upper rule, VEX/SSE on the AVX-512 state, WP-D/WP-F compatibility) |
 | extractor | `cmd/janus/amd64.go` (plus small dispatch edits) |
 | differential oracle | `oracle-amd64/`, `Oracle/Amd64Main.lean`, `docs/validation/ORACLE-AMD64.md` |
-| tests | `JanusTests/Amd64.lean`, `cmd/janus/amd64_test.go` |
+| tests | `test/lean/JanusTests/Amd64.lean`, `cmd/janus/amd64_test.go` |
 | proofs | `examples/proofs-amd64/<Function>/Proof.lean` |
 
 ## The model
@@ -292,7 +292,7 @@ AES/SHA, AVX-512 (scalar FMA is modelled since WP-B, `CRC32` and `PCMPESTRI` sin
   SDM pseudocode over dwords with `Ch`/`Parity`/`Maj`/`Σ0`/`Σ1` shared with arm64. `ADCX`
   (`ADOX`) adds with `CF` (`OF`) as carry in and out and leaves the other five status flags
   unchanged; an undefined carry in faults (`undefinedFlag`). 128-bit memory operands must be
-  16-aligned (exception class 4). `JanusTests/X86Crypto.lean` checks FIPS-197 C.1/C.3 (encryption
+  16-aligned (exception class 4). `test/lean/JanusTests/X86Crypto.lean` checks FIPS-197 C.1/C.3 (encryption
   and the Equivalent Inverse Cipher), FIPS 180-4 SHA-1/SHA-256("abc") and the Intel AES-NI white
   paper vectors through these definitions, in the kernel.
 * **SSE packed (WP-D).** Each operation is the SDM `Operation` over elements (`ExecSSE`, using
@@ -328,7 +328,7 @@ AES/SHA, AVX-512 (scalar FMA is modelled since WP-B, `CRC32` and `PCMPESTRI` sin
   result is written by `ExecAVX.setV`: **VEX.128 zeroes bits 255:128 of the destination**
   (`Janus.Amd64.Tactic.exec_vex128_zero_upper`, for every instruction and every register it
   writes at 128 bits), while no legacy-SSE instruction changes any upper half
-  (`exec_sse_preserves_upper`); `JanusTests/AVX.lean` runs `VPADDD ymm` → `PADDD xmm` (upper
+  (`exec_sse_preserves_upper`); `test/lean/JanusTests/AVX.lean` runs `VPADDD ymm` → `PADDD xmm` (upper
   half kept) and `VPADDD xmm` → `PADDD xmm` (zeroed) on concrete states. The three-operand forms
   read `src1` from `VEX.vvvv`; memory operands are unaligned except for the aligned moves. The
   32 `VCMP` predicates are `ExecAVX.vcmp` (`= FP.cmp` for the eight legacy ones, `vcmp_legacy`).
@@ -361,7 +361,7 @@ AES/SHA, AVX-512 (scalar FMA is modelled since WP-B, `CRC32` and `PCMPESTRI` sin
   write zeroes bits 511:256 (`exec_avx_zero_zmm`); legacy SSE changes no AVX-512 state
   (`exec_sse_preserves_avx512`); and `sse_compat`/`avx_compat` show that WP-D's and WP-F's
   results, with the AVX-512 state erased, are what they were before it was added.
-  `JanusTests/AVX512.lean` has the decode known answers (GNU `as` and the Go std encodings), masked
+  `test/lean/JanusTests/AVX512.lean` has the decode known answers (GNU `as` and the Go std encodings), masked
   merging and zeroing, `VPCOMPRESSQ`, `VPERMB`, `VPTERNLOGQ`, the GF(2⁸) identities (`0x53⁻¹ =
   0xCA`), `KORTEST`, and the zero-upper rule on literals and for every state.
 * **CPU-feature globals.** `runtime.memmove` reads `runtime.memmoveBits` and

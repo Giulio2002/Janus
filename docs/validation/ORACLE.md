@@ -318,7 +318,7 @@ clears the NaN's sign bit), and the model now faults there instead.
 The same corpus against the Sail model (`docs/validation/ORACLE-SAIL.md`): Janus vs Sail 0 MISMATCH
 (638,122 agree, 15,637 model-gap, 34 unobserved Sail errors on MOPS/PAuth words).
 
-`JanusTests/Neon.lean` holds one hardware result per mnemonic the C corpora produce (208 words),
+`test/lean/JanusTests/Neon.lean` holds one hardware result per mnemonic the C corpora produce (208 words),
 re-checked by the kernel.
 
 After merging agent/armcrypto (main a3626db), whose `CryptoInstr.permute`/`dupScalar` replace the
@@ -383,7 +383,7 @@ cases): 867,719 cases, **0 MISMATCH**, 832,639 agree, 35,079 model-gap (34,572 `
 354 `unaligned`, 106 `noCode`, 47 `outsideAllocation`), 1 unobserved.
 
 The model was right the first time on this corpus. Independently of qemu and Sail,
-`JanusTests/Crypto.lean` checks the operations against the standards' test vectors (kernel
+`test/lean/JanusTests/Crypto.lean` checks the operations against the standards' test vectors (kernel
 evaluation): SHA-1("abc") and SHA-256("abc") of FIPS 180-4 computed with SHA1C/P/M/H/SU0/SU1 and
 SHA256H/H2/SU0/SU1 the way Go's kernels compose them, the CRC-32 and CRC-32C check values of
 "123456789" with CRC32B/H/W/X and CRC32CB/CX, and PMULL/PMULL2 against independently computed

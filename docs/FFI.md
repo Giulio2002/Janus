@@ -105,7 +105,7 @@ Where every argument and the result of a prototype go is a pure Lean function of
   put it in.
 
 `decide` evaluates all of this on concrete prototypes (`sig.passing = … := by decide` in every
-proof), and `#eval` prints it (`JanusTests/CABIProbe.lean`).
+proof), and `#eval` prints it (`test/lean/JanusTests/CABIProbe.lean`).
 
 ### 1.3 The differential test against gcc and clang (`scripts/cabi-probe.sh`)
 
@@ -116,7 +116,7 @@ documents. `scripts/cabi-probe.sh` (Go program `scripts/cabiprobe`) takes a corp
 edge cases of both ABIs (HFA/HVA of 1–5 members, `float`/`double` mixes, unions, nested and
 array members, `__int128` alignment, `_Complex`, `long double`, register exhaustion in each class,
 variadic `double`s and structs) and seeded random prototypes — and asks Janus
-(`lake env lean --run JanusTests/CABIProbe.lean`) for every argument's and the result's
+(`lake env lean --run test/lean/JanusTests/CABIProbe.lean`) for every argument's and the result's
 locations, the layouts, `AL` and the `va_list` states. For each of 8 configurations (gcc and
 clang, `-O0` and `-O2`, arm64 under qemu and amd64 native) it then compiles, per prototype,
 

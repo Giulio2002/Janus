@@ -25,7 +25,7 @@ extension of size 0), `__attribute__((packed))`/`aligned(n)`, and 32/64-byte vec
 `__m512`: their passing depends on `-mavx`). A prototype using them is outside the model.
 
 The layout functions are plain structural recursion; `#eval`/`decide` evaluate them on concrete
-types, and the probe (`JanusTests/CABIProbe.lean`, `scripts/cabi-probe.sh`) checks them against
+types, and the probe (`test/lean/JanusTests/CABIProbe.lean`, `scripts/cabi-probe.sh`) checks them against
 gcc and clang (`sizeof`, `_Alignof`, `offsetof`).
 -/
 

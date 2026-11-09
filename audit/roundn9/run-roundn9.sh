@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Red-team round n9 (today's new features: U14 live convT, U-GROWMULTI, ErrorfLive amd64 RetLow/r15, Lake-free verify,
-# janus_grab). Semantic attacks on the contracts are Lean theorems in JanusTests/RedTeamN9.lean (built by
+# janus_grab). Semantic attacks on the contracts are Lean theorems in test/lean/JanusTests/RedTeamN9.lean (built by
 # `lake build JanusTests.RedTeamN9`; a regression there fails the build). This script runs the auditor-level rows:
 # RetLow smuggled into a consumer statement. Rows: b1-b7 and b9 must be rejected by the auditor with the reason checked; b8 (CallOK64 as-is) is the control and verifies. Exits 1 if a row differs.
 set -u

@@ -7,6 +7,7 @@ name = "Janus"
 
 [[lean_lib]]
 name = "JanusTests"
+srcDir = "test/lean"
 
 [[lean_exe]]
 name = "janus-oracle"

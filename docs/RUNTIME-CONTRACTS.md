@@ -559,10 +559,10 @@ fault. The contracts are satisfiable (`ICallSat`, `ICallSatAmd64`: a writer retu
 **Audit.** `ICallContract` is a pinned contract. The runtime parameters `impl`, `rt` and `R` follow the variable rule; the
 callee address `fn` must be a variable (a dynamic callee) or exactly `Extracted.program.contractAddr "name"` (a static call to a
 non-extracted function that the extraction lists as a `--contract` stub, e.g. `fmt.Fprint`); never a numeral, `Extracted.entry`,
-the address of an extracted function, or an offset of a stub address (`JanusTests/ICallAudit.lean`); `P` and `keep` may be closed terms (they are the
-statement's claims about the call, mention no runtime variable); NO theorem premise may constrain `rt` through `Outside a n rt` (red team B3-B6: `Outside 0 2^48 rt`, or two that cover the space, force `rt = []`; the caller's frame is stated in the `Ensures` precondition, where it is an obligation); no premise may mention the callee address `fn` of an `ICallContract` except the contract hypotheses themselves (B1/B2: `fn = Extracted.entry` or `fn = <numeral>` would choose the callee); and a numeral stack or frame size of 2^47 or more is rejected (B12: it cannot exist, so the hypothesis would be vacuous). **`preserves` (U-ICALL-PRESERVES).** The last parameter of `ICallContract`/`ICallContract64` is `preserves : State → Memory → Prop`, default `fun _ _ => True` (nothing assumed; existing consumers are unchanged). The post of the callee then also says `preserves s m` for the memory `m` it leaves. The one other accepted form is `RtPreserves R2` (`RtPreserves64 R2` on amd64) for a VARIABLE `R2 : RtInv` of the statement: `∀ b L, R2.inv b L g (view R2.rt L s.mem) → R2.inv b L g (view R2.rt L m)` — the callee may write the heap (allocate, collect) and leaves the allocator invariant intact. It is a disclosed ASSUMPTION ABOUT THE CALLEE, beyond the ABI, in the contract itself (a separate premise of the same shape is rejected by the premise rule); any other `preserves` (bytes, values, registers, `False`, a closed model, an eta-expanded `RtPreserves`) is refused. Note the form is per budget: a callee that consumes allocation budget does not preserve `toyInv b` for the same `b`, so the form fits runtimes whose invariant is budget-free for the callee's allocations. Satisfiable: `iCallPreserves_satisfiable`, `iCallPreserves64_satisfiable` (a callee that leaves memory as found preserves every `R2`). Rows: `JanusTests/ICallAudit.lean`, `audit/icall/run-preserves64.sh`, `audit/icall/attacks/P*.lean`.
+the address of an extracted function, or an offset of a stub address (`test/lean/JanusTests/ICallAudit.lean`); `P` and `keep` may be closed terms (they are the
+statement's claims about the call, mention no runtime variable); NO theorem premise may constrain `rt` through `Outside a n rt` (red team B3-B6: `Outside 0 2^48 rt`, or two that cover the space, force `rt = []`; the caller's frame is stated in the `Ensures` precondition, where it is an obligation); no premise may mention the callee address `fn` of an `ICallContract` except the contract hypotheses themselves (B1/B2: `fn = Extracted.entry` or `fn = <numeral>` would choose the callee); and a numeral stack or frame size of 2^47 or more is rejected (B12: it cannot exist, so the hypothesis would be vacuous). **`preserves` (U-ICALL-PRESERVES).** The last parameter of `ICallContract`/`ICallContract64` is `preserves : State → Memory → Prop`, default `fun _ _ => True` (nothing assumed; existing consumers are unchanged). The post of the callee then also says `preserves s m` for the memory `m` it leaves. The one other accepted form is `RtPreserves R2` (`RtPreserves64 R2` on amd64) for a VARIABLE `R2 : RtInv` of the statement: `∀ b L, R2.inv b L g (view R2.rt L s.mem) → R2.inv b L g (view R2.rt L m)` — the callee may write the heap (allocate, collect) and leaves the allocator invariant intact. It is a disclosed ASSUMPTION ABOUT THE CALLEE, beyond the ABI, in the contract itself (a separate premise of the same shape is rejected by the premise rule); any other `preserves` (bytes, values, registers, `False`, a closed model, an eta-expanded `RtPreserves`) is refused. Note the form is per budget: a callee that consumes allocation budget does not preserve `toyInv b` for the same `b`, so the form fits runtimes whose invariant is budget-free for the callee's allocations. Satisfiable: `iCallPreserves_satisfiable`, `iCallPreserves64_satisfiable` (a callee that leaves memory as found preserves every `R2`). Rows: `test/lean/JanusTests/ICallAudit.lean`, `audit/icall/run-preserves64.sh`, `audit/icall/attacks/P*.lean`.
 
-Red team: `audit/icall/attacks.sh` (twenty rows: A1-A8, B1-B6 and B12, C0, P0-P3), `JanusTests/ICallRedTeam.lean`
+Red team: `audit/icall/attacks.sh` (twenty rows: A1-A8, B1-B6 and B12, C0, P0-P3), `test/lean/JanusTests/ICallRedTeam.lean`
 (a callee that clobbers `X28`/`X29`/`SP` or writes the caller's frame does not satisfy the postcondition), `audit/icall/run.sh`
 (wrong argument bytes, forged `fn`).
 
@@ -878,7 +878,7 @@ fresh block (and only it) joins the live set (`fresh`), while the buffer or tabl
 empty string, both ISAs: `SbtsLiveSat[Amd64].lean` (`slicebytetostringLive_satisfiable`, `slicebytetostringLive64_satisfiable`), and the
 tactics `janus_live_sbts_empty` / `janus64_live_sbts_empty` (the `RET` stub at the contract address, request `buf = ptr = n = 0`).
 Red team: `audit/roundspecbind/attacks/SbtsAddr.lean` (c2 control; a5 forged address, a6 variable address, a7/a8/a9 another spec or
-other live data are rejected) and `JanusTests/LiveStubSbts.lean`. Non-empty strings: `janus_live_sbts n A hok` / `janus64_live_sbts n A hok` (`LiveStubSbts[Amd64].lean`: the stub copies the `n` bytes at `ptr` into a fresh block of
+other live data are rejected) and `test/lean/JanusTests/LiveStubSbts.lean`. Non-empty strings: `janus_live_sbts n A hok` / `janus64_live_sbts n A hok` (`LiveStubSbts[Amd64].lean`: the stub copies the `n` bytes at `ptr` into a fresh block of
 the toy allocator and returns `(block, n)`; `buf = 0`, `n` a size class — 16, 24, 32, 48, … — `n ≤ A ≤ 64 n`; satisfiability
 `slicebytetostringLive[64]_satisfiable_copy`). The empty string with ANY caller buffer (the real wrappers always pass a stack buffer): `janus_live_sbts_empty_buf` / `janus64_live_sbts_empty_buf` (`hok : ∀ args, ok a args → ∃ buf p, args = [buf, p, 0]`; the stub `MOV X1, X2; RET` / `MOV RBX, RCX; RET`; nothing written or allocated). Not witnessable on the toy runtime: `n = 1` (the result is the binary's static table, a fact
 about its data that no stub can establish for every memory) and the caller's-buffer case (`toyInv` holds heap blocks only, the
@@ -1089,7 +1089,7 @@ where the result `(r0, n)` is, so that a consumer can call a second runtime func
 `StrAt.outside` / `CatStrAt.outside` (`Janus/Contracts/String.lean`) turn this into "the result is outside the window
 `[lo, lo + len)`" from three layout facts: `Outside lo len rt` (the contract's own precondition for the caller's frame), the
 buffer is nil or outside, and `staticuint64s` is outside (the binary's data is not on the goroutine stack); for a
-concatenation, the operands are outside. `JanusTests/StrAt.lean` derives it for each disjunct.
+concatenation, the operands are outside. `test/lean/JanusTests/StrAt.lean` derives it for each disjunct.
 
 **Live layer.** `slicebytetostringLive`, `concatstringLive k`, `concatstringsLive` now return the result as `fresh` (apart
 from the live set `L`) exactly when it is a new block (`n ≥ 2` and no buffer for `slicebytetostring`; two or more
@@ -1103,7 +1103,7 @@ non-empty operand itself when allowed and otherwise `rawstringtmp`. Satisfiabili
 
 The UTF-8 decoder the specs use is `Janus.Spec.String.decodeRune`, a transcription of Go's
 `decoderune` (U+FFFD and one byte for every invalid sequence, surrogates and overlong forms
-rejected); `JanusTests/String.lean` checks it, `runesFrom`, `countRunes` and `intRune` against
+rejected); `test/lean/JanusTests/String.lean` checks it, `runesFrom`, `countRunes` and `intRune` against
 about 16,000 vectors printed by the Go 1.26 runtime itself (`scripts/utf8vectors`).
 
 **Satisfiability.** `Janus.Contracts.Sat` and `SatAmd64` prove `<spec>_satisfiable` for every
@@ -1490,7 +1490,7 @@ the `[]any` holds exactly `1 + #%d` values: a **`*errors.errorString`** for the 
 `tErr`, non-nil data pointer to the string header `s`) and an `int` (type word `tInt`, data pointer to
 the 8-byte value) per `%d`. Every other call (another verb or flag, `%%`, a second `%w`, a missing or
 surplus operand, an operand of another type, a nil `%w`) is outside the contract: `ArgsOK` is part of
-the precondition, and `JanusTests/Errorf.lean` checks the rejected formats and the accepted ones
+the precondition, and `test/lean/JanusTests/Errorf.lean` checks the rejected formats and the accepted ones
 against the real `fmt.Errorf`.
 
 **Result.** The error interface `(iWrap, d)`; `d` is a fresh 32-byte object (fresh for `L`, inside
@@ -1521,7 +1521,7 @@ itab and the operand's data word, returns `(iWrap, d)`), and a call state satisf
 precondition. **Limit:** the witnessed instance is the format `%w` alone with `B = 0` (the errorString
 text is empty): a witness for a message with bytes or `%d` verbs needs a copy loop and a decimal
 conversion in the toy stub and is not built. The `%d` and text clauses of `ErrorfPost` are therefore
-checked against the real `fmt.Errorf` (`JanusTests/Errorf.lean`) but have no machine-code witness.
+checked against the real `fmt.Errorf` (`test/lean/JanusTests/Errorf.lean`) but have no machine-code witness.
 
 **Real-format satisfiability and placement (arm64: `ErrorfRealImpl`, `ErrorfRealLive`, `ErrorfRealSat`; amd64: `ErrorfRealSat64`).**
 For `"%w: have %d, want %d bytes"` the arm64 witness is a real stub (126 words, `scripts/errorf/gen_arm64.py`): two decimal
@@ -1625,7 +1625,7 @@ for what each contract allows and what is trusted.
 
 Witnesses: `Kernel.Effect.total`, `Kernel.SiteNext.total`, `Amd64.Kernel.SiteNext.total` (no
 contract is stuck where its precondition holds), `write_full`, `read_some`, `clock_monotonic`,
-`mmap_anon` (the interesting behaviour is allowed), and `JanusTests/Kernel.lean` (concrete code
+`mmap_anon` (the interesting behaviour is allowed), and `test/lean/JanusTests/Kernel.lean` (concrete code
 meets `SchedContract` and `ConvT64Contract`). Examples: `examples/proofs-sys/{arm64,amd64}/`
 (`WriteOut`: `syscall.Write`; `NowNano`: `time.Now().UnixNano()`; `Pid`: `syscall.Getpid`;
 `MustNonNeg`: a path ending in a trap), run by `scripts/verify-sys-examples.sh`.

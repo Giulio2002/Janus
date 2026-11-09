@@ -5,7 +5,7 @@ import Janus.CABI.SysV
 # The C ABI probe: Janus's classification, printed for the differential test
 
 `scripts/cabi-probe.sh` (the Go program `scripts/cabiprobe`) runs this file with
-`lake env lean --run JanusTests/CABIProbe.lean` and feeds it one prototype per line:
+`lake env lean --run test/lean/JanusTests/CABIProbe.lean` and feeds it one prototype per line:
 
 ```
 <id> <ret | v> <named | -> <arg type> ...

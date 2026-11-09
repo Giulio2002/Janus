@@ -17,7 +17,7 @@ Each case follows the ARM ARM `Operation` pseudocode of the instruction. Operati
 32-bit (`sf = 0`) forms are computed on `BitVec 32` and zero-extended to 64 bits on write,
 which is what `X[d, 32] = result` does on AArch64. The executor is written with
 non-recursive definitions (plus the structurally recursive `Nat` helpers of `Bits`) so that
-`simp` and `decide` can evaluate it; see `JanusTests/Exec.lean`.
+`simp` and `decide` can evaluate it; see `test/lean/JanusTests/Exec.lean`.
 
 Modelling decisions (user mode, Linux):
 * Memory accesses go through the checked `load`/`store` of `State`; an access outside the

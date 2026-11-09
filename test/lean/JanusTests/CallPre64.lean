@@ -3,7 +3,7 @@ import Janus.Contracts.InternalCallAmd64
 
 /-! # The precondition of an internal callee's summary, closed by `janus64_run … calls [S]` (S5, amd64)
 
-The amd64 twin of `JanusTests/CallPre.lean`: `CALL` pushes the return address (a store into the stack window), the
+The amd64 twin of `test/lean/JanusTests/CallPre.lean`: `CALL` pushes the return address (a store into the stack window), the
 callee's precondition mentions the program's read-only data (`DataLoaded` across that store), the return site must be
 an admissible return address of the callee's program with an abstract runtime stand-in `impl` (a), (b), and a
 bound `64 ≤ b` follows from `blockSize 32 false + blockSize 32 true ≤ b` (c). -/

@@ -4,7 +4,7 @@ import JanusTests.Exec
 /-!
 # Atomics, ordered accesses, exclusives, prefetch, DCZID_EL0 and DC ZVA on concrete states
 
-Generated like `JanusTests/Exec.lean`: the expected results were produced by running each
+Generated like `test/lean/JanusTests/Exec.lean`: the expected results were produced by running each
 instruction under `qemu-aarch64` with the oracle runner from the same initial state (`st`, with
 `dczid := 7`, qemu's DCZID_EL0), so every `example` is a hardware-vs-model agreement check
 re-checked by the kernel. `obs` observes `X0..X30`, `SP`, `pc`, `NZCV` and the listed bytes.

@@ -7,7 +7,7 @@ The pure specifications the string runtime contracts (`Janus.Contracts.String`,
 `Janus.Contracts.StringAmd64`) are stated with. A Go string is its bytes, a `List Nat` of values
 below 256 (`strBytes m p n` reads one from memory). Every definition transcribes the Go source
 it names, operation for operation, so that "matches Go" is a reading of two short texts side by
-side; the test vectors of `JanusTests/String.lean` (produced by the real Go runtime) check the
+side; the test vectors of `test/lean/JanusTests/String.lean` (produced by the real Go runtime) check the
 transcription.
 
 * `decodeRune s k`: `runtime.decoderune(s, k)` (`runtime/utf8.go`), including its answer for
