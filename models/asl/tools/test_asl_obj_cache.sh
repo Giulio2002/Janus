@@ -4,13 +4,13 @@
 # across checkout paths, and a tampered object, a wrong HMAC key, a changed C file or an incomplete set is a miss
 # or a rejection (rebuild), never a silent pass. Seconds; everything happens in mktemp directories.
 #
-#   JanusASL/tools/test_asl_obj_cache.sh
+#   models/asl/tools/test_asl_obj_cache.sh
 set -uo pipefail
 export LC_ALL=C
 # Hermetic: the nightly's cold run exports JANUS_ASL_CACHE=0 ASL_OBJ_CACHE=0, which asl.sh honours (it blanks ASL_CACHE),
 # so an inherited value turned the "empty ASL_OBJ_CACHE is the default" case into OFF. Every case that needs one sets it.
 unset JANUS_ASL_CACHE ASL_OBJ_CACHE
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 t=$(mktemp -d "${TMPDIR:-/tmp}/asl-obj-cache-test.XXXXXX")
 # Leftovers of THIS test die with it (RTOBJ6: recompile sandboxes of a killed run survived for hours). A process is ours only if its
 # working directory is inside the private directory $t (unique: mktemp) AND it is either a descendant of this shell or an orphan of
@@ -44,7 +44,7 @@ fail=0
 ok() { echo "ok   $*"; }
 bad() { echo "FAIL $*"; fail=1; }
 B() { python3 -I "$root/scripts/lib/bcache.py" "$@"; }
-M() { python3 -I "$root/JanusASL/tools/asl_mod_cache.py" "$@"; }
+M() { python3 -I "$root/models/asl/tools/asl_mod_cache.py" "$@"; }
 expect() {  # expect RC DESCRIPTION CMD...
   local want=$1 d=$2 rc=0; shift 2
   "$@" > "$t/out" 2> "$t/err" || rc=$?
@@ -53,12 +53,12 @@ expect() {  # expect RC DESCRIPTION CMD...
 
 copy() {  # copy DIR: a copy of the checkout without builds
   rm -rf "$1"; mkdir -p "$1"
-  rsync -a --exclude=.git --exclude=.lake --exclude=artifacts --exclude='JanusASL/ArmASL' \
-    --exclude='JanusASL/ArmASL.lean' "$root/" "$1/"
+  rsync -a --exclude=.git --exclude=.lake --exclude=artifacts --exclude='models/asl/ArmASL' \
+    --exclude='models/asl/ArmASL.lean' "$root/" "$1/"
 }
 # a built-looking tree: emitted C, and an object + hash + trace for each, as Lake writes them (the trace records the
 # compile command, the object's output hash and the C file's hash), compiled by the toolchain's clang
-prefix=$(cd "$root/JanusASL" && lean --print-prefix); clang="$prefix/bin/clang"
+prefix=$(cd "$root/models/asl" && lean --print-prefix); clang="$prefix/bin/clang"
 [ -x "$clang" ] || { echo "FAIL: no toolchain clang at $clang"; exit 1; }
 lh() {  # lh FILE TEXT: Lake's own file hash (bcache.lake_hash), as Lake writes it into .hash and the trace
   python3 -I -c 'import importlib.util,sys;sp=importlib.util.spec_from_file_location("b",sys.argv[1]);m=importlib.util.module_from_spec(sp);sp.loader.exec_module(m);print(m.lake_hash(open(sys.argv[2],"rb").read(),sys.argv[3]=="1"))' "$root/scripts/lib/bcache.py" "$1" "$2"
@@ -81,7 +81,7 @@ json.dump({"synthetic": False, "schemaVersion": "2025-09-10", "outputs": oh + ".
 PY
 }
 build() {  # build DIR: fake .lake/build/ir with the same C in any directory
-  local lake="$1/JanusASL/.lake" d f
+  local lake="$1/models/asl/.lake" d f
   for d in "$lake/build/ir/ArmASL" "$lake/packages/Sail/.lake/build/ir/Sail" "$lake/build/ir/JanusASL"; do mkdir -p "$d"; done
   for f in "$lake/build/ir/ArmASL.c" "$lake/build/ir/ArmASL/Part01.c" "$lake/build/ir/ArmASL/Part02.c" \
            "$lake/packages/Sail/.lake/build/ir/Sail/Attr.c" "$lake/build/ir/JanusASL/Check.c"; do
@@ -95,7 +95,7 @@ copy "$t/a"; build "$t/a"
 copy "$t/deep/er/b"; build "$t/deep/er/b"
 ida=$(M objkey "$t/a"); idb=$(M objkey "$t/deep/er/b")
 [ -n "$ida" ] && [ "$ida" = "$idb" ] && ok "the entry id does not depend on the checkout's path ($ida)" || bad "id differs by path: $ida vs $idb"
-[ -n "$clang" ] && { cmp -s "$t/a/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" "$t/deep/er/b/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" &&
+[ -n "$clang" ] && { cmp -s "$t/a/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" "$t/deep/er/b/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" &&
   ok "the same C compiled in two directories gives a bit-identical object" || bad "objects differ across directories"; }
 M objfiles "$t/a" | tr '\0' '\n' | grep -c . | grep -qx 12 && ok "4 C files (ArmASL.c, 2 parts, 1 Sail) x (object, hash, trace) = 12 files; JanusASL C is out of scope" || bad "objfiles count"
 
@@ -105,37 +105,37 @@ stage() {  # stage DIR SCOPE [INDEX]: objstage into a fresh stage; prints the id
 store() { stage "$1" arm > /dev/null && B store armobj "$cache" "$ida" "$t/st" < "$t/st.list"; }
 expect 0 "store from the first checkout" store "$t/a"
 expect 0 "fetch into the other path hits" B fetch armobj "$cache" "$idb" "$t/new/.lake"
-(cd "$t/a/JanusASL/.lake" && M objfiles "$t/a" | tr '\0' '\n' | while read -r f; do cmp -s "$f" "$t/new/.lake/$f" || echo "DIFF $f"; done) > "$t/diff"
+(cd "$t/a/models/asl/.lake" && M objfiles "$t/a" | tr '\0' '\n' | while read -r f; do cmp -s "$f" "$t/new/.lake/$f" || echo "DIFF $f"; done) > "$t/diff"
 [ ! -s "$t/diff" ] && ok "the restored files are byte-identical" || bad "restore differs: $(head -3 "$t/diff")"
 B fetch armobj "$cache" "$idb" "$t/new/.lake" > "$t/o"; [ "$(cat "$t/o")" = current ] && ok "an identical tree is 'current'" || bad "current"
 
 # the JanusASL scope: its own id/entry (per-library C, e.g. the huge Proofs.Config), independent of the arm scope
-build_jasl() { mkobj "$1/JanusASL/.lake" "$1/JanusASL/.lake/build/ir/JanusASL/Check.c"; }
+build_jasl() { mkobj "$1/models/asl/.lake" "$1/models/asl/.lake/build/ir/JanusASL/Check.c"; }
 build_jasl "$t/a"; build_jasl "$t/deep/er/b"
 ja=$(M objkey "$t/a" jasl); jb=$(M objkey "$t/deep/er/b" jasl)
 [ -n "$ja" ] && [ "$ja" = "$jb" ] && [ "$ja" != "$ida" ] && ok "the jasl scope has its own id, path independent" || bad "jasl id: $ja $jb $ida"
 M objfiles "$t/a" jasl | tr '\0' '\n' | grep -c . | grep -qx 3 && ok "jasl scope = 1 C file x 3" || bad "jasl objfiles"
 M objfiles "$t/a" | tr "\0" "\n" | { grep -c JanusASL/Check || true; } | grep -qx 0 && ok "arm scope still excludes JanusASL C" || bad "arm scope leaks"
-printf '// c\nint g;\n' > "$t/a/JanusASL/.lake/build/ir/JanusASL/NoObj.c"
+printf '// c\nint g;\n' > "$t/a/models/asl/.lake/build/ir/JanusASL/NoObj.c"
 M objfiles "$t/a" jasl | tr '\0' '\n' | grep -c . | grep -qx 3 && ok "jasl: a C file without any object is skipped" || bad "jasl partial"
-rm "$t/a/JanusASL/.lake/build/ir/JanusASL/NoObj.c"
-rm "$t/a/JanusASL/.lake/build/ir/JanusASL/Check.c.o.export.trace"; expect 1 "jasl: an incomplete triple still refuses" M objfiles "$t/a" jasl
-mkobj "$t/a/JanusASL/.lake" "$t/a/JanusASL/.lake/build/ir/JanusASL/Check.c"
+rm "$t/a/models/asl/.lake/build/ir/JanusASL/NoObj.c"
+rm "$t/a/models/asl/.lake/build/ir/JanusASL/Check.c.o.export.trace"; expect 1 "jasl: an incomplete triple still refuses" M objfiles "$t/a" jasl
+mkobj "$t/a/models/asl/.lake" "$t/a/models/asl/.lake/build/ir/JanusASL/Check.c"
 expect 1 "an unknown scope is refused" M objkey "$t/a" bogus
 stage "$t/a" jasl > /dev/null; expect 0 "store jasl scope" B store armobj "$cache" "$ja" "$t/st" < "$t/st.list"
 expect 0 "fetch jasl scope into another path" B fetch armobj "$cache" "$jb" "$t/newj/.lake"
 rm -rf "$cache/armobj/$ja"
 
 # a changed emitted C file: another id, so a miss (never the stale object)
-copy "$t/c"; build "$t/c"; echo '// edit' >> "$t/c/JanusASL/.lake/build/ir/ArmASL/Part02.c"
+copy "$t/c"; build "$t/c"; echo '// edit' >> "$t/c/models/asl/.lake/build/ir/ArmASL/Part02.c"
 idc=$(M objkey "$t/c"); [ "$idc" != "$ida" ] && ok "one changed C byte changes the id" || bad "id unchanged"
 expect 2 "... which is a miss" B fetch armobj "$cache" "$idc" "$t/new2/.lake"
 [ -z "$(find "$t/new2" -type f 2>/dev/null)" ] && ok "... and copies nothing" || bad "files copied on a miss"
 # an incomplete set (an object removed) is not published
-rm "$t/c/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export.trace"
+rm "$t/c/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export.trace"
 expect 1 "an incomplete object set has no file list (nothing is stored)" M objfiles "$t/c"
 # a changed compiler flag is in the ArmASL key, hence in the id
-copy "$t/d"; build "$t/d"; sed -i 's/^moreLeancArgs = \["-fbracket-depth=100000"\]$/moreLeancArgs = ["-fbracket-depth=100001"]/' "$t/d/JanusASL/lakefile.toml"
+copy "$t/d"; build "$t/d"; sed -i 's/^moreLeancArgs = \["-fbracket-depth=100000"\]$/moreLeancArgs = ["-fbracket-depth=100001"]/' "$t/d/models/asl/lakefile.toml"
 [ "$(M objkey "$t/d")" != "$ida" ] && ok "a changed compiler flag changes the id" || bad "flag change not in the id"
 
 e="$cache/armobj/$ida"
@@ -175,32 +175,32 @@ expect 0 "objstage accepts a genuine tree (arm)" stage "$t/p" arm
 ls "$t/st/build/ir/ArmASL/Part01.c.o.export.cin" > /dev/null 2>&1 && ok "  ... with a .cin record of each C file" || bad "no .cin"
 expect 0 "objstage accepts a genuine tree (jasl)" stage "$t/p" jasl
 # (publish-side lie 1) the C changed after the object was compiled (lean re-emitted it: .c.hash is new, the trace is old)
-copy "$t/q"; build "$t/q"; q="$t/q/JanusASL/.lake/build/ir/ArmASL/Part02.c"
+copy "$t/q"; build "$t/q"; q="$t/q/models/asl/.lake/build/ir/ArmASL/Part02.c"
 echo '// other C' >> "$q"; lh "$q" 1 > "$q.hash"
 expect 1 "objstage refuses an object whose trace records another C hash than the current C" stage "$t/q" arm
 # (lie 2) the object bytes were swapped but hash/trace kept: objstage cannot see it, the recompile at store does
-copy "$t/r"; build "$t/r"; r="$t/r/JanusASL/.lake/build/ir/ArmASL/Part01.c"
+copy "$t/r"; build "$t/r"; r="$t/r/models/asl/.lake/build/ir/ArmASL/Part01.c"
 printf 'int other(void){return 7;}\n' > "$t/other.c"; (cd "$t" && "$clang" -c -o "$r.o.export" other.c -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING)
 expect 1 "objstage refuses swapped object bytes under an unchanged .hash (Lake's file hash is recomputed, RTOBJ2)" stage "$t/r" arm
 # the consistent forgery (the attacker also rewrites .hash and the trace's output): objstage cannot see it, the recompile does
 oh=$(lh "$r.o.export" 0); echo "$oh" > "$r.o.export.hash"; sed -i "s#\"outputs\": \"[0-9a-f]*\.o\"#\"outputs\": \"$oh.o\"#" "$r.o.export.trace"
 expect 0 "objstage cannot see a consistently forged object (the recompile does)" stage "$t/r" arm
 idr=$(cat "$t/out"); rm -rf "$cache/armobj"
-expect 4 "store --recompile refuses to publish the swapped object" B store armobj "$cache" "$idr" "$t/st" --c-root "$t/r/JanusASL/.lake" --recompile all < "$t/st.list"
+expect 4 "store --recompile refuses to publish the swapped object" B store armobj "$cache" "$idr" "$t/st" --c-root "$t/r/models/asl/.lake" --recompile all < "$t/st.list"
 [ ! -e "$cache/armobj/$idr" ] && ok "  ... and nothing was stored" || bad "stored a poisoned entry"
 # poisoned entry published without the recompile (an old/other publisher): verify --recompile detects it, store --recompile replaces it
 expect 0 "a poisoned entry stored without recompile" B store armobj "$cache" "$idr" "$t/st"  < "$t/st.list"
-expect 3 "verify --recompile all reports POISONED" B verify armobj "$cache" "$idr" --c-root "$t/r/JanusASL/.lake" --recompile all
+expect 3 "verify --recompile all reports POISONED" B verify armobj "$cache" "$idr" --c-root "$t/r/models/asl/.lake" --recompile all
 grep -q POISONED "$t/out" && ok "  ... says POISONED" || bad "no POISONED message"
-cp "$t/q/JanusASL/.lake/build/ir/ArmASL/Part02.c" /dev/null
+cp "$t/q/models/asl/.lake/build/ir/ArmASL/Part02.c" /dev/null
 build "$t/r"   # rebuild the genuine objects in place
 stage "$t/r" arm > /dev/null
-expect 0 "store --recompile replaces the poisoned entry when the recompile differs" B store armobj "$cache" "$idr" "$t/st" --c-root "$t/r/JanusASL/.lake" --recompile all < "$t/st.list"
+expect 0 "store --recompile replaces the poisoned entry when the recompile differs" B store armobj "$cache" "$idr" "$t/st" --c-root "$t/r/models/asl/.lake" --recompile all < "$t/st.list"
 grep -q stored "$t/out" && ok "  ... (stored, not 'present')" || bad "poisoned entry not replaced: $(cat "$t/out")"
-expect 0 "the replacement verifies and recompiles bit-identically" B verify armobj "$cache" "$idr" --c-root "$t/r/JanusASL/.lake" --recompile all
+expect 0 "the replacement verifies and recompiles bit-identically" B verify armobj "$cache" "$idr" --c-root "$t/r/models/asl/.lake" --recompile all
 # (lie 3) a shim compiler at another path, and a shim at the keyed path (content hashed into the id)
 copy "$t/s"; build "$t/s"; mkdir -p "$t/shim"; printf '#!/bin/sh\nexec "%s" "$@"\n' "$clang" > "$t/shim/clang"; chmod +x "$t/shim/clang"
-mkobj "$t/s/JanusASL/.lake" "$t/s/JanusASL/.lake/build/ir/ArmASL/Part01.c" "$t/shim/clang"
+mkobj "$t/s/models/asl/.lake" "$t/s/models/asl/.lake/build/ir/ArmASL/Part01.c" "$t/shim/clang"
 expect 1 "objstage refuses an object whose trace names another compiler than the keyed one" stage "$t/s" arm
 id0=$(M objkey "$t/p"); id1=$(LEAN_CC="$t/shim/clang" M objkey "$t/p")
 [ "$id0" != "$id1" ] && ok "LEAN_CC set changes the id" || bad "LEAN_CC not in the id"
@@ -211,12 +211,12 @@ printf '#!/bin/sh\n# third\nexec "%s" "$@"\n' "$clang" > "$t/shim/clang"; id4=$(
 [ "$id4" != "$id3" ] && ok "the same LEAN_CC path with other content is another id" || bad "LEAN_CC same path new content"
 # (B2) every compile-affecting variable and table changes the id
 for v in CCC_OVERRIDE_OPTIONS CCC_ADD_ARGS COMPILER_PATH GCC_EXEC_PREFIX CLANG_FOO CPLUS_INCLUDE_PATH; do
-  idv=$(env "$v=x" python3 -I "$root/JanusASL/tools/asl_mod_cache.py" objkey "$t/p"); [ "$idv" != "$id0" ] && ok "$v changes the id" || bad "$v not keyed"
+  idv=$(env "$v=x" python3 -I "$root/models/asl/tools/asl_mod_cache.py" objkey "$t/p"); [ "$idv" != "$id0" ] && ok "$v changes the id" || bad "$v not keyed"
 done
 copy "$t/w"; build "$t/w"; build_jasl "$t/w"
 j0=$(M objkey "$t/w" jasl)
-grep -n "weakLeancArgs\|^name = \"JanusASL\"\|\[\[lean_lib\]\]" "$t/w/JanusASL/lakefile.toml" | head -3 > /dev/null
-python3 -I - "$t/w/JanusASL/lakefile.toml" <<'PY'
+grep -n "weakLeancArgs\|^name = \"JanusASL\"\|\[\[lean_lib\]\]" "$t/w/models/asl/lakefile.toml" | head -3 > /dev/null
+python3 -I - "$t/w/models/asl/lakefile.toml" <<'PY'
 import re, sys
 p = sys.argv[1]; s = open(p).read()
 i = s.index('name = "JanusASL"'); j = s.index("\n", i)
@@ -224,7 +224,7 @@ open(p, "w").write(s[:j] + '\nweakLeancArgs = ["-fno-foo"]' + s[j:])
 PY
 j1=$(M objkey "$t/w" jasl); [ "$j0" != "$j1" ] && ok "weakLeancArgs of lean_lib JanusASL changes the jasl id" || bad "weakLeancArgs not in the jasl id"
 copy "$t/w2"; build "$t/w2"; build_jasl "$t/w2"
-python3 -I - "$t/w2/JanusASL/lakefile.toml" <<'PY'
+python3 -I - "$t/w2/models/asl/lakefile.toml" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
 i = s.index('name = "janus-asl-check"'); j = s.index("\n", i)
@@ -234,8 +234,8 @@ j2=$(M objkey "$t/w2" jasl); [ "$j0" != "$j2" ] && ok "a lean_exe janus-asl-chec
 # mutants: machine and scope are in the id
 mid=$(python3 -I - "$root" "$t/p" <<'PY'
 import importlib.util, platform, sys
-spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/JanusASL/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-lake = sys.argv[2] + "/JanusASL/.lake"; cs = m.obj_c_files(lake)
+spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/models/asl/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+lake = sys.argv[2] + "/models/asl/.lake"; cs = m.obj_c_files(lake)
 a = m.obj_id(sys.argv[2], cs); platform.machine = lambda: "riscv64"; b = m.obj_id(sys.argv[2], cs)
 m.obj_tables = lambda r, sc="jasl": {}   # isolate the scope field from the tables
 seen = []; oc = m.canonical; m.canonical = lambda o: (seen.append(o), oc(o))[1]
@@ -245,13 +245,13 @@ PY
 )
 [ "$mid" = "machine-keyed scope-keyed" ] && ok "the id depends on the machine and on the scope" || bad "id mutants: $mid"
 # an object that is a symlink is refused by objfiles AND objstage
-copy "$t/y"; build "$t/y"; yo="$t/y/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export"; cp "$yo" "$t/y.o"; rm "$yo"; ln -s "$t/y.o" "$yo"
+copy "$t/y"; build "$t/y"; yo="$t/y/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export"; cp "$yo" "$t/y.o"; rm "$yo"; ln -s "$t/y.o" "$yo"
 expect 1 "objfiles refuses an object that is a symlink" M objfiles "$t/y"
 expect 1 "objstage refuses an object that is a symlink" stage "$t/y" arm
 
 # ======== D1: per-kind path allowlist, at store and at fetch ========
-expect 4 "store refuses a non-object path in an armobj entry" B store armobj "$cache" "$(printf 'a%.0s' {1..40})" "$t/p/JanusASL" < <(printf 'JanusASL.lean\0')
-expect 4 "store refuses an .olean in an armobj entry" B store armobj "$cache" "$(printf 'a%.0s' {1..40})" "$t/p/JanusASL/.lake" < <(printf 'build/ir/ArmASL/Foo.olean\0')
+expect 4 "store refuses a non-object path in an armobj entry" B store armobj "$cache" "$(printf 'a%.0s' {1..40})" "$t/p/models/asl" < <(printf 'JanusASL.lean\0')
+expect 4 "store refuses an .olean in an armobj entry" B store armobj "$cache" "$(printf 'a%.0s' {1..40})" "$t/p/models/asl/.lake" < <(printf 'build/ir/ArmASL/Foo.olean\0')
 # a correctly signed entry that contains an .olean: fetch rejects it and writes nothing
 python3 -I - "$root" "$cache" "$t/p" <<'PY'
 import os, sys, importlib.util
@@ -285,27 +285,27 @@ B verify armobj "$cache" "$ida" > /dev/null && ok "  ... the entry is valid afte
 mkjc() {  # mkjc LAKE REL NAME: a C file + object under LAKE/build/ir/REL
   mkdir -p "$1/build/ir/$2"; printf '// c\nint %s_f(void){return %d;}\n' "$3" "${#3}" > "$1/build/ir/$2/$3.c"; mkobj "$1" "$1/build/ir/$2/$3.c"
 }
-copy "$t/pj"; mkdir -p "$t/pj/JanusASL/.lake"
-for n in A B Big; do mkjc "$t/pj/JanusASL/.lake" JanusASL "$n"; done
-printf '// no object\nint z;\n' > "$t/pj/JanusASL/.lake/build/ir/JanusASL/NoObj.c"; echo 0000000000000000 > "$t/pj/JanusASL/.lake/build/ir/JanusASL/NoObj.c.hash"
+copy "$t/pj"; mkdir -p "$t/pj/models/asl/.lake"
+for n in A B Big; do mkjc "$t/pj/models/asl/.lake" JanusASL "$n"; done
+printf '// no object\nint z;\n' > "$t/pj/models/asl/.lake/build/ir/JanusASL/NoObj.c"; echo 0000000000000000 > "$t/pj/models/asl/.lake/build/ir/JanusASL/NoObj.c.hash"
 pc="$t/pc"; mkdir -p "$pc"
 expect 0 "objpublish jasl stores one entry per object that has one" M objpublish "$t/pj" jasl "$pc" all
 grep -q "stored 3, already cached 0, no object 1, refused 0" "$t/out" && ok "  ... 3 entries (A, B, Big), NoObj skipped" || bad "jasl publish summary: $(cat "$t/out")"
 [ "$(ls "$pc/armobj" | grep -c '^[0-9a-f]\{40\}$')" = 3 ] && ok "  ... 3 entry directories" || bad "entry count"
 # a fresh checkout (same C, other path) restores them all
-copy "$t/pk"; mkdir -p "$t/pk/JanusASL/.lake/build/ir/JanusASL"
-cp "$t/pj/JanusASL/.lake/build/ir/JanusASL/"{A,B,Big,NoObj}.c "$t/pj/JanusASL/.lake/build/ir/JanusASL/"{A,B,Big,NoObj}.c.hash "$t/pk/JanusASL/.lake/build/ir/JanusASL/"
+copy "$t/pk"; mkdir -p "$t/pk/models/asl/.lake/build/ir/JanusASL"
+cp "$t/pj/models/asl/.lake/build/ir/JanusASL/"{A,B,Big,NoObj}.c "$t/pj/models/asl/.lake/build/ir/JanusASL/"{A,B,Big,NoObj}.c.hash "$t/pk/models/asl/.lake/build/ir/JanusASL/"
 expect 0 "objrestore jasl" M objrestore "$t/pk" jasl "$pc"
 grep -q "3 restored, 1 without entry, 0 rejected" "$t/out" && ok "  ... 3 restored, the object-less C has no entry" || bad "restore summary: $(cat "$t/out")"
-[ -f "$t/pk/JanusASL/.lake/build/ir/JanusASL/Big.c.o.export" ] && cmp -s "$t/pk/JanusASL/.lake/build/ir/JanusASL/Big.c.o.export" "$t/pj/JanusASL/.lake/build/ir/JanusASL/Big.c.o.export" && ok "  ... byte-identical objects" || bad "restored object differs"
+[ -f "$t/pk/models/asl/.lake/build/ir/JanusASL/Big.c.o.export" ] && cmp -s "$t/pk/models/asl/.lake/build/ir/JanusASL/Big.c.o.export" "$t/pj/models/asl/.lake/build/ir/JanusASL/Big.c.o.export" && ok "  ... byte-identical objects" || bad "restored object differs"
 # one module changes: only its entry misses; the others still hit (D3: a changed module does not recompile Config)
-echo '// changed' >> "$t/pk/JanusASL/.lake/build/ir/JanusASL/A.c"; rm -rf "$t/pk2"; mkdir -p "$t/pk2"; cp -a "$t/pk/JanusASL" "$t/pk2/JanusASL"; rm -f "$t/pk2/JanusASL/.lake/build/ir/JanusASL/"*.o.export*
-copy "$t/pk3"; mkdir -p "$t/pk3/JanusASL/.lake/build/ir/JanusASL"; cp "$t/pk/JanusASL/.lake/build/ir/JanusASL/"*.c "$t/pk/JanusASL/.lake/build/ir/JanusASL/"*.c.hash "$t/pk3/JanusASL/.lake/build/ir/JanusASL/"
+echo '// changed' >> "$t/pk/models/asl/.lake/build/ir/JanusASL/A.c"; rm -rf "$t/pk2"; mkdir -p "$t/pk2"; cp -a "$t/pk/models/asl" "$t/pk2/models/asl"; rm -f "$t/pk2/models/asl/.lake/build/ir/JanusASL/"*.o.export*
+copy "$t/pk3"; mkdir -p "$t/pk3/models/asl/.lake/build/ir/JanusASL"; cp "$t/pk/models/asl/.lake/build/ir/JanusASL/"*.c "$t/pk/models/asl/.lake/build/ir/JanusASL/"*.c.hash "$t/pk3/models/asl/.lake/build/ir/JanusASL/"
 expect 0 "objrestore after one C changed" M objrestore "$t/pk3" jasl "$pc"
 grep -q "2 restored, 2 without entry" "$t/out" && ok "  ... B and Big restored, only the changed A (and NoObj) miss" || bad "partial restore: $(cat "$t/out")"
 # a tampered per-object entry is rejected by name and the others are still used
 f1=$(find "$pc/armobj" -path '*/tree/build/ir/JanusASL/*' -name 'B.c.o.export' | head -1); chmod -R u+w "$(dirname "$f1")"; printf X | dd of="$f1" bs=1 count=1 conv=notrunc 2>/dev/null
-copy "$t/pk4"; mkdir -p "$t/pk4/JanusASL/.lake/build/ir/JanusASL"; cp "$t/pj/JanusASL/.lake/build/ir/JanusASL/"*.c "$t/pj/JanusASL/.lake/build/ir/JanusASL/"*.c.hash "$t/pk4/JanusASL/.lake/build/ir/JanusASL/"
+copy "$t/pk4"; mkdir -p "$t/pk4/models/asl/.lake/build/ir/JanusASL"; cp "$t/pj/models/asl/.lake/build/ir/JanusASL/"*.c "$t/pj/models/asl/.lake/build/ir/JanusASL/"*.c.hash "$t/pk4/models/asl/.lake/build/ir/JanusASL/"
 expect 0 "objrestore with one tampered entry" M objrestore "$t/pk4" jasl "$pc"
 grep -q "2 restored, 1 without entry, 1 rejected" "$t/out" && ok "  ... the tampered one is REJECTED, the rest restored" || bad "tampered per-object: $(cat "$t/out")"
 
@@ -319,12 +319,12 @@ def main : IO Unit := do
   IO.println (Hash.ofText "a\r\nb\n").hex
   IO.println (Hash.ofByteArray (ByteArray.mk (Array.range 100 |>.map (·.toUInt8)))).hex
 LEAN
-want=$(cd "$root/JanusASL" && timeout 300 lean --run "$t/lh.lean" 2>/dev/null | tr '\n' ' ')
+want=$(cd "$root/models/asl" && timeout 300 lean --run "$t/lh.lean" 2>/dev/null | tr '\n' ' ')
 got=$(printf 'abc' > "$t/v1"; printf 'a\r\nb\n' > "$t/v2"; python3 -c 'import sys;sys.stdout.buffer.write(bytes(range(100)))' > "$t/v3"; echo "$(lh "$t/v1" 0) $(lh "$t/v2" 1) $(lh "$t/v3" 0) ")
 [ -n "$want" ] && [ "$want" = "$got" ] && ok "lake_hash equals Lake's Hash.ofByteArray / ofText on three vectors" || bad "lake_hash differs from Lake: '$want' vs '$got'"
 
-copy "$t/f"; build "$t/f"; fl="$t/f/JanusASL/.lake/build/ir/ArmASL/Part02.c"
-printf '// Lean compiler output\nint f_Part02(void){\n#ifdef EVIL\nreturn 666;\n#else\nreturn 7;\n#endif\n}\n' > "$fl"; mkobj "$t/f/JanusASL/.lake" "$fl"
+copy "$t/f"; build "$t/f"; fl="$t/f/models/asl/.lake/build/ir/ArmASL/Part02.c"
+printf '// Lean compiler output\nint f_Part02(void){\n#ifdef EVIL\nreturn 666;\n#else\nreturn 7;\n#endif\n}\n' > "$fl"; mkobj "$t/f/models/asl/.lake" "$fl"
 # the forged compile command: the object is built with -DEVIL, .hash/trace outputs consistent, the log line edited to say so
 (cd "$(dirname "$fl")" && "$clang" -c -o "$fl.o.export" "$fl" -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING -DEVIL)
 oh=$(lh "$fl.o.export" 0); echo "$oh" > "$fl.o.export.hash"
@@ -334,11 +334,11 @@ grep -q "argument" "$t/out" "$t/err" 2>/dev/null && ok "  ... naming the argumen
 # the same forged entry published by a publisher without objstage: store --recompile and verify --recompile refuse it
 sed -i "s#-DEVIL##" "$fl.o.export.trace"; sed -i 's/ -DLEAN_EXPORTING ", "/ -DLEAN_EXPORTING", "/' "$fl.o.export.trace"
 # (rebuild the honest trace log, then a SECOND forgery that is allowed by shape but whose object differs: only the recompile sees it)
-mkobj "$t/f/JanusASL/.lake" "$fl"; (cd "$(dirname "$fl")" && "$clang" -c -o "$fl.o.export" "$fl" -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING -DEVIL)
+mkobj "$t/f/models/asl/.lake" "$fl"; (cd "$(dirname "$fl")" && "$clang" -c -o "$fl.o.export" "$fl" -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING -DEVIL)
 oh=$(lh "$fl.o.export" 0); echo "$oh" > "$fl.o.export.hash"; sed -i "s#\"outputs\": \"[0-9a-f]*\.o\"#\"outputs\": \"$oh.o\"#" "$fl.o.export.trace"
 expect 0 "objstage accepts a consistent forgery whose logged command is honest (only the recompile can see it)" stage "$t/f" arm
 idf=$(cat "$t/out"); rm -rf "$cache/armobj"
-expect 4 "store --recompile all refuses it" B store armobj "$cache" "$idf" "$t/st" --c-root "$t/f/JanusASL/.lake" --recompile all < "$t/st.list"
+expect 4 "store --recompile all refuses it" B store armobj "$cache" "$idf" "$t/st" --c-root "$t/f/models/asl/.lake" --recompile all < "$t/st.list"
 # entry traces are data: a trace whose command is a shell is never run by verify --recompile
 expect 0 "a forged entry stored without recompile" B store armobj "$cache" "$idf" "$t/st" < "$t/st.list"
 # a command in the entry's trace that runs a shell: re-signed by a keyed publisher (store re-signs whatever it is given)
@@ -350,18 +350,18 @@ d = json.load(open(p)); d["log"][0]["message"] = ".> /bin/sh -c 'touch %s' -c -o
 json.dump(d, open(p, "w"))
 PY
 rm -rf "$cache/armobj"; B store armobj "$cache" "$idf" "$t/st2" < "$t/st.list" > /dev/null
-rm -f "$t/PWNED"; expect 3 "verify --recompile reports POISONED for an entry whose trace runs a shell" B verify armobj "$cache" "$idf" --c-root "$t/f/JanusASL/.lake" --recompile all
+rm -f "$t/PWNED"; expect 3 "verify --recompile reports POISONED for an entry whose trace runs a shell" B verify armobj "$cache" "$idf" --c-root "$t/f/models/asl/.lake" --recompile all
 [ ! -e "$t/PWNED" ] && ok "  ... and never ran it" || bad "  ... the shell in the trace RAN"
 
 # inconclusive never destroys: a good entry survives a store whose recompile cannot run (c-root without C)
 copy "$t/g"; build "$t/g"; rm -rf "$t/st"; mkdir "$t/st"; idg=$(M objstage "$t/g" arm "$t/st" "$t/st.list"); rm -rf "$cache/armobj"
-expect 0 "good entry stored with a full recompile" B store armobj "$cache" "$idg" "$t/st" --c-root "$t/g/JanusASL/.lake" --recompile all < "$t/st.list"
+expect 0 "good entry stored with a full recompile" B store armobj "$cache" "$idg" "$t/st" --c-root "$t/g/models/asl/.lake" --recompile all < "$t/st.list"
 mkdir -p "$t/noc"; expect 4 "a store whose recompile is inconclusive (no C) fails" B store armobj "$cache" "$idg" "$t/st" --c-root "$t/noc" --recompile all < "$t/st.list"
 expect 0 "  ... and the good entry is still there and valid" B verify armobj "$cache" "$idg"
 
 # the default sample plus the random draw catches a consistent forgery of a LARGE object (not among the 3 smallest)
-big="$t/g/JanusASL/.lake/build/ir/ArmASL/Part02.c"; for i in $(seq 1 100); do echo "int pad_$i(void){return $i;}" >> "$big"; done
-mkobj "$t/g/JanusASL/.lake" "$big"; printf 'int f_Part02(void){return 666;}\n' > "$t/evil.c"
+big="$t/g/models/asl/.lake/build/ir/ArmASL/Part02.c"; for i in $(seq 1 100); do echo "int pad_$i(void){return $i;}" >> "$big"; done
+mkobj "$t/g/models/asl/.lake" "$big"; printf 'int f_Part02(void){return 666;}\n' > "$t/evil.c"
 (cd "$t" && "$clang" -c -o "$big.o.export" evil.c -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING)
 oh=$(lh "$big.o.export" 0); echo "$oh" > "$big.o.export.hash"; sed -i "s#\"outputs\": \"[0-9a-f]*\.o\"#\"outputs\": \"$oh.o\"#" "$big.o.export.trace"
 rm -rf "$cache/armobj"; ASL_OBJ_RECOMPILE_RANDOM=0 M objpublish "$t/g" arm "$cache" 3 > "$t/out" 2>&1
@@ -384,25 +384,25 @@ expect 2 "  ... a fetch of it is now a miss" B fetch armobj "$cache" "$idh" "$t/
 
 
 # the vendored Sail package's lakefile (its build flags) is in the object id, and never widens the accepted flags
-copy "$t/k"; build "$t/k"; mkdir -p "$t/k/JanusASL/.lake/packages/Sail"; idk0=$(M objkey "$t/k")
-printf '[[lean_lib]]\nname = "Sail"\nweakLeancArgs = ["-DEVIL"]\n' > "$t/k/JanusASL/.lake/packages/Sail/lakefile.toml"
+copy "$t/k"; build "$t/k"; mkdir -p "$t/k/models/asl/.lake/packages/Sail"; idk0=$(M objkey "$t/k")
+printf '[[lean_lib]]\nname = "Sail"\nweakLeancArgs = ["-DEVIL"]\n' > "$t/k/models/asl/.lake/packages/Sail/lakefile.toml"
 [ "$(M objkey "$t/k")" != "$idk0" ] && ok "a changed Sail package lakefile changes the id" || bad "Sail lakefile not in the id"
-sk="$t/k/JanusASL/.lake/packages/Sail/.lake/build/ir/Sail/Attr.c"
+sk="$t/k/models/asl/.lake/packages/Sail/.lake/build/ir/Sail/Attr.c"
 (cd "$(dirname "$sk")" && "$clang" -c -o "$sk.o.export" "$sk" -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING -DEVIL)
 oh=$(lh "$sk.o.export" 0); echo "$oh" > "$sk.o.export.hash"; sed -i "s#-DLEAN_EXPORTING#-DLEAN_EXPORTING -DEVIL#; s#\"outputs\": \"[0-9a-f]*\.o\"#\"outputs\": \"$oh.o\"#" "$sk.o.export.trace"
 rm -rf "$t/st"; mkdir "$t/st"; expect 1 "objstage: -DEVIL is not accepted just because the Sail lakefile (the publisher's own) declares it" M objstage "$t/k" arm "$t/st" "$t/st.list"
 
 
 # previously untested bindings (mutation survivors on c73d7de0): the trace's output vs .hash, and the .cin record vs the C
-copy "$t/m"; build "$t/m"; mp="$t/m/JanusASL/.lake/build/ir/ArmASL/Part01.c"
+copy "$t/m"; build "$t/m"; mp="$t/m/models/asl/.lake/build/ir/ArmASL/Part01.c"
 sed -i 's#"outputs": "[0-9a-f]*\.o"#"outputs": "0000000000000000.o"#' "$mp.o.export.trace"
 rm -rf "$t/st"; mkdir "$t/st"; expect 1 "objstage refuses a trace whose recorded output differs from the .hash" M objstage "$t/m" arm "$t/st" "$t/st.list"
-mkobj "$t/m/JanusASL/.lake" "$mp"; rm -rf "$t/st"; mkdir "$t/st"; idm=$(M objstage "$t/m" arm "$t/st" "$t/st.list"); rm -rf "$cache/armobj"
+mkobj "$t/m/models/asl/.lake" "$mp"; rm -rf "$t/st"; mkdir "$t/st"; idm=$(M objstage "$t/m" arm "$t/st" "$t/st.list"); rm -rf "$cache/armobj"
 B store armobj "$cache" "$idm" "$t/st" < "$t/st.list" > /dev/null
 echo '// edited after publishing' >> "$mp"
-expect 4 "verify --recompile with a C file that is not the one recorded (.cin) is inconclusive, never a pass" B verify armobj "$cache" "$idm" --c-root "$t/m/JanusASL/.lake" --recompile all
+expect 4 "verify --recompile with a C file that is not the one recorded (.cin) is inconclusive, never a pass" B verify armobj "$cache" "$idm" --c-root "$t/m/models/asl/.lake" --recompile all
 
-copy "$t/n"; build "$t/n"; np="$t/n/JanusASL/.lake/build/ir/ArmASL/Part01.c"; oc=$(cat "$np.hash")
+copy "$t/n"; build "$t/n"; np="$t/n/models/asl/.lake/build/ir/ArmASL/Part01.c"; oc=$(cat "$np.hash")
 echo 0123456789abcdef > "$np.hash"; sed -i "s#$oc#0123456789abcdef#g" "$np.o.export.trace"
 rm -rf "$t/st"; mkdir "$t/st"; expect 1 "objstage refuses a C whose .hash (even echoed consistently in the trace) is not Lake's text hash of the C" M objstage "$t/n" arm "$t/st" "$t/st.list"
 
@@ -483,13 +483,13 @@ for k in man:
 data = "".join("%s  %s\n" % (v, k) for k, v in sorted(keep.items())).encode()
 open(e + "/MANIFEST.sha256", "wb").write(data); open(e + "/MANIFEST.hmac", "w").write(b.mac("armobj", ident, data) + "\n")
 PY
-expect 4 "an entry without .cin records: verify --recompile is inconclusive (no crash)" B verify armobj "$cache" "$idg" --c-root "$t/g2/JanusASL/.lake" --recompile all
+expect 4 "an entry without .cin records: verify --recompile is inconclusive (no crash)" B verify armobj "$cache" "$idg" --c-root "$t/g2/models/asl/.lake" --recompile all
 grep -q Traceback "$t/err" && bad "uncaught exception: $(tail -3 "$t/err")" || ok "  ... without a traceback"
-expect 4 "store --recompile over it keeps the entry (inconclusive)" B store armobj "$cache" "$idg" "$t/st" --c-root "$t/g2/JanusASL/.lake" --recompile all < "$t/st.list"
+expect 4 "store --recompile over it keeps the entry (inconclusive)" B store armobj "$cache" "$idg" "$t/st" --c-root "$t/g2/models/asl/.lake" --recompile all < "$t/st.list"
 B verify armobj "$cache" "$idg" > /dev/null && ok "  ... the existing entry survives" || bad "entry destroyed"
 # a compile that times out
 rm -rf "$cache/armobj"; B store armobj "$cache" "$idg" "$t/st" < "$t/st.list" > /dev/null
-ASL_OBJ_RECOMPILE_TIMEOUT=0 expect 4 "a recompile that times out is inconclusive" B verify armobj "$cache" "$idg" --c-root "$t/g2/JanusASL/.lake" --recompile all
+ASL_OBJ_RECOMPILE_TIMEOUT=0 expect 4 "a recompile that times out is inconclusive" B verify armobj "$cache" "$idg" --c-root "$t/g2/models/asl/.lake" --recompile all
 grep -q Traceback "$t/err" && bad "timeout crashed: $(tail -3 "$t/err")" || ok "  ... no traceback"
 # the random draw is bounded by C size
 python3 -I - "$root" <<'PY' && ok "draw_random only picks objects whose C is within ASL_OBJ_RECOMPILE_MAXC" || bad "draw_random bound"
@@ -509,13 +509,13 @@ expect 0 "nightly-objaudit: a cache that agrees with the cold tree passes" env N
 grep -q "objaudit \[arm\]: .*coverage [1-9][0-9]* of [1-9][0-9]* objects compared (100%)" "$t/out" && ok "  ... and compared objects" || bad "nothing compared: $(cat "$t/out")"
 expect 2 "nightly-objaudit: the scope override without the test marker is refused" env NIGHTLY_OBJAUDIT_SCOPES="arm" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
 expect 2 "nightly-cold-gate: refuses to run with NIGHTLY_OBJAUDIT_SCOPES set" env NIGHTLY_OBJAUDIT_SCOPES="arm" "$root/scripts/nightly-cold-gate.sh"
-co="$t/cold/JanusASL/.lake/build/ir/ArmASL/Part02.c.o.export"; cp "$co" "$t/co.bak"; printf 'X' >> "$co"
+co="$t/cold/models/asl/.lake/build/ir/ArmASL/Part02.c.o.export"; cp "$co" "$t/co.bak"; printf 'X' >> "$co"
 expect 1 "nightly-objaudit: a cold object that differs from the cached one is P0" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
 grep -q "POISONED" "$t/out" && ok "  ... names it POISONED" || bad "no POISONED"
 ls "$ac/armobj"/.poisoned-* > /dev/null 2>&1 && ok "  ... and the entry was quarantined" || bad "not quarantined"
 expect 2 "  ... a quarantined entry is a miss for every later fetch" B fetch armobj "$ac" "$(M objkey "$t/cold")" "$t/audfetch/.lake"
 cp "$t/co.bak" "$co"
-copy "$t/cold2"; mkdir -p "$t/cold2/JanusASL/.lake/build/ir/ArmASL"; cp "$t/cold/JanusASL/.lake/build/ir/ArmASL.c" "$t/cold2/JanusASL/.lake/build/ir/" 2>/dev/null
+copy "$t/cold2"; mkdir -p "$t/cold2/models/asl/.lake/build/ir/ArmASL"; cp "$t/cold/models/asl/.lake/build/ir/ArmASL.c" "$t/cold2/models/asl/.lake/build/ir/" 2>/dev/null
 expect 1 "nightly-objaudit fails closed when the cold tree has no objects (nothing compared)" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold2" "$ac"
 expect 1 "nightly-objaudit fails closed when the cache has no armobj directory" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$t/emptycache"
 
@@ -542,9 +542,9 @@ PY
 fresh() {  # fresh NAME: a new built fixture tree $t/NAME (arm + jasl objects)
   copy "$t/$1"; build "$t/$1"; build_jasl "$t/$1"
 }
-L() { echo "$t/$1/JanusASL/.lake"; }
+L() { echo "$t/$1/models/asl/.lake"; }
 # --- (B1) a decoy lakefile table does not widen the flags: the expected vector is exact
-fresh dec; python3 -I - "$t/dec/JanusASL/lakefile.toml" <<'PY'
+fresh dec; python3 -I - "$t/dec/models/asl/lakefile.toml" <<'PY'
 import sys; p = sys.argv[1]; open(p, "a").write('\n[[lean_lib]]\nname = "Decoy"\nmoreLeancArgs = ["-fwrapv", "-Xclang", "-disable-llvm-passes"]\n')
 PY
 MKOBJ_EXTRA="-fwrapv" mkobj "$(L dec)" "$(L dec)/build/ir/ArmASL/Part01.c"
@@ -594,9 +594,9 @@ man["build/ir/Other/Zed.c.o.export"] = b.sha_file(z)
 data = "".join("%s  %s\n" % (v, k) for k, v in sorted(man.items())).encode()
 os.chmod(e + "/MANIFEST.sha256", 0o644); open(e + "/MANIFEST.sha256", "wb").write(data); open(e + "/MANIFEST.hmac", "w").write(b.mac("armobj", ident, data) + "\n")
 PY
-rm -rf "$t/restz"; mkdir -p "$t/restz"; cp -a "$t/p" "$t/restz/"; rm -rf "$t/restz/p/JanusASL/.lake/build/ir/ArmASL"
+rm -rf "$t/restz"; mkdir -p "$t/restz"; cp -a "$t/p" "$t/restz/"; rm -rf "$t/restz/p/models/asl/.lake/build/ir/ArmASL"
 expect 0 "objrestore with a signed entry that smuggles a path outside the id's C set" M objrestore "$t/p" arm "$cache"
-grep -q REJECTED "$t/out" && [ ! -e "$t/p/JanusASL/.lake/build/ir/Other/Zed.c.o.export" ] && ok "  ... REJECTED, nothing smuggled into the tree" || bad "smuggled path accepted: $(cat "$t/out")"
+grep -q REJECTED "$t/out" && [ ! -e "$t/p/models/asl/.lake/build/ir/Other/Zed.c.o.export" ] && ok "  ... REJECTED, nothing smuggled into the tree" || bad "smuggled path accepted: $(cat "$t/out")"
 expect 3 "bcache verify of the smuggling entry is invalid" B verify armobj "$cache" "$idp"
 expect 4 "store refuses a stage with an extra object path" bash -c "cp -a '$t/st' '$t/st9'; mkdir -p '$t/st9/build/ir/Other'; echo x > '$t/st9/build/ir/Other/Zed.c.o.export'; (cat '$t/st.list'; printf 'build/ir/Other/Zed.c.o.export\0') | python3 -I '$root/scripts/lib/bcache.py' store armobj '$cache' '$idp' '$t/st9'"
 # --- sandbox gating
@@ -638,10 +638,10 @@ t, cache, idp = sys.argv[2:]
 def boom(*a, **k): raise OSError(28, "No space left on device")
 orig = tempfile.mkdtemp; tempfile.mkdtemp = boom
 try:
-    b.recompile_entry("armobj", cache, idp, t + "/p/JanusASL/.lake", "all"); raise SystemExit("no error")
+    b.recompile_entry("armobj", cache, idp, t + "/p/models/asl/.lake", "all"); raise SystemExit("no error")
 except b.Inconclusive:
     pass
-spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/JanusASL/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/models/asl/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 m.obj_publish(sys.argv[1], "arm", cache, "0") if False else None
 tempfile.mkdtemp = orig
 PY
@@ -658,8 +658,8 @@ cs_c="$t/smpcache"; mkdir -p "$cs_c"
 M objpublish "$t/smp" jasl "$cs_c" 0 > "$t/smp.out" 2>&1; :   # no recompile at publish: both forgeries are stored
 python3 -I - "$root" "$cs_c" "$t/smp" <<'PY' && ok "sampling: N smallest always checked; the random draw reaches the biggest only below the size cap" || bad "sample composition"
 import importlib.util, os, sys, glob
-spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/JanusASL/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-bc = m.load_bcache(sys.argv[1]); cache, tree = sys.argv[2], sys.argv[3]; lake = tree + "/JanusASL/.lake"
+spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/models/asl/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+bc = m.load_bcache(sys.argv[1]); cache, tree = sys.argv[2], sys.argv[3]; lake = tree + "/models/asl/.lake"
 units = {c: i for i, cs in m.obj_units(tree, "jasl") for c in cs}
 def check(rel_c, sample, rnd, maxc):
     ident = [i for i, cs in m.obj_units(tree, "jasl") if rel_c in cs][0]
@@ -722,24 +722,24 @@ grep -q INCOMPLETE "$t/out" && ok "  ... INCOMPLETE, not a pass" || bad "no INCO
 grep -q 'nightly-objaudit.sh" "$work/tree-cold" "$cache_dir" || rc_final=1' "$root/scripts/nightly-cold-gate.sh" && ok "nightly-cold-gate.sh: a failing object audit sets rc_final=1" || bad "audit result not wired to rc_final"
 grep -q 'run_gate cold JANUS_ASL_CACHE=0 ASL_OBJ_CACHE=0' "$root/scripts/nightly-cold-gate.sh" && grep -q '"\$@" LEAN_NUM_THREADS=4 JANUS_JOBS=2 memcap -m 48G scripts/asl.sh build' "$root/scripts/nightly-cold-gate.sh" && ok "the cold run passes JANUS_ASL_CACHE=0 to the gate AND to its own link step" || bad "cold run wiring"
 cdir="$t/coldcache"; mkdir -p "$cdir"; M objpublish "$t/p" arm "$cdir" 0 > /dev/null
-rm -rf "$t/cr"; copy "$t/cr"; mkdir -p "$t/cr/JanusASL/.lake"; rsync -a --include='*/' --include='*.c' --include='*.c.hash' --exclude='*' "$t/p/JanusASL/.lake/" "$t/cr/JanusASL/.lake/"
+rm -rf "$t/cr"; copy "$t/cr"; mkdir -p "$t/cr/models/asl/.lake"; rsync -a --include='*/' --include='*.c' --include='*.c.hash' --exclude='*' "$t/p/models/asl/.lake/" "$t/cr/models/asl/.lake/"
 JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
-[ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "a cold run (JANUS_ASL_CACHE=0, no ASL_OBJ_CACHE set) does NOT restore objects from a populated cache" || bad "cold run restored from the cache: $(cat "$t/out")"
+[ ! -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "a cold run (JANUS_ASL_CACHE=0, no ASL_OBJ_CACHE set) does NOT restore objects from a populated cache" || bad "cold run restored from the cache: $(cat "$t/out")"
 ASL_OBJ_CACHE=1 JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
-[ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... not even with ASL_OBJ_CACHE=1 (JANUS_ASL_CACHE=0 wins)" || bad "cold run restored with ASL_OBJ_CACHE=1"
+[ ! -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... not even with ASL_OBJ_CACHE=1 (JANUS_ASL_CACHE=0 wins)" || bad "cold run restored with ASL_OBJ_CACHE=1"
 ASL_OBJ_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
-[ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "ASL_OBJ_CACHE=0 opts out: nothing restored" || bad "restored despite ASL_OBJ_CACHE=0"
+[ ! -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "ASL_OBJ_CACHE=0 opts out: nothing restored" || bad "restored despite ASL_OBJ_CACHE=0"
 def=$(sed -n 's/^OBJ_CACHE_DEFAULT=\([01]\).*/\1/p' "$root/scripts/asl.sh")   # the default is one constant: the tests follow it
 # (the nightly's cached run exports ASL_OBJ_CACHE=1 and a gate may carry other cache variables: each probe starts from a clean slate)
 st() { env -u ASL_OBJ_CACHE -u JANUS_ASL_CACHE -u ASL_CACHE "$@" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -v -E '^(memguard|janus: memory guard|janus-memguard)' | tail -n 1; }
 [ "$(st ASL_CACHE="$cdir")" = "$([ "$def" = 1 ] && echo ON || echo "OFF (default)")" ] && [ "$(st ASL_OBJ_CACHE=0 ASL_CACHE="$cdir")" = "OFF (ASL_OBJ_CACHE=0)" ] && st JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" | grep -q "$([ "$def" = 1 ] && echo '^OFF (no build cache' || echo '^OFF (default)')" && ok "objcache-state: ON by default, OFF with ASL_OBJ_CACHE=0, OFF with JANUS_ASL_CACHE=0" || bad "objcache-state: $(st ASL_CACHE="$cdir") / $(st ASL_OBJ_CACHE=0 ASL_CACHE="$cdir") / $(st JANUS_ASL_CACHE=0 ASL_CACHE="$cdir")"
 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
 if [ "$def" = 1 ]; then
-  [ -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "the object cache is ON by default (the same call without opt-out restores: the test discriminates)" || bad "default restore failed: $(cat "$t/out")"
+  [ -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "the object cache is ON by default (the same call without opt-out restores: the test discriminates)" || bad "default restore failed: $(cat "$t/out")"
 else
-  [ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "the object cache is OFF by default (OBJ_CACHE_DEFAULT=0)" || bad "restored by default despite OBJ_CACHE_DEFAULT=0"
+  [ ! -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "the object cache is OFF by default (OBJ_CACHE_DEFAULT=0)" || bad "restored by default despite OBJ_CACHE_DEFAULT=0"
   ASL_OBJ_CACHE=1 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
-  [ -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... and ASL_OBJ_CACHE=1 turns it on" || bad "opt-in restore failed"
+  [ -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... and ASL_OBJ_CACHE=1 turns it on" || bad "opt-in restore failed"
 fi
 
 # ======== RTOBJ4 survivors: one direct test per mutant ========
@@ -748,7 +748,7 @@ import importlib.util, os, subprocess, sys, json, tempfile, shutil, stat
 root, t = sys.argv[1], sys.argv[2]
 def load(name, rel):
     spec = importlib.util.spec_from_file_location(name, root + "/" + rel); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
-b = load("bcache", "scripts/lib/bcache.py"); m = load("amc", "JanusASL/tools/asl_mod_cache.py")
+b = load("bcache", "scripts/lib/bcache.py"); m = load("amc", "models/asl/tools/asl_mod_cache.py")
 def raises(exc, f, *a, **k):
     try: f(*a, **k)
     except exc: return True
@@ -766,19 +766,19 @@ fakelean "$prefix"
 py <<'PY' && ok "keyed_toolchain accepts the real prefix" || bad "keyed_toolchain real"
 import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
 os.environ["PATH"] = t + "/fl:" + os.environ["PATH"]
-pre, cc = b.keyed_toolchain(root + "/JanusASL"); assert cc == pre + "/bin/clang"
+pre, cc = b.keyed_toolchain(root + "/models/asl"); assert cc == pre + "/bin/clang"
 PY
 fakelean "$t/linkp"
 py <<'PY' && ok "keyed_toolchain refuses a prefix reached through a symlink (realpath check)" || bad "prefix realpath mutant"
 import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
 os.environ["PATH"] = t + "/fl:" + os.environ["PATH"]
-need(raises(b.CacheError, b.keyed_toolchain, root + "/JanusASL"), "symlinked prefix accepted")
+need(raises(b.CacheError, b.keyed_toolchain, root + "/models/asl"), "symlinked prefix accepted")
 PY
 rm -rf "$t/real_par" "$t/par_link"; mkdir -p "$t/real_par/fp/bin" "$t/real_par/fp/include/clang" "$t/real_par/fp/include/lean"; cp "$clang" "$t/real_par/fp/bin/clang"; ln -s "$t/real_par" "$t/par_link"; fakelean "$t/par_link/fp"
 py <<'PY' && ok "keyed_toolchain refuses a prefix with a symlinked PARENT directory (realpath != path)" || bad "prefix parent symlink"
 import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
 os.environ["PATH"] = t + "/fl:" + os.environ["PATH"]
-need(raises(b.CacheError, b.keyed_toolchain, root + "/JanusASL"), "prefix under a symlinked parent accepted")
+need(raises(b.CacheError, b.keyed_toolchain, root + "/models/asl"), "prefix under a symlinked parent accepted")
 PY
 for d in bin include include/clang include/lean; do
   rm -rf "$t/fp3"; mkdir -p "$t/fp3/bin" "$t/fp3/include/clang" "$t/fp3/include/lean"; cp "$clang" "$t/fp3/bin/clang"
@@ -786,7 +786,7 @@ for d in bin include include/clang include/lean; do
   py <<'PY' && ok "keyed_toolchain refuses a symlinked toolchain directory ($d)" || bad "prefix dir symlink ($d)"
 import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
 os.environ["PATH"] = t + "/fl:" + os.environ["PATH"]
-need(raises(b.CacheError, b.keyed_toolchain, root + "/JanusASL"), "symlinked toolchain directory accepted")
+need(raises(b.CacheError, b.keyed_toolchain, root + "/models/asl"), "symlinked toolchain directory accepted")
 PY
 done
 # LEAN_CC: neither published nor recompiled
@@ -794,12 +794,12 @@ fakelean "$prefix"
 py <<'PY' && ok "LEAN_CC set: keyed_toolchain refuses (Inconclusive)" || bad "LEAN_CC refusal"
 import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
 os.environ["PATH"] = t + "/fl:" + os.environ["PATH"]; os.environ["LEAN_CC"] = "clang"
-need(raises(b.Inconclusive, b.keyed_toolchain, root + "/JanusASL"), "LEAN_CC accepted")
+need(raises(b.Inconclusive, b.keyed_toolchain, root + "/models/asl"), "LEAN_CC accepted")
 PY
 # stage: the staged compiler/prefix must be the toolchain's keyed ones
 py <<'PY' && ok "stage_unit refuses when the id's compiler is not the toolchain's" || bad "stage cc/prefix == keyed"
 import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
-tree = t + "/p"; lake = tree + "/JanusASL/.lake"
+tree = t + "/p"; lake = tree + "/models/asl/.lake"
 cs = m.obj_c_files(lake, "arm"); ident = m.obj_id(tree, cs, "arm")
 real = m.obj_compiler(tree); m._CC[tree] = (real[0] + "x", real[1], real[2])
 st = tempfile.mkdtemp(dir=t)
@@ -812,7 +812,7 @@ PY
 # the compiler's content is in the id (isolated from the env part of the ArmASL key)
 py <<'PY' && ok "the compiler binary's content alone changes the id" || bad "compiler content in id"
 import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
-tree = t + "/p"; lake = tree + "/JanusASL/.lake"; cs = m.obj_c_files(lake, "arm")
+tree = t + "/p"; lake = tree + "/models/asl/.lake"; cs = m.obj_c_files(lake, "arm")
 r = m.obj_compiler(tree); a = m.obj_id(tree, cs, "arm")
 m._CC[tree] = (r[0], "0" * 64, r[2]); c = m.obj_id(tree, cs, "arm")
 need(a != c, "same id for another compiler hash")
@@ -820,7 +820,7 @@ PY
 # stage: the C is re-hashed at stage time (the only tie of a staged object to the id's C)
 py <<'PY' && ok "stage_unit re-hashes the C: a C that is not the id's is refused" || bad "C re-hash at stage"
 import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
-tree = t + "/p"; lake = tree + "/JanusASL/.lake"; cs = dict(m.obj_c_files(lake, "arm")); ident = m.obj_id(tree, cs, "arm")
+tree = t + "/p"; lake = tree + "/models/asl/.lake"; cs = dict(m.obj_c_files(lake, "arm")); ident = m.obj_id(tree, cs, "arm")
 cs["build/ir/ArmASL/Part01.c"] = "0" * 64
 st = tempfile.mkdtemp(dir=t)
 try: m.stage_unit(tree, "arm", lake, ident, cs, st); need(False, "staged a C that is not the id's")
@@ -829,19 +829,19 @@ PY
 # only .c.o.export is cacheable
 fresh ne; mv "$(L ne)/build/ir/ArmASL/Part01.c.o.export" "$(L ne)/build/ir/ArmASL/Part01.c.o.noexport"; mv "$(L ne)/build/ir/ArmASL/Part01.c.o.export.hash" "$(L ne)/build/ir/ArmASL/Part01.c.o.noexport.hash"; mv "$(L ne)/build/ir/ArmASL/Part01.c.o.export.trace" "$(L ne)/build/ir/ArmASL/Part01.c.o.noexport.trace"
 expect 1 "a .c.o.noexport object is not cacheable (stage refuses)" stage "$t/ne" arm
-grep -q "janusasl-obj-cache-v3" "$root/JanusASL/tools/asl_mod_cache.py" && ok "the object id scheme is v3" || bad "scheme"
+grep -q "janusasl-obj-cache-v3" "$root/models/asl/tools/asl_mod_cache.py" && ok "the object id scheme is v3" || bad "scheme"
 # argv_problem: out / C path forms, unknown objects
 py <<'PY' && ok "argv_problem: output form, C path form, '..', unknown object are refused" || bad "argv_problem forms"
 import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
-pre, cc = b.keyed_toolchain(root + "/JanusASL") if False else (None, None)
+pre, cc = b.keyed_toolchain(root + "/models/asl") if False else (None, None)
 import subprocess
-pre = subprocess.run(["lean", "--print-prefix"], capture_output=True, text=True, cwd=root + "/JanusASL").stdout.strip(); cc = pre + "/bin/clang"
-rel = "build/ir/ArmASL/Part01.c"; c = "/x/JanusASL/.lake/" + rel
+pre = subprocess.run(["lean", "--print-prefix"], capture_output=True, text=True, cwd=root + "/models/asl").stdout.strip(); cc = pre + "/bin/clang"
+rel = "build/ir/ArmASL/Part01.c"; c = "/x/models/asl/.lake/" + rel
 good = b.expected_argv(cc, pre, c, c + ".o.export", rel)
 need(b.argv_problem(good, cc, pre, rel) is None, "the keyed command is refused")
 bad1 = list(good); bad1[3] = "/x/other.o"; need(b.argv_problem(bad1, cc, pre, rel), "output form")
 bad2 = b.expected_argv(cc, pre, "/x/elsewhere/Other.c", "/x/elsewhere/Other.c.o.export", rel); need(b.argv_problem(bad2, cc, pre, rel), "C path suffix")
-bad3 = b.expected_argv(cc, pre, "/x/../etc/JanusASL/.lake/" + rel, "/x/../etc/JanusASL/.lake/" + rel + ".o.export", rel); need(b.argv_problem(bad3, cc, pre, rel), "dotdot")
+bad3 = b.expected_argv(cc, pre, "/x/../etc/models/asl/.lake/" + rel, "/x/../etc/models/asl/.lake/" + rel + ".o.export", rel); need(b.argv_problem(bad3, cc, pre, rel), "dotdot")
 need(b.argv_problem(b.expected_argv(cc, pre, "/x/build/ir/Other/Zed.c", "/x/build/ir/Other/Zed.c.o.export", "build/ir/Other/Zed.c"), cc, pre, "build/ir/Other/Zed.c"), "unknown object cacheable")
 need(b.argv_problem(good, cc + "x", pre, rel), "argv[0] not the keyed clang")
 PY
@@ -875,7 +875,7 @@ expect 3 "a .cin that disagrees with the signed set is invalid" B verify armobj 
 fresh_entry; py "$s1c" "$ids1" <<'PY' && ok "fetch with another C set than the entry's is rejected (set == want_set)" || bad "set == want_set"
 import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
 cache, ident = sys.argv[3], sys.argv[4]
-cs = m.obj_c_files(t + "/st1/JanusASL/.lake", "arm"); other = dict(cs); other["build/ir/ArmASL/Part01.c"] = "1" * 64
+cs = m.obj_c_files(t + "/st1/models/asl/.lake", "arm"); other = dict(cs); other["build/ir/ArmASL/Part01.c"] = "1" * 64
 need(raises(b.CacheError, b.fetch, "armobj", cache, ident, t + "/dstx/.lake", (), None, other), "another set accepted")
 b.fetch("armobj", cache, ident, t + "/dsty/.lake", (), None, cs)
 PY
@@ -1130,7 +1130,7 @@ done
 # does on a bad TOML): tcb_modules is None and obj_units returns no unit although the C files are handed in directly
 cat > "$t/m17unit.py" <<'PY'
 import importlib.util, sys
-spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/JanusASL/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/models/asl/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 r = sys.argv[2]
 assert m.tcb_modules(r) is None, m.tcb_modules(r)
 m.obj_id = lambda root, cs, scope: "stub"   # the id computation must not be what stops it
@@ -1148,7 +1148,7 @@ janus_fresh m17imp
 printf 'import Lean\n' > "$t/m17imp/Janus/Foo.lean"
 cat > "$t/m17imp.py" <<'PY'
 import importlib.util, sys
-spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/JanusASL/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/models/asl/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 assert "Janus.Foo" in (m.tcb_modules(sys.argv[2]) or set()), m.tcb_modules(sys.argv[2])
 PY
 python3 -I "$t/m17imp.py" "$root" "$t/m17imp" > "$t/out" 2>&1 && ok "M17: an import hidden after a block comment on its line is still TCB" || bad "M17: the hidden import was dropped from the TCB: $(head -c 300 "$t/out")"
@@ -1156,8 +1156,8 @@ python3 -I "$t/m17imp.py" "$root" "$t/m17imp" > "$t/out" 2>&1 && ok "M17: an imp
 # opt-out values: 0|off|no|false switch it off, an empty value is the default (ON) and is printed, junk is OFF
 for v in 0 off no false; do
   ASL_OBJ_CACHE=$v ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -q "^OFF (ASL_OBJ_CACHE=$v)" && ok "ASL_OBJ_CACHE=$v turns the object cache OFF" || bad "ASL_OBJ_CACHE=$v not OFF"
-  rm -f "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export"; ASL_OBJ_CACHE=$v ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > /dev/null 2>&1
-  [ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... and nothing is restored" || bad "restored with ASL_OBJ_CACHE=$v"
+  rm -f "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export"; ASL_OBJ_CACHE=$v ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > /dev/null 2>&1
+  [ ! -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... and nothing is restored" || bad "restored with ASL_OBJ_CACHE=$v"
 done
 ASL_OBJ_CACHE= ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -q "$([ "$def" = 1 ] && echo '^ON (ASL_OBJ_CACHE=<empty>, the default)' || echo '^OFF (default)')" && ok "an EMPTY ASL_OBJ_CACHE is the default (ON) and says so" || bad "empty value"
 ASL_OBJ_CACHE=banana ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -q "^OFF (ASL_OBJ_CACHE=banana: unrecognised" && ok "an unrecognised value is OFF, not silently ON" || bad "junk value"

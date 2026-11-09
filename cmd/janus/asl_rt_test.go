@@ -1,8 +1,8 @@
 package main
 
-// RT: two `verify --asl` workspaces seeded from DIFFERENT gate trees at the same time (each tree's JanusASL/.lake is
+// RT: two `verify --asl` workspaces seeded from DIFFERENT gate trees at the same time (each tree's models/asl/.lake is
 // a symlink to one source checkout's build) end up with distinct, real, private .lake directories; neither writes the
-// other's or the checkout's JanusASL/.lake, and no package-overrides.json appears in the checkout.
+// other's or the checkout's models/asl/.lake, and no package-overrides.json appears in the checkout.
 
 import (
 	"bytes"
@@ -41,7 +41,7 @@ func treeDigest(t *testing.T, dir string) string {
 func TestRTConcurrentASLWorkspacesDoNotShareALake(t *testing.T) {
 	root, _ := filepath.Abs("../..")
 	scratch := t.TempDir()
-	src := filepath.Join(scratch, "checkout", "JanusASL", ".lake")
+	src := filepath.Join(scratch, "checkout", "models", "asl", ".lake")
 	wr(t, filepath.Join(src, "build/lib/lean/A.olean"), "a")
 	wr(t, filepath.Join(src, "packages/Sail/x"), "s")
 	before := treeDigest(t, filepath.Join(scratch, "checkout"))
@@ -50,7 +50,7 @@ func TestRTConcurrentASLWorkspacesDoNotShareALake(t *testing.T) {
 	ws := make([]string, n)
 	errs := make([]error, n)
 	for i := 0; i < n; i++ {
-		tree := filepath.Join(scratch, fmt.Sprintf("tree%d", i), "JanusASL")
+		tree := filepath.Join(scratch, fmt.Sprintf("tree%d", i), "models", "asl")
 		os.MkdirAll(tree, 0o755)
 		wr(t, filepath.Join(tree, "ArmASL", "Part01.lean"), "-- model\n")     // the model sources the seed is pruned against
 		if err := os.Symlink(src, filepath.Join(tree, ".lake")); err != nil { // the gate tree's shared symlink
@@ -105,7 +105,7 @@ echo mine > "$d/.lake/build/lib/lean/W` + fmt.Sprint(i) + `.olean"
 		}
 	}
 	if after := treeDigest(t, filepath.Join(scratch, "checkout")); after != before {
-		t.Fatalf("the source checkout's JanusASL/.lake changed:\nbefore %s\nafter  %s", before, after)
+		t.Fatalf("the source checkout's models/asl/.lake changed:\nbefore %s\nafter  %s", before, after)
 	}
 	if _, err := os.Stat(filepath.Join(src, "package-overrides.json")); err == nil {
 		t.Fatal("a package-overrides.json appeared in the source checkout")

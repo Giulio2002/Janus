@@ -58,15 +58,15 @@ mk "$t/a" c1 0 PASS h1; mk "$t/b" c1 0 PASS h1; sed -i 's/"config:SAIL_SPLIT":"1
 check "an unrecorded SAIL_SPLIT (older gate) fails closed" 2 "$t/a" "$t/b"
 mk "$t/a" c1 0 PASS h1; mk "$t/b" c1 0 PASS h1
 # hashes on a fake worktree
-mkdir -p "$t/w/JanusASL/.lake/build/lib/lean" "$t/w/validation/reference-models/sail-arm/target/release"; echo o > "$t/w/JanusASL/.lake/build/lib/lean/ArmASL.olean"; echo d > "$t/w/validation/reference-models/sail-arm/target/release/janus-oracle-sail"
+mkdir -p "$t/w/models/asl/.lake/build/lib/lean" "$t/w/validation/reference-models/sail-arm/target/release"; echo o > "$t/w/models/asl/.lake/build/lib/lean/ArmASL.olean"; echo d > "$t/w/validation/reference-models/sail-arm/target/release/janus-oracle-sail"
 python3 -I "$cmp_py" hashes "$t/w" "$t/h1.json"; echo p >> "$t/w/validation/reference-models/sail-arm/target/release/janus-oracle-sail"; python3 -I "$cmp_py" hashes "$t/w" "$t/h2.json"
 mkdir -p "$t/w/scripts"; printf 'SAIL_SPLIT_PARTS=48\n' > "$t/w/scripts/oracle-sail.sh"
 python3 -I "$cmp_py" hashes "$t/w" "$t/h3.json"; SAIL_SPLIT=0 python3 -I "$cmp_py" hashes "$t/w" "$t/h4.json"
 # every ir/*.c and ir/*.c.o.* of every Lake tree is hashed (traces are not: they hold worktree paths), and a changed Janus.* object is P0
-w2="$t/w2"; mkdir -p "$w2/.lake/build/ir/Janus" "$w2/JanusASL/.lake/build/ir/ArmASL" "$w2/JanusASL/.lake/build/ir/JanusASL" "$w2/JanusASL/.lake/packages/Sail/.lake/build/ir/Sail" "$w2/JanusASL/.lake/build/lib/lean"
+w2="$t/w2"; mkdir -p "$w2/.lake/build/ir/Janus" "$w2/models/asl/.lake/build/ir/ArmASL" "$w2/models/asl/.lake/build/ir/JanusASL" "$w2/models/asl/.lake/packages/Sail/.lake/build/ir/Sail" "$w2/models/asl/.lake/build/lib/lean"
 echo c > "$w2/.lake/build/ir/Janus/Foo.c"; echo o > "$w2/.lake/build/ir/Janus/Foo.c.o.export"; echo h > "$w2/.lake/build/ir/Janus/Foo.c.o.export.hash"; echo cin > "$w2/.lake/build/ir/Janus/Foo.c.o.export.cin"; echo '{"p":"/some/worktree"}' > "$w2/.lake/build/ir/Janus/Foo.c.o.export.trace"
-echo a > "$w2/JanusASL/.lake/build/ir/ArmASL/Part01.c"; echo ao > "$w2/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export"
-echo j > "$w2/JanusASL/.lake/build/ir/JanusASL/Check.c.o.export"; echo s > "$w2/JanusASL/.lake/packages/Sail/.lake/build/ir/Sail/Attr.c.o.export"; echo '{}' > "$w2/JanusASL/.lake/build/ir/JanusASL/Check.setup.json"
+echo a > "$w2/models/asl/.lake/build/ir/ArmASL/Part01.c"; echo ao > "$w2/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export"
+echo j > "$w2/models/asl/.lake/build/ir/JanusASL/Check.c.o.export"; echo s > "$w2/models/asl/.lake/packages/Sail/.lake/build/ir/Sail/Attr.c.o.export"; echo '{}' > "$w2/models/asl/.lake/build/ir/JanusASL/Check.setup.json"
 python3 -I "$cmp_py" hashes "$w2" "$t/i1.json"
 echo o2 > "$w2/.lake/build/ir/Janus/Foo.c.o.export"; python3 -I "$cmp_py" hashes "$w2" "$t/i2.json"
 python3 -I - "$t" <<'PY' && echo "ok   ir: hashes cover the janus, janusasl and Sail trees (C, objects, .hash; not traces/setup.json/the object cache's .cin records) and a changed object changes the digest" || { echo "FAIL ir hashes"; fail=1; }

@@ -9,11 +9,11 @@
 #                                             1 FAIL: no pin for the current keys (STALE), or a pin that is tampered,
 #                                             corrupt or incomplete. Reads only.
 #   scripts/model-pin.sh verify-tree [--stale rebuild|fail] [--only armasl,sail]
-#                                             every pinned file in THIS checkout's JanusASL/.lake / oracle-sail still has its
+#                                             every pinned file in THIS checkout's models/asl/.lake / oracle-sail still has its
 #                                             pinned hash (the gate runs it after the lanes). Reads only.
 #   scripts/model-pin.sh write --commit REV [--evidence FILE]
 #                                             create/confirm the pin from THIS checkout's truly-cold build
-#                                             (JanusASL/.lake, validation/reference-models/sail-arm/target). Refused unless JANUS_PIN_WRITER is
+#                                             (models/asl/.lake, validation/reference-models/sail-arm/target). Refused unless JANUS_PIN_WRITER is
 #                                             set by scripts/nightly-cold-gate.sh, which calls it only after a cold gate
 #                                             that built both from source passed and agreed with the cached run.
 #
@@ -51,7 +51,7 @@ case "$cmd" in
     while [ $# -gt 0 ]; do case "$1" in --stale) stale="${2:?}"; shift 2 ;; --only) only="${2:?}"; shift 2 ;; *) echo "model-pin: unknown argument $1" >&2; exit 2 ;; esac; done
     keys || exit 1
     rc=0
-    for kk in "armasl $ak $root/JanusASL/.lake" "sail $sk $root/oracle-sail"; do
+    for kk in "armasl $ak $root/models/asl/.lake" "sail $sk $root/oracle-sail"; do
       set -- $kk
       case ",$only," in *",$1,"*) ;; *) continue ;; esac
       out=$(python3 -I "$mp" verify-tree "$1" "$pin" "$2" "$3"); r=$?
@@ -68,7 +68,7 @@ case "$cmd" in
     [ -n "$commit" ] || { echo "model-pin: write needs --commit" >&2; exit 2; }
     keys || exit 1
     rc=0
-    "$root/scripts/asl.sh" files | python3 -I "$mp" write armasl "$pin" "$ak" "$root/JanusASL/.lake" --commit "$commit" "${ev[@]}" || rc=$?
+    "$root/scripts/asl.sh" files | python3 -I "$mp" write armasl "$pin" "$ak" "$root/models/asl/.lake" --commit "$commit" "${ev[@]}" || rc=$?
     [ "$rc" = 0 ] || exit $rc
     [ -f "$root/validation/reference-models/sail-arm/target/release/janus-oracle-sail" ] || { echo "model-pin: no Sail driver built in $root/validation/reference-models/sail-arm/target" >&2; exit 1; }
     printf 'target/release/janus-oracle-sail\0' | python3 -I "$mp" write sail "$pin" "$sk" "$root/validation/reference-models/sail-arm" --commit "$commit" "${ev[@]}" || rc=$?

@@ -5,7 +5,7 @@ import JanusX86.Proofs.Prefix
 The status flags of the model's `rflags` register against Janus' `Flags` (`FlagsRel`: every flag
 Janus defines has its value; undefined ones are unrelated), and `write_user_rflags`, which writes
 each status flag either from the computed flag vector or, where the instruction's undefined mask
-has it, from the model's undefined-value source (`janus_undef`, JanusX86/sail/slice.py). -/
+has it, from the model's undefined-value source (`janus_undef`, models/x86/sail/slice.py). -/
 
 set_option linter.unusedSimpArgs false
 

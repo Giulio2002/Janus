@@ -1,4 +1,4 @@
-# Root functions of the Sail slice (JanusX86/sail/harness.sail + register init).
+# Root functions of the Sail slice (models/x86/sail/harness.sail + register init).
 initialize_registers
 janus_x86_init
 janus_x86_step

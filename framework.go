@@ -19,7 +19,7 @@ var Framework embed.FS
 // vendored, generated ArmASL model (vendor/ArmASL.tar.gz, with its SHA-256 and version pins).
 // `janus verify --asl` builds it once per framework and JanusASL version in the local cache.
 //
-//go:embed JanusASL/lakefile.toml JanusASL/lake-manifest.json JanusASL/lean-toolchain JanusASL/JanusASL JanusASL/vendor
+//go:embed models/asl/lakefile.toml models/asl/lake-manifest.json models/asl/lean-toolchain models/asl/JanusASL models/asl/vendor
 var ASL embed.FS
 
 // GoSources holds the Go source of the janus command and of this package (every .go file of the

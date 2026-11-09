@@ -4,7 +4,7 @@
 #   scripts/x86formal.sh deps    the pinned toolchain: JanusASL's opam root with Sail 0.20.3 and its
 #                                patches (scripts/asl.sh deps), the slicing plugin (JanusASL's, built
 #                                into $X86DEPS), sail-x86-from-acl2 at the pin
-#   scripts/x86formal.sh gen     slice the model to the Janus subset and generate Lean (JanusX86/X86Sail*),
+#   scripts/x86formal.sh gen     slice the model to the Janus subset and generate Lean (models/x86/X86Sail*),
 #                                then compare with the vendored copy (GEN_UPDATE=1 replaces the vendored copy)
 #   scripts/x86formal.sh build   unpack the vendored model (if needed) and build JanusX86 (lake)
 #   scripts/x86formal.sh check   build + `lake exe janus-x86-check` on the amd64 oracle corpus (default)
@@ -38,7 +38,7 @@ CASES="${CASES:-$root/artifacts/oracle-amd64/cases.jsonl}"
 HW="${HW:-$(dirname "$CASES")/hw.jsonl}"
 OUT="${OUT:-$root/artifacts/x86formal}"
 JOBS="${JOBS:-$(nproc)}"
-pkg="$root/JanusX86"
+pkg="$root/models/x86"
 here="$pkg/sail"
 
 # ---- pins (keep in sync with docs/validation/X86FORMAL.md) ----
@@ -60,7 +60,7 @@ do_deps() {
   fi
   eval "$(opam env --switch="$SWITCH" --set-switch)"
   # JanusASL's slicing plugin, unchanged, built outside the source tree
-  (cd "$root/JanusASL/sail/plugin" && dune build --build-dir "$X86DEPS/plugin-build" ./sail_plugin_janus.cmxs)
+  (cd "$root/models/asl/sail/plugin" && dune build --build-dir "$X86DEPS/plugin-build" ./sail_plugin_janus.cmxs)
 }
 
 do_gen() {
@@ -75,7 +75,7 @@ do_gen() {
   local files=(prelude.sail register_types.sail registers.sail register_accessors.sail opcode_ext.sail
     memory_accessors.sail init.sail config.sail logging.sail step.sail main.sail harness.sail
     termination_measures.sail)
-  # Lake fetches lean-sail itself; the generated lakefile is not used (JanusX86/lakefile.toml is).
+  # Lake fetches lean-sail itself; the generated lakefile is not used (models/x86/lakefile.toml is).
   (cd "$w/sliced" && ulimit -s unlimited &&
     sail --plugin "$plugin" --janus-lean \
       --lean-import-file "$here/JanusX86Extras.lean" \
@@ -83,7 +83,7 @@ do_gen() {
       --lean-output-dir "$w/out" --lean-force-output --lean-single-file --lean-line-width 100000 \
       -o X86Sail "${files[@]}" > "$w/sail.log" 2>&1) ||
     { grep -v -i warning "$w/sail.log" | tail -30; exit 1; }
-  # One module per ~1/12 of the declarations, chained (JanusX86/sail/split_lean.py).
+  # One module per ~1/12 of the declarations, chained (models/x86/sail/split_lean.py).
   python3 -I "$here/split_lean.py" "$w/out/X86Sail/X86Sail.lean" "$w/split" 12
   cp "$w/out/X86Sail/X86Sail/"*.lean "$w/split/X86Sail/"
   (cd "$w/split" && tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - \

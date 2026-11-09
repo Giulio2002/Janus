@@ -11,7 +11,7 @@ For every case of the amd64 oracle corpus (`artifacts/oracle-amd64/cases.jsonl`,
 
 * the **Sail side**: `X86Sail.Functions.janus_x86_step` (rems-project/sail-x86-from-acl2, the
   Sail translation of ACL2 X86isa, sliced to the opcodes Janus decodes and translated to Lean
-  by Sail's Lean backend, `JanusX86/sail/`), from `janus_x86_init` (64-bit mode, CPL 3,
+  by Sail's Lean backend, `models/x86/sail/`), from `janus_x86_init` (64-bit mode, CPL 3,
   application-level memory view), with the code page and the data buffer in the Sail memory,
   **twice**: with the model's undefined-value source returning 0 and 1 (a flag or register that
   differs between the two runs is undefined in the model, as in `validation/reference-models/sail-x86/compare.py`);

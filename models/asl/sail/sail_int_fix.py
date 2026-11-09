@@ -22,7 +22,7 @@ import sys
 OLD = '''def integer_update_subrange (i : Int) (hi : Nat) (lo : Nat) (x : (BitVec (hi - lo + 1))) : Int :=
   (set_slice_int ((hi -i lo) +i 1) i lo x)
 '''
-NEW = '''-- JanusASL (JanusASL/sail/sail_int_fix.py): the Lean library's `set_slice_int` truncates `i` to
+NEW = '''-- JanusASL (models/asl/sail/sail_int_fix.py): the Lean library's `set_slice_int` truncates `i` to
 -- the width of `x`; update bits hi..lo of the two's-complement integer arithmetically instead.
 def integer_update_subrange (i : Int) (hi : Nat) (lo : Nat) (x : (BitVec (hi - lo + 1))) : Int :=
   i - ((i / 2 ^ lo) % 2 ^ (hi - lo + 1)) * 2 ^ lo + (x.toNat : Int) * 2 ^ lo

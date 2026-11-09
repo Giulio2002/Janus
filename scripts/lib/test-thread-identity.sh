@@ -12,9 +12,9 @@ set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 targets=("$@"); [ ${#targets[@]} -gt 0 ] || targets=(ArmASL.Defs ArmASL.FakeReal ArmASL.SpecializationV1 ArmASL.JanusExtras)
 work=$(mktemp -d /srv/janus-ops/work.XXXX); trap 'rm -rf "$work"' EXIT
-co="$work/co"; tree="$co/JanusASL"   # the package requires the framework by path (..): a full checkout layout
+co="$work/co"; tree="$co/models/asl"   # the package requires the framework by path (..): a full checkout layout
 mkdir -p "$co"
-rsync -a --exclude=.git --exclude=.lake --exclude=artifacts --exclude=target --exclude=bin --exclude=JanusX86 --exclude=sail-arm "$root/" "$co/" || exit 1
+rsync -a --exclude=.git --exclude=.lake --exclude=artifacts --exclude=target --exclude=bin --exclude=/models/x86 --exclude=/validation/reference-models/sail-arm "$root/" "$co/" || exit 1
 (cd "$tree" && tar -xzf vendor/ArmASL.tar.gz && touch ArmASL.lean) || exit 1
 run() { # run THREADS OUTFILE: a clean .lake each time, the same path
   rm -rf "$tree/.lake"
@@ -42,7 +42,7 @@ prun() { # prun THREADS OUTFILE
   rm -rf "$tree/.lake"
   (cd "$co" && ASL_CACHE="$cache" scripts/asl.sh restore) > "$work/prestore-$1.log" 2>&1 || return 2
   [ -f "$tree/.lake/build/lib/lean/ArmASL.olean" ] || return 2
-  python3 -I "$co/JanusASL/tools/asl_mod_cache.py" restore "$co" "$cache" >> "$work/prestore-$1.log" 2>&1
+  python3 -I "$co/models/asl/tools/asl_mod_cache.py" restore "$co" "$cache" >> "$work/prestore-$1.log" 2>&1
   local m f
   for m in "${proofs[@]}"; do
     [ -f "$tree/.lake/build/lib/lean/${m//.//}.olean" ] || return 2   # its dependencies must be restored too

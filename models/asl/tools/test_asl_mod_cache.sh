@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Tests of the per-module JanusASL build cache (JanusASL/tools/asl_mod_cache.py; scripts/asl.sh
+# Tests of the per-module JanusASL build cache (models/asl/tools/asl_mod_cache.py; scripts/asl.sh
 # ASL_CACHE; docs/design/ASL.md "Build cache").
 #
-#   JanusASL/tools/test_asl_mod_cache.sh              key tests (seconds)
-#   JanusASL/tools/test_asl_mod_cache.sh --e2e CACHE  also end to end, with CACHE holding this
+#   models/asl/tools/test_asl_mod_cache.sh              key tests (seconds)
+#   models/asl/tools/test_asl_mod_cache.sh --e2e CACHE  also end to end, with CACHE holding this
 #                                                     commit's ArmASL and module entries (only read):
 #                                                     a fresh copy of the checkout restores and builds
 #                                                     JanusASL (timed; Lake must build no JanusASL or
@@ -14,7 +14,7 @@
 # Everything happens in mktemp directories, which are removed at the end.
 set -euo pipefail
 export LC_ALL=C
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 e2e=""
 if [ "${1:-}" = --e2e ]; then e2e="${2:?--e2e CACHE}"; fi
 t=$(mktemp -d "${TMPDIR:-/tmp}/asl-mod-cache-test.XXXXXX")
@@ -25,15 +25,15 @@ bad() { echo "FAIL $*"; fail=1; }
 
 copy() {  # copy DIR: a copy of the checkout without builds
   rm -rf "$1"; mkdir -p "$1"
-  rsync -a --exclude=.git --exclude=.lake --exclude=artifacts --exclude='JanusASL/ArmASL' \
-    --exclude='JanusASL/ArmASL.lean' "$root/" "$1/"
+  rsync -a --exclude=.git --exclude=.lake --exclude=artifacts --exclude='models/asl/ArmASL' \
+    --exclude='models/asl/ArmASL.lean' "$root/" "$1/"
 }
-keys() { python3 -I "$1/JanusASL/tools/asl_mod_cache.py" keys "$1" | sort; }
+keys() { python3 -I "$1/models/asl/tools/asl_mod_cache.py" keys "$1" | sort; }
 dependents() {  # dependents ROOT MODULE: MODULE and every module that imports it, transitively
   python3 -I - "$1" "$2" <<'PY'
 import importlib.util, os, sys
 root, target = sys.argv[1], sys.argv[2]
-spec = importlib.util.spec_from_file_location("m", os.path.join(root, "JanusASL/tools/asl_mod_cache.py"))
+spec = importlib.util.spec_from_file_location("m", os.path.join(root, "models/asl/tools/asl_mod_cache.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 ks = m.Keys(root)
 mods = ks.modules()
@@ -58,12 +58,12 @@ copy "$t/b"
 [ "$(keys "$t/b" | sha256sum)" = "$(sha256sum < "$t/a.keys")" ] && ok "keys do not depend on the checkout's path" || bad "keys depend on the path"
 
 # a comment and a reformatting in the JanusASL lakefile: parsed, so no key changes
-printf '\n# a comment\n' >> "$t/b/JanusASL/lakefile.toml"
+printf '\n# a comment\n' >> "$t/b/models/asl/lakefile.toml"
 [ -z "$(changed "$t/a" "$t/b")" ] && ok "a lakefile comment changes no key" || bad "a lakefile comment changed keys"
 
 # one proof file: it and exactly its dependents
 copy "$t/b"
-f=JanusASL/JanusASL/Proofs/Madd.lean
+f=models/asl/JanusASL/Proofs/Madd.lean
 echo "-- edited" >> "$t/b/$f"
 c=$(changed "$t/a" "$t/b")
 deps=$(dependents "$t/b" JanusASL.Proofs.Madd)
@@ -80,7 +80,7 @@ d=$(dependents "$t/b" Janus.Arm64.State)
 
 # a setting Lake traces (a library's moreLeanArgs) and the toolchain
 copy "$t/b"
-sed -i 's/^name = "JanusASL"$/name = "JanusASL"\nmoreLeanArgs = ["--tstack=100000"]/' "$t/b/JanusASL/lakefile.toml"
+sed -i 's/^name = "JanusASL"$/name = "JanusASL"\nmoreLeanArgs = ["--tstack=100000"]/' "$t/b/models/asl/lakefile.toml"
 c=$(changed "$t/a" "$t/b" | grep -c '^JanusASL' || true)
 [ "$c" -gt 0 ] && ok "a JanusASL lib option changes the JanusASL keys ($c)" || bad "a lib option changed no key"
 copy "$t/b"
@@ -92,7 +92,7 @@ c=$(changed "$t/a" "$t/b" | wc -l)
 # `restore --record`: a signed record (scripts/lib/restamp.py verifies it), written O_EXCL|O_NOFOLLOW at 0600
 old_kd="${JANUS_CACHE_KEY_DIR-}"; export JANUS_CACHE_KEY_DIR="$t/key"; mkdir -m 700 "$t/key"
 mkdir -m 700 "$t/recd" "$t/emptycache"
-python3 -I "$t/a/JanusASL/tools/asl_mod_cache.py" restore "$t/a" "$t/emptycache" --record "$t/recd/record.json" > /dev/null 2>&1
+python3 -I "$t/a/models/asl/tools/asl_mod_cache.py" restore "$t/a" "$t/emptycache" --record "$t/recd/record.json" > /dev/null 2>&1
 if python3 -I - "$t/recd/record.json" "$t/a" "$root/scripts/lib/bcache.py" <<'PY'
 import importlib.util, json, os, stat, sys
 rec, tree, bcp = sys.argv[1:4]
@@ -104,7 +104,7 @@ PY
 then ok "restore --record writes a 0600 record with an HMAC over its files, bound to the tree"; else bad "restore --record output"; fi
 # a symlink planted at the temp name (same pid via exec) is not followed
 echo untouched > "$t/victim"; rm -f "$t/recd/record.json"
-python3 -I - "$t/a" "$t/emptycache" "$t/recd/record.json" "$t/victim" "$t/a/JanusASL/tools/asl_mod_cache.py" <<'PY' > /dev/null 2>&1 || true
+python3 -I - "$t/a" "$t/emptycache" "$t/recd/record.json" "$t/victim" "$t/a/models/asl/tools/asl_mod_cache.py" <<'PY' > /dev/null 2>&1 || true
 import os, sys
 tree, cache, rec, victim, tool = sys.argv[1:6]
 os.symlink(victim, rec + ".tmp%d" % os.getpid())
@@ -118,7 +118,7 @@ sp="$t/a/.lake/janus-framework.ready"
 if python3 -I - "$t/a" "$sp" <<'PY'
 import hashlib, importlib.util, json, os, sys
 root, sp = sys.argv[1:3]
-spec = importlib.util.spec_from_file_location("m", os.path.join(root, "JanusASL/tools/asl_mod_cache.py")); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+spec = importlib.util.spec_from_file_location("m", os.path.join(root, "models/asl/tools/asl_mod_cache.py")); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 ks = m.Keys(root); p = ks.pkg_of("Janus.State") or ks.pkgs[1]
 ol = os.path.join(root, ".lake/build/lib/lean/Janus/State.olean")
 assert m.stamp_mismatch(ks, p, "Janus.State") is None            # no stamp: unconstrained
@@ -137,11 +137,11 @@ if [ -n "$old_kd" ]; then export JANUS_CACHE_KEY_DIR="$old_kd"; else unset JANUS
 if [ -n "$e2e" ]; then
   # A fresh copy at this commit: restore (ArmASL and modules) and build JanusASL.
   copy "$t/w"
-  (cd "$t/w/JanusASL" && tar -xzf vendor/ArmASL.tar.gz && touch ArmASL.lean)
+  (cd "$t/w/models/asl" && tar -xzf vendor/ArmASL.tar.gz && touch ArmASL.lean)
   start=$(date +%s)
   (cd "$t/w" && ASL_CACHE="$e2e" ASL_CACHE_READONLY=1 scripts/asl.sh restore) > "$t/restore.log" 2>&1
-  python3 -I "$t/w/JanusASL/tools/asl_mod_cache.py" restore "$t/w" "$e2e" | tee -a "$t/restore.log"
-  (cd "$t/w/JanusASL" && lake build --no-ansi JanusASL) > "$t/build.log" 2>&1
+  python3 -I "$t/w/models/asl/tools/asl_mod_cache.py" restore "$t/w" "$e2e" | tee -a "$t/restore.log"
+  (cd "$t/w/models/asl" && lake build --no-ansi JanusASL) > "$t/build.log" 2>&1
   secs=$(( $(date +%s) - start ))
   built=$(grep -cE '(Built|Replayed) (JanusASL|Janus)\.' "$t/build.log" | head -1 || true)
   nb=$(grep -E 'Built (JanusASL|Janus)[. ]' "$t/build.log" | grep -vc ':c\.o\|:o\b' || true)
@@ -156,7 +156,7 @@ if [ -n "$e2e" ]; then
   inlib=$(python3 -I - "$t/w" <<'PY'
 import importlib.util, os, sys
 root = sys.argv[1]
-spec = importlib.util.spec_from_file_location("m", os.path.join(root, "JanusASL/tools/asl_mod_cache.py"))
+spec = importlib.util.spec_from_file_location("m", os.path.join(root, "models/asl/tools/asl_mod_cache.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 ks = m.Keys(root)
 roots = [r for lib in ks.pkgs[0].cfg.get("lean_lib", []) if lib.get("name") == "JanusASL" for r in lib.get("roots", ["JanusASL"])]
@@ -165,7 +165,7 @@ PY
 )
   expect=$(join -j1 "$t/w.keys" <(keys "$t/w") | awk '$2 != $3 {print $1}' | sort | comm -12 - <(echo "$inlib"))
   start=$(date +%s)
-  (cd "$t/w/JanusASL" && lake build --no-ansi JanusASL) > "$t/build2.log" 2>&1
+  (cd "$t/w/models/asl" && lake build --no-ansi JanusASL) > "$t/build2.log" 2>&1
   secs=$(( $(date +%s) - start ))
   got=$(grep -oE 'Built (JanusASL|Janus)\.[A-Za-z0-9_.]+( |$)' "$t/build2.log" | awk '{print $2}' | sort -u)
   [ "$got" = "$expect" ] && ok "after editing $f, Lake rebuilt exactly it and its $(( $(echo "$got" | wc -l) - 1 )) dependents in ${secs}s (of $n modules)" ||

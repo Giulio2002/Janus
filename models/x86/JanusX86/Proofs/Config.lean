@@ -4,7 +4,7 @@ import JanusX86.Proofs.Monad
 
 The analogue of JanusASL's `LinuxEL0Config`: the part of the Sail x86 state that the
 64-bit application-level path of `x86_fetch_decode_execute` reads and that is not Janus
-architectural state. `janus_x86_init` (JanusX86/sail/harness.sail) establishes it, and
+architectural state. `janus_x86_init` (models/x86/sail/harness.sail) establishes it, and
 `janus-x86-check` checks the Boolean version `cfgOk` on the base state and on every case's pre-
 and post-states (docs/validation/X86FORMAL.md).
 

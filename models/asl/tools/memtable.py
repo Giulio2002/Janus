@@ -13,7 +13,7 @@ for p in d["procs"]:
     if not m:
         continue
     tool = m.group(1)
-    f = re.search(r"/JanusASL/((?:ArmASL|JanusASL)/[^ ]*?)\.(lean|c)\b", a) or re.search(r" (\S+\.lean)", a)
+    f = re.search(r"/models/asl/((?:ArmASL|JanusASL)/[^ ]*?)\.(lean|c)\b", a) or re.search(r" (\S+\.lean)", a)
     mod = f.group(1).replace("/", ".") if f else " ".join(a.split()[1:])[:100]
     if tool == "clang":
         mod += ":c.o"

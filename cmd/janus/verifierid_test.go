@@ -642,15 +642,18 @@ func TestResultEntryTamperIsMiss(t *testing.T) {
 func copyTreeForBuild(t *testing.T, dst string) {
 	t.Helper()
 	// Only what the command is built from; no .git, no .lake.
-	items := []string{"go.mod", "go.sum", "framework.go", "identity_sentinel.s", "identity_sentinel.h", "lakefile.toml", "lake-manifest.json", "lean-toolchain", "Janus.lean", "Janus", "JanusASL", "cmd"}
+	items := []string{"go.mod", "go.sum", "framework.go", "identity_sentinel.s", "identity_sentinel.h", "lakefile.toml", "lake-manifest.json", "lean-toolchain", "Janus.lean", "Janus", "models/asl", "cmd"}
 	for _, it := range items {
-		cmd := exec.Command("cp", "-a", filepath.Join(repoRoot, it), dst+"/")
+		if err := os.MkdirAll(filepath.Join(dst, filepath.Dir(it)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("cp", "-a", filepath.Join(repoRoot, it), filepath.Join(dst, filepath.Dir(it))+"/")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("cp %s: %v\n%s", it, err, out)
 		}
 	}
 	// The copy needs neither tests' testdata nor generated artifacts.
-	os.RemoveAll(filepath.Join(dst, "JanusASL", ".lake"))
+	os.RemoveAll(filepath.Join(dst, "models", "asl", ".lake"))
 }
 
 func buildCopy(t *testing.T, dir, out string, env []string, flags ...string) string {

@@ -40,9 +40,9 @@ the amd64 model or JanusX86.
 |---|---|
 | model | [rems-project/sail-x86-from-acl2](https://github.com/rems-project/sail-x86-from-acl2) `0c6c023dccc7c20d8d9dbfc481f01d9bb49d62bf` (the commit `validation/reference-models/sail-x86/build.sh` uses) |
 | Sail | 0.20.3 with JanusASL's patches (JanusASL's opam switch `sail-0.20.3-janus`, `scripts/asl.sh deps`) |
-| Lean | 4.34.1 (`JanusX86/lean-toolchain`, as the main package) |
+| Lean | 4.34.1 (`models/x86/lean-toolchain`, as the main package) |
 | lean-sail | v7, `8fc8e29d7a62f832346cc7548953e44ec17bc271` |
-| vendored model | `JanusX86/vendor/X86Sail.tar.gz` (+ `.sha256`); `gen` reproduces it byte for byte |
+| vendored model | `models/x86/vendor/X86Sail.tar.gz` (+ `.sha256`); `gen` reproduces it byte for byte |
 
 ## Results (2026-10-27, the slice of the whole one- and two-byte maps)
 
@@ -78,7 +78,7 @@ refuses a misaligned or unmapped operand where the model runs, or the reverse).
 |---|---|
 | corpora | `scripts/oracle-amd64.sh full` (505,715 cases) and the class runs `fp` (551,478), `v3` (217,698), `x87` (125,344), `sse` (863,656), `crypto` (98,745), `avx` (797,454) and `avx512` (133,436): 3,293,526 cases in all, each with the hardware results of the same run (`hw.jsonl`; native oracle: 0 MISMATCH) |
 | `janus-x86-check` | **0 MISMATCH on every corpus**; `X86Config` holds on every case's pre- and post-state. Before the slice covered the whole maps: 452,644 `janus decodes, the slice excludes it` verdicts over these corpora (below). After: none |
-| proofs | the audited class theorems listed below (an explicit list in `JanusX86/Audit.lean`, every statement printed); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only |
+| proofs | the audited class theorems listed below (an explicit list in `models/x86/JanusX86/Audit.lean`, every statement printed); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only |
 
 The check runs the model twice per case, with the undefined-value source (`janus_undef`, below)
 at 0 and at 1, and compares only what Janus defines (Janus' `Flags` are `Option Bool`; a flag
@@ -273,7 +273,7 @@ The proofs relate Janus to **the generated Lean**, not to X86isa's ACL2 text. Tr
    the hardware results.
 2. **Sail → Lean** (Sail 0.20.3's Lean backend, JanusASL's patches), checked empirically by the
    check on 697,542 cases against Janus and the hardware.
-3. **The slice and its edits** (`JanusX86/sail/slice.py`, `keep.txt`, `harness.sail`,
+3. **The slice and its edits** (`models/x86/sail/slice.py`, `keep.txt`, `harness.sail`,
    `termination_measures.sail`, `JanusX86Extras.lean`). Kept dispatch arms are verbatim; every other
    arm of the one- and two-byte opcode maps becomes `x86_model_error "janus-excluded: …"`, so a
    byte sequence Janus decodes that lands on an excluded arm is reported, not hidden. The slice used to keep only the opcodes
@@ -308,8 +308,8 @@ scripts/x86formal.sh check && scripts/x86formal.sh prove
 ```
 
 `gen` is deterministic (sorted tar members, mtime 0, `gzip -n`). To add an opcode to the slice,
-list it in `JanusX86/sail/keep.txt` (and in `roots.txt` if nothing reaches its function). To
+list it in `models/x86/sail/keep.txt` (and in `roots.txt` if nothing reaches its function). To
 prove a new one-byte ModRM class, follow `Proofs/Unary.lean`: a decode lemma (Janus' `decode`
 on the class), a dispatch lemma (`one_byte_opcode_execute` → the arm, by `simp` with `decide`),
 the arm's `run_*` lemma against the abstract operand hypotheses, and `rm_frame`; then add the
-theorem to `JanusX86/Audit.lean`.
+theorem to `models/x86/JanusX86/Audit.lean`.

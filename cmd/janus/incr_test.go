@@ -773,7 +773,7 @@ func TestVerifierIdentityGoOnlyScope(t *testing.T) {
 	l := tb.clone()
 	l.framework["Janus/Amd64/Only.lean"] = nil
 	l.framework["Janus.lean"].Data = append(l.framework["Janus.lean"].Data, []byte("\n-- edit\n")...)
-	l.asl["JanusASL/lakefile.toml"].Data = append(l.asl["JanusASL/lakefile.toml"].Data, []byte("\n# edit\n")...)
+	l.asl["models/asl/lakefile.toml"].Data = append(l.asl["models/asl/lakefile.toml"].Data, []byte("\n# edit\n")...)
 	delete(l.framework, "Janus/Amd64/Only.lean")
 	l.sync()
 	if g, err := verifierIdentityScope(l.b, false); err != nil || g != goOnly {

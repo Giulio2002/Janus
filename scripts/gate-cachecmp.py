@@ -4,7 +4,7 @@
 
     gate-cachecmp.py hashes WORKTREE OUT.json     SHA-256 of the build artifacts the ASL/Sail caches serve:
                                                   every ArmASL and JanusASL .olean, and every emitted C file and
-                                                  compiled C object (ir:<tree>/<path>; ArmASL's modules build under JanusASL/.lake/build/ir/ArmASL, i.e. the janusasl tree; a symlinked file is recorded as symlink:<target>) of the janus, janusasl and Sail
+                                                  compiled C object (ir:<tree>/<path>; ArmASL's modules build under models/asl/.lake/build/ir/ArmASL, i.e. the janusasl tree; a symlinked file is recorded as symlink:<target>) of the janus, janusasl and Sail
                                                   Lake trees (and their combined digest)
                                                   and the Sail oracle driver binary, plus the build
                                                   configuration the driver depends on (config:SAIL_SPLIT from
@@ -16,7 +16,7 @@
 Byte hashes of .olean files are not comparable across directories: Lean 4.34 stores the module's linter messages
 (`Lean.Linter.lintLogExt`) in the .olean together with the absolute source path, so a module that emits a warning
 differs between two worktrees (and from the copy a cache entry was published from) in thousands of bytes although every
-declaration is the same. For the modules under JanusASL/Proofs/ ONLY, `hashes` therefore also records
+declaration is the same. For the modules under models/asl/JanusASL/Proofs/ ONLY, `hashes` therefore also records
 `sem:<module>` = the SHA-256 of the module re-serialized with its message log removed (tools/oleandigest: Lean's own
 saveModuleData, the WHOLE file: header, constants, every other extension's entries, compiled code), `lint:<module>` = the
 number of message-log entries and `lay:<module>` = "ok" when the original file has no bytes the module data does not
@@ -126,7 +126,7 @@ def semantic(exe, paths):
 
 def hashes(worktree):
     out = {}
-    lib = os.path.join(worktree, "JanusASL", ".lake", "build", "lib", "lean")
+    lib = os.path.join(worktree, "models", "asl", ".lake", "build", "lib", "lean")
     oleans = []
     for d, dirs, files in os.walk(lib):
         dirs.sort()
@@ -155,8 +155,8 @@ def hashes(worktree):
     # the C files and the objects they describe ARE compared here, and the cache audit checks each entry's .cin against its C.
     # Keys carry the tree and the path under build/ir, so a file present in one run only is a difference.
     for tree, lake in (("janus", os.path.join(worktree, ".lake")),
-                       ("janusasl", os.path.join(worktree, "JanusASL", ".lake")),
-                       ("sail", os.path.join(worktree, "JanusASL", ".lake", "packages", "Sail", ".lake"))):
+                       ("janusasl", os.path.join(worktree, "models", "asl", ".lake")),
+                       ("sail", os.path.join(worktree, "models", "asl", ".lake", "packages", "Sail", ".lake"))):
         base = os.path.join(lake, "build", "ir")
         for d, dirs, files in os.walk(base):
             dirs.sort()
@@ -173,7 +173,7 @@ def hashes(worktree):
         out["sail-driver"] = sha_file(drv)
     out.update(config(worktree))
     # `combined`: every artifact digest that is path independent (the sem/lint/lay records and the driver, and the file hashes of
-    # the modules outside JanusASL/Proofs/); `combined:bytes` all file hashes (informational)
+    # the modules outside models/asl/JanusASL/Proofs/); `combined:bytes` all file hashes (informational)
     h = hashlib.sha256()
     for k in sorted(k for k in out if not k.startswith(CONFIG) and not (k.startswith("olean:") and k[6:].startswith(PATH_ONLY_PREFIX))):
         h.update(("%s %s\n" % (k, out[k])).encode())

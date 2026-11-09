@@ -11,7 +11,7 @@ For every case of the oracle corpus (`artifacts/oracle/cases.jsonl`, format of
 `validation/hardware-comparison/arm64/layout/layout.go`), run
 
 * the **ASL side**: `ArmASL.Functions.janus_step` (the sail-arm arm-v9.4-a model, sliced to the
-  Janus subset and translated to Lean by Sail's Lean backend, `JanusASL/sail/`), from the Linux
+  Janus subset and translated to Lean by Sail's Lean backend, `models/asl/sail/`), from the Linux
   EL0 state of `janus_init` with the MMU on and a 4-level identity map of the code page and the
   data buffer (the same tables as `validation/reference-models/sail-arm/src/main.rs`), and
 * the **Janus side**: `Janus.Arm64.step` from the state `validation/model-runner/Oracle/Main.lean` builds,
@@ -162,7 +162,7 @@ def baseState : Except String SState := do
   pure { s with mem := baseMemory }
 
 
-/-! ## `UserMapped` (JanusASL/Proofs/Mem.lean), evaluated
+/-! ## `UserMapped` (models/asl/JanusASL/Proofs/Mem.lean), evaluated
 
 The load/store theorems assume that the ASL's own `AArch64_TranslateAddress` maps every byte of
 Janus' regions identically as Normal write-back memory, without fault and without changing the

@@ -99,7 +99,7 @@ type aslModelInfo struct {
 	Build          string            `json:"build,omitempty"`
 }
 
-// aslPackage is the JanusASL Lake package: the copy embedded in janus, or <janus-root>/JanusASL.
+// aslPackage is the JanusASL Lake package: the copy embedded in janus, or <janus-root>/models/asl.
 type aslPackage struct {
 	Source, Dir string
 	Files       map[string][]byte // slash paths relative to the package
@@ -121,16 +121,16 @@ func aslDiag(msg, next string) error {
 	return &diag{Invalid: true, Msg: msg, Stage: "ASL build", Next: next}
 }
 
-// loadASL reads the JanusASL package of the framework: <dir>/JanusASL for a directory framework,
+// loadASL reads the JanusASL package of the framework: <dir>/models/asl for a directory framework,
 // else the copy embedded in this binary. The vendored model must match its recorded SHA-256.
 func loadASL(fw *framework) (*aslPackage, error) {
 	pkg := &aslPackage{Source: fw.Source, Files: map[string][]byte{}}
 	var fsys fs.FS
 	if fw.Source == "directory" {
-		pkg.Dir = filepath.Join(fw.Dir, "JanusASL")
+		pkg.Dir = filepath.Join(fw.Dir, "models", "asl")
 		fsys = os.DirFS(pkg.Dir)
 	} else {
-		sub, err := fs.Sub(janus.ASL, "JanusASL")
+		sub, err := fs.Sub(janus.ASL, "models/asl")
 		if err != nil {
 			return nil, aslDiag("Cannot read the embedded JanusASL package: "+err.Error(), "")
 		}
@@ -157,18 +157,18 @@ func loadASL(fw *framework) (*aslPackage, error) {
 	})
 	if err != nil {
 		return nil, aslDiag("Cannot read the JanusASL package: "+err.Error(),
-			"--asl needs the JanusASL package: the copy embedded in janus, or JanusASL/ in the --janus-root checkout.")
+			"--asl needs the JanusASL package: the copy embedded in janus, or models/asl/ in the --janus-root checkout.")
 	}
 	for _, p := range []string{"lakefile.toml", "lake-manifest.json", "vendor/ArmASL.tar.gz", "vendor/ArmASL.tar.gz.sha256", "vendor/ArmASL.version"} {
 		if _, ok := pkg.Files[p]; !ok {
 			return nil, aslDiag("The JanusASL package has no "+p+".",
-				"--asl needs the JanusASL package: the copy embedded in janus, or JanusASL/ in the --janus-root checkout.")
+				"--asl needs the JanusASL package: the copy embedded in janus, or models/asl/ in the --janus-root checkout.")
 		}
 	}
 	pkg.ModelSha256 = sha256Hex(pkg.Files["vendor/ArmASL.tar.gz"])
 	if want := strings.TrimSpace(string(pkg.Files["vendor/ArmASL.tar.gz.sha256"])); want != pkg.ModelSha256 {
-		return nil, aslDiag(fmt.Sprintf("The vendored ASL model JanusASL/vendor/ArmASL.tar.gz has SHA-256 %s, not the recorded %s.", pkg.ModelSha256, want),
-			"Restore the vendored model (git checkout JanusASL/vendor), or regenerate it with scripts/asl.sh gen.")
+		return nil, aslDiag(fmt.Sprintf("The vendored ASL model models/asl/vendor/ArmASL.tar.gz has SHA-256 %s, not the recorded %s.", pkg.ModelSha256, want),
+			"Restore the vendored model (git checkout models/asl/vendor), or regenerate it with scripts/asl.sh gen.")
 	}
 	pkg.Version = map[string]string{}
 	for _, l := range strings.Split(string(pkg.Files["vendor/ArmASL.version"]), "\n") {
@@ -275,7 +275,7 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 	}
 	model, err := unpackModel(pkg.Files["vendor/ArmASL.tar.gz"])
 	if err != nil {
-		return nil, aslDiag("Cannot unpack the vendored ASL model: "+err.Error(), "Restore JanusASL/vendor/ArmASL.tar.gz.")
+		return nil, aslDiag("Cannot unpack the vendored ASL model: "+err.Error(), "Restore models/asl/vendor/ArmASL.tar.gz.")
 	}
 	dir := aslCacheDir(fw, pkg, janusDir)
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {

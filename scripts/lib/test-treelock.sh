@@ -11,10 +11,10 @@ unset POOL_TIMELINE JANUS_POOL_DIR JANUS_GATE_PG
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; repo="$(cd "$here/../.." && pwd)"
 t="$(mktemp -d "${TMPDIR:-/tmp}/test-treelock.XXXXXX")"; trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
-tree="$t/tree"; mkdir -p "$tree/JanusASL/.lake" "$tree/.lake/build" "$tree/scripts/lib"; : > "$tree/JanusASL/lakefile.toml" "$tree/scripts/lib"
+tree="$t/tree"; mkdir -p "$tree/models/asl/.lake" "$tree/.lake/build" "$tree/scripts/lib"; : > "$tree/models/asl/lakefile.toml" "$tree/scripts/lib"
 cp -r "$here/lanelake" "$tree/scripts/lib/"; echo v1 > "$tree/.lake/build/Janus.olean"
 # tl_run as asl.sh defines it (extracted, so the test runs the real text)
-sed -n '/^tl_run() {/,/^_TL_SELF=/p' "$repo/scripts/asl.sh" > "$t/tl.sh"; pkg="$tree/JanusASL"
+sed -n '/^tl_run() {/,/^_TL_SELF=/p' "$repo/scripts/asl.sh" > "$t/tl.sh"; pkg="$tree/models/asl"
 cat > "$t/fakelake" <<'EOS'
 #!/usr/bin/env bash
 # fake lake: "build" rewrites the framework olean slowly (replay does) and logs the interval
@@ -35,8 +35,8 @@ cat > "$t/lane.sh" <<'EOS'
 #!/usr/bin/env bash
 # a lane: tl_run-style write phase (restore = non-lake writer of a shared file, then lake build), then a reader phase
 set -u
-root="$FAKE_ROOT"; pkg="$FAKE_TREE/JanusASL"; . "$FAKE_T/tl.sh"
-phase_w() { echo "START r $$ $(date +%s.%N)" >> "$FAKE_LOG"; echo restoring > "$FAKE_TREE/JanusASL/cache"; sleep 0.3; echo ok > "$FAKE_TREE/JanusASL/cache"
+root="$FAKE_ROOT"; pkg="$FAKE_TREE/models/asl"; . "$FAKE_T/tl.sh"
+phase_w() { echo "START r $$ $(date +%s.%N)" >> "$FAKE_LOG"; echo restoring > "$FAKE_TREE/models/asl/cache"; sleep 0.3; echo ok > "$FAKE_TREE/models/asl/cache"
             echo "END r $$ $(date +%s.%N)" >> "$FAKE_LOG"; lake build; }
 phase_r() { echo "START q $$ $(date +%s.%N)" >> "$FAKE_LOG"; sleep 0.4; echo "END q $$ $(date +%s.%N)" >> "$FAKE_LOG"; }
 if [ "${1:-}" = __call ]; then shift; "$@"; exit; fi
@@ -47,7 +47,7 @@ chmod +x "$t"/fake* "$t/lane.sh"
 export FAKE_LOG="$t/log" FAKE_TREE="$tree" FAKE_T="$t" FAKE_ROOT="$tree" JANUS_REAL_LAKE="$t/fakelake" \
        JANUS_LANE_TREE="$tree" JANUS_LANE_LAKE_LOCK=1 PATH="$tree/scripts/lib/lanelake:$PATH"
 cp "$t/fakelake" "$t/lake_real"; ln -sf "$t/fakelake" "$t/lake"   # `lake` resolves to the wrapper first on PATH
-( cd "$tree/JanusASL" && "$t/lane.sh" ) & ( cd "$tree/JanusASL" && "$t/lane.sh" ) & ( cd "$tree/JanusASL" && "$t/lane.sh" ) &
+( cd "$tree/models/asl" && "$t/lane.sh" ) & ( cd "$tree/models/asl" && "$t/lane.sh" ) & ( cd "$tree/models/asl" && "$t/lane.sh" ) &
 ( cd "$tree" && "$t/fakejanus" ) & ( cd "$tree" && "$t/fakejanus" ) &
 sleep 0.2; ( cd "$tree" && "$t/fakejanus" ) &
 timeout 60 bash -c 'wait'; [ $? = 0 ] || true
@@ -78,17 +78,17 @@ iv=[(d["START"][0],d["START"][1],d["END"][1]) for d in ev.values() if "END" in d
 j=[i for i in iv if i[0]=="j"]; b=[i for i in iv if i[0]=="w"]
 sys.exit(1 if [1 for x in j for y in b if x[1]<y[2] and y[1]<x[2]] else 0)
 PY
-[ "$(cat "$tree/JanusASL/cache")" = ok ] && ok "the shared cache file ends consistent" || bad "cache file: $(cat "$tree/JanusASL/cache")"
-# --- two trees whose JanusASL/.lake is a symlink to ONE directory (as the gate's lake trees share the checkout's): the lock is
+[ "$(cat "$tree/models/asl/cache")" = ok ] && ok "the shared cache file ends consistent" || bad "cache file: $(cat "$tree/models/asl/cache")"
+# --- two trees whose models/asl/.lake is a symlink to ONE directory (as the gate's lake trees share the checkout's): the lock is
 # keyed by the resolved directory, so writers in different trees still serialise
 shared="$t/shared/.lake"; mkdir -p "$shared"
 for n in A B; do
-  mkdir -p "$t/t$n/JanusASL" "$t/t$n/.lake/build" "$t/t$n/scripts/lib"; : > "$t/t$n/JanusASL/lakefile.toml"
-  ln -sfn "$shared" "$t/t$n/JanusASL/.lake"; cp -r "$here/lanelake" "$t/t$n/scripts/lib/"; echo v1 > "$t/t$n/.lake/build/Janus.olean"
+  mkdir -p "$t/t$n/models/asl" "$t/t$n/.lake/build" "$t/t$n/scripts/lib"; : > "$t/t$n/models/asl/lakefile.toml"
+  ln -sfn "$shared" "$t/t$n/models/asl/.lake"; cp -r "$here/lanelake" "$t/t$n/scripts/lib/"; echo v1 > "$t/t$n/.lake/build/Janus.olean"
 done
 : > "$t/log"
 for n in A B A B; do
-  ( export FAKE_TREE="$t/t$n" FAKE_ROOT="$t/t$n" JANUS_LANE_TREE="$t/t$n" PATH="$t/t$n/scripts/lib/lanelake:$PATH"; cd "$t/t$n/JanusASL" && "$t/lane.sh" ) &
+  ( export FAKE_TREE="$t/t$n" FAKE_ROOT="$t/t$n" JANUS_LANE_TREE="$t/t$n" PATH="$t/t$n/scripts/lib/lanelake:$PATH"; cd "$t/t$n/models/asl" && "$t/lane.sh" ) &
 done
 wait
 python3 -I - "$t/log" <<'PY' && ok "trees sharing one .lake by symlink: writers of different trees never overlap" || bad "writers of two trees sharing a .lake overlapped"
@@ -106,7 +106,7 @@ PY
 cat > "$t/nest.sh" <<'EOS'
 #!/usr/bin/env bash
 set -u
-root="$FAKE_ROOT"; pkg="$FAKE_TREE/JanusASL"; . "$FAKE_T/tl.sh"
+root="$FAKE_ROOT"; pkg="$FAKE_TREE/models/asl"; . "$FAKE_T/tl.sh"
 inner() { :; }
 outer() { tl_run x inner; }
 if [ "${1:-}" = __call ]; then shift; "$@"; exit; fi
@@ -114,7 +114,7 @@ _TL_SELF="$0"
 tl_run s outer
 EOS
 chmod +x "$t/nest.sh"
-( cd "$tree/JanusASL" && timeout 20 "$t/nest.sh" > "$t/nest.out" 2>&1 ); nrc=$?
+( cd "$tree/models/asl" && timeout 20 "$t/nest.sh" > "$t/nest.out" 2>&1 ); nrc=$?
 [ "$nrc" = 97 ] && grep -q "refusing an exclusive" "$t/nest.out" && ok "x nested in a shared hold is refused with exit 97 (no deadlock)" || bad "nested x: rc $nrc (124 = it hung): $(cat "$t/nest.out")"
 [ "$fail" = 0 ] && echo "all checks passed"
 exit $fail

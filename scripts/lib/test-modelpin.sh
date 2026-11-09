@@ -172,17 +172,17 @@ fi
 
 # ---------------------------------------------------------------- build-script level: the pin steps of asl.sh / oracle-sail.sh
 # A fake checkout whose scripts and model inputs are the real ones (symlinks), with its own build directories.
-fr="$t/fake"; mkdir -p "$fr/JanusASL" "$fr/validation/reference-models/sail-arm" "$fr/artifacts"
+fr="$t/fake"; mkdir -p "$fr/models/asl" "$fr/validation/reference-models/sail-arm" "$fr/artifacts"
 ln -s "$root/scripts" "$fr/scripts"; ln -s "$root/lean-toolchain" "$fr/lean-toolchain"; ln -s "$root/lakefile.toml" "$fr/lakefile.toml"
 [ ! -e "$root/lakefile.lean" ] || ln -s "$root/lakefile.lean" "$fr/lakefile.lean"
-for x in vendor tools sail lake-manifest.json lakefile.toml lean-toolchain; do ln -s "$root/JanusASL/$x" "$fr/JanusASL/$x"; done
+for x in vendor tools sail lake-manifest.json lakefile.toml lean-toolchain; do ln -s "$root/models/asl/$x" "$fr/models/asl/$x"; done
 for x in Cargo.lock Cargo.toml cache_key.py instrument_model.py src; do ln -s "$root/validation/reference-models/sail-arm/$x" "$fr/validation/reference-models/sail-arm/$x"; done
 if [ -n "$ak" ]; then
   A() { JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/asl.sh" restore; }
   S() { JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/oracle-sail.sh" build; }
-  fresh() { rm -rf "$fr/JanusASL/.lake" "$fr/validation/reference-models/sail-arm/target"; }
+  fresh() { rm -rf "$fr/models/asl/.lake" "$fr/validation/reference-models/sail-arm/target"; }
   gpin; fresh; expect 0 "asl.sh restore from a valid pin" A
-  [ "$(cat "$fr/JanusASL/.lake/packages/Sail/Sail.olean" 2>/dev/null)" = s ] && ok "  ... the pinned files are in JanusASL/.lake" || bad "pinned files not restored"
+  [ "$(cat "$fr/models/asl/.lake/packages/Sail/Sail.olean" 2>/dev/null)" = s ] && ok "  ... the pinned files are in models/asl/.lake" || bad "pinned files not restored"
   gpin; chmod u+w "$t/gp/$ak/tree/build/lib/lean/ArmASL/Part01.olean" "$t/gp/$ak/tree/build/lib/lean/ArmASL"; echo X >> "$t/gp/$ak/tree/build/lib/lean/ArmASL/Part01.olean"
   fresh; expect 1 "asl.sh restore: a TAMPERED pinned artifact FAILS (no build around it)" A
   gpin; chmod u+w "$t/gp/$ak/tree/packages/Sail"; rm -f "$t/gp/$ak/tree/packages/Sail/Sail.olean"

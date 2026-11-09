@@ -2,18 +2,18 @@
 """Shared per-module build cache for the JanusASL proofs and the Janus framework modules they
 import (scripts/asl.sh, ASL_CACHE; docs/design/ASL.md "Build cache").
 
-    python3 -I JanusASL/tools/asl_mod_cache.py restore REPO_ROOT CACHE [--record FILE]   copy cached builds in
-    python3 -I JanusASL/tools/asl_mod_cache.py publish REPO_ROOT CACHE [--exe]
+    python3 -I models/asl/tools/asl_mod_cache.py restore REPO_ROOT CACHE [--record FILE]   copy cached builds in
+    python3 -I models/asl/tools/asl_mod_cache.py publish REPO_ROOT CACHE [--exe]
                                     store the builds of the JanusASL library's closure (--exe: and
                                     of its executables'), after `lake build` has built them
-    python3 -I JanusASL/tools/asl_mod_cache.py keys    REPO_ROOT         module -> key, one per line
-    python3 -I JanusASL/tools/asl_mod_cache.py show    REPO_ROOT MODULE  the canonical inputs of a key
-    python3 -I JanusASL/tools/asl_mod_cache.py gc      CACHE --max SIZE [--root REPO_ROOT]
+    python3 -I models/asl/tools/asl_mod_cache.py keys    REPO_ROOT         module -> key, one per line
+    python3 -I models/asl/tools/asl_mod_cache.py show    REPO_ROOT MODULE  the canonical inputs of a key
+    python3 -I models/asl/tools/asl_mod_cache.py gc      CACHE --max SIZE [--root REPO_ROOT]
                                     [--grace SECONDS] [--dry-run]
                                     evict entries (see "Eviction" below)
-    python3 -I JanusASL/tools/asl_mod_cache.py objkey  REPO_ROOT [arm|jasl]  id of the object entry (below)
-    python3 -I JanusASL/tools/asl_mod_cache.py objfiles REPO_ROOT [arm|jasl] its files, NUL-separated, relative
-                                    to JanusASL/.lake (nothing if the object set is incomplete)
+    python3 -I models/asl/tools/asl_mod_cache.py objkey  REPO_ROOT [arm|jasl]  id of the object entry (below)
+    python3 -I models/asl/tools/asl_mod_cache.py objfiles REPO_ROOT [arm|jasl] its files, NUL-separated, relative
+                                    to models/asl/.lake (nothing if the object set is incomplete)
 
 The ArmASL model and lean-sail are cached as one entry (asl_cache_key.py). This adds one entry per
 Lean module of the JanusASL package (JanusASL.*) and of the janus package (Janus.*), so a worktree
@@ -128,7 +128,7 @@ def canonical(obj):
 
 def load_armasl_key(root):
     sys.dont_write_bytecode = True  # no __pycache__ in the checkout
-    path = os.path.join(root, "JanusASL", "tools", "asl_cache_key.py")
+    path = os.path.join(root, "models", "asl", "tools", "asl_cache_key.py")
     spec = importlib.util.spec_from_file_location("asl_cache_key", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -199,7 +199,7 @@ class Keys:
     def __init__(self, root):
         self.root = os.path.abspath(root)
         self.bc = load_bcache(self.root)
-        pkgdir = os.path.join(self.root, "JanusASL")
+        pkgdir = os.path.join(self.root, "models", "asl")
         self.akey = load_armasl_key(self.root)
         self.pkgs = [Pkg("janusasl", pkgdir, "JanusASL", reduced_lakefile(self.akey, lakefile_path(pkgdir))),
                      Pkg("janus", self.root, "Janus", reduced_lakefile(self.akey, lakefile_path(self.root)))]
@@ -626,8 +626,8 @@ PER_OBJECT = ("jasl", "janus")  # one entry per object (a changed module recompi
 
 
 def scope_lake(root, scope):
-    """The .lake directory whose build/ir holds the scope's C (JanusASL/.lake)."""
-    return os.path.join(root, ".lake") if scope == "janus" else os.path.join(root, "JanusASL", ".lake")
+    """The .lake directory whose build/ir holds the scope's C (models/asl/.lake)."""
+    return os.path.join(root, ".lake") if scope == "janus" else os.path.join(root, "models", "asl", ".lake")
 
 
 def obj_dirs(lake, scope="arm"):
@@ -671,7 +671,7 @@ def obj_compiler(root):
         return _CC[root]
     akey = load_armasl_key(root)
     cc = os.environ.get("LEAN_CC")
-    pre = subprocess.run(["lean", "--print-prefix"], cwd=os.path.join(root, "JanusASL"), capture_output=True,
+    pre = subprocess.run(["lean", "--print-prefix"], cwd=os.path.join(root, "models", "asl"), capture_output=True,
                          text=True, timeout=120).stdout.strip()
     p = (shutil.which(cc.split()[0]) or cc.split()[0]) if cc else os.path.join(pre, "bin", "clang")
     try:
@@ -684,9 +684,9 @@ def obj_compiler(root):
 def obj_tables(root, scope="jasl"):
     """The lean_lib/lean_exe tables of the scope's package, whole (leancArgs, moreLeancArgs, weakLeancArgs,
     moreLinkArgs, roots, ...): Lake's trace does not cover the weak arguments. lean_lib JanusASL and lean_exe
-    janus-asl-check of JanusASL/lakefile.toml."""
+    janus-asl-check of models/asl/lakefile.toml."""
     import tomllib
-    path = os.path.join(root, "lakefile.toml" if scope == "janus" else os.path.join("JanusASL", "lakefile.toml"))
+    path = os.path.join(root, "lakefile.toml" if scope == "janus" else os.path.join("models", "asl", "lakefile.toml"))
     with open(path, "rb") as f:
         cfg = tomllib.load(f)
     if scope == "janus":
@@ -819,7 +819,7 @@ def stage_unit(root, scope, lake, ident, cs, stage):
     bc = load_bcache(root)
     cc, _, prefix = obj_compiler(root)
     try:
-        kpre, kcc = bc.keyed_toolchain(os.path.join(root, "JanusASL"))
+        kpre, kcc = bc.keyed_toolchain(os.path.join(root, "models", "asl"))
     except bc.CacheError as ex:
         sys.exit("objstage: %s" % ex)
     if cc != kcc or prefix != kpre:

@@ -134,10 +134,10 @@ def main():
 
 def module_name(path):
     p = os.path.abspath(path)
-    i = p.rfind("/JanusASL/JanusASL/")
+    i = p.rfind("/models/asl/JanusASL/")
     if i < 0:
-        raise SystemExit("split_proofs: not under JanusASL/JanusASL/: " + path)
-    return p[i + len("/JanusASL/"):-len(".lean")].replace("/", ".")
+        raise SystemExit("split_proofs: not under models/asl/JanusASL/: " + path)
+    return p[i + len("/models/asl/"):-len(".lean")].replace("/", ".")
 
 
 def verify(path, orig):

@@ -6,7 +6,7 @@
    "name": "janus",
    "manifestFile": "lake-manifest.json",
    "inherited": false,
-   "dir": "..",
+   "dir": "../..",
    "configFile": "lakefile.toml"},
   {"url": "https://github.com/rems-project/lean-sail",
    "type": "git",

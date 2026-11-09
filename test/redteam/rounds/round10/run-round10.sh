@@ -199,7 +199,7 @@ check C1_arm64_crypto_decode_vs_asl $? "janus-decode vs the sail-arm v9.4 decode
 
 }
 blk_asl() {
-echo "== holds: the ASL sqrt_real substitution (agent/asl, JanusASL/sail/fakereal_sqrt.py)"
+echo "== holds: the ASL sqrt_real substitution (agent/asl, models/asl/sail/fakereal_sqrt.py)"
 type tmark >/dev/null 2>&1 && tmark "== holds: the ASL sqrt_real substitution (agent/as"
 o="$(python3 -I $R/asl/half_only.py $R/asl 2>&1 | head -1)"
 grep -q 'MISMATCHES 0 ' <<<"$o"; check ASL1_sqrt_real_half_exhaustive $? "$(cut -c1-60 <<<"$o")"

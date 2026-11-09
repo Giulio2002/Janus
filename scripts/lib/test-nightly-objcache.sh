@@ -23,7 +23,7 @@ S
 cat > scripts/asl.sh <<'S'
 #!/usr/bin/env bash
 echo "asl $* cwd=$(basename "$PWD") JANUS_ASL_CACHE=${JANUS_ASL_CACHE-unset} ASL_OBJ_CACHE=${ASL_OBJ_CACHE-unset}" >> "$STUB/calls.log"
-mkdir -p .lake/build/ir/Janus JanusASL/.lake/build/lib/lean JanusASL/.lake/build/ir/ArmASL
+mkdir -p .lake/build/ir/Janus models/asl/.lake/build/lib/lean models/asl/.lake/build/ir/ArmASL
 echo c > .lake/build/ir/Janus/Foo.c
 case "$(cat "$STUB/mode")" in same) echo obj > .lake/build/ir/Janus/Foo.c.o.export ;; *) echo "obj-${JANUS_ASL_CACHE-unset}" > .lake/build/ir/Janus/Foo.c.o.export ;; esac
 S

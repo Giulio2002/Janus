@@ -3611,7 +3611,7 @@ opaque run (thm proofMod marker trusted : String) (depRoots : Array String) : IO
 
 `janus verify --asl` derives, from the user's verified `Ensures` theorem, the same statement
 about Arm's ASL (JanusASL's `Ensures.toASL`). The derivation is `aslCorollary`: it is used both by
-the `janus_asl_corollary` command that builds the corollary (JanusASL/JanusASL/Verify.lean) and by
+the `janus_asl_corollary` command that builds the corollary (models/asl/JanusASL/Verify.lean) and by
 `runASL` here, which audits the result without running any proof code. The JanusASL constants are
 named, not imported: the framework does not depend on JanusASL. -/
 

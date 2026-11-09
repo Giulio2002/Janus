@@ -4,7 +4,7 @@ import Lean
 
 /-! # A stricter audit of the JanusASL theorems (docs/audit/AUDIT-ASL.md, finding A6)
 
-`JanusASL/Audit.lean` selects theorems by name suffix (`_agree`, `_asl`, `toASL`) and checks
+`models/asl/JanusASL/Audit.lean` selects theorems by name suffix (`_agree`, `_asl`, `toASL`) and checks
 only their axioms. It does not fail when a documented theorem is missing or renamed, and it
 does not look at what the theorems state, so a weakened statement (an extra hypothesis, a
 `True` conclusion) passes. This audit, run by `test/redteam/rounds/rt-asl/run.sh`:

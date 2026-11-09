@@ -4,7 +4,7 @@
     compare.py CASES LEAN_JSONL C_JSONL
 
 LEAN_JSONL: `janus-asl-check --dump-asl CASES` (JanusASL's generated Lean model, with the
-`sqrt_real` replacement of JanusASL/sail/fakereal_sqrt.py). C_JSONL: oracle-sail's driver on the
+`sqrt_real` replacement of models/asl/sail/fakereal_sqrt.py). C_JSONL: oracle-sail's driver on the
 same cases (sail-arm compiled by Sail's C backend, whose `sqrt_real` is GMP Newton iteration).
 Both must complete every case with the same V0-V31 and FPSR. Prints one summary line, and the
 first differences; exits 1 on any difference.

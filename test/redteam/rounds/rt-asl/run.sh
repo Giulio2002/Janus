@@ -43,7 +43,7 @@ row() { # row NAME EXPECT RESULT  (EXPECT ok|blocked|latent: RESULT must start w
   printf '%-34s %-8s %s%s\n' "$1" "$2" "$3" "$mark"
 }
 
-lean_in_pkg() { (cd "$root/JanusASL" && lake env lean "$@"); }
+lean_in_pkg() { (cd "$root/models/asl" && lake env lean "$@"); }
 
 grp_prove() {
   echo "== JanusASL (scripts/asl.sh prove)"
@@ -124,10 +124,10 @@ grp_probes() {
     ( cd "$W" && cp "$here/sail/patches.sail" lean/ && cd lean &&
       sail --lean patches.sail -o RtProbe --lean-output-dir "$W/lean/out" --lean-force-output > sail.log 2>&1 &&
       cd out/RtProbe &&
-      python3 -I "$root/JanusASL/sail/fakereal_sqrt.py" RtProbe/FakeReal.lean &&
-      python3 -I "$root/JanusASL/sail/sail_int_fix.py" "$(grep -rl '^def integer_update_subrange' --include=*.lean . | head -1)" &&
-      sed -i "s#^git = .*#path = \"$root/JanusASL/.lake/packages/Sail\"#; /^rev = /d" lakefile.toml &&
-      cp "$root/JanusASL/lean-toolchain" . && rm -f lake-manifest.json &&
+      python3 -I "$root/models/asl/sail/fakereal_sqrt.py" RtProbe/FakeReal.lean &&
+      python3 -I "$root/models/asl/sail/sail_int_fix.py" "$(grep -rl '^def integer_update_subrange' --include=*.lean . | head -1)" &&
+      sed -i "s#^git = .*#path = \"$root/models/asl/.lake/packages/Sail\"#; /^rev = /d" lakefile.toml &&
+      cp "$root/models/asl/lean-toolchain" . && rm -f lake-manifest.json &&
       cp "$here/sail/Probe.lean" RtProbe/Probe.lean && memguard_lake build RtProbe > build.log 2>&1 &&
       lake env lean RtProbe/Probe.lean > "$W/lean/out.txt" 2>&1 ) || echo "Lean backend build failed (see $W/lean)"
     cmpk() { diff <(grep "^$1 " "$W/c/out") <(grep "^$1 " "$W/lean/out.txt") >/dev/null 2>&1; }
@@ -145,8 +145,8 @@ grp_probes() {
     fi
     # C2 is not reached: no let/var in sail-arm or in JanusASL's own Sail binds a block.
     sa="$DEPS/sail-arm-7d05816/arm-v9.4-a/src"
-    hits=$(cat "$sa"/*.sail "$root"/JanusASL/sail/*.sail 2>/dev/null | grep -cE '(let|var) [^=]*= *\{')
-    if [ "$hits" = 0 ]; then row "C2 shape in the sliced sources" blocked "blocked (0 let/var-bound blocks in sail-arm + JanusASL/sail)"
+    hits=$(cat "$sa"/*.sail "$root"/models/asl/sail/*.sail 2>/dev/null | grep -cE '(let|var) [^=]*= *\{')
+    if [ "$hits" = 0 ]; then row "C2 shape in the sliced sources" blocked "blocked (0 let/var-bound blocks in sail-arm + models/asl/sail)"
     else row "C2 shape in the sliced sources" blocked "FOUND $hits let/var-bound blocks: C2 may be reached"; fi
   else
     echo "   (skipped: no pinned toolchain at $DEPS; run scripts/asl.sh deps)"
@@ -186,7 +186,7 @@ grp_fsqrt() {
   if python3 -I "$here/sqrt/gen_cases.py" > "$W/fsqrt/cases.jsonl" &&
      scripts/oracle-sail.sh build > "$W/fsqrt/osb.log" 2>&1 &&
      JANUS_SAIL_JOBS=8 "$root/validation/reference-models/sail-arm/target/release/janus-oracle-sail" < "$W/fsqrt/cases.jsonl" > "$W/fsqrt/c.jsonl" &&
-     (cd "$root/JanusASL" && memguard_lake build janus-asl-check > "$W/fsqrt/build.log" 2>&1 &&
+     (cd "$root/models/asl" && memguard_lake build janus-asl-check > "$W/fsqrt/build.log" 2>&1 &&
       fsqrt_dump_parallel "$W/fsqrt/cases.jsonl" "$W/fsqrt/lean.jsonl" "$W/fsqrt/lean.err"); then
     if python3 -I "$here/sqrt/compare.py" "$W/fsqrt/cases.jsonl" "$W/fsqrt/lean.jsonl" "$W/fsqrt/c.jsonl" > "$W/fsqrt/cmp.txt"; then
       row "A5 fsqrt (Lean = C)" ok "ok ($(head -1 "$W/fsqrt/cmp.txt"))"

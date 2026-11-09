@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Independent model: ASL FPSqrt = FPRound(exact sqrt) vs FPRound(sqrt_real') where sqrt_real' is
-the JanusASL/sail/fakereal_sqrt.py replacement (round-to-odd at 2^-1100), transliterated from
+the models/asl/sail/fakereal_sqrt.py replacement (round-to-odd at 2^-1100), transliterated from
 the generated Lean (vendor/ArmASL.tar.gz @502cb93, ArmASL/FakeReal.lean, Part06.lean FPRoundBase__1).
 
 (a) oracle: FPRoundBase on r = sqrt(s) with every decision made by exact integer/rational

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The key of the shared ArmASL build cache (scripts/asl.sh, ASL_CACHE; docs/design/ASL.md "Build cache").
 
-    python3 -I JanusASL/tools/asl_cache_key.py REPO_ROOT          the key (32 hex digits)
-    python3 -I JanusASL/tools/asl_cache_key.py REPO_ROOT --show   the canonical inputs it hashes
+    python3 -I models/asl/tools/asl_cache_key.py REPO_ROOT          the key (32 hex digits)
+    python3 -I models/asl/tools/asl_cache_key.py REPO_ROOT --show   the canonical inputs it hashes
 
 A cache entry holds the ArmASL build outputs (oleans, ileans, C, objects, Lake traces) and the
 lean-sail package. The key is the SHA-256 of exactly the inputs those outputs are a function of,
@@ -15,15 +15,15 @@ Lake does not trace but that still reach the outputs (weak arguments, leanc argu
   * the splitter (split_lean.py), as before (it only runs in `gen`, so this is conservative);
   * both lean-toolchain files (JanusASL's is the one elan runs in JanusASL/; the root's is the
     framework's);
-  * the lean-sail entry of JanusASL/lake-manifest.json (url, rev, ...) and the manifest's
+  * the lean-sail entry of models/asl/lake-manifest.json (url, rev, ...) and the manifest's
     packagesDir: the only package ArmASL imports, and where it lives;
-  * JanusASL/lakefile.toml, parsed and reduced to
+  * models/asl/lakefile.toml, parsed and reduced to
       - every package-level setting except the ones listed in PKG_IGNORED below (an unknown or
         new setting is therefore keyed: the default is to key, not to drop),
       - every lean_lib / lean_exe table that can own an ArmASL module: the ArmASL lib itself and
         any target whose name, roots, globs or root is ArmASL or ArmASL.* (Lake builds a module
         with the options of the first library that claims it), in file order;
-  * the package-level extraDepTargets of the janus package (`path = ".."`): Lake mixes the
+  * the package-level extraDepTargets of the janus package (`path = "../.."`): Lake mixes the
     transitive dependencies' extraDepTargets into every module trace;
   * the content of the toolchain `lean` resolves to in JanusASL/ (driver binaries, libleanshared and
     every core .olean, by SHA-256; `lean --version`), the environment variables that reach the
@@ -191,7 +191,7 @@ def sha(data):
 
 
 def inputs(root):
-    pkg = os.path.join(root, "JanusASL")
+    pkg = os.path.join(root, "models", "asl")
     out = {
         "scheme": SCHEME,
         "model": read(os.path.join(pkg, "vendor", "ArmASL.tar.gz.sha256")).decode().split()[0],
@@ -206,7 +206,7 @@ def inputs(root):
     out["manifest.packagesDir"] = manifest.get("packagesDir")
     sail = [p for p in manifest.get("packages", []) if p.get("name") == "Sail"]
     if len(sail) != 1:
-        sys.exit("asl_cache_key: JanusASL/lake-manifest.json has %d Sail entries" % len(sail))
+        sys.exit("asl_cache_key: models/asl/lake-manifest.json has %d Sail entries" % len(sail))
     out["manifest.Sail"] = sail[0]
 
     try:
@@ -227,7 +227,7 @@ def inputs(root):
                 if any(claims_model(t.get(k)) for k in ("name", "roots", "globs", "root")):
                     owners.append({"kind": kind, "config": t})
         if not any(o["kind"] == "lean_lib" and o["config"].get("name") == MODEL for o in owners):
-            sys.exit("asl_cache_key: JanusASL/lakefile.toml has no lean_lib %s" % MODEL)
+            sys.exit("asl_cache_key: models/asl/lakefile.toml has no lean_lib %s" % MODEL)
         # Lake resolves a module to the first target that claims it: keep the file order.
         out["lakefile.owners"] = owners
 

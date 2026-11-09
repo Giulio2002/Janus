@@ -700,7 +700,7 @@ the proofs are checked by the kernel replay of the `.olean`s, and `janus-asl-che
 
 No check result, no theorem, no audit output and no replay marker is cached by this layer. Every
 check still runs on every invocation: `scripts/asl.sh prove` still has Lake check every JanusASL
-module against the restored `.olean`s and runs `JanusASL/Audit.lean` (the axiom audit);
+module against the restored `.olean`s and runs `models/asl/JanusASL/Audit.lean` (the axiom audit);
 `scripts/asl.sh replay` still runs `leanchecker` over every module (the kernel re-checks every
 declaration); `test/redteam/rounds/rt-asl/run.sh` still runs every group (A1-A8, the probes, FSQRT, the
 concurrency tests), the FSQRT and probe rows now using a cached build of the *program under test*,
@@ -708,7 +708,7 @@ not a cached outcome. A restored `.olean` is the same bytes that a build of the 
 produces (the key below), and the kernel replay re-checks them anyway.
 
 **The key is a hash of every input.** An entry lives at a path named by the SHA-256 of
-(`JanusASL/tools/asl_cache_key.py`, `asl_mod_cache.py`, `validation/reference-models/sail-arm/cache_key.py`):
+(`models/asl/tools/asl_cache_key.py`, `asl_mod_cache.py`, `validation/reference-models/sail-arm/cache_key.py`):
 
 * the sources: the vendored model tarball's digest, each module's source file by content, the
   Sail driver's `Cargo.toml`/`Cargo.lock`/`src/**`, the pinned crate revision and model digest,

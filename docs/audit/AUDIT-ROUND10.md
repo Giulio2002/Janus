@@ -216,7 +216,7 @@ note could add.
 
 ## The ASL slice regeneration (agent/asl): holds
 
-`JanusASL/sail/fakereal_sqrt.py` replaces the one `sqrt_real` of the generated `FakeReal.lean`
+`models/asl/sail/fakereal_sqrt.py` replaces the one `sqrt_real` of the generated `FakeReal.lean`
 (the regex matches exactly one definition; the vendored slice has no other). The replacement,
 with `K = 1100`, computes `m = Nat.sqrt ⌊num·4^K/den⌋` and returns `m/2^K` when `m²·den = num·4^K`
 (exact), else `(2m+1)/2^(K+1)`: round-to-odd at `2^-1100`, strictly inside the interval of the

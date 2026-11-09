@@ -38,7 +38,7 @@ about the ASL, bound to the binary ([below](#janus-verify---asl-the-corollary-of
 | corpus | `artifacts/oracle/cases.jsonl` from `scripts/oracle.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
 | `janus-asl-check` | **566,027 agree, 17,729 gap, 0 MISMATCH** (slice with the scalar floating-point, crypto, CRC and permute decoders, vendored sha256 `cd26b412…`; FPCR/FPSR set from the case and FPSR compared after the step); `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 1 h with 12 tasks |
 | `janus-asl-check`, slice round 2 | **927,078 agree, 38,443 gap, 0 MISMATCH** on 965,521 cases of the corpus of agent/asl + agent/stxr (96833af, with main 4a75ac7) + agent/syscall + agent/neonfix (Advanced SIMD, exclusives, SVC/BRK/UDF, MRS/MSR of NZCV/FPSR/FPCR/DIT and the environment registers); vendored sha256 `fd9e1885…`; `LinuxEL0Config`/`FPConfig` and `UserMapped` hold on every case; 2 h 15 min with 12 tasks |
-| proofs | **84 audited theorems** (an explicit list in JanusASL/Audit.lean; test/redteam/rounds/rt-asl/AuditStrict.lean prints the statements of 81 of them, plus `JanusASL.Verify.classify_sound`): the encoding-class `*_agree` theorems, the 4 FP rounding theorems (`rb32Of_eq`, `rb64Of_eq`, `run_FPRoundBase32`, `run_FPRoundBase64`), the 16 scalar floating-point encoding-class theorems (`fcmp_agree`, `fadd_agree`, `fsub_agree`, `fmul_agree`, `fdiv_agree`, `fmadd_agree`, `fmsub_agree`, `fnmadd_agree`, `fnmsub_agree`, `fsqrt_agree`, `fccmp_agree`, `scvtf_agree`, `ucvtf_agree`, `fcvtzs_agree`, `fcvtzu_agree`, `fcvt_agree`), `run_agree_fp`, `fpClassify_sound`, `classify_sound_fp`, `classifyAll_sound`, `Ensures.toASL_fp`, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
+| proofs | **84 audited theorems** (an explicit list in models/asl/JanusASL/Audit.lean; test/redteam/rounds/rt-asl/AuditStrict.lean prints the statements of 81 of them, plus `JanusASL.Verify.classify_sound`): the encoding-class `*_agree` theorems, the 4 FP rounding theorems (`rb32Of_eq`, `rb64Of_eq`, `run_FPRoundBase32`, `run_FPRoundBase64`), the 16 scalar floating-point encoding-class theorems (`fcmp_agree`, `fadd_agree`, `fsub_agree`, `fmul_agree`, `fdiv_agree`, `fmadd_agree`, `fmsub_agree`, `fnmadd_agree`, `fnmsub_agree`, `fsqrt_agree`, `fccmp_agree`, `scvtf_agree`, `ucvtf_agree`, `fcvtzs_agree`, `fcvtzu_agree`, `fcvt_agree`), `run_agree_fp`, `fpClassify_sound`, `classify_sound_fp`, `classifyAll_sound`, `Ensures.toASL_fp`, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
 | `janus verify --asl` | the ASL corollaries of the shipped `Add`, `Max`, `Mul64` and `Add128` proofs, derived from their artifacts, audited and kernel-replayed (`scripts/asl.sh verify`, `TestASLExamples`) |
 
 Agreement by corpus class (`agree` / `gap`):
@@ -84,10 +84,10 @@ theorem madd_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b001
 `Rel js s` says that the Sail state holds Janus' X0–X30, SP (as `SP_EL0`), PC and NZCV, at EL0
 with `PSTATE.SP = 0` and `PSTATE.nRW = 0`. All other Sail state is unconstrained: system
 registers, features, memory, and so on. `janus_step` is the generated Sail entry point
-(`JanusASL/sail/harness.sail`). It is sail-arm's `__DecodeA64` (decode, then execute), with SEE
+(`models/asl/sail/harness.sail`). It is sail-arm's `__DecodeA64` (decode, then execute), with SEE
 retry and the PC update of `__InstructionExecute`, and it maps ASL exceptions to an outcome.
 
-| class (Arm encoding group) | words | status | theorem (JanusASL/Proofs/…) |
+| class (Arm encoding group) | words | status | theorem (models/asl/JanusASL/Proofs/…) |
 |---|---|---|---|
 | ADD/ADDS/SUB/SUBS (immediate) | 2^26 | **proved** | `addSubImm_agree` (AddSubImmClass) |
 | ADD/ADDS/SUB/SUBS (shifted register) | all valid | **proved** | `addSubShifted_agree` (AddSubShifted) |
@@ -190,7 +190,7 @@ is disabled), `FPProcessDenorms` and `FPCompare` (FP/Compare.lean). An exception
 without trapping has its FPCR enable bit clear, which is all the ASL's trap test needs.
 
 The ASL's `while` loops (FPRoundBase normalizes the mantissa with two) are `Lean.Loop.forIn`, which
-Lean unfolds for monads with a `Lean.Order.MonadTail` instance. Decision: JanusASL/Proofs/Loop.lean
+Lean unfolds for monads with a `Lean.Order.MonadTail` instance. Decision: models/asl/JanusASL/Proofs/Loop.lean
 adds that instance for `EStateM` (a flat order per initial state; no axioms beyond the standard
 three) and the lemma `forIn_loop_pure` for loops with a pure body. This is reasoning about the
 existing definitions only: no generated definition, and nothing in the generator or the vendored
@@ -342,7 +342,7 @@ corollary says nothing about the corresponding ASL state (the four examples are 
 
 So for these programs the shipped guarantee, for example "Add returns x + y", holds of Arm's ASL
 (as translated) under `LinuxEL0Config`. Earlier versions copied the four programs by hand into
-`JanusASL/Proofs/Examples.lean`; those copies are gone, and the corollaries now come from the
+`models/asl/JanusASL/Proofs/Examples.lean`; those copies are gone, and the corollaries now come from the
 artifacts (`cmd/janus` test `TestASLExamples`, and `.github/workflows/asl.yml`).
 
 The other classes are covered by the corpus test. Loads and stores go through the full
@@ -352,7 +352,7 @@ pending.
 ### How the proofs work
 
 The generated ASL is ordinary Lean: `SailM` is `EStateM` over Sail's sequential state. Each proof
-evaluates it symbolically with `simp`, using one run lemma per primitive (`JanusASL/Proofs/Monad`,
+evaluates it symbolically with `simp`, using one run lemma per primitive (`models/asl/JanusASL/Proofs/Monad`,
 `Basic`, `Gpr`). There are four layers:
 
 1. **Dispatch.** `__DecodeA64` → `__DecodeA64_DataProcImm` / `_DataProcReg` (Step.lean). Each
@@ -378,7 +378,7 @@ evaluates it symbolically with `simp`, using one run lemma per primitive (`Janus
 4. **Assembly.** `step_agree` (Step.lean) combines these with Janus' `decode` lemmas
    (JanusDecode.lean) and with the PC update of `janus_step`.
 
-`scripts/asl.sh prove` builds the proofs and runs `JanusASL/Audit.lean`. That file walks the
+`scripts/asl.sh prove` builds the proofs and runs `models/asl/JanusASL/Audit.lean`. That file walks the
 environment and fails if any `JanusASL.Proofs.*_agree` theorem depends on an axiom other than
 `propext`, `Classical.choice` and `Quot.sound`. This rules out `sorryAx`, and also
 `Lean.ofReduceBool`, so no `native_decide` or `bv_decide`. Once the model is built (`scripts/asl.sh
@@ -433,7 +433,7 @@ The steps, each with its own stage:
    second). `janus framework` shows the build directory and whether it is built. Builds are
    kept for `$JANUS_ASL_RETENTION_DAYS` (default 30) after their last use. Lake reuses modules
    by content hash, so a build directory can be seeded from an in-tree build
-   (`scripts/asl.sh verify` does so from `JanusASL/.lake`). The compiled modules of the build
+   (`scripts/asl.sh verify` does so from `models/asl/.lake`). The compiled modules of the build
    (JanusASL, ArmASL and lean-sail) are then **pinned** like the framework and re-checked after
    every later step.
 2. **`ASL coverage`.** janus compiles, trusted (it imports only `Extracted` and
@@ -499,10 +499,10 @@ main theorem verifies; each ASL corollary is refused. A consumer package with a 
 |---|---|---|
 | Lean | 4.34.1 (`lean-toolchain`, same as Janus) | |
 | [sail-arm](https://github.com/rems-project/sail-arm) | `7d0581642d0e` (master; includes the Lean `MOD` = `Nat.mod` fix in `prelude.sail`) | Arm's ASL for v9.4-A, translated to Sail by Arm's asl_to_sail |
-| [Sail](https://github.com/rems-project/sail) | tag `0.20.3` + `JanusASL/sail/sail-0.20.3-upstream-backports.patch` + `JanusASL/sail/sail-0.20.3-janus-lean-fixes.patch` | Lean backend |
+| [Sail](https://github.com/rems-project/sail) | tag `0.20.3` + `models/asl/sail/sail-0.20.3-upstream-backports.patch` + `models/asl/sail/sail-0.20.3-janus-lean-fixes.patch` | Lean backend |
 | OCaml / opam | 5.2.1 / opam 2.x, own root `$DEPS/opam`, switch `sail-0.20.3-janus` | builds Sail |
 | [lean-sail](https://github.com/rems-project/lean-sail) | tag v7, `8fc8e29d7a62` | Lean runtime library of the generated code (v6, Sail 0.20.3's default, does not build on 4.34.1) |
-| generated model | `JanusASL/vendor/ArmASL.tar.gz` (sha256 in `.sha256`), 50 chained parts plus 4 support modules, 21 MB | unpacked into `JanusASL/ArmASL*` (ignored by git) |
+| generated model | `models/asl/vendor/ArmASL.tar.gz` (sha256 in `.sha256`), 50 chained parts plus 4 support modules, 21 MB | unpacked into `models/asl/ArmASL*` (ignored by git) |
 
 Sail-master cannot be used: it removed `lib/trace.sail`, which sail-arm still includes.
 
@@ -543,7 +543,7 @@ upstream (none has been filed):
    `toUInt64`, which mapped negative values to 0.
 7. **Square root.** The toolchain's `sqrt_real` goes through `Float`, which FSQRT reaches once
    the scalar floating-point instructions are in the slice. `scripts/asl.sh gen` replaces it
-   mechanically (JanusASL/sail/fakereal_sqrt.py) by the round-to-odd approximation at absolute
+   mechanically (models/asl/sail/fakereal_sqrt.py) by the round-to-odd approximation at absolute
    precision 2^-1100: `m/2^1100` when `m = ⌊√x·2^1100⌋` is exact, `(2m+1)/2^1101` otherwise.
    Every boundary FPRound tests for binary16/32/64 is a multiple of 2^-1100, so FPRound of it
    equals FPRound of the exact root (result and exceptions). The corpus FSQRT cases agree, and
@@ -552,14 +552,14 @@ upstream (none has been filed):
    vector of the field's width before the update, so every bit outside the field was lost (Sail's
    C and OCaml libraries update the integer in place). FPRoundBase's round-to-odd (FCVTXN) is the
    one use in the slice. `scripts/asl.sh gen` replaces the generated definition mechanically
-   (JanusASL/sail/sail_int_fix.py) by `i - ((i / 2^lo) % 2^len) * 2^lo + x * 2^lo`; rt-asl row
+   (models/asl/sail/sail_int_fix.py) by `i - ((i / 2^lo) % 2^len) * 2^lo + x * 2^lo`; rt-asl row
    A5 ius checks it against Sail's C backend, and the corpus FCVTXN cases agree.
 
 Bugs 4–6 each produced a model that compiled without complaint but gave wrong results. Only the
 corpus comparison found them. That comparison is the reason the check exists alongside the
 proofs.
 
-### Slicing (JanusASL/sail/)
+### Slicing (models/asl/sail/)
 
 The whole arm-v9.4-a model does not fit in Lean: the full `BranchExcSys` decode alone came to
 207 MB. Generation therefore runs in two stages:
@@ -616,15 +616,15 @@ lean-sail package are copied from `<dir>/<key>`, checked against the entry's SHA
 after a build they are published there atomically if the entry is missing.
 `scripts/asl.sh model` builds (or restores) only the model.
 
-The key (`JanusASL/tools/asl_cache_key.py`, `--show` prints its inputs) covers exactly what the
+The key (`models/asl/tools/asl_cache_key.py`, `--show` prints its inputs) covers exactly what the
 ArmASL outputs are a function of, so a branch that edits only JanusASL's proofs, its other
 targets or their options (agent/aslverify adds roots, a lib and an exe) shares the entry:
 
 * the vendored tarball's SHA-256 (the sources of every ArmASL module), the splitter, both
   `lean-toolchain` files;
-* the lean-sail entry of `JanusASL/lake-manifest.json` and its `packagesDir` (ArmASL imports
+* the lean-sail entry of `models/asl/lake-manifest.json` and its `packagesDir` (ArmASL imports
   only `Sail` and `ArmASL.*`);
-* from the parsed `JanusASL/lakefile.toml`: every package-level setting except metadata, default
+* from the parsed `models/asl/lakefile.toml`: every package-level setting except metadata, default
   targets, drivers, release and server-only settings (an unknown setting is keyed), and every
   `lean_lib`/`lean_exe` that can own an ArmASL module (the `ArmASL` lib, and any target whose
   name, roots, globs or root is `ArmASL` or `ArmASL.*`), whole and in file order;
@@ -644,7 +644,7 @@ without `tomllib`) falls back to hashing the whole file. Entries under the previ
 whole lakefile and manifest, a superset of these inputs) are still read and never written, so the
 existing entry is reused and republished under the new key on the first build.
 
-Measured with `JanusASL/tools/test_asl_cache.sh --e2e /srv/janus-asl-cache` (read only): a
+Measured with `models/asl/tools/test_asl_cache.sh --e2e /srv/janus-asl-cache` (read only): a
 checkout restored from the existing entry and published into a temporary cache; a copy with the
 aslverify lakefile edits (other JanusASL roots, a new lib and a new exe) gets the same key, and its
 restore takes **1.2 s** (695 files, manifest checked), after which `lake build ArmASL --no-build`
@@ -658,7 +658,7 @@ second restore recopies the entry (about a second); nothing else differs.
 
 The same `ASL_CACHE` also holds **one entry per Lean module** of the JanusASL package
 (`JanusASL.*`) and of the janus package (`Janus.*`), so the ~45 min proof build is shared too
-(`JanusASL/tools/asl_mod_cache.py`; `scripts/asl.sh build`, `prove` and `replay` restore before
+(`models/asl/tools/asl_mod_cache.py`; `scripts/asl.sh build`, `prove` and `replay` restore before
 `lake build` and publish after it). A module's key is the SHA-256 of exactly the inputs Lake 4.34
 hashes into its trace, each by content (`asl_mod_cache.py show ROOT MODULE` prints them):
 
@@ -697,14 +697,14 @@ removed and rebuilt them and every restored JanusASL module after them (79 min).
 library only (not `janus-asl-check`, whose uncached ArmASL `.c.o` objects cost ~10 min of serial clang) and verifies
 its examples up to `ASL_VERIFY_JOBS` (default 4) at once after the first has been through alone.
 
-Measured (`JanusASL/tools/test_asl_mod_cache.sh --e2e CACHE`, plus the restore steps timed
+Measured (`models/asl/tools/test_asl_mod_cache.sh --e2e CACHE`, plus the restore steps timed
 separately): building JanusASL at one commit from an empty module cache (the ArmASL entry
 restored) took **44 min 42 s** and published 126 entries (882 files, 1.9 GB; the other 7 keyed
 modules are executables' roots and files no library imports). A fresh copy of the same commit
 then restores the model in 1.1 s and the modules in **2.4 s** (manifests checked), after which
 `lake build JanusASL` takes **0.25 s** ("Build completed successfully (194 jobs)", nothing built):
 **4 s** in all, against 45 min. A second restore finds all 126 current in 1.8 s. Adding a theorem to
-`JanusASL/Proofs/Madd.lean` then makes Lake rebuild exactly that module and its 3 dependents in
+`models/asl/JanusASL/Proofs/Madd.lean` then makes Lake rebuild exactly that module and its 3 dependents in
 the library (`Proofs.Run`, `Proofs.Examples`, `Proofs`; 11 s), the set the keys predict; the key
 tests also check that the keys do not depend on the checkout's path, that a lakefile comment
 changes none, that editing `Janus/Arm64/State.lean` changes exactly its 109 dependents' keys, and
@@ -714,7 +714,7 @@ under a loaded host), and a fresh copy of that commit then restored 137 modules 
 in **5 s**, and the Madd edit rebuilt it and its 4 dependents (17 s).
 
 **Compiled objects** (`CACHE/armobj/<id>`, `asl_mod_cache.py objrestore|objpublish|objkey|objstage|objfiles`, `asl.sh` `objcache_*`;
-tested by `JanusASL/tools/test_asl_obj_cache.sh` and `scripts/lib/test-cachecmp.sh`). The ArmASL entry is stored
+tested by `models/asl/tools/test_asl_obj_cache.sh` and `scripts/lib/test-cachecmp.sh`). The ArmASL entry is stored
 after `lake build ArmASL`, before the `janus-asl-check` link compiles each emitted C file (`ir/ArmASL/PartNN.c`,
 `ir/Sail/*.c`, `ir/JanusASL/**.c` of the modules the executable links) to `.c.o.export`; a warm `asl-build` still
 ran clang over them (the largest parts take 2-3 min each at -O3, `JanusASL.Proofs.Config` alone ~10 min).
@@ -742,7 +742,7 @@ trace is DATA from the publisher, so every binding is recomputed at publish by `
   argv[0] is the string `<lean --print-prefix>/bin/clang` (no realpath indirection; a symlinked prefix or toolchain
   directory is refused), `-I`, `--sysroot` and `-isystem` are that prefix's own strings, the flag list is hard-coded and
   every flag is REQUIRED, once, in Lake's order (`-O3 -DNDEBUG`, plus `-fbracket-depth=100000` for the ArmASL parts and
-  the janus-asl-check root `JanusASL/Check`, then `-DLEAN_EXPORTING`); only the `-o`/C paths are free, in form. Nothing is
+  the janus-asl-check root `models/asl/JanusASL/Check`, then `-DLEAN_EXPORTING`); only the `-o`/C paths are free, in form. Nothing is
   derived from the lakefile (a decoy `[[lean_lib]]` table with `-fwrapv`/`-Xclang` cannot widen it); a lakefile that
   changes what Lake logs makes the objects unpublishable until the vector in code is reviewed. Only `.c.o.export`
   objects are cacheable. The same equality is checked again before any recompile, where a mismatch is POISONED and the
@@ -817,13 +817,13 @@ it whole or not at all) and deleted after; its lock and use stamp are removed wh
 locker re-checks that the path still names the file it locked. A module restore that cannot copy
 an entry completely removes all of that module's outputs, so no copied trace vouches for a missing
 output, and Lake builds it. Collecting only deletes: a removed entry is a miss.
-`JanusASL/tools/test_asl_mod_cache_gc.sh` tests the order, the budget, the grace, the use stamp,
+`models/asl/tools/test_asl_mod_cache_gc.sh` tests the order, the budget, the grace, the use stamp,
 the lock of a reader, the lock retry and the leftovers on fixtures; with `--sample CACHE` it copies
 CACHE's entries for the checkout's modules into mktemp (CACHE is only read) and races restores
 against `gc --max 0 --grace 0` in a loop: on the shared cache's 80 entries for this commit, five
 rounds restored 41, 80, 80, 80 and 6 modules whole and the rest not at all, never a mixture.
 
-## The check (JanusASL/Check.lean)
+## The check (models/asl/JanusASL/Check.lean)
 
 Both sides start from the corpus case's registers, flags, V registers, TPIDR_EL0 and data buffer.
 The ASL state is `sail_model_init` followed by `janus_init`. That is the Linux EL0 setup of
@@ -837,10 +837,10 @@ alignment fault, DFSC 0x21, counts as agreeing with Janus' `unaligned`.
 
 Each Lean process of the pipeline must stay under 12 GiB, and `scripts/asl.sh build` followed by
 `scripts/asl.sh prove` must fit in 24 GiB. Every number below is measured with
-`JanusASL/tools/memprof.py`. It samples `/proc` every 0.2 s and reports each process's peak
+`models/asl/tools/memprof.py`. It samples `/proc` every 0.2 s and reports each process's peak
 resident set (`VmHWM`) and the peak of the whole process tree. With `--cap GB` it also runs the
 command in a systemd scope with `MemoryMax=GB` and no swap, so the kernel kills a runaway build
-instead of the host. `JanusASL/tools/memtable.py` prints the per-process table. All runs are on
+instead of the host. `models/asl/tools/memtable.py` prints the per-process table. All runs are on
 this 48-core host. "Before" is main plus merge/asl3: 44 audited theorems, the 24-part model, and
 the decode-chain files as single modules. "After" is this layout. The summed RSS counts the
 mmapped `.olean` pages once per process, so the scope's `memory.peak` (anonymous memory plus page
@@ -875,7 +875,7 @@ What was changed:
   gives back, byte for byte, the single file that joining the 24 old parts gives, and
   `scripts/asl.sh gen` regenerates the new tarball byte for byte (sha256
   `aa1fa24372907b2785607f738191355818a3c193f49efe471faed16ddcfad60f`).
-* **The decode-chain proofs are split** (`JanusASL/tools/split_proofs.py FILE 4`). `LdStDecode`,
+* **The decode-chain proofs are split** (`models/asl/tools/split_proofs.py FILE 4`). `LdStDecode`,
   `LdStDecode9`, `LdStDecodeP` and `LdStDecodeR` are now import lists of `<File>/PartNN` modules
   with 4 lemmas each. Each part repeats the header, and the lemmas are copied byte for byte
   (`split_proofs.py --check FILE REV` compares them with the file at a git revision). As one
@@ -897,7 +897,7 @@ What was changed:
   one process at a time took 15m56, four 5m49, peak memory 11 -> 41 GiB). Import lists that declare nothing are skipped: leanchecker
   takes name prefixes, so naming one would pull in all its parts.
 
-Semantics check. `JanusASL/tools/Digest.lean` prints every declaration of the ArmASL and JanusASL
+Semantics check. `models/asl/tools/Digest.lean` prints every declaration of the ArmASL and JanusASL
 modules with structural hashes of its type and value. Before and after give the same 15,895
 declarations, all with the same type hashes and the same value hashes. Auxiliary declarations
 (matchers, equation lemmas, `_proof_N`) are hashed by content instead of by name, because Lean
@@ -1099,7 +1099,7 @@ and 6), not in Janus.
 | **total** | **440** | **440** | **0** |
 
 Sample rows (the full 440-row table is `artifacts/asl/evidence-iter11.md`, made by
-`JanusASL/tools/evidence.py` from `artifacts/asl/verdicts-iter11.jsonl`):
+`models/asl/tools/evidence.py` from `artifacts/asl/verdicts-iter11.jsonl`):
 
 | id | word | reg | Janus | Lean ASL (before fix) | qemu | Sail C++ |
 |---:|---|---|---|---|---|---|
@@ -1167,12 +1167,12 @@ scripts/asl.sh check && scripts/asl.sh prove
 `gen` is deterministic. The tarball is written with sorted names, mtime 0 and `gzip -n`, and the
 slice paths in assertion messages are rewritten to `sail-arm/arm-v9.4-a/src/`. A rebuilt
 toolchain therefore reproduces the vendored file byte for byte. After you change the Sail side,
-rebuild the plugin with `cd JanusASL/sail/plugin && rm -rf _build && dune build
+rebuild the plugin with `cd models/asl/sail/plugin && rm -rf _build && dune build
 ./sail_plugin_janus.cmxs` (inside the opam env). To add a decode function to the slice, list it
 in `keep.txt`, and also in `roots.txt` if nothing reaches it. To prove a new class, generate its
 dispatch lemma with
-`python3 JanusASL/tools/chain.py JanusASL/ArmASL __DecodeA64_DataProcReg <name> 'lo:len:val,...'`
+`python3 models/asl/tools/chain.py models/asl/ArmASL __DecodeA64_DataProcReg <name> 'lo:len:val,...'`
 and follow `Madd.lean`.
 A file of many such lemmas (as `LdStDecode*.lean`) should then be split with
-`python3 JanusASL/tools/split_proofs.py JanusASL/JanusASL/Proofs/<File>.lean 4`, which keeps every
+`python3 models/asl/tools/split_proofs.py models/asl/JanusASL/Proofs/<File>.lean 4`, which keeps every
 part near 3.5 GiB (see "Memory").

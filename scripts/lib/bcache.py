@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Integrity layer of the content-addressed build caches (scripts/asl.sh, scripts/oracle-sail.sh,
-JanusASL/tools/asl_mod_cache.py; docs/SOUNDNESS.md "Build caches").
+models/asl/tools/asl_mod_cache.py; docs/SOUNDNESS.md "Build caches").
 
 A cache entry is a directory
     <entry>/tree/<relative path>      the produced files (read-only copies)
@@ -634,7 +634,7 @@ def lake_hash(data, text=False):
 
 
 # ---- the logged compile command is DATA from the publisher: it must EQUAL the command built from keyed values ----
-BRACKET = "-fbracket-depth=100000"  # the one extra flag JanusASL/lakefile.toml gives ArmASL and the janus-asl-check root
+BRACKET = "-fbracket-depth=100000"  # the one extra flag models/asl/lakefile.toml gives ArmASL and the janus-asl-check root
 
 
 def keyed_toolchain(pkgdir):
@@ -662,8 +662,8 @@ def keyed_toolchain(pkgdir):
 
 
 def expected_extra(c_rel):
-    """The flags between -O3 -DNDEBUG and -DLEAN_EXPORTING for the C file c_rel (relative to JanusASL/.lake), or None
-    when no such object is cacheable. ArmASL's parts and the janus-asl-check root (JanusASL/Check) carry
+    """The flags between -O3 -DNDEBUG and -DLEAN_EXPORTING for the C file c_rel (relative to models/asl/.lake), or None
+    when no such object is cacheable. ArmASL's parts and the janus-asl-check root (models/asl/JanusASL/Check) carry
     -fbracket-depth=100000 (their lakefile entries); the other JanusASL modules and Sail carry nothing more. Taken from
     code, not from the lakefile: a decoy lakefile table cannot widen it (the keyed tables decide what Lake logs; a
     mismatch makes the object unpublishable, never trusted)."""

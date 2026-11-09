@@ -20,7 +20,7 @@ if [ -n "${NIGHTLY_OBJAUDIT_SCOPES:-}" ]; then
 fi
 [ -d "$cache/armobj" ] || { echo "nightly-objaudit: no armobj directory in $cache: nothing to audit, the audit did not run"; exit 1; }
 for sc in ${NIGHTLY_OBJAUDIT_SCOPES:-arm jasl janus}; do
-  python3 -I "$tree/JanusASL/tools/asl_mod_cache.py" objaudit "$tree" "$sc" "$cache" ${extra[@]+"${extra[@]}"}
+  python3 -I "$tree/models/asl/tools/asl_mod_cache.py" objaudit "$tree" "$sc" "$cache" ${extra[@]+"${extra[@]}"}
   oa=$?
   if [ "$oa" != 0 ]; then
     echo "nightly-objaudit: P0 compiled-object cache audit [$sc] FAILED (rc $oa: 3 = POISONED entry quarantined, 4 = nothing compared): every cached gate result since the last clean nightly is unproven"

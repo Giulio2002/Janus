@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Tests of the ASL cache collector (JanusASL/tools/asl_mod_cache.py gc; scripts/asl.sh cache_gc).
+# Tests of the ASL cache collector (models/asl/tools/asl_mod_cache.py gc; scripts/asl.sh cache_gc).
 #
-#   JanusASL/tools/test_asl_mod_cache_gc.sh               fixture tests (seconds)
-#   JanusASL/tools/test_asl_mod_cache_gc.sh --sample CACHE   also a stress test on a COPY (in mktemp)
+#   models/asl/tools/test_asl_mod_cache_gc.sh               fixture tests (seconds)
+#   models/asl/tools/test_asl_mod_cache_gc.sh --sample CACHE   also a stress test on a COPY (in mktemp)
 #                                                  of CACHE's entries for this checkout's modules:
 #                                                  restores race `gc --max 0 --grace 0`; every
 #                                                  module must end up restored exactly as its
@@ -11,12 +11,12 @@
 #
 # Everything happens in mktemp directories (on disk, under ${TMPDIR:-/var/tmp}), removed at the end.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 sample=""
 if [ "${1:-}" = --sample ]; then sample="${2:?--sample CACHE}"; fi
 t=$(mktemp -d "${TMPDIR:-/var/tmp}/asl-gc-test.XXXXXX")
 trap 'rm -rf "$t"' EXIT
-tool="$root/JanusASL/tools/asl_mod_cache.py"
+tool="$root/models/asl/tools/asl_mod_cache.py"
 
 python3 -I - "$tool" "$root" "$t" <<'PY'
 import importlib.util, os, subprocess, sys, time, fcntl, json
@@ -133,7 +133,7 @@ if [ -n "$sample" ]; then
   echo "sample: $n entries copied ($(du -sh "$t/pristine" | cut -f1))"
   fail=0
   for round in 1 2 3 4 5; do
-    rm -rf "$t/cache" "$t/w/.lake/build" "$t/w/JanusASL/.lake/build"; cp -a "$t/pristine" "$t/cache"
+    rm -rf "$t/cache" "$t/w/.lake/build" "$t/w/models/asl/.lake/build"; cp -a "$t/pristine" "$t/cache"
     ( sleep "0.$((round * 2))"; while :; do python3 -I "$tool" gc "$t/cache" --max 0 --grace 0 >/dev/null 2>&1; done ) &
     gcp=$!
     python3 -I "$tool" restore "$t/w" "$t/cache" 2>&1 | tail -1

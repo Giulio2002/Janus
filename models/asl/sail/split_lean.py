@@ -82,5 +82,5 @@ for k in range(len(cuts) - 1):
     open(os.path.join(outdir, "ArmASL", name + ".lean"), "w").write("\n".join(text))
     parts.append(name)
 open(os.path.join(outdir, "ArmASL.lean"), "w").write(
-    "-- Sail-generated model, split by JanusASL/sail/split_lean.py\nimport ArmASL.%s\n" % parts[-1])
+    "-- Sail-generated model, split by models/asl/sail/split_lean.py\nimport ArmASL.%s\n" % parts[-1])
 print(len(parts), "parts")

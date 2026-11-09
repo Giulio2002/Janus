@@ -93,7 +93,7 @@ mkrun "$t/c3" $P "$(build decl mut-decl2)"
 want "compare: a changed declaration is P0" 1 "SEMANTIC digests differ" "$t/c1" "$t/c3"
 mkrun "$t/c4" $P "$(build ir mut-ir2)"
 want "compare: an IR / compiled-code change is P0" 1 "SEMANTIC digests differ" "$t/c1" "$t/c4"
-# the same byte difference in a module that is NOT under JanusASL/Proofs/ must be byte-identical
+# the same byte difference in a module that is NOT under models/asl/JanusASL/Proofs/ must be byte-identical
 mkrun "$t/d1" ArmASL/M.olean "$a"; mkrun "$t/d2" ArmASL/M.olean "$b"
 want "compare: differing bytes in an ArmASL module are P0 even with equal digests" 1 "ArmASL/M.olean" "$t/d1" "$t/d2"
 mkrun "$t/d3" Janus/M.olean "$a"; mkrun "$t/d4" Janus/M.olean "$b"

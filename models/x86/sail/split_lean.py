@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Split Sail's single-file Lean output into a chain of modules (docs/validation/X86FORMAL.md (copied from JanusASL/sail/split_lean.py with the module name changed)).
+"""Split Sail's single-file Lean output into a chain of modules (docs/validation/X86FORMAL.md (copied from models/asl/sail/split_lean.py with the module name changed)).
 
     split_lean.py X86Sail.lean OUTDIR [N]
 
@@ -59,5 +59,5 @@ for k in range(len(cuts) - 1):
     open(os.path.join(outdir, "X86Sail", name + ".lean"), "w").write("\n".join(text))
     parts.append(name)
 open(os.path.join(outdir, "X86Sail.lean"), "w").write(
-    "-- Sail-generated model, split by JanusASL/sail/split_lean.py\nimport X86Sail.%s\n" % parts[-1])
+    "-- Sail-generated model, split by models/asl/sail/split_lean.py\nimport X86Sail.%s\n" % parts[-1])
 print(len(parts), "parts")

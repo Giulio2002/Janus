@@ -1,4 +1,4 @@
-# Decode functions of sail-arm arm-v9.4-a kept in the Janus slice (JanusASL/sail/slice.py).
+# Decode functions of sail-arm arm-v9.4-a kept in the Janus slice (models/asl/sail/slice.py).
 # One per line; one block per Janus `Instr` constructor (Janus/Arm64/Instr.lean).
 # adr
 decode_adr_aarch64_instrs_integer_arithmetic_address_pc_rel

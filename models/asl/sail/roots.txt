@@ -1,4 +1,4 @@
-# Root functions of the Sail slice (JanusASL/sail/harness.sail + register init).
+# Root functions of the Sail slice (models/asl/sail/harness.sail + register init).
 initialize_registers
 janus_init
 janus_step

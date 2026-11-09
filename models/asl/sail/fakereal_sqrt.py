@@ -22,7 +22,7 @@ the exact root. This is how Janus' own FP core rounds square roots (round to odd
 import re, sys
 
 NEW = '''-- val sqrt = pure "sqrt_real" : real -> real
--- JanusASL (JanusASL/sail/fakereal_sqrt.py): round-to-odd at absolute precision 2^-1100, so
+-- JanusASL (models/asl/sail/fakereal_sqrt.py): round-to-odd at absolute precision 2^-1100, so
 -- that FPRound of it equals FPRound of the exact square root for binary16/32/64.
 def sqrt_real (x : real) : real :=
   if x ≤ 0 then 0 else
@@ -41,5 +41,5 @@ if n != 1:
     sys.exit(f"fakereal_sqrt.py: expected one sqrt_real definition in {p}, found {n}")
 old_note = "Only `sqrt_real` has no exact\n   rational meaning; it is not reached by the Janus slice and is defined via Float."
 if old_note in t2:
-    t2 = t2.replace(old_note, "`sqrt_real` is the round-to-odd\n   approximation below (JanusASL/sail/fakereal_sqrt.py).")
+    t2 = t2.replace(old_note, "`sqrt_real` is the round-to-odd\n   approximation below (models/asl/sail/fakereal_sqrt.py).")
 open(p, 'w').write(t2)

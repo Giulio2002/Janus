@@ -30,8 +30,8 @@
 #               model artifacts (the ArmASL build + lean-sail, and the Sail oracle driver), which are treated like the Lean
 #               toolchain. The run starts with empty result / verdict / test-fixture caches (XDG_CACHE_HOME is a fresh private
 #               directory in <out>/cold-cache; the Go build cache and the HMAC key are kept), a fresh framework build
-#               (it REFUSES to start if .lake/build, JanusASL/.lake/build, JanusX86/.lake/build or validation/reference-models/sail-arm/target hold
-#               a build: use a fresh worktree, or --wipe), and no JanusASL/Janus module cache. The model artifacts come ONLY from
+#               (it REFUSES to start if .lake/build, models/asl/.lake/build, models/x86/.lake/build or validation/reference-models/sail-arm/target hold
+#               a build: use a fresh worktree, or --wipe), and no models/asl/JanusASL/Janus module cache. The model artifacts come ONLY from
 #               the model pin (scripts/model-pin.sh, scripts/lib/modelpin.py): content-hash pinned (SHA-256 of every file, the
 #               manifest HMAC, and a signed pin record that binds the exact manifest) and integrity-checked on EVERY cold
 #               gate, before anything is built (and again by every restore and after every build): a tampered, corrupt or missing
@@ -45,7 +45,7 @@
 #               itself, publishing and pinning nothing. This flag makes a stale pin FAIL instead. A tampered, corrupt, missing,
 #               unsigned or re-signed pin, a manifest that does not match its record, or a pin under another HMAC key ALWAYS fails
 #               and is never rebuilt around.
-#   --wipe      with --cold: remove this checkout's build directories (.lake/build, JanusASL/.lake/build, JanusX86/.lake/build,
+#   --wipe      with --cold: remove this checkout's build directories (.lake/build, models/asl/.lake/build, models/x86/.lake/build,
 #               validation/reference-models/sail-arm/target) instead of refusing to start on them
 # Cancel a run: it is its own process group, and writes the group id to <out>/pgid; cancel with
 #   kill -- -$(cat <out>/pgid)
@@ -300,7 +300,7 @@ tlf="$out/timeline.jsonl"; : > "$tlf"
 # ---- --cold: fresh build directories, empty caches, the model from the pin (once: the setsid re-exec below keeps them)
 if [ -n "$cold" ] && [ -z "${JANUS_COLD_DONE:-}" ]; then
   dirty=()
-  for d in .lake/build JanusASL/.lake/build JanusX86/.lake/build validation/reference-models/sail-arm/target; do
+  for d in .lake/build models/asl/.lake/build models/x86/.lake/build validation/reference-models/sail-arm/target; do
     if [ -e "$root/$d" ] || [ -L "$root/$d" ]; then
       if [ -n "$wipe" ]; then echo "gate: --cold --wipe: removing $root/$d"; rm -rf "${root:?}/$d"
       elif [ -L "$root/$d" ] || [ -n "$(ls -A "$root/$d" 2>/dev/null)" ]; then dirty+=("$d"); fi
@@ -408,12 +408,12 @@ dag_check || { echo "gate: internal error: the stage graph is inconsistent"; exi
 # reads .lake/build at that moment fails ("changed after the proof compile", a missing .olean). They
 # therefore work in a private copy of the sources (and a copy of the finished framework build), so the
 # prebuilt build the verify, go test and audit lanes read is never written after the prebuild. Their own
-# package builds (JanusASL/.lake, JanusX86/.lake, validation/reference-models/sail-arm/target) and artifacts/ are shared by
+# package builds (models/asl/.lake, models/x86/.lake, validation/reference-models/sail-arm/target) and artifacts/ are shared by
 # symlink: only these lanes use the former, and artifacts/ is read-only to them.
 mktree() { # DIR [private]: a private copy of the sources and of the finished framework build (kept when present: same hash)
-  # "private": JanusASL/.lake is a real directory of the tree's own (filled from the verified ASL cache by asl.sh), not
+  # "private": models/asl/.lake is a real directory of the tree's own (filled from the verified ASL cache by asl.sh), not
   # the symlink to the checkout's build that the other lake trees share; a lane in such a tree can never write the checkout
-  local -a rs=(--exclude=/.git --exclude=/artifacts --exclude=/test/redteam/bin --exclude=/JanusASL/.lake --exclude=/JanusX86/.lake
+  local -a rs=(--exclude=/.git --exclude=/artifacts --exclude=/test/redteam/bin --exclude=/models/asl/.lake --exclude=/models/x86/.lake
     --exclude=/validation/reference-models/sail-arm/target --exclude=/bin --exclude=/.gate-tree-ready)
   if [ -f "$1/.gate-tree-ready" ]; then
     # a kept tree is reused only if its CONTENT still equals the sources (rsync -c compares checksums, not times): a tree edited after it was
@@ -427,8 +427,8 @@ mktree() { # DIR [private]: a private copy of the sources and of the finished fr
   fi
   mkdir -p "$1"
   rsync -a "${rs[@]}" ./ "$1"/ || { echo "gate: cannot copy the sources to $1"; exit 1; }
-  ln -sfn "$root/artifacts" "$1/artifacts"; if [ "${2:-}" = private ]; then mkdir -p "$1/JanusASL/.lake"; else ln -sfn "$root/JanusASL/.lake" "$1/JanusASL/.lake"; fi
-  ln -sfn "$root/JanusX86/.lake" "$1/JanusX86/.lake"; ln -sfn "$root/validation/reference-models/sail-arm/target" "$1/validation/reference-models/sail-arm/target"
+  ln -sfn "$root/artifacts" "$1/artifacts"; if [ "${2:-}" = private ]; then mkdir -p "$1/models/asl/.lake"; else ln -sfn "$root/models/asl/.lake" "$1/models/asl/.lake"; fi
+  ln -sfn "$root/models/x86/.lake" "$1/models/x86/.lake"; ln -sfn "$root/validation/reference-models/sail-arm/target" "$1/validation/reference-models/sail-arm/target"
   mkdir -p "$1/bin"; cp -f bin/janus "$1/bin/janus"; : > "$1/.gate-tree-ready"
 }
 # x86 has a tree of its own, the JanusASL/oracle/rt-asl lanes another: two lakes in one tree race on its .oleans
@@ -439,7 +439,7 @@ flock -n "$treelock" || { echo "gate: another run uses the same sources/trees ($
 # the JanusASL cache hook (scripts/asl.sh ASL_CACHE; agent/speed-asl's JANUS_ASL_CACHE is accepted as an alias;
 # its interface is not final, this only forwards the directory)
 [ -n "${ASL_CACHE:-}" ] || { [ -z "${JANUS_ASL_CACHE:-}" ] || export ASL_CACHE="$JANUS_ASL_CACHE"; }
-mkdir -p "$root/JanusASL/.lake" "$root/JanusX86/.lake" "$root/validation/reference-models/sail-arm/target"
+mkdir -p "$root/models/asl/.lake" "$root/models/x86/.lake" "$root/validation/reference-models/sail-arm/target"
 echo "gate: isolated source copies for the lake lanes are made once the framework build is pinned (removed when the gate passes, kept otherwise: $treebase)"
 lane_times="$root/artifacts/gate/lane-times"
 shards=$(gotest_shards_n)  # 6 by default: the longest test (~470 s) is then about the longest shard
@@ -492,14 +492,14 @@ addc x86 "$(laneenv "$tree_x86") cd '$tree_x86' && scripts/x86formal.sh prove"
 # CI checks that the gate used to lack (docs/TESTING.md "CI vs gate"): go vet, the JanusASL cache-key tests, the
 # decoder coverage of the arm64 examples, the quick differential oracles (qemu / native), and `asl.sh verify`
 add govet "go vet ./..."
-add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && JanusASL/tools/test_asl_obj_cache.sh && scripts/lib/test-nightly-objcache.sh && scripts/lib/test-modelpin.sh && scripts/lib/test-incr-liveness.sh && scripts/lib/test-incr-hosttools.sh && scripts/lib/test-verdict-banner.sh && scripts/lib/test-gate-decoder.sh && scripts/lib/test-gotest-extras.sh"
+add cachekeys "models/asl/tools/test_asl_cache.sh && models/asl/tools/test_asl_mod_cache.sh && models/asl/tools/test_asl_obj_cache.sh && scripts/lib/test-nightly-objcache.sh && scripts/lib/test-modelpin.sh && scripts/lib/test-incr-liveness.sh && scripts/lib/test-incr-hosttools.sh && scripts/lib/test-verdict-banner.sh && scripts/lib/test-gate-decoder.sh && scripts/lib/test-gotest-extras.sh"
 add decoder "BLOCKERS_OUT='$out/decoder' scripts/decoder-coverage.sh"
 add oracle "$(laneenv "$tree") cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
 # asl-verify waits for asl-build only to find the ArmASL model in the build cache (asl-build builds and publishes it, and the
 # model takes ~45 min to build): when the verified cache already holds this model (scripts/asl.sh cached) there is nothing to
 # wait for, and the two lanes (separate trees) run side by side; cache entries are published atomically under per-key locks.
 asl_verify_needs() { if scripts/asl.sh cached >/dev/null 2>&1; then echo "gate: the ArmASL model is in the verified build cache: asl-verify does not wait for asl-build" >&2; else needs asl-build; fi; }
-add asl-verify "$(laneenv "$tree_aslv") cd '$tree_aslv' && scripts/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4 && test ! -L '$tree_aslv/JanusASL/.lake'" "$(asl_verify_needs)"
+add asl-verify "$(laneenv "$tree_aslv") cd '$tree_aslv' && scripts/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4 && test ! -L '$tree_aslv/models/asl/.lake'" "$(asl_verify_needs)"
 add asl-build "$(laneenv "$tree") cd '$tree' && scripts/asl.sh build"
 add sail-build "$(laneenv "$tree") cd '$tree' && scripts/oracle-sail.sh build"
 for g in prove rel strict replay btf probes fsqrt go; do

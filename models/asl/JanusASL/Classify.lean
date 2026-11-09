@@ -67,7 +67,7 @@ def classify (w : Nat) : Option String :=
   else none
 
 /-- The proved scalar floating-point encoding class of `w` (the name of its `fpStepOK_<class>` theorem,
-`JanusASL/Proofs/FP/Run.lean`), if any. Like `classify`, the conditions are the theorems' hypotheses
+`models/asl/JanusASL/Proofs/FP/Run.lean`), if any. Like `classify`, the conditions are the theorems' hypotheses
 verbatim. -/
 def fpClassify (w : Nat) : Option String :=
   if w < 2 ^ 32 then

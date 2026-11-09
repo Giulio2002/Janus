@@ -4,7 +4,7 @@ import JanusASL.Proofs.CfgDef
 
 /-! # From the generated `janus_step` to a decode clause
 
-`janus_step w` (the harness, `JanusASL/sail/harness.sail`) writes a few bookkeeping registers,
+`janus_step w` (the harness, `models/asl/sail/harness.sail`) writes a few bookkeeping registers,
 calls `__DecodeA64`, and advances PC unless a branch was taken. `__DecodeA64` dispatches on
 `op0 = w<28:25>` to a class function, an if-chain over sail-arm's decode clauses. This file has
 the parts that do not depend on the instruction: field extraction on literal-free words,

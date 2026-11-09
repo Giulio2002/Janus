@@ -21,7 +21,7 @@ be stated.
 | # | Severity | Finding | Status |
 |---|----------|---------|--------|
 | C1 | **medium** (availability; fails closed) | concurrent `janus verify` failed with "framework integrity … unexpected Janus/Tools/Decode.olean" while `janus blockers` (or any writer) used the same framework build | **BROKEN → fixed** (shared/exclusive locking, ready stamp, regression tests) |
-| A6 | medium (assurance) | `JanusASL/Audit.lean` selects theorems by name suffix and checks only axioms: a missing or renamed theorem, or a weakened statement, passes | open → stricter audit + reviewed statements added as a row; sent to the ASL agent |
+| A6 | medium (assurance) | `models/asl/JanusASL/Audit.lean` selects theorems by name suffix and checks only axioms: a missing or renamed theorem, or a weakened statement, passes | open → stricter audit + reviewed statements added as a row; sent to the ASL agent |
 | C2 | low (latent) | Sail's Lean backend (with JanusASL's patches) silently drops assignments made inside a block that initializes a `let`/`var` | latent: not reached (0 such shapes in the sources); row added; sent to the ASL agent |
 | A4 | low | `Ensures.toASL` is described as "the same statement about the ASL", but `Rel` ignores memory and V registers, so a postcondition about those carries nothing over | open (doc); the 4 examples are register-only and are not affected |
 | A1 | — | `Rel` is too weak or degenerate | blocked: `Rel` is a function onto X0–X30, SP, PC, NZCV (kernel-checked) |
@@ -186,8 +186,8 @@ backend (built against the pinned lean-sail), and run on the same inputs:
 | assignments in `if`/`match` branches bound by `let` | (pre-existing case) | 2 × 256 | yes |
 | `RoundTowardsZero(Real(a)/Real(b))` for 64-bit and 80-bit operands, negative cases, `INT_MIN/-1` | 6 (`Rat`) | 7 | yes |
 | `pow_real` with negative and positive exponents, negative base | 6 | 3 | yes |
-| `sqrt_real` (the replacement of JanusASL/sail/fakereal_sqrt.py, applied to the probe's `FakeReal.lean` as `scripts/asl.sh gen` does): `⌊√(a/b)·2^80⌋` for squares, non-squares, tiny and huge rationals | 7 (`sqrt_real`) | 30 | yes |
-| `integer_update_subrange` (the replacement of JanusASL/sail/sail_int_fix.py, applied to the probe's Lean output as `scripts/asl.sh gen` does; sail-arm's `prelude.sail` definition): bit 0, bits 7..4 and bits 63..60 replaced in 23 integers each (zero, small, 2^22 and 2^23 boundaries, negatives, ±2^63, 2^64 ± 1, ±2^100, a 97-bit value) | 8 (`integer_update_subrange`) | 69 | yes (row A5 ius) |
+| `sqrt_real` (the replacement of models/asl/sail/fakereal_sqrt.py, applied to the probe's `FakeReal.lean` as `scripts/asl.sh gen` does): `⌊√(a/b)·2^80⌋` for squares, non-squares, tiny and huge rationals | 7 (`sqrt_real`) | 30 | yes |
+| `integer_update_subrange` (the replacement of models/asl/sail/sail_int_fix.py, applied to the probe's Lean output as `scripts/asl.sh gen` does; sail-arm's `prelude.sail` definition): bit 0, bits 7..4 and bits 63..60 replaced in 23 integers each (zero, small, 2^22 and 2^23 boundaries, negatives, ±2^63, 2^64 ± 1, ±2^100, a 97-bit value) | 8 (`integer_update_subrange`) | 69 | yes (row A5 ius) |
 
 `FakeReal.lean` was also read line by line. `round_down`/`round_up` are `Rat.floor`/`Rat.ceil`
 (Sail C: `mpq` floor/ceil). `abs`, comparisons and `to_real` are exact. `real_power x n` is
@@ -238,7 +238,7 @@ once the backend translates it correctly. Sent to the ASL agent.
 
 ## A6 (medium, open): the JanusASL audit does not pin what it audits
 
-`scripts/asl.sh prove` runs `JanusASL/Audit.lean`. It walks the environment and checks the
+`scripts/asl.sh prove` runs `models/asl/JanusASL/Audit.lean`. It walks the environment and checks the
 axioms of every `JanusASL.*` constant whose name ends in `_agree`, `_asl` or `toASL`. The
 JanusASL theorems do **not** go through `janus verify`'s trusted auditor: there is no
 statement identity, no sandbox and no olean pins. Gaps:
@@ -256,7 +256,7 @@ branch hypotheses checked for satisfiability via A2) are the ones docs/design/AS
 names, each must be a `theorem` with standard axioms, any unlisted `JanusASL.*` declaration with
 those suffixes fails, and every statement is printed. `run.sh` compares the statements with the
 reviewed copy `test/redteam/rounds/rt-asl/asl-statements.golden`, so any change to a statement must be
-reviewed again. Suggested to the ASL agent: adopt it as `JanusASL/Audit.lean`.
+reviewed again. Suggested to the ASL agent: adopt it as `models/asl/JanusASL/Audit.lean`.
 
 ## A7 (blocked): kernel replay
 
@@ -304,7 +304,7 @@ Values pinned (decoded from `janus_init`) compared with Linux 6.x arm64:
 
 The findings were sent to the ASL agent. It reports the following:
 
-* A6: `JanusASL/Audit.lean` now takes an explicit list of 41 names (the 39 above plus the new
+* A6: `models/asl/JanusASL/Audit.lean` now takes an explicit list of 41 names (the 39 above plus the new
   `ldstUImm_agree` and `ldstImm9_agree`). Each must exist as a theorem, unlisted names fail, and
   the statements are printed.
 * A4 and A8: docs/design/ASL.md now says that `Rel` is register-only (so `Ensures.toASL` transfers

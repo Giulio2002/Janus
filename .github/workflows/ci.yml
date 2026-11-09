@@ -29,8 +29,8 @@ jobs:
       # cannot change a build keep its key, edits that can change it (seconds; docs/design/ASL.md).
       - name: JanusASL build cache keys
         run: |
-          JanusASL/tools/test_asl_cache.sh
-          JanusASL/tools/test_asl_mod_cache.sh
+          models/asl/tools/test_asl_cache.sh
+          models/asl/tools/test_asl_mod_cache.sh
 
   go-test:
     name: Lean build, go vet, go test

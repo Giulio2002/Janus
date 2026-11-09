@@ -7,7 +7,7 @@ and integrity-checked on EVERY gate. This file adds no new trusted storage code:
 bcache.py entry (scripts/lib/bcache.py: per-file SHA-256 manifest + HMAC under the per-user key, two-phase verified
 copy) in a pin store of their own, and the pin RECORD binds the entry to the exact manifest by its SHA-256.
 
-    <PIN>/<key>                       kind armasl entry (JanusASL/.lake: ArmASL build + packages/Sail)
+    <PIN>/<key>                       kind armasl entry (models/asl/.lake: ArmASL build + packages/Sail)
     <PIN>/sail/<key>                  kind sail entry (the oracle driver)
     <PIN>/records/<kind>-<key>.json   {"record": {...}, "hmac": ...}: one file, replaced atomically
     <PIN>/.pin-write.lock             held by the (only) writer

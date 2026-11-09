@@ -209,7 +209,7 @@ func TestASLPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{"JanusASL/Verify.lean", "JanusASL/Classify.lean", "JanusASL/Proofs/Run.lean", "JanusASL/Proofs/Examples.lean"} {
+	for _, p := range []string{"models/asl/JanusASL/Verify.lean", "models/asl/JanusASL/Classify.lean", "models/asl/JanusASL/Proofs/Run.lean", "models/asl/JanusASL/Proofs/Examples.lean"} {
 		if _, ok := pkg.Files[p]; !ok {
 			t.Errorf("embedded JanusASL lacks %s", p)
 		}
@@ -236,7 +236,7 @@ func TestASLPackage(t *testing.T) {
 		t.Errorf("vendor/ArmASL.version sail-arm %q does not match scripts/asl.sh", pkg.Version["sail-arm"])
 	}
 	if !strings.Contains(string(pkg.Files["lakefile.toml"]), `rev = "`+pkg.Version["lean-sail"]+`"`) {
-		t.Errorf("vendor/ArmASL.version lean-sail %q does not match JanusASL/lakefile.toml", pkg.Version["lean-sail"])
+		t.Errorf("vendor/ArmASL.version lean-sail %q does not match models/asl/lakefile.toml", pkg.Version["lean-sail"])
 	}
 	if _, err := unpackModel([]byte("not a tarball")); err == nil {
 		t.Error("unpackModel accepted garbage")
@@ -285,7 +285,7 @@ func aslVerify(t *testing.T, sym, proof string, extra ...string) (int, string, s
 
 // TestASLExamples: --asl derives the ASL corollaries of the shipped Add, Max, Mul64 and Add128
 // proofs directly from their artifacts (these replaced the hand-copied programs that were in
-// JanusASL/JanusASL/Proofs/Examples.lean).
+// models/asl/JanusASL/Proofs/Examples.lean).
 func TestASLExamples(t *testing.T) {
 	needASL(t)
 	for name, post := range map[string]string{
@@ -454,12 +454,12 @@ func TestASLSibling(t *testing.T) {
 	}
 }
 
-// A symlinked <cacheDir>/.lake (scripts/asl.sh verify once seeded with `cp -a` of a gate tree's JanusASL/.lake, itself
+// A symlinked <cacheDir>/.lake (scripts/asl.sh verify once seeded with `cp -a` of a gate tree's models/asl/.lake, itself
 // a link into the main checkout) is replaced by a private directory; the link's target and the package override
 // written afterwards never touch it.
 func TestASLSymlinkedLakeDirIsReplaced(t *testing.T) {
 	root := t.TempDir()
-	victim := filepath.Join(root, "main-checkout", "JanusASL", ".lake")
+	victim := filepath.Join(root, "main-checkout", "models", "asl", ".lake")
 	if err := os.MkdirAll(filepath.Join(victim, "build", "lib", "lean"), 0o755); err != nil {
 		t.Fatal(err)
 	}

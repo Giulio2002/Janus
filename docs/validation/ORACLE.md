@@ -29,7 +29,7 @@ summaries and compresses the dumps with zstd (`zstd -dc verdicts.jsonl.zst | …
 `scripts/lib/artifacts.sh`); `gen.jsonl` and `harvest.jsonl`, whose union is `cases.jsonl`, are
 removed. `KEEP=zst` compresses those too, `KEEP=1` keeps every file raw, as before. The drivers
 that read the corpus (`scripts/oracle-sail.sh`, `scripts/asl.sh check`, `scripts/x86formal.sh
-check`, `validation/reference-models/sail-x86/compare.py`, `JanusASL/tools/evidence.py`) accept the compressed
+check`, `validation/reference-models/sail-x86/compare.py`, `models/asl/tools/evidence.py`) accept the compressed
 files.
 
 Knobs: `JOBS`, `N` (words per generated class), `K` (states per harvested word), `PER_CLASS`

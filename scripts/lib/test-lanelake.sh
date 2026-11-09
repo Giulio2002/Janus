@@ -7,7 +7,7 @@ set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 t="$(mktemp -d "${TMPDIR:-/tmp}/test-lanelake.XXXXXX")"; trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
-mkdir -p "$t/tree/JanusASL/.lake" "$t/other"; : > "$t/tree/JanusASL/lakefile.toml"; LK="$t/tree/JanusASL/.lake/.gate-lake.lock"
+mkdir -p "$t/tree/models/asl/.lake" "$t/other"; : > "$t/tree/models/asl/lakefile.toml"; LK="$t/tree/models/asl/.lake/.gate-lake.lock"
 cat > "$t/reallake" <<'EOS'
 #!/usr/bin/env bash
 # fake lake: logs "START/END kind pid time"; build rewrites $T/tree/state (non-atomically, slowly), env reads it
@@ -24,7 +24,7 @@ EOS
 chmod +x "$t/reallake"; echo complete > "$t/tree/state"
 export FAKE_T="$t" JANUS_REAL_LAKE="$t/reallake" JANUS_LANE_TREE="$t/tree" JANUS_LANE_LAKE_LOCK=1
 L="$here/lanelake/lake"
-lane() { ( cd "$t/tree/JanusASL" && "$L" "$@" ); }
+lane() { ( cd "$t/tree/models/asl" && "$L" "$@" ); }
 # lane A: a rebuild; lane B: two read-only calls; lane C: another rebuild
 lane build & lane env & lane env & lane build & sleep 0.1; lane env &
 wait
@@ -51,21 +51,21 @@ sys.exit(0 if any(a[0]<b[1] and b[0]<a[1] for i,a in enumerate(iv) for b in iv[i
 PY
 # a call outside the tree is not locked: it runs while another holds the lock
 : > "$t/log"
-( cd "$t/tree/JanusASL" && "$L" build ) & sleep 0.15
+( cd "$t/tree/models/asl" && "$L" build ) & sleep 0.15
 s=$(date +%s.%N); ( cd "$t/other" && "$L" other ); e=$(date +%s.%N)
 wait
 awk -v s="$s" -v e="$e" 'BEGIN { exit !(e - s < 0.45) }' && ok "a call outside the tree passes through" || bad "outside call waited"
 # the lock file: created 0600, a symlink or a foreign/linked file is refused (and never followed)
 : > "$t/log"; rm -f "$LK"
-( cd "$t/tree/JanusASL" && "$L" build ) && [ "$(stat -c %a "$LK")" = 600 ] && ok "lock file created with mode 0600" || bad "lock mode $(stat -c %a "$LK" 2>&1)"
+( cd "$t/tree/models/asl" && "$L" build ) && [ "$(stat -c %a "$LK")" = 600 ] && ok "lock file created with mode 0600" || bad "lock mode $(stat -c %a "$LK" 2>&1)"
 : > "$t/log"; rm -f "$LK"; echo precious > "$t/victim"; ln -s "$t/victim" "$LK"
-out=$( cd "$t/tree/JanusASL" && "$L" build 2>&1 ); rc=$?
+out=$( cd "$t/tree/models/asl" && "$L" build 2>&1 ); rc=$?
 [ "$rc" != 0 ] && grep -q 'symlink is refused' <<<"$out" && [ "$(cat "$t/victim")" = precious ] && [ ! -s "$t/log" ] && ok "a symlinked lock file is refused, not followed, lake not run" || bad "symlink: rc=$rc $out"
 rm -f "$LK"; ln "$t/victim" "$LK"
-out=$( cd "$t/tree/JanusASL" && "$L" build 2>&1 ); rc=$?
+out=$( cd "$t/tree/models/asl" && "$L" build 2>&1 ); rc=$?
 [ "$rc" != 0 ] && grep -q 'one link' <<<"$out" && ok "a hard-linked lock file is refused" || bad "hardlink: rc=$rc $out"
 rm -f "$LK"; mkdir "$LK"
-out=$( cd "$t/tree/JanusASL" && "$L" build 2>&1 ); rc=$?
+out=$( cd "$t/tree/models/asl" && "$L" build 2>&1 ); rc=$?
 [ "$rc" != 0 ] && ok "a directory as lock file is refused" || bad "directory accepted"
 rmdir "$LK"
 

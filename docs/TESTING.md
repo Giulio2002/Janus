@@ -15,7 +15,7 @@ instance check and kernel replay still runs with the same strength.
 | soundness audit | `test/redteam/run-rounds.sh [-j LANES]` (all of them as parallel lanes), or each: `test/redteam/run-all.sh [-j N]`, `test/redteam/rounds/round{2,3,4,5,7,8}/run-round*.sh [-j N]`, `test/redteam/rounds/round6/run-round6.sh` | every documented attack is rejected, every control verifies (round 7: the result cache) |
 | Go tests | `go test -timeout 60m ./cmd/...` (`-short`: no Lake builds) | the CLI, the extractor, the verifier end to end, the cache collector |
 | JanusASL | `scripts/asl.sh prove` | the Arm-ASL equivalence theorems (39) and their axiom audit |
-| ASL build cache | `JanusASL/tools/test_asl_cache.sh [--e2e CACHE]` | the `ASL_CACHE` key ignores lakefile edits that cannot reach the ArmASL build and changes on every input that can (31 cases, seconds); with `--e2e`, a restore into a copy with an edited JanusASL lakefile leaves `lake build ArmASL` nothing to do (docs/design/ASL.md "Build cache") |
+| ASL build cache | `models/asl/tools/test_asl_cache.sh [--e2e CACHE]` | the `ASL_CACHE` key ignores lakefile edits that cannot reach the ArmASL build and changes on every input that can (31 cases, seconds); with `--e2e`, a restore into a copy with an edited JanusASL lakefile leaves `lake build ArmASL` nothing to do (docs/design/ASL.md "Build cache") |
 
 `-j N` runs up to `N` independent rows/proofs at once (`scripts/lib/parallel.sh`); output is
 printed in the original order, and a failure in any block fails the run. The default is
@@ -129,7 +129,7 @@ Extras (nightly, `JANUS_NIGHTLY=1` or `JANUS_GOTEST_EXTRAS=1`): `TestReplayUnder
 `JANUS_PRESSURE_TEST=1`) and `TestConsumerMathlib` (`JANUS_TEST_MATHLIB=1`, persistent cache and package directory under
 `~/.cache/janus-test-mathlib-<key>`, key = sha256 of checkout path, toolchain and Mathlib revision: another key is a cold build;
 lake and janus re-check what is inside, a corrupt entry rebuilds or fails, never passes; cold 146 s). Both must PASS or the lane fails.
-The four `TestASL*` tests are an OPT-IN third extra (only with `JANUS_TEST_ASL_EXTRA=1` in addition to the extras switch; OFF by default since nightly ef4ff16c, where it built JanusASL for 1947 s and then the checkout's framework build vanished under it; without it they SKIP and the SKIPPED-COVERAGE summary names the gap; re-enable after it uses a private copy of the checkout framework and sets `JANUS_HEAVY_LOCK_HELD` under heavy-run). When opted in it runs (`JANUS_TEST_ASL=1`, persistent cache `~/.cache/janus-test-asl-<key>` seeded from the checkout's built `JanusASL/.lake`); `TestRTMatrix` and `TestRTShadowedAlias` build their forged fixtures themselves (`rtFixtures`, `replaypar_rt_test.go`) and run in the shards when `JANUS_NIGHTLY=1`; `TestRejectPIE` builds its PIE binary; `TestRejectsNonArm64` patches e_machine; the unshare subtest of `TestRT11...` keeps its store out of /tmp. The ASL extra runs with `JANUS_MEM_MAX=48G` (the default 24 GiB job limit OOM-killed `lake build ArmASL`) runs ALONE after the shards and other extras (never beside them), under the host heavy lock (`JANUS_HEAVY_LOCK`, default `/srv/janus-ops/heavy.lock`; `JANUS_HEAVY_LOCK_HELD=1` if the caller already holds it), and warm-starts from its persistent keyed cache directory. `JANUS_TEST_ASL_SEED` is honoured only for a seed with a `.lake/janus-seed.json` manifest naming this framework, JanusASL package and toolchain and the sha256 of every file (`verifyASLSeed`; `TestASLSeedRejectsTamperedOrMismatched`): anything else is a miss and the build is cold (about an hour). `TestRTMatrix` is a stub over ten tests `TestRTMatrix_0..9`. `JANUS_GOTEST_EXTRA_LIST` (labels `pressure mathlib asl`) restricts the extras while developing.
+The four `TestASL*` tests are an OPT-IN third extra (only with `JANUS_TEST_ASL_EXTRA=1` in addition to the extras switch; OFF by default since nightly ef4ff16c, where it built JanusASL for 1947 s and then the checkout's framework build vanished under it; without it they SKIP and the SKIPPED-COVERAGE summary names the gap; re-enable after it uses a private copy of the checkout framework and sets `JANUS_HEAVY_LOCK_HELD` under heavy-run). When opted in it runs (`JANUS_TEST_ASL=1`, persistent cache `~/.cache/janus-test-asl-<key>` seeded from the checkout's built `models/asl/.lake`); `TestRTMatrix` and `TestRTShadowedAlias` build their forged fixtures themselves (`rtFixtures`, `replaypar_rt_test.go`) and run in the shards when `JANUS_NIGHTLY=1`; `TestRejectPIE` builds its PIE binary; `TestRejectsNonArm64` patches e_machine; the unshare subtest of `TestRT11...` keeps its store out of /tmp. The ASL extra runs with `JANUS_MEM_MAX=48G` (the default 24 GiB job limit OOM-killed `lake build ArmASL`) runs ALONE after the shards and other extras (never beside them), under the host heavy lock (`JANUS_HEAVY_LOCK`, default `/srv/janus-ops/heavy.lock`; `JANUS_HEAVY_LOCK_HELD=1` if the caller already holds it), and warm-starts from its persistent keyed cache directory. `JANUS_TEST_ASL_SEED` is honoured only for a seed with a `.lake/janus-seed.json` manifest naming this framework, JanusASL package and toolchain and the sha256 of every file (`verifyASLSeed`; `TestASLSeedRejectsTamperedOrMismatched`): anything else is a miss and the build is cold (about an hour). `TestRTMatrix` is a stub over ten tests `TestRTMatrix_0..9`. `JANUS_GOTEST_EXTRA_LIST` (labels `pressure mathlib asl`) restricts the extras while developing.
 Every other skip is printed as `SKIPPED-COVERAGE: ... NOT RUN <test>: <reason>` (also in `<out>/gotest/skips-report.txt`) and the run
 is not recorded. The "memory controller is not enabled for children" line printed by `janus memguard` is the cgroup mechanism being
 passed over for `systemd-user` (a delegated scope whose leaf holds the leader process cannot enable controllers for children); the
@@ -183,11 +183,11 @@ exclusive for anything that can rewrite the package (build, update, exe, ...), s
 re-resolution ("URL has changed; deleting packages/Sail and cloning") or a rebuild by one lane therefore never
 overlaps another lane's lake call, while read-only lanes (replay, strict, rel) still run side by side
 (`scripts/lib/test-lanelake.sh`, with a fake `lake` that rewrites a shared file). I chose the lock over a tree per lane
-because JanusASL/.lake (5.8 GB, with `packages/Sail`) is shared by symlink and a copy per lane would cost that much
+because models/asl/.lake (5.8 GB, with `packages/Sail`) is shared by symlink and a copy per lane would cost that much
 each; the lock covers it. Tree reuse on failure and lakeguard are unchanged.
 
 **Lock order for a shared tree.** Every WRITER of a tree that lanes share holds the tree's locks, in this fixed
-order: (1) the package lake lock, KEYED BY THE RESOLVED DIRECTORY BEING WRITTEN: `realpath(<package>/.lake)/.gate-lake.lock` (`scripts/lib/lanelake/keys.sh`), so every tree and the checkout that share one `.lake` by symlink (the gate's lake trees share the checkout's `JanusASL/.lake`) serialise on ONE lock; (2) the janus framework lock `realpath(<tree>/.lake)/janus-framework.lock`
+order: (1) the package lake lock, KEYED BY THE RESOLVED DIRECTORY BEING WRITTEN: `realpath(<package>/.lake)/.gate-lake.lock` (`scripts/lib/lanelake/keys.sh`), so every tree and the checkout that share one `.lake` by symlink (the gate's lake trees share the checkout's `models/asl/.lake`) serialise on ONE lock; (2) the janus framework lock `realpath(<tree>/.lake)/janus-framework.lock`
 (the lock a `janus ... --janus-root <tree>` holds SHARED for a whole verification; a writer takes it exclusive, because
 `lake build JanusASL` replays and rewrites `Janus/*.olean` in the tree's framework build, which a running janus must
 not see, and which made janus rebuild or loop: the 2400 s `rtasl-go` hang); (3) inside the command, the cache locks
@@ -217,7 +217,7 @@ content-addressed cache of `agent/speed-asl` is not final, so this is only the h
 `kill -- -$(cat <out>/pgid)` (or stop its memcap scope) and nothing else; never kill by name or pattern, other
 gates share the host (`scripts/lib/test-pgcancel.sh`). The Lake-writing lanes (x86, asl, oracle, rt-asl) work in
 private source copies (`artifacts/gate/trees/<hash>/x86` and `/asl`, about 0.85 GiB each, see "Kept trees"),
-because a `lake` in JanusX86/JanusASL replays the framework's `.olean` files it depends on by path; the verify,
+because a `lake` in models/x86/JanusX86/JanusASL replays the framework's `.olean` files it depends on by path; the verify,
 go test and audit lanes read the prebuilt framework build, which is never written after the prebuild.
 
 **Speed baseline.** `scripts/speed-baseline.tsv` (id, wall seconds, peak GiB per verify item and lane) is recorded
@@ -251,7 +251,7 @@ re-record on a green full gate and say why in the commit message.
 | CI `lake build Janus JanusTests` and `... janus-oracle-amd64` (not default Lake targets) | prebuild `lake`: `lake build JanusTests janus-oracle-amd64` |
 | CI `go vet ./...` | lane `govet` |
 | (new) `scripts/lint-example-addresses.sh`: no hard-coded address of the example binaries (a literal in [0x400000, 0x600000), not a multiple of 0x10000) in `examples/**/*.lean`; take it from the extraction (`janus_eval% (Extracted.entry + k)`, `segAddr`, `Extracted.dataAddr.«…»`) or mark a genuine constant `-- addr-ok: <why>`. Why: adding one example to the shared binary moved code by 64 bytes and data by 128 and broke StackGrow/ScratchSum | runs in lane `axiom`, after `ci-axiom-guard.sh` |
-| CI `JanusASL/tools/test_asl_cache.sh`, `test_asl_mod_cache.sh` | lane `cachekeys` |
+| CI `models/asl/tools/test_asl_cache.sh`, `test_asl_mod_cache.sh` | lane `cachekeys` |
 | CI decoder coverage of the arm64 examples (`janus blockers`) | lane `decoder` (`scripts/decoder-coverage.sh`, also called by ci.yml) |
 | CI `scripts/oracle.sh quick` (qemu) and `scripts/oracle-amd64.sh quick` (native), MISMATCH check | lane `oracle` (in the lake tree, after `rtasl-prove`) |
 | asl.yml `scripts/asl.sh verify` (4 ASL corollaries) | lane `asl-verify` (after `rtasl-prove`) |
@@ -1029,7 +1029,7 @@ check still runs. The policy:
   any lane's pass/fail, or in any ASL/Sail artifact hash (`scripts/gate-cachecmp.py`: every
   ArmASL/JanusASL `.olean` and the Sail driver), the cache served something its inputs do not
   determine, or a key misses an input. Treat every cached result since the last agreeing nightly as
-  unproven, fix the key (`JanusASL/tools/asl_cache_key.py`, `asl_mod_cache.py`,
+  unproven, fix the key (`models/asl/tools/asl_cache_key.py`, `asl_mod_cache.py`,
   `validation/reference-models/sail-arm/cache_key.py`), and add a case to `scripts/lib/test-bcache.sh`. (If a build step is
   not reproducible bit for bit, the artifact comparison will say so on the first nightly: fix the
   non-determinism or drop that artifact from `gate-cachecmp.py hashes`, with a note here; never
@@ -1041,7 +1041,7 @@ check still runs. The policy:
   modules at 83049110; the 217 clean modules and the whole ArmASL model were byte-identical, and the build is
   deterministic at a fixed path: 3 rebuilds at LEAN_NUM_THREADS 1/4/0 byte-identical). The comparison therefore accepts
   such a file-hash difference ("path-only", counted and listed) under ALL of these conditions, and is otherwise strict:
-  the module is under `JanusASL/Proofs/` (ArmASL/*, Janus/*, lean-sail, the Sail driver and every other JanusASL module must
+  the module is under `models/asl/JanusASL/Proofs/` (ArmASL/*, Janus/*, lean-sail, the Sail driver and every other JanusASL module must
   be BYTE-identical); both runs recorded `sem:<module>` = the SHA-256 of the module re-serialized by Lean's own
   `saveModuleData` with every `Lean.Linter.lintLogExt` entry array removed (`tools/oleandigest`, `janus-olean-digest`: the
   WHOLE file, so header, constants (kind, name, universe parameters, type, value), every other extension's entries (simp
@@ -1076,7 +1076,7 @@ integrity and key tests are `scripts/lib/test-bcache.sh`.
 
 `scripts/gate.sh --cold` is the cold gate (user decision 2026-10-30, option B). It rebuilds everything from scratch (a fresh
 framework `.lake`, empty result / verdict / test-fixture caches in a private `<out>/cold-cache` that replaces `XDG_CACHE_HOME`,
-no JanusASL/Janus module cache) **except the ISA model artifacts**: the ArmASL build with lean-sail and the Sail oracle driver.
+no models/asl/JanusASL/Janus module cache) **except the ISA model artifacts**: the ArmASL build with lean-sail and the Sail oracle driver.
 Those are treated like the Lean toolchain:
 
 * **Pinned by content.** The pin store (`$JANUS_MODEL_PIN_DIR`, default `/srv/janus-model-pin`; not the build cache, so no
@@ -1096,7 +1096,7 @@ Those are treated like the Lean toolchain:
   (`scripts/model-pin.sh write`: under a lock, entry then one atomically replaced record). If a pin for the same inputs exists
   and the new cold build differs in any `.olean`/`.ilean`/driver byte it exits 1 `NOT REPRODUCED` and keeps the old pin.
   `modelpin.py write` refuses without the nightly's `JANUS_PIN_WRITER` and inside a cold gate.
-* A cold gate refuses to start on a checkout that already has a build (`.lake/build`, `JanusASL/.lake/build`, `JanusX86/.lake/build`,
+* A cold gate refuses to start on a checkout that already has a build (`.lake/build`, `models/asl/.lake/build`, `models/x86/.lake/build`,
   `validation/reference-models/sail-arm/target`): use a fresh worktree, or `--wipe`. It cannot be `--incremental`. Everything else (all lanes, the axiom
   guard, the speed check) is unchanged.
 

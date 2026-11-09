@@ -2,9 +2,9 @@
 # JanusASL: Janus' AArch64 model against Arm's ASL inside Lean (docs/design/ASL.md).
 #
 #   scripts/asl.sh deps    install the pinned toolchain into $DEPS: an opam root with Sail 0.20.3
-#                          plus 8 upstream Lean-backend commits and JanusASL's backend fixes (JanusASL/sail/*.patch),
+#                          plus 8 upstream Lean-backend commits and JanusASL's backend fixes (models/asl/sail/*.patch),
 #                          the slicing plugin, sail-arm at the pin, lean-sail at the pin
-#   scripts/asl.sh gen     slice sail-arm to the Janus subset and generate Lean (JanusASL/ArmASL*),
+#   scripts/asl.sh gen     slice sail-arm to the Janus subset and generate Lean (models/asl/ArmASL*),
 #                          then compare with the vendored copy (GEN_UPDATE=1 replaces the vendored copy)
 #   scripts/asl.sh restore unpack the vendored model (if needed) and copy its build from ASL_CACHE (no build)
 #   scripts/asl.sh model   unpack the vendored model (if needed) and build only ArmASL (lake; uses ASL_CACHE)
@@ -28,7 +28,7 @@
 #                      the generated model's build (and the lean-sail package) is copied from
 #                      the cache entry for this model and toolchain, if there is one; after a
 #                      build, it is stored there if not. Entries are keyed by a hash of every input
-#                      (JanusASL/tools/asl_cache_key.py: the vendored tarball, the splitter, the
+#                      (models/asl/tools/asl_cache_key.py: the vendored tarball, the splitter, the
 #                      toolchain by content, the lean-sail manifest entry, the lakefile settings that
 #                      reach ArmASL's modules, the compiler environment, the machine), carry a
 #                      SHA-256 manifest AND an HMAC of it under a per-user key
@@ -37,7 +37,7 @@
 #                      runners share one build of the ~45 min model. A missing, unsigned, tampered
 #                      or incomplete entry is rebuilt from source, never used.
 #                      The same directory also caches every JanusASL and Janus module's build
-#                      (ASL_CACHE/mods, JanusASL/tools/asl_mod_cache.py): one entry per module,
+#                      (ASL_CACHE/mods, models/asl/tools/asl_mod_cache.py): one entry per module,
 #                      keyed by what Lake traces (source, imports' keys, package settings,
 #                      toolchain), restored before and published after the JanusASL build.
 #   JANUS_ASL_CACHE=0  force a cold build: neither reads nor writes the cache (also off/no/false)
@@ -45,7 +45,7 @@
 #                      pin (scripts/lib/modelpin.py, docs/TESTING.md "Cold gate and the model pin"), never from the build
 #                      cache and never built-and-published: a missing, tampered or corrupt pin FAILS (a stale pin = a model
 #                      input changed; by default (JANUS_MODEL_PIN_STALE=rebuild; =fail to refuse) it builds the model from source inside this run instead,
-#                      loudly, publishing nothing). The JanusASL/Janus module cache is off. After the build every pinned file
+#                      loudly, publishing nothing). The models/asl/JanusASL/Janus module cache is off. After the build every pinned file
 #                      is hashed again. Only scripts/nightly-cold-gate.sh writes the pin.
 #   scripts/asl.sh key  print the model cache/pin key (32 hex digits)
 #   ASL_CACHE_READONLY=1   use the cache but never write to it
@@ -72,7 +72,7 @@ DEPS="${DEPS:-/srv/janus-asl-deps}"
 CASES="${CASES:-$root/artifacts/oracle/cases.jsonl}"
 OUT="${OUT:-$root/artifacts/asl}"
 JOBS="${JOBS:-$(nproc)}"
-pkg="$root/JanusASL"
+pkg="$root/models/asl"
 here="$pkg/sail"
 
 # The build cache is on by default (docs/SOUNDNESS.md "Build caches"): ASL_CACHE=<dir> picks it,
@@ -147,7 +147,7 @@ do_gen() {
     "$S/instrs32.sail" "$S/instrs64.sail" "$S/instrs64_sve.sail" "$S/instrs64_sme.sail"
     "$S/decode_end.sail" "$S/fetch.sail" "$S/map_clauses.sail" "$S/event_clauses.sail"
     "$here/harness.sail" "$S/termination_measures.sail")
-  # Lake fetches lean-sail itself; the generated lakefile is not used (JanusASL/lakefile.toml is).
+  # Lake fetches lean-sail itself; the generated lakefile is not used (models/asl/lakefile.toml is).
   (cd "$w" && ulimit -s unlimited &&
     sail --plugin "$here/plugin/_build/default/sail_plugin_janus.cmxs" --janus-lean \
       --janus-roots "$(grep -v '^#' "$here/roots.txt" | tr '\n' ' ')" \
@@ -161,7 +161,7 @@ do_gen() {
   python3 -I "$here/sail_int_fix.py" "$w/out/ArmASL/ArmASL.lean"
   # An exact-enough square root for FSQRT (the toolchain's goes through Float).
   python3 -I "$here/fakereal_sqrt.py" "$w/out/ArmASL/ArmASL/FakeReal.lean"
-  # Chained modules of at most PART_BYTES each (JanusASL/sail/split_lean.py).
+  # Chained modules of at most PART_BYTES each (models/asl/sail/split_lean.py).
   rm -rf "$w/split"; mkdir -p "$w/split"
   python3 -I "$here/split_lean.py" "$w/out/ArmASL/ArmASL.lean" "$w/split" --bytes "$PART_BYTES"
   cp "$w/out/ArmASL/ArmASL/"*.lean "$w/split/ArmASL/"
@@ -247,7 +247,7 @@ pin_step() { # restore | verify-tree
 }
 
 # Keep the cache within $ASL_CACHE_MAX (default 15G): unreferenced ArmASL entries first, then the
-# least recently restored entries (JanusASL/tools/asl_mod_cache.py gc; the checkout's own ArmASL
+# least recently restored entries (models/asl/tools/asl_mod_cache.py gc; the checkout's own ArmASL
 # entry and anything used in the last hour are kept). ASL_CACHE_MAX=off disables it.
 cache_gc() {
   [ -n "${ASL_CACHE:-}" ] && [ "${ASL_CACHE_READONLY:-0}" != 1 ] && [ "${ASL_CACHE_MAX:-15G}" != off ] || return 0
@@ -255,7 +255,7 @@ cache_gc() {
 }
 
 # ---- shared per-module cache of the JanusASL and Janus modules (ASL_CACHE/mods) ----
-# JanusASL/tools/asl_mod_cache.py: one entry per module, keyed by what Lake traces (source,
+# models/asl/tools/asl_mod_cache.py: one entry per module, keyed by what Lake traces (source,
 # imports' keys, package settings, toolchain), with a SHA-256 manifest checked on every copy.
 modcache_restore() {  # modcache_restore [--record FILE]
   # no cache, or a failed restore: no record is written, and restamp.py then has nothing to do
@@ -343,7 +343,7 @@ tl_run() {
     "$@"; return
   fi
   . "$root/scripts/lib/lanelake/keys.sh"
-  lock="$(lane_lake_lock "$pkg")"   # keyed by the resolved JanusASL/.lake: trees sharing it by symlink share the lock
+  lock="$(lane_lake_lock "$pkg")"   # keyed by the resolved models/asl/.lake: trees sharing it by symlink share the lock
   if [ "${JANUS_LANE_LOCK_HELD:-}" = "$lock" ]; then "$@"; return; fi
   # An exclusive phase nested in a SHARED hold of the same lock would wait for itself (flock on a new descriptor of the
   # same file never upgrades): refuse it loudly instead of hanging. JANUS_LANE_LOCK_SHARED names the lock held shared.
@@ -387,7 +387,7 @@ do_cached() {
   python3 -I "$root/scripts/lib/bcache.py" verify armasl "$ASL_CACHE" "$(asl_cache_key)" > /dev/null
 }
 
-# Only the cache restore (JanusASL/tools/test_asl_cache.sh).
+# Only the cache restore (models/asl/tools/test_asl_cache.sh).
 do_restore() { tl_run x restore_phase; }
 restore_phase() {
   unpack
@@ -538,7 +538,7 @@ verify_main() {
   d=$("$root/bin/janus" framework --janus-root "$root" --json |
     python3 -I -c 'import json, sys; print(json.load(sys.stdin)["asl"]["cacheDir"])')
   # $d is janus's private cache for this verification: its .lake must be a real directory of its own, never a
-  # link into a checkout (a gate tree's JanusASL/.lake is itself a symlink to the main checkout's; `cp -a` of
+  # link into a checkout (a gate tree's models/asl/.lake is itself a symlink to the main checkout's; `cp -a` of
   # it copied the link, and janus then wrote its package override and built through it into the checkout).
   # A link left by an earlier run is removed (the link only), and the seed is a DEREFERENCED copy.
   if [ -L "$d/.lake" ]; then echo "verify: removing the symlinked $d/.lake (the link, not its target)"; rm -f "$d/.lake"; fi
@@ -575,7 +575,7 @@ case "$mode" in
   deps) do_deps ;;
   gen) do_gen ;;
   key) asl_cache_key ;;
-  files) asl_cache_files ;;   # the pinned/cached files, NUL-separated, relative to JanusASL/.lake
+  files) asl_cache_files ;;   # the pinned/cached files, NUL-separated, relative to models/asl/.lake
   restore) do_restore ;;
   model) do_model ;;
   build) do_build ;;
