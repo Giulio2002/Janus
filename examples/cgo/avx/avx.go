@@ -1,5 +1,5 @@
 // Package avx holds the Janus FFI example whose C code is compiled by clang at -O3
-// -march=x86-64-v3 (built with CC=clang, see scripts/build/build-examples-cgo.sh): a loop that clang
+// -march=x86-64-v3 (built with CC=clang, see scripts/build-examples-cgo.sh): a loop that clang
 // vectorises with AVX2 on YMM registers.
 package avx
 
