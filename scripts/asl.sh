@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JanusASL: Janus' AArch64 model against Arm's ASL inside Lean (docs/ASL.md).
+# JanusASL: Janus' AArch64 model against Arm's ASL inside Lean (docs/design/ASL.md).
 #
 #   scripts/asl.sh deps    install the pinned toolchain into $DEPS: an opam root with Sail 0.20.3
 #                          plus 8 upstream Lean-backend commits and JanusASL's backend fixes (JanusASL/sail/*.patch),
@@ -13,7 +13,7 @@
 #   scripts/asl.sh prove   build the proofs (JanusASL.Proofs) and audit their axioms
 #   scripts/asl.sh replay  kernel-replay every JanusASL module with leanchecker, in batches
 #   scripts/asl.sh verify  build + `janus verify --asl` on the shipped Add, Max, Mul64 and Add128
-#                          proofs: their ASL corollaries, derived from the artifacts (docs/ASL.md)
+#                          proofs: their ASL corollaries, derived from the artifacts (docs/design/ASL.md)
 #
 # Environment:
 #   DEPS     pinned external sources/toolchains (default /srv/janus-asl-deps)
@@ -55,7 +55,7 @@
 #   GEN      work directory of `gen` (default $DEPS/gen)
 #   ASL_MEM_GB   memory budget of `build`/`prove` (default: the smaller of 24 and 60% of MemAvailable)
 #   ASL_JOBS     Lean processes Lake runs at once (default ASL_MEM_GB / ASL_JOB_GB, at least 1)
-#   ASL_JOB_GB   peak of the largest single Lean process of the build (default 8, docs/ASL.md "Memory")
+#   ASL_JOB_GB   peak of the largest single Lean process of the build (default 8, docs/design/ASL.md "Memory")
 #   REPLAY_BATCH modules per leanchecker process in `replay` (default 4)
 #   JANUS_REPLAY_PAR  leanchecker processes `replay` runs at once (default 4)
 #   ASL_EXAMPLES  examples for `verify` (default "Add Max Mul64 Add128")
@@ -94,7 +94,7 @@ PIN_DIR=""
 if [ -n "$MODEL_PIN" ]; then ASL_CACHE=""; PIN_DIR="$(python3 -I "$root/scripts/lib/modelpin.py" dir)"; fi
 export ASL_CACHE
 
-# ---- pins (keep in sync with docs/ASL.md) ----
+# ---- pins (keep in sync with docs/design/ASL.md) ----
 SAIL_URL=https://github.com/rems-project/sail
 SAIL_TAG=0.20.3
 SAIL_REV=0.20.3                 # tag; the patch adds later upstream Lean-backend fixes + JanusASL's
@@ -269,7 +269,7 @@ modcache_publish() {  # modcache_publish [--exe]
   cache_gc
 }
 
-# ---- the compiled C objects (ASL_CACHE/armobj; asl_mod_cache.py "Compiled objects", docs/ASL.md) ----
+# ---- the compiled C objects (ASL_CACHE/armobj; asl_mod_cache.py "Compiled objects", docs/design/ASL.md) ----
 # Scopes: arm (ArmASL parts + lean-sail: one entry, keyed by all their C) and jasl / janus (the JanusASL and Janus
 # libraries: one entry per object, so one changed module recompiles only itself). Looked up after the C exists (the
 # id hashes each C and the compiler binary); HMAC + per-file SHA-256 + path allowlist as for the other entries.
@@ -313,7 +313,7 @@ unpack() {
 
 # Lake starts as many Lean processes as its thread pool has threads (LEAN_NUM_THREADS); each Lean
 # process gets the same value for its own elaboration threads. Bound both by memory: every process
-# of the build stays under ASL_JOB_GB (docs/ASL.md, "Memory"), so ASL_JOBS of them fit ASL_MEM_GB.
+# of the build stays under ASL_JOB_GB (docs/design/ASL.md, "Memory"), so ASL_JOBS of them fit ASL_MEM_GB.
 asl_jobs() {
   local avail budget per
   avail=$(awk '/^MemAvailable:/ {print int($2 / 1048576)}' /proc/meminfo)

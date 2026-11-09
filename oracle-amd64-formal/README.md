@@ -163,7 +163,7 @@ python3 -I oracle-amd64-formal/compare.py WORKDIR/model-janus/x86_emulator OUT_D
   --classes '^(gen/(rcl|rcr|movss|movsd_xmm|movups|movaps|movupd|movapd|movdqu|movdqa|movq|movd|pxor|xorps|xorpd|pcmpeqb|pand|por|pmovmskb|pshufd|pshuflw|punpcklbw|prefetch.*|cld|v.*)|edge/(tls|sse-memmove|sse-align|vec-cmp|vec-align)|harvest/(rcr|movss|movsd_xmm|movups|movdqu|movq|movd|cld|v.*|p.*))$'
 ```
 
-Results on the final `SEED=1` run are in `docs/ORACLE-AMD64.md` ("FS, YMM and the new
+Results on the final `SEED=1` run are in `docs/validation/ORACLE-AMD64.md` ("FS, YMM and the new
 instructions"): every FS-relative case identical, 0 flags undefined there but defined by us,
 and every result difference a formal-model bug in `MOVD/MOVQ xmm, r/m` (it does not
 zero-extend to 128 bits). The formal model implements no VEX instruction and none of the

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round-13 regression rows (docs/AUDIT.md, docs/SOUNDNESS.md "Round 13"): the round-10/11 V1 rule
+# Round-13 regression rows (docs/audit/AUDIT.md, docs/SOUNDNESS.md "Round 13"): the round-10/11 V1 rule
 # (a runtime-contract hypothesis must quantify the runtime and nothing else may constrain the
 # runtime variables) now classifies EVERY binder of the theorem, of any sort. A non-Prop binder
 # (PLift, ULift, Subtype, Sigma, structure, a proof-local `def … : Type`) whose type mentions a

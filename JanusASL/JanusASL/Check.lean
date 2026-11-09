@@ -16,7 +16,7 @@ For every case of the oracle corpus (`artifacts/oracle/cases.jsonl`, format of
   data buffer (the same tables as `oracle-sail/src/main.rs`), and
 * the **Janus side**: `Janus.Arm64.step` from the state `Oracle/Main.lean` builds,
 
-and compare. This is a *test* (compiled evaluation), not a proof. See `docs/ASL.md`.
+and compare. This is a *test* (compiled evaluation), not a proof. See `docs/design/ASL.md`.
 
 Verdicts (one per case):
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reproduce the round-3 attacks (docs/AUDIT-ROUND3.md) and check the fix for R1 (CRITICAL).
+# Reproduce the round-3 attacks (docs/audit/AUDIT-ROUND3.md) and check the fix for R1 (CRITICAL).
 # Exits 1 if the fixed finding R1 regresses (prints Verified again).
 # Writes only under audit/round3/work/.  Usage: audit/round3/run-round3.sh [-j N]  (-j: blocks at once, scripts/lib/parallel.sh)
 set -u

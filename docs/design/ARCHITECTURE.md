@@ -9,8 +9,8 @@ Janus has two halves that meet at one generated file, `Extracted.lean`:
   automation.
 
 The extractor never interprets an instruction, and the Lean side never trusts the extractor's
-analysis. This document explains how that split works. [SOUNDNESS.md](SOUNDNESS.md) states precisely
-what a theorem means, and [CLI.md](CLI.md) documents every artifact format.
+analysis. This document explains how that split works. [SOUNDNESS.md](../SOUNDNESS.md) states precisely
+what a theorem means, and [CLI.md](../CLI.md) documents every artifact format.
 
 ## Data flow
 
@@ -61,7 +61,7 @@ Step by step, for `janus extract <binary> <symbol> <outdir>` followed by `janus 
    byte-compares the result with the saved files. It then compiles a trusted copy of `Extracted`,
    compiles the proof in a sandbox, audits the theorem with the trusted `janus-audit` routine, replays the
    environment with `leanchecker`, re-checks every hash, and writes `verified.json`. The full list of
-   steps is in [CLI.md § Verify](CLI.md#verify).
+   steps is in [CLI.md § Verify](../CLI.md#verify).
 
 ## Why decoding in Lean keeps the extractor out of the TCB
 
@@ -278,10 +278,10 @@ on an ASL-derived check).
 
 | Directory | What it is |
 |---|---|
-| `oracle/` | arm64 differential oracle vs qemu or native hardware ([ORACLE.md](ORACLE.md)) |
-| `oracle-sail/` | the same corpus on the Sail arm-v9.4-a model of Arm's ASL ([ORACLE-SAIL.md](ORACLE-SAIL.md)) |
-| `oracle-amd64/`, `oracle-amd64-formal/` | amd64 oracle on the host CPU, and the Sail/ACL2 X86isa flag cross-check ([ORACLE-AMD64.md](ORACLE-AMD64.md)) |
-| `audit/` | the attack files behind [AUDIT.md](AUDIT.md) and `run-all.sh` |
+| `oracle/` | arm64 differential oracle vs qemu or native hardware ([ORACLE.md](../validation/ORACLE.md)) |
+| `oracle-sail/` | the same corpus on the Sail arm-v9.4-a model of Arm's ASL ([ORACLE-SAIL.md](../validation/ORACLE-SAIL.md)) |
+| `oracle-amd64/`, `oracle-amd64-formal/` | amd64 oracle on the host CPU, and the Sail/ACL2 X86isa flag cross-check ([ORACLE-AMD64.md](../validation/ORACLE-AMD64.md)) |
+| `audit/` | the attack files behind [AUDIT.md](../audit/AUDIT.md) and `run-all.sh` |
 
 ## Where the trust boundary runs inside `janus verify`
 
@@ -300,4 +300,4 @@ change the result it reports:
 * `leanchecker` replays the environment independently, and every `.olean` hash is re-checked after the
   audit and the replay.
 
-[AUDIT.md](AUDIT.md) describes the attacks this arrangement was built against.
+[AUDIT.md](../audit/AUDIT.md) describes the attacks this arrangement was built against.

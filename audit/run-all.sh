@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reproduce every attack in docs/AUDIT.md. Writes only under audit/work/.
+# Reproduce every attack in docs/audit/AUDIT.md. Writes only under audit/work/.
 # Usage: audit/run-all.sh [-j N]     (builds audit/bin/janus from the current tree)
 #   -j N   run up to N rows at once (default: $JANUS_JOBS, else the number of cores capped by
 #          memory, scripts/lib/parallel.sh); -j 1 runs them one by one. Output order is the same.
@@ -86,7 +86,7 @@ if [ -e "$a6m" ]; then row A6_eval_io blocked "accepted: the proof wrote the mar
 for a in A2_unexpander A4_unexpand_janus; do
   par_run 'row "$a" Verified-honest "$(v --proof audit/attacks/$a.lean $W/Add --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"'
 done
-# Round 2, CRITICAL-1 (docs/AUDIT-ROUND2.md): an instance written inline in the statement
+# Round 2, CRITICAL-1 (docs/audit/AUDIT-ROUND2.md): an instance written inline in the statement
 # (`@HMul.hMul _ _ _ ⟨fun a b => a + b⟩ x y`, printed `x * y`) used to verify against Add. Now
 # rejected (statement identity) by the instance-argument check and, independently, by the
 # round-trip of the printed statement. Variants: HSub, HMul, an OfNat literal instance, a
@@ -235,7 +235,7 @@ for ns in "" --unsafe-no-sandbox; do
 done
 fi
 
-# ASL corollary forgeries (docs/ASL.md, audit/asl/attacks): proofs whose main theorem verifies
+# ASL corollary forgeries (docs/design/ASL.md, audit/asl/attacks): proofs whose main theorem verifies
 # but which try to forge the --asl corollary. Each must print "Invalid: ASL corollary"; the honest
 # Add control must derive it. Needs the JanusASL build (about an hour once): JANUS_AUDIT_ASL=1.
 asl_v() { # asl_v PROOF [flags…]: the ASL verdict line and its stage

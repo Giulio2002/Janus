@@ -1,4 +1,4 @@
-// Round 10 probes against the real go1.26.0 runtime (docs/AUDIT-ROUND10.md).
+// Round 10 probes against the real go1.26.0 runtime (docs/audit/AUDIT-ROUND10.md).
 // Build: go build -ldflags=-checklinkname=0 (linkname pulls of runtime internals).
 //
 //	probe10 tanil N    runtime.typeAssert with a nil type and CanFail (contract I1): how many of

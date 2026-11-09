@@ -15,7 +15,7 @@ BSRQ AX, AX ; MOVQ $-1, CX ; CMOVQEQ CX, AX ; INCQ AX ; RET
 
 `BSR` of zero sets `ZF` and leaves its destination *undefined* (Intel; AMD keeps it). The model
 makes it an arbitrary 64-bit value (`State.undefVal`), the proof holds for every such value, and
-`CMOVQEQ` (which reads only `ZF`) replaces it by `-1`: this is `Janus` docs/AUDIT.md LOW-2.
+`CMOVQEQ` (which reads only `ZF`) replaces it by `-1`: this is `Janus` docs/audit/AUDIT.md LOW-2.
 -/
 
 namespace Proof

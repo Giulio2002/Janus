@@ -14,7 +14,7 @@ import (
 // to the UDF after it). The runner executes CLREX before every case, so the monitor starts in
 // the Open Access state; the Lean side (janus-oracle) runs every case under every outcome stream
 // of the store-exclusives and the comparator accepts any of the model's outcomes
-// (docs/ORACLE.md, "Nondeterministic outcomes").
+// (docs/validation/ORACLE.md, "Nondeterministic outcomes").
 
 func encLdxr(size, o0, rn, rt uint32) uint32 {
 	return 0x08400000 | size<<30 | 31<<16 | o0<<15 | 31<<10 | rn<<5 | rt

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Second, authoritative reference oracle: run the Janus oracle corpus on the Sail arm-v9.4-a
 # model (Arm's ASL, via rems-project/sail-arm and the sail-aarch64-oracle crate) and report
-# three-way agreement Janus vs Sail vs qemu. See docs/ORACLE-SAIL.md.
+# three-way agreement Janus vs Sail vs qemu. See docs/validation/ORACLE-SAIL.md.
 #
 #   scripts/oracle-sail.sh build     build the Sail driver (the 166 MB model is built as SAIL_SPLIT_PARTS parallel C++ TUs, see SAIL_SPLIT)
 #   scripts/oracle-sail.sh smoke     build + hand-written sanity cases
@@ -48,7 +48,7 @@ DEPS="${DEPS:-/srv/janus-sail-deps}"
 SAIL_MODEL="${SAIL_MODEL:-vendored}"
 here="$root/oracle-sail"
 
-# ---- pins (keep in sync with docs/ORACLE-SAIL.md and oracle-sail/Cargo.toml) ----
+# ---- pins (keep in sync with docs/validation/ORACLE-SAIL.md and oracle-sail/Cargo.toml) ----
 CRATE_URL=https://github.com/yufengzjj/sail-aarch64-oracle
 CRATE_REV=2dffc81de96705d087b72a57047dd4589c6fb548
 CRATE_MODEL_GZ_SHA256=64e3a9292cf2a722a9f2c59f2a379217a33556eb8c84f05501aa560315a0b78c
@@ -93,7 +93,7 @@ model_dir() {
   python3 -I "$here/dir_digest.py" record "$dst/.inst-complete" "$dst/model.cpp" "$dst/model.h" "$dst/model_missing.cpp" -- "src=$sd" "instrument=$ins"
 }
 
-# ---- parallel model build (docs/ORACLE-SAIL.md "Split build") ----
+# ---- parallel model build (docs/validation/ORACLE-SAIL.md "Split build") ----
 # The model is one 170 MB C++ TU that g++ compiles serially (~24 min). With SAIL_SPLIT=1 it is cut at
 # top-level item boundaries into SAIL_SPLIT_PARTS TUs (split_model.py, every layout assumption asserted) and the pinned
 # crate's build.rs, patched to take the parts (build.rs.patch, both hashes pinned), compiles them in parallel.
@@ -307,7 +307,7 @@ for line in sys.stdin:
   # sail-arm stubs the exclusive monitor (IsExclusiveLocal/IsExclusiveGlobal/IsExclusiveVA are
   # TRUE: every store-exclusive passes), so Janus runs with --monitor-stub: each store-exclusive
   # first gets a monitor marking its own bytes, which makes "pass" one of the model's outcomes.
-  # The Open-state rule (fail) is checked against qemu only (docs/ORACLE-SAIL.md).
+  # The Open-state rule (fail) is checked against qemu only (docs/validation/ORACLE-SAIL.md).
   janus_stub="$OUT/janus-vs-sail/janus-monitor-stub.sh"
   printf '#!/bin/sh\nexec %s --monitor-stub "$@"\n' "$janus_bin" > "$janus_stub"
   chmod +x "$janus_stub"

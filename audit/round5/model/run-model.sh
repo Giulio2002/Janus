@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round 5, item 6 (docs/AUDIT-ROUND5.md): targeted oracle cases for six instruction families
+# Round 5, item 6 (docs/audit/AUDIT-ROUND5.md): targeted oracle cases for six instruction families
 # (arm64 ADD/SUB extended register, Advanced SIMD shift by immediate, across lanes; amd64
 # BT/BTS/BTR/BTC, SHLD/SHRD, BSF/BSR/TZCNT/LZCNT/POPCNT), model vs hardware (qemu-aarch64,
 # the host CPU), plus the hand-derived kernel checks in HandDerived.lean.

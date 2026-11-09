@@ -1,5 +1,5 @@
 /* =============================================================================
- * harness.sail: the Janus entry points into the sliced Sail x86 model (docs/X86FORMAL.md).
+ * harness.sail: the Janus entry points into the sliced Sail x86 model (docs/validation/X86FORMAL.md).
  *
  * Appended after the sliced sail-x86-from-acl2 sources. Everything here is a thin wrapper:
  * prefix/ModRM/SIB decoding, the dispatch, the instruction semantics, the flag computations,

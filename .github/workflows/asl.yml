@@ -1,7 +1,7 @@
 name: ASL equivalence
 
 # Builds the Lean translation of Arm's ASL (vendored, JanusASL/vendor/ArmASL.tar.gz) and checks the
-# kernel-checked equivalence theorems between it and the Janus arm64 model (docs/ASL.md), then runs
+# kernel-checked equivalence theorems between it and the Janus arm64 model (docs/design/ASL.md), then runs
 # `janus verify --asl` on the shipped Add, Max, Mul64 and Add128 proofs: each one's ASL corollary is
 # derived from its artifacts, audited and kernel-replayed. The model build takes about an hour, so
 # this runs weekly, on demand, and when the arm64 model, JanusASL or the verifier changes, rather

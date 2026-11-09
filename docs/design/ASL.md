@@ -1,6 +1,6 @@
 # JanusASL: the Lean model checked against Arm's ASL inside Lean
 
-`docs/ORACLE.md` checks `Janus.Arm64.step` against qemu. `docs/ORACLE-SAIL.md` checks it against
+`docs/validation/ORACLE.md` checks `Janus.Arm64.step` against qemu. `docs/validation/ORACLE-SAIL.md` checks it against
 Arm's ASL, run as the Sail arm-v9.4-a model compiled to C++. Both are harnesses outside Lean.
 JanusASL brings the second check into Lean. Sail's Lean backend translates the same Sail model to
 Lean, and the result is sliced to the instructions Janus decodes. Then:
@@ -138,7 +138,7 @@ retry and the PC update of `__InstructionExecute`, and it maps ASL exceptions to
 
 **System register reads that are not in the table.** `MRS Xt, ID_AA64ISAR0_EL1` and the other
 feature-ID registers (`ID_AA64ISAR1/2`, `ID_AA64PFR0/1`, `ID_AA64ZFR0`, `ID_AA64MMFR0..4`,
-`ID_AA64DFR0/1`, N5 in [GAPS.md](GAPS.md)) are decoded by Janus as environment reads
+`ID_AA64DFR0/1`, N5 in [GAPS.md](../GAPS.md)) are decoded by Janus as environment reads
 (`Instr.mrsEnv (.idreg crm op2)`, like `MIDR_EL1`, `CNTVCT_EL0`, `DIT`): they execute as
 `Fault.kernel` and the kernel contract `Janus.Kernel.Site.mrs` gives an **arbitrary** 64-bit result.
 They are deliberately not in the ASL system-register list (`janus_sysreg_splice.sail` keeps only
@@ -547,7 +547,7 @@ upstream (none has been filed):
    precision 2^-1100: `m/2^1100` when `m = ⌊√x·2^1100⌋` is exact, `(2m+1)/2^1101` otherwise.
    Every boundary FPRound tests for binary16/32/64 is a multiple of 2^-1100, so FPRound of it
    equals FPRound of the exact root (result and exceptions). The corpus FSQRT cases agree, and
-   rt-asl rows A5 rsq and A5 fsqrt check it against Sail's C backend (docs/AUDIT-ASL.md, A5).
+   rt-asl rows A5 rsq and A5 fsqrt check it against Sail's C backend (docs/audit/AUDIT-ASL.md, A5).
 8. **`integer_update_subrange`.** The Lean library's `set_slice_int` converts the integer to a bit
    vector of the field's width before the update, so every bit outside the field was lost (Sail's
    C and OCaml libraries update the integer in place). FPRoundBase's round-to-odd (FCVTXN) is the
@@ -1140,7 +1140,7 @@ the chain are trusted:
 2. **Sail → Lean** (Sail 0.20.3's Lean backend with the patches above). It is checked
    empirically: on the 583,756-case corpus, the Lean model agrees with Janus on every case that
    both run, and Janus agrees with qemu and with the C++ build of the same Sail
-   (`docs/ORACLE.md`, `docs/ORACLE-SAIL.md`). The development history shows why this link needs the test: bugs 4–6
+   (`docs/validation/ORACLE.md`, `docs/validation/ORACLE-SAIL.md`). The development history shows why this link needs the test: bugs 4–6
    all produced code that compiled.
 3. **The slice and splices.** Kept decode patterns are verbatim. A word that Janus decodes and
    that lands on an excluded body is reported by the check rather than hidden. The splices

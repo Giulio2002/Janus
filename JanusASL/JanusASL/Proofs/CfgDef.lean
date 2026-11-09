@@ -2,7 +2,7 @@ import JanusASL.Proofs.Rel
 
 /-! # `LinuxEL0Config`, the predicate (the evaluation lemmas are in Config.lean)
 
-See Config.lean and docs/ASL.md. Defined here, below Step.lean, so that every class theorem can
+See Config.lean and docs/design/ASL.md. Defined here, below Step.lean, so that every class theorem can
 conclude that its step preserves the configuration. -/
 
 namespace JanusASL.Proofs

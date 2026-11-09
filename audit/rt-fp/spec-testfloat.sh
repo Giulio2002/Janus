@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Row SPEC-TF (docs/AUDIT-FP.md): Janus.Float.add/mul/fma/truncInt against SoftFloat 3e vectors.
+# Row SPEC-TF (docs/audit/AUDIT-FP.md): Janus.Float.add/mul/fma/truncInt against SoftFloat 3e vectors.
 # Usage: audit/rt-fp/spec-testfloat.sh [MAX_VECTORS_PER_RUN]   (needs /srv/janus-fp-deps, scripts/testfloat.sh)
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

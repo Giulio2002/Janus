@@ -18,7 +18,7 @@ import (
 // embedded framework, or a --janus-root checkout). Before the shared/exclusive locking of
 // framework.go, a writer (`janus blockers` building janus-decode, which adds
 // Janus.Tools.Decode) failed every verification that was using the build with "framework
-// integrity … unexpected Janus/Tools/Decode.olean" (docs/AUDIT-ASL.md, C1).
+// integrity … unexpected Janus/Tools/Decode.olean" (docs/audit/AUDIT-ASL.md, C1).
 
 // buildJanusBinary builds this command into a temporary directory: the tests below run real,
 // separate janus processes, as concurrent users do.

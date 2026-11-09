@@ -1,7 +1,7 @@
 import Janus.Arm64.Decode
 
 /-!
-Row DEC-A64 (docs/AUDIT-FP.md): no word is claimed by two decoders. Reads the words of a
+Row DEC-A64 (docs/audit/AUDIT-FP.md): no word is claimed by two decoders. Reads the words of a
 `janus-decode` output file (argument 1) that `decodeAll` accepts and checks that `decode` and
 `decodeNeon` do not both accept any of them (`decodeAll` tries `decode` first, so an overlap
 would be a second, shadowed decoder for the same encoding). Prints the overlapping words and

@@ -1,7 +1,7 @@
 # Janus soundness audit — round 2
 
 > **Status (agent/audit-fix):** CRITICAL-1 and U1 are fixed, LOW-3/LOW-4 and the olean-loader
-> residual are documented in [SOUNDNESS.md](SOUNDNESS.md); MEDIUM-1, LOW-1 and LOW-2 (amd64
+> residual are documented in [SOUNDNESS.md](../SOUNDNESS.md); MEDIUM-1, LOW-1 and LOW-2 (amd64
 > model) are open. See the per-finding table in [AUDIT.md](AUDIT.md#round-2-2026-10-23). The
 > report below is kept as written.
 
@@ -9,7 +9,7 @@ Second independent adversarial review of the claim: *if `janus verify` (or `veri
 consumer `--proof-root` verification) prints `Verified`, the printed theorem holds for the actual
 bytes of this binary under the documented semantics.*
 
-Round 1 (`docs/AUDIT.md`) and the later F7 review fixed forged audits, pretty-printer/unexpander
+Round 1 (`docs/audit/AUDIT.md`) and the later F7 review fixed forged audits, pretty-printer/unexpander
 tricks, sandbox and replay holes, framework-olean rebuilding, and model issues up to the
 atomics/DC-ZVA coverage. This round attacks the auditor's constant/instance rules, the new
 dependency/replay/sandbox machinery, and the newest model semantics.

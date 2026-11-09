@@ -5,7 +5,7 @@ import Lean.Data.Json
 # `janus-oracle`: run `Janus.Arm64.step` on differential-test cases
 
 Reads one JSON test case per line on stdin (the format written by `oracle gen`, see
-`oracle/layout/layout.go` and `docs/ORACLE.md`) and prints one JSON result per line:
+`oracle/layout/layout.go` and `docs/validation/ORACLE.md`) and prints one JSON result per line:
 
 * the initial `State` has `X0..X30`, `SP`, `NZCV`, `pc`, `V0..V31` (field `v`, absent = 0),
   `tpidr` (TPIDR_EL0, absent = 0), `fpcr`/`fpsr` (absent = 0) and `dczid` (the reference machine's DCZID_EL0, field

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Compare janus-decode's verdicts with GNU objdump's disassembly of the same words
-(docs/AUDIT-FP.md, row DEC-A64). Usage: compare.py LEAN_OUT OBJDUMP_OUT
+(docs/audit/AUDIT-FP.md, row DEC-A64). Usage: compare.py LEAN_OUT OBJDUMP_OUT
 Fails (exit 1) when the model accepts a word objdump calls undefined, or decodes a floating-point
 word as a different instruction or precision than objdump, or a non-FP constructor covers an FP
 mnemonic. The Advanced SIMD floating-point classes of `NeonInstr` (vector, scalar, by-element,

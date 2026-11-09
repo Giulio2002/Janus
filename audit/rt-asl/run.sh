@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Red-team round ASL (docs/AUDIT-ASL.md): JanusASL's meaning, the Sail backend patches, and
+# Red-team round ASL (docs/audit/AUDIT-ASL.md): JanusASL's meaning, the Sail backend patches, and
 # concurrent `janus verify`. Writes only to a mktemp directory (and the Go/Lake build caches).
 #
 #   audit/rt-asl/run.sh            every row, one group after the other
@@ -88,7 +88,7 @@ grp_strict() {
 grp_replay() {
   echo "== A7: independent kernel replay of the JanusASL modules (leanchecker)"
   # Every module of JanusASL.Proofs, batched by `scripts/asl.sh replay` (one leanchecker over all of
-  # JanusASL.Proofs holds several copies of the model's environment at once: ~16 GiB, docs/ASL.md "Memory").
+  # JanusASL.Proofs holds several copies of the model's environment at once: ~16 GiB, docs/design/ASL.md "Memory").
   if "$root/scripts/asl.sh" replay > "$W/replay.log" 2>&1 && grep -q '^replay: leanchecker passed on all' "$W/replay.log"; then
     row "A7 leanchecker JanusASL.Proofs" ok "ok (every proof module replayed by the kernel)"
   else
@@ -137,7 +137,7 @@ grp_probes() {
         else row "A5 $k" ok "DIFFERS from the C backend"; fi
       done
       for k in vb vf vcat; do
-        if cmpk "$k"; then row "C2 $k (let-bound block)" latent "fixed (Lean = C): update docs/AUDIT-ASL.md C2"
+        if cmpk "$k"; then row "C2 $k (let-bound block)" latent "fixed (Lean = C): update docs/audit/AUDIT-ASL.md C2"
         else row "C2 $k (let-bound block)" latent "latent: Lean drops the block's assignments ($(diff <(grep "^$k " "$W/c/out") <(grep "^$k " "$W/lean/out.txt") | grep -c '^<') of 256 differ)"; fi
       done
     else

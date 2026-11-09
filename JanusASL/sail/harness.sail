@@ -1,5 +1,5 @@
 /* =============================================================================
- * harness.sail: the Janus entry points into the sliced sail-arm model (docs/ASL.md).
+ * harness.sail: the Janus entry points into the sliced sail-arm model (docs/design/ASL.md).
  *
  * Appended after the sliced sail-arm sources. Everything here is a thin wrapper:
  * the instruction semantics, decode, the EL0 checks (SP alignment, alignment,

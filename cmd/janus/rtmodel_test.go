@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// rt-model EX1 (docs/AUDIT-MODEL.md): the extractor copies code and read-only data by section
+// rt-model EX1 (docs/audit/AUDIT-MODEL.md): the extractor copies code and read-only data by section
 // header, but the kernel loads by program header (PT_LOAD) and ignores section headers. A
 // binary whose `.text` section header points at a different file offset than the executable
 // PT_LOAD maps still runs the real code, yet Janus would read (and prove about) the wrong

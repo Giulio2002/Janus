@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round-11 regression rows (docs/AUDIT.md, docs/SOUNDNESS.md "Round 11"): the round-10 V1 rule
+# Round-11 regression rows (docs/audit/AUDIT.md, docs/SOUNDNESS.md "Round 11"): the round-10 V1 rule
 # (a runtime-contract hypothesis must quantify the runtime) now covers EVERY non-program,
 # non-numeric contract argument, not only RtReady/IfaceModel/MapModel/List (Nat x Nat). Exits 1
 # if a blocked attack verifies, a control stops verifying, or a kernel-checked model row changes

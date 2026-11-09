@@ -1,5 +1,5 @@
 /- Lean definitions imported by the generated Sail x86 model (`--lean-import-file`,
-docs/X86FORMAL.md). Only a `decreasing_trivial` extension: the measures of
+docs/validation/X86FORMAL.md). Only a `decreasing_trivial` extension: the measures of
 termination_measures.sail decrease by integer arithmetic on the model's own helpers
 (`lognot_int`, `Int.shiftr`, `floor2`), which `omega` (or, after a case split, `grind`) decides once they are unfolded. This
 is a proof search only (no axiom, no `sorry`): a goal it cannot prove fails the build. -/

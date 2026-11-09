@@ -539,7 +539,7 @@ All earlier rows of `audit/run-all.sh` still print their expected result.
 
 A second, independent adversarial review attacked the auditor's constant/instance rules, the
 dependency/replay/sandbox machinery and the newest model semantics. The full report is
-[docs/AUDIT-ROUND2.md](AUDIT-ROUND2.md); its attack files are in `audit/round2/`
+[docs/audit/AUDIT-ROUND2.md](AUDIT-ROUND2.md); its attack files are in `audit/round2/`
 (`attacks/`, `controls/`, `model/`, `amd64/`) and `audit/round2/run-round2.sh` reproduces the
 verifier findings and exits 1 if a fixed one regresses. The CRITICAL-1 and U1 rows are also in
 `audit/run-all.sh` (`R2.*`).
@@ -549,7 +549,7 @@ verifier findings and exits 1 if a fixed one regresses. The CRITICAL-1 and U1 ro
 | CRITICAL-1 | An instance written inline in the statement (`@HMul.hMul _ _ _ ⟨fun a b => a + b⟩ x y`) is hidden by the default pretty-printer: against `example.com/basic.Add` the statement printed `… = x * y` (S1c) or `x - y` (S1) and verified, every constant being Lean core. | critical | **fixed** (below). `run-round2.sh` and run-all `R2.S1*`: `Invalid`, `Stage: statement identity` |
 | U1 | The `unshare` fallback remounted only `/` read-only: `/tmp`, `/dev/shm`, `/boot`, `/run/user/…` stayed writable on the host (the trusted cache was already safe). | low (confinement) | **fixed**: every mount is remounted read-only (keeping its locked flags), `/tmp` and `/dev/shm` are private tmpfs mounts, binds under the host `/tmp` are re-exposed from the hidden original; if a mount cannot be made read-only the fallback is refused (install bubblewrap). The self-test checks `/tmp` and `/dev/shm` are private. `JANUS_SANDBOX=unshare` forces the fallback; run-all `R2.U1*` and `TestUnshareFallback*` |
 | M1, deps, replay cache, verify-batch, audit marker | Module-system proof, dependency pinning, cache poisoning, cross-request influence, record spoofing | n/a | blocked (no change) |
-| LOW-3 | arm64 feature list missing FP/AdvSIMD; the `arm64HasATOMICS` precondition trusts the kernel's HWCAP report | low (docs) | **documented** in [SOUNDNESS.md](SOUNDNESS.md) ("Atomics, exclusives and system registers") |
+| LOW-3 | arm64 feature list missing FP/AdvSIMD; the `arm64HasATOMICS` precondition trusts the kernel's HWCAP report | low (docs) | **documented** in [SOUNDNESS.md](../SOUNDNESS.md) ("Atomics, exclusives and system registers") |
 | LOW-4 | `DCZID_EL0` assumed identical on all cores | low (docs) | **documented** in SOUNDNESS.md |
 | Residual | the auditor and `leanchecker` load untrusted `.olean` bytes; the loader does not validate them | TCB | **documented** in SOUNDNESS.md (trusted computing base, item 4) |
 | MEDIUM-1 | amd64: the direction flag is not in the state; a verified *mid-function* theorem says memmove's backward `REP MOVSQ` copies forward (call theorems unaffected) | medium | open (amd64 model) |
@@ -596,7 +596,7 @@ clean prints round-trip). Tests: `cmd/janus/round2_test.go` (`TestInlineInstance
 
 ## ASL corollary forgeries (`janus verify --asl`)
 
-`--asl` derives the verified theorem's corollary about Arm's ASL ([ASL.md](ASL.md#janus-verify---asl-the-corollary-of-a-verified-theorem)).
+`--asl` derives the verified theorem's corollary about Arm's ASL ([ASL.md](../design/ASL.md#janus-verify---asl-the-corollary-of-a-verified-theorem)).
 The corollary module imports the untrusted proof, so its compile runs sandboxed and its result is
 re-checked by the trusted auditor (`JanusAudit.runASL`). `audit/asl/attacks/` holds proofs whose
 main theorem verifies but which try to forge the corollary; `audit/run-all.sh` runs them with

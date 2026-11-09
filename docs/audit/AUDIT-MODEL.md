@@ -19,7 +19,7 @@ Axes:
 
 Rows: `audit/rt-model/run.sh` (SEQ, CORNER, EX1), `cmd/janus/rtmodel_test.go`
 (`TestSegmentMismatchRejected`). The model/decoder/runner infrastructure is built on the
-existing oracles (`docs/ORACLE-AMD64.md`, `docs/ORACLE.md`, `docs/ORACLE-SAIL.md`); the
+existing oracles (`docs/validation/ORACLE-AMD64.md`, `docs/validation/ORACLE.md`, `docs/validation/ORACLE-SAIL.md`); the
 sequence mode added here is a new `seq`/`words` field in the oracle case format
 (`oracle-amd64/layout`, `oracle/layout`) that both the native runners and the Lean models
 (`Oracle.Amd64Main`, `Oracle.Main`) understand.
@@ -51,7 +51,7 @@ runnable ELF). The two are independent descriptions of the same file.
 So if a binary's `.text` section header says "the code at virtual address `V` is at file offset
 `O₁`" while the `PT_LOAD` that maps `V` says "map file offset `O₂` there", the CPU executes the
 bytes at `O₂` and Janus reads the bytes at `O₁`. The trusted byte-copy (TCB item 2 in
-[SOUNDNESS.md](SOUNDNESS.md)) then copies bytes that are not the ones that run, and every
+[SOUNDNESS.md](../SOUNDNESS.md)) then copies bytes that are not the ones that run, and every
 downstream guarantee is about the wrong bytes. `janus check` re-runs the same section-header
 copy and compares it to `Extracted.lean`, so it confirms the mismatch rather than detecting it;
 the binary's SHA-256 pins exactly the tampered file.
@@ -121,7 +121,7 @@ section against it.
 
 ## SEQ (axis 2): multi-instruction straight-line blocks
 
-Single-step oracles (`docs/ORACLE-AMD64.md`, `docs/ORACLE.md`) prove each instruction in
+Single-step oracles (`docs/validation/ORACLE-AMD64.md`, `docs/validation/ORACLE.md`) prove each instruction in
 isolation; they cannot catch a bug that only shows up when one instruction's output is another's
 input — a flag written then read, a 32-bit write whose zero-extension a later instruction reads,
 a partial-register merge a wide read observes, memory written then reloaded. Sequence mode runs a
@@ -173,7 +173,7 @@ result of each corner is observed by the next instruction:
   (zero-extension), the undefined-`OF`/`CF`-at-0 rules and the 16-bit `SHLD`/`SHRD` undefined
   result: **30,000 cases, 100% agree**.
 
-The count-0-still-writes bug the amd64 oracle originally found (`docs/ORACLE-AMD64.md`) is exactly
+The count-0-still-writes bug the amd64 oracle originally found (`docs/validation/ORACLE-AMD64.md`) is exactly
 the kind of thing these chains stress; the current model handles it, and the chains confirm the
 flag definedness tracking is consistent across steps.
 

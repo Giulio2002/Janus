@@ -1,7 +1,7 @@
 import Janus
 
 /-!
-# The specifications themselves against Berkeley SoftFloat (docs/AUDIT-FP.md, row SPEC-TF)
+# The specifications themselves against Berkeley SoftFloat (docs/audit/AUDIT-FP.md, row SPEC-TF)
 
 `Janus.Float.add`/`mul`/`fma`/`truncInt` (`Janus/Float/Spec.lean`) are what the example theorems
 state. `scripts/testfloat.sh` checks the *machine models* against SoftFloat; this checks the

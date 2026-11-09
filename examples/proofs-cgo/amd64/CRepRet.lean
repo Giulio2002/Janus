@@ -10,7 +10,7 @@ c_repret_umax:  mov %rsi,%rax;  cmp %rsi,%rdi;  jbe 1f;  mov %rdi,%rax;  1: repz
 The function is hand-written assembly in the style of the perlasm (OpenSSL-derived) libraries that
 cgo programs link (`cx87.c`): its last instruction is the AMD branch-predictor idiom `repz ret`,
 which the CPU executes as a plain `ret` (the `F3` prefix has no effect on a near `RET`; the
-amd64 oracle checks this against hardware, `docs/ORACLE-AMD64.md`).
+amd64 oracle checks this against hardware, `docs/validation/ORACLE-AMD64.md`).
 
 **Guarantee.** For all 64-bit `a` and `b`, every System V call of `c_repret_umax` (any admissible
 return address at `[RSP]`, `RSP + 8` 16-byte aligned, the 8 bytes of the return address readable;

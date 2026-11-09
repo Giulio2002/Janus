@@ -1,6 +1,6 @@
 # JanusX86: Janus' hand-written amd64 model checked against the Sail x86 model (translated from
 # ACL2 X86isa) inside Lean. A separate Lake package so that the main Janus library depends
-# neither on the Sail Lean library nor on the generated model. See docs/X86FORMAL.md.
+# neither on the Sail Lean library nor on the generated model. See docs/validation/X86FORMAL.md.
 name = "janusx86"
 version = "0.1.0"
 defaultTargets = ["JanusX86", "janus-x86-check"]

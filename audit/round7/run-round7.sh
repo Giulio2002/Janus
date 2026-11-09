@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round-7 regression rows (docs/AUDIT-ROUND7.md). Exits 1 if a blocked attack prints Verified, a
+# Round-7 regression rows (docs/audit/AUDIT-ROUND7.md). Exits 1 if a blocked attack prints Verified, a
 # control stops verifying or prints something else, or a stub fixture is misclassified.
 # Every attack verification passes --fresh (no result or replay cache: the cold path); the cache
 # itself is attacked by audit/round7/run-cache.sh, which this script runs last (under

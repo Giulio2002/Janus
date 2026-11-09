@@ -1,9 +1,9 @@
 # JanusX86: the amd64 model checked against the Sail x86 model inside Lean
 
-`docs/ORACLE-AMD64.md` checks `Janus.Amd64.step` against the host CPU. JanusX86 adds an
+`docs/validation/ORACLE-AMD64.md` checks `Janus.Amd64.step` against the host CPU. JanusX86 adds an
 independent formal reference: the x86-64 ISA model of ACL2 X86isa, as translated to Sail by
 rems-project/sail-x86-from-acl2, compiled to Lean by Sail's Lean backend and sliced to the
-opcodes of the one- and two-byte maps (the whole of both maps since 2026-10-27, below). It is the amd64 counterpart of JanusASL (`docs/ASL.md`). Then:
+opcodes of the one- and two-byte maps (the whole of both maps since 2026-10-27, below). It is the amd64 counterpart of JanusASL (`docs/design/ASL.md`). Then:
 
 * `lake exe janus-x86-check` runs the generated model and Janus `step` side by side in compiled
   Lean, on the whole amd64 oracle corpus, and compares both with the recorded hardware results.

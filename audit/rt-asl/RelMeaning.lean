@@ -2,7 +2,7 @@ import JanusASL.Proofs
 import JanusASL.Verify
 import Lean
 
-/-! # Red-team round ASL (docs/AUDIT-ASL.md): what `Rel`, `LinuxEL0Config` and the example
+/-! # Red-team round ASL (docs/audit/AUDIT-ASL.md): what `Rel`, `LinuxEL0Config` and the example
 transfers mean
 
 Checked by `audit/rt-asl/run.sh` (`lake env lean` in JanusASL/, then an axiom audit).

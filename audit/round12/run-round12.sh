@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round-12: the ELF loader's view (docs/AUDIT-ROUND12.md, docs/SOUNDNESS.md "ELF loader semantics").
+# Round-12: the ELF loader's view (docs/audit/AUDIT-ROUND12.md, docs/SOUNDNESS.md "ELF loader semantics").
 # A crafted ELF must be rejected at extraction (never Verified); the unmodified binary must still
 # verify; the synthetic-ELF defence tests (dynamic relocations, DT_TEXTREL, writable code,
 # RELRO, symbol ranges, init_array) must pass. Exits 1 on any BROKEN row.

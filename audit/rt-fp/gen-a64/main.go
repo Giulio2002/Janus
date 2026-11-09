@@ -1,4 +1,4 @@
-// Command gena64 writes the arm64 floating-point red-team corpus (docs/AUDIT-FP.md, rows
+// Command gena64 writes the arm64 floating-point red-team corpus (docs/audit/AUDIT-FP.md, rows
 // A64-*): systematic grids of special operands crossed with FPCR modes the random corpus of
 // scripts/oracle.sh fp samples only sparsely. Every case is an ordinary oracle case (one
 // instruction, layout.Case JSON per line), run by `oracle run` against qemu and replayed on Sail.

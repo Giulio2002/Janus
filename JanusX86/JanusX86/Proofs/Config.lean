@@ -6,7 +6,7 @@ The analogue of JanusASL's `LinuxEL0Config`: the part of the Sail x86 state that
 64-bit application-level path of `x86_fetch_decode_execute` reads and that is not Janus
 architectural state. `janus_x86_init` (JanusX86/sail/harness.sail) establishes it, and
 `janus-x86-check` checks the Boolean version `cfgOk` on the base state and on every case's pre-
-and post-states (docs/X86FORMAL.md).
+and post-states (docs/validation/X86FORMAL.md).
 
 * no machine-status or fault flag is pending (`ms_reg`, `fault_reg`; `x86_fetch_decode_execute`
   does nothing when one is set), and register-write logging is off (`write_gpr` and `write_rip`

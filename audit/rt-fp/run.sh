@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Red-team round FP (docs/AUDIT-FP.md): the floating-point models, decoders, specifications and
+# Red-team round FP (docs/audit/AUDIT-FP.md): the floating-point models, decoders, specifications and
 # example theorems. Writes only to a mktemp directory (and the Go/Lake build caches).
 #
 #   audit/rt-fp/run.sh                 every row

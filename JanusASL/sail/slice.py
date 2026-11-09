@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Slice the sail-arm arm-v9.4-a A64 decoder to the Janus subset (docs/ASL.md).
+"""Slice the sail-arm arm-v9.4-a A64 decoder to the Janus subset (docs/design/ASL.md).
 
     slice.py SRC_DIR OUT_DIR KEEP_FILE
 

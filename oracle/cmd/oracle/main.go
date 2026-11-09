@@ -1,6 +1,6 @@
 // Command oracle generates differential test cases for the Janus AArch64 model, runs them
 // natively (cmd/runner under qemu-aarch64) and through `janus-oracle` (Janus.Arm64.step),
-// and compares the two. See docs/ORACLE.md.
+// and compares the two. See docs/validation/ORACLE.md.
 //
 //	oracle gen     -n 2000 -seed 1 -o gen.jsonl            randomised encodings per class
 //	oracle harvest -k 2 -o harvest.jsonl BIN...            every distinct word in .text of BINs

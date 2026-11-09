@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round-4 regression rows (docs/AUDIT-ROUND4.md). Exits 1 if a fixed finding regresses.
+# Round-4 regression rows (docs/audit/AUDIT-ROUND4.md). Exits 1 if a fixed finding regresses.
 # Writes only under audit/round4/work/ and audit/round4/bin/.  Usage: audit/round4/run-round4.sh [-j N]  (-j: blocks at once, scripts/lib/parallel.sh)
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

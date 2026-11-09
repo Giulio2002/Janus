@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Shared per-module build cache for the JanusASL proofs and the Janus framework modules they
-import (scripts/asl.sh, ASL_CACHE; docs/ASL.md "Build cache").
+import (scripts/asl.sh, ASL_CACHE; docs/design/ASL.md "Build cache").
 
     python3 -I JanusASL/tools/asl_mod_cache.py restore REPO_ROOT CACHE [--record FILE]   copy cached builds in
     python3 -I JanusASL/tools/asl_mod_cache.py publish REPO_ROOT CACHE [--exe]
@@ -77,7 +77,7 @@ publish `.tmp-*` directories older than a day are removed too.
 The id binds the C content of the scope, the keyed compiler BINARY's content, the ArmASL key (toolchain, flags,
 environment incl. CCC_*), the machine and (jasl) the JanusASL lib/exe tables; a store checks that each object's
 trace/hash bind to the current C and the keyed compiler (objstage) and recompiles a sample; Lake does not re-check a
-restored object, so there is no second check at use time and no kernel replay: see docs/ASL.md "Compiled objects"
+restored object, so there is no second check at use time and no kernel replay: see docs/design/ASL.md "Compiled objects"
 (key + HMAC + the nightly reproducibility audit of gate-cachecmp.py).
 
 **Trust.** As for the ArmASL entry: the cache must be writable only by users you trust, since a
@@ -279,7 +279,7 @@ class Keys:
 def is_object(rel):
     """A compiled C object (or its .hash/.trace), in any directory: NOT carried by module entries. Module entries are protected
     by the HMAC and file hashes only; a native object needs the armobj entry's staging checks, recompile sample,
-    tombstones and the nightly audit (docs/ASL.md "Compiled objects"), so objects travel only there (ASL_OBJ_CACHE=1)."""
+    tombstones and the nightly audit (docs/design/ASL.md "Compiled objects"), so objects travel only there (ASL_OBJ_CACHE=1)."""
     return ".c.o." in os.path.basename(rel)  # wherever it sits (a decoy under lib/lean/ is dropped too)
 
 

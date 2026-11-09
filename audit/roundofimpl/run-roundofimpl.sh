@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round-15 regression rows (docs/AUDIT.md, docs/SOUNDNESS.md "Round 15"): internal calls. A runtime contract may be
+# Round-15 regression rows (docs/audit/AUDIT.md, docs/SOUNDNESS.md "Round 15"): internal calls. A runtime contract may be
 # assumed about `Extracted.program.ofImpl impl` (the runtime's own code, no user code), and the one premise on `impl`
 # the auditor allows is exactly `ImplApart Extracted.program impl` ("the runtime's code does not overlap the
 # extracted function's code"). Controls verify; every attack (a concrete implementation, `impl` mentioned outside

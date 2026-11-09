@@ -1,6 +1,6 @@
 package main
 
-// janus verify --asl: the same guarantee, transferred to Arm's ASL (docs/ASL.md, section
+// janus verify --asl: the same guarantee, transferred to Arm's ASL (docs/design/ASL.md, section
 // "janus verify --asl"; threat model in docs/SOUNDNESS.md).
 //
 // After the main verification has passed, the ASL stage
@@ -535,7 +535,7 @@ var aslAssumptionText = []struct{ name, text string }{
 }
 
 var aslCaveats = []string{
-	"The ASL is the Sail translation of Arm's arm-v9.4-a ASL (sail-arm), sliced to the Janus subset and translated to Lean by Sail's Lean backend (docs/ASL.md, Trust story); the guarantee is about that generated Lean model.",
+	"The ASL is the Sail translation of Arm's arm-v9.4-a ASL (sail-arm), sliced to the Janus subset and translated to Lean by Sail's Lean backend (docs/design/ASL.md, Trust story); the guarantee is about that generated Lean model.",
 	"aslRun fetches each instruction word with the program's own fetch (the extracted code), not through the ASL's translated instruction fetch; one janus_step per instruction (decode and execute), with no interrupts and no debug.",
 	"Only runs that return to the caller are transferred; faults and out-of-fuel outcomes of Janus are not (there Janus is conservative and the ASL may continue).",
 }
@@ -641,7 +641,7 @@ func runASLStage(e *aslEnv) *aslReport {
 			msg = "The kernel did not confirm the ASL coverage of Extracted.program.\n" + summarizeLeanErrors(out, 2000)
 		}
 		return aslFail(r, &diag{Invalid: true, Msg: msg, Stage: "ASL coverage", Details: out,
-			Next: "The ASL corollary needs every instruction in a class with a JanusASL equivalence theorem (docs/ASL.md lists them); the main verification is unaffected."})
+			Next: "The ASL corollary needs every instruction in a class with a JanusASL equivalence theorem (docs/design/ASL.md lists them); the main verification is unaffected."})
 	}
 	wordsPins, err := newPinnedLib("the trusted JanusASLWords build", wordsDir, nil)
 	if err != nil {

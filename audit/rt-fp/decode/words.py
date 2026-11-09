@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Words for the A64 floating-point decoder sweep (docs/AUDIT-FP.md, row DEC-A64): every value of
+"""Words for the A64 floating-point decoder sweep (docs/audit/AUDIT-FP.md, row DEC-A64): every value of
 bits 31:24 in the scalar FP space (M, S, 11110/11111) and the Advanced SIMD (vector and scalar)
 FP neighbours, every value of bits 23:10 (ftype, Rm/opcode/rmode/cond/imm8 fields), and eight
 patterns of bits 9:0 (Rn/Rd, including the should-be-zero imm5 and opcode2<2:0> fields).

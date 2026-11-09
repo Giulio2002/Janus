@@ -33,7 +33,7 @@ ENV_NAMES = ("CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "AR", "LD
              "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "CPATH", "PKG_CONFIG_PATH", "GMP_LIB_DIR", "GMP_INCLUDE_DIR",
              "SDKROOT", "CXXSTDLIB", "LD_LIBRARY_PATH", "LD_PRELOAD", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR")
 # not inputs: the registry location (Cargo.lock pins the sources) and terminal output. CARGO_BUILD_JOBS is
-# scheduling only. Measured (docs/ORACLE-SAIL.md "Split build"): the SAIL_SPLIT=1 driver is bit-identical across job counts
+# scheduling only. Measured (docs/validation/ORACLE-SAIL.md "Split build"): the SAIL_SPLIT=1 driver is bit-identical across job counts
 # (-j8 and -j24, sha256 d894a505...), so the split binary does not depend on it; it stays KEYED anyway (the SAIL_SPLIT=0
 # single-unit driver has no such measurement, and a key that is too fine only costs a rebuild).
 ENV_SKIP = ("CARGO_HOME", "CARGO_TERM_COLOR", "CARGO_TERM_PROGRESS_WHEN", "CARGO_TERM_PROGRESS_WIDTH", "CARGO_TERM_VERBOSE", "CARGO_LOG")

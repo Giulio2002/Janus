@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Split a large generated proof file of JanusASL.Proofs into smaller modules (docs/ASL.md, "Memory").
+"""Split a large generated proof file of JanusASL.Proofs into smaller modules (docs/design/ASL.md, "Memory").
 
     split_proofs.py FILE.lean [PER_PART]          split (default 4 top-level commands per part)
     split_proofs.py --check FILE.lean REV         verify an existing split against FILE.lean at git REV

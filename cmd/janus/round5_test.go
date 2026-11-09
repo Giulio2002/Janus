@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Round 5 E5 (docs/AUDIT-ROUND5.md): an instance bound inside the statement or a disclosed
+// Round 5 E5 (docs/audit/AUDIT-ROUND5.md): an instance bound inside the statement or a disclosed
 // definition (`Exists fun [_ : HMul …] => r = x * y`, a class-typed binder, a nested `∀ [_ : C]`,
 // or a def passed to `Exists` without its instance argument) makes `x * y` refer to a quantified
 // instance, so the claim holds for every result while it prints as `… = x * y`. All of them

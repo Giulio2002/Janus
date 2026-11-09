@@ -1,6 +1,6 @@
 # The Sail (Arm ASL) oracle
 
-`docs/ORACLE.md` tests `Janus.Arm64.step` against `qemu-aarch64`. qemu is an implementation,
+`docs/validation/ORACLE.md` tests `Janus.Arm64.step` against `qemu-aarch64`. qemu is an implementation,
 not a specification. This second oracle runs the **same cases** on the **Sail arm-v9.4-a
 model**, which rems-project translated automatically from Arm's official ASL (the 2023-03
 Armv9.4-A release). It then reports three-way agreement: Janus vs Sail, qemu vs Sail, Janus vs qemu.
@@ -183,7 +183,7 @@ and must not be read as "the architecture says so":
   Since Janus models the store-exclusives (docs/SOUNDNESS.md), Janus-vs-Sail runs `janus-oracle
   --monitor-stub`: before each store-exclusive the model's monitor is set to mark exactly that
   store's bytes, which is the stub's view, so "pass" is among the model's outcomes (`alts`, see
-  docs/ORACLE.md "Nondeterministic outcomes"), and the comparator requires Sail's result to be
+  docs/validation/ORACLE.md "Nondeterministic outcomes"), and the comparator requires Sail's result to be
   one of them. That checks the data path, the status register, register overlaps, alignment and
   faults of every store-exclusive against Arm's ASL. The parts the stub cannot judge (the Open
   Access state fails; a store-exclusive to the marked bytes opens the monitor) are checked against
@@ -281,7 +281,7 @@ pairs are 0 MISMATCH. The Sail-only SP-misalignment corpus (2,680 cases) is 0 MI
 
 ## Results with the crypto extension, CRC32 and permutes (2026-10-25, 389,440 cases)
 
-The crypto corpus of `docs/ORACLE.md` (`scripts/oracle.sh crypto`, then
+The crypto corpus of `docs/validation/ORACLE.md` (`scripts/oracle.sh crypto`, then
 `QEMU_OUT=artifacts/oracle-crypto OUT=artifacts/oracle-sail-crypto JOBS=8 scripts/oracle-sail.sh run`):
 the generated and harvested SHA-1/SHA-256/SHA-512/SHA-3, PMULL, CRC32, permute and scalar-DUP
 classes and 150,000 sequence-mode blocks. The driver now runs sequence cases: a case's `words`
@@ -304,7 +304,7 @@ exception is taken or a Sail exception escapes; the final state is reported as f
 
 ## Results with scalar floating point (2026-10-24, 1,131,099 cases)
 
-The floating-point corpus of `docs/ORACLE.md` (`scripts/oracle.sh fp`, then
+The floating-point corpus of `docs/validation/ORACLE.md` (`scripts/oracle.sh fp`, then
 `QEMU_OUT=artifacts/oracle-fp OUT=artifacts/oracle-sail-fp scripts/oracle-sail.sh run`). The
 driver now writes each case's `FPCR` and `FPSR` by stepping real `MSR FPCR`/`MSR FPSR`
 instructions at EL0 (and refuses a case whose `FPCR` does not read back), and reports both after
@@ -355,7 +355,7 @@ Sail uses `State.dczid` = 8 as before.
 
 * **Soundness: 0 cases** (`soundness.jsonl` is empty). Janus's gaps against Sail: 14,235
   `undecodable`, 334 `unaligned`, 87 `noCode`, 30 `outsideAllocation`.
-* The SIMD&FP classes against Sail (same grouping as in `docs/ORACLE.md`):
+* The SIMD&FP classes against Sail (same grouping as in `docs/validation/ORACLE.md`):
 
 | class | cases | harvest | agree-ok | agree-fault | model-gap | MISMATCH | unobserved | distinct words |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -405,7 +405,7 @@ now includes `go test -c` of `sync/atomic` and `runtime`, and the classes `sys.m
 * **Soundness: 0 cases** (`soundness.jsonl` is empty). Janus's 10,456 gaps against Sail are
   9,935 `undecodable`, 385 `unaligned` (Sail implements FEAT_LSE2: misaligned ordered/atomic
   accesses inside 16 bytes succeed), 107 `noCode`, 29 `outsideAllocation`.
-* The new instructions against Sail (same grouping as in `docs/ORACLE.md`):
+* The new instructions against Sail (same grouping as in `docs/validation/ORACLE.md`):
 
 | instruction | cases | harvest | agree-ok | agree-fault | model-gap | MISMATCH | unobserved | distinct words |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|

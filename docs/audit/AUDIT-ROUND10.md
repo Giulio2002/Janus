@@ -230,7 +230,7 @@ like the true root, with the same IXC/UFC/OFC. A sub-agent's model (a transliter
 modes: half precision exhaustively, 2,539,440 comparisons, 0 mismatches; single precision
 5,288,960 comparisons (66,192 samples: random, every exponent with edge mantissas, subnormals,
 exact squares, near-ties) and double precision 6,600,160 (82,515 samples, same design): 14,428,560
-comparisons in all, 0 mismatches. `docs/AUDIT-ASL.md` row A5 still probes
+comparisons in all, 0 mismatches. `docs/audit/AUDIT-ASL.md` row A5 still probes
 `sqrt_real` at `2^80`, not the `2^1100` the code uses.
 
 ## Open items

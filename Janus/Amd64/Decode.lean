@@ -14,7 +14,7 @@ encoding the hardware treats differently from what we would model. Rejecting is 
 (execution stops with `Fault.undecodable`); accepting an encoding with a different meaning
 would be unsound. Sources: Intel SDM Vol. 2, chapter 2 (instruction format, REX, ModRM/SIB
 tables 2-1..2-3) and the opcode maps of appendix A, cross-checked against
-`golang.org/x/arch/x86/x86asm` and the native oracle (`docs/ORACLE-AMD64.md`).
+`golang.org/x/arch/x86/x86asm` and the native oracle (`docs/validation/ORACLE-AMD64.md`).
 
 Prefix policy (strict):
 * Legacy prefixes `66` (operand size), `F2`/`F3` (only where they select an instruction:

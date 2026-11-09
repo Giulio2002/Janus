@@ -17,7 +17,7 @@ For every case of the amd64 oracle corpus (`artifacts/oracle-amd64/cases.jsonl`,
   differs between the two runs is undefined in the model, as in `oracle-amd64-formal/compare.py`);
 * the **Janus side**: `Janus.Amd64.step` from the state `Oracle/Amd64Main.lean` builds,
 
-and compare. This is a *test* (compiled evaluation), not a proof. See `docs/X86FORMAL.md`.
+and compare. This is a *test* (compiled evaluation), not a proof. See `docs/validation/X86FORMAL.md`.
 
 Verdicts:
 
@@ -31,7 +31,7 @@ Verdicts:
   every VEX instruction), or the instruction is outside the Janus subset.
 * `sail-defect`: the results differ, and the **hardware** (`hw.jsonl`, the native oracle's
   single-stepped run of the same case) agrees with Janus on every compared field. Each such case
-  is assigned a defect class (`defectClass`); docs/X86FORMAL.md lists them with evidence. These
+  is assigned a defect class (`defectClass`); docs/validation/X86FORMAL.md lists them with evidence. These
   classes are excluded from agreement claims.
 * `MISMATCH`: anything else: the results differ and the hardware does not side with Janus (or
   there is no hardware record), or an instruction Janus decodes reaches an arm the slice
@@ -322,7 +322,7 @@ def janusEqHw (j : JanusOk) (h : Hw) : Bool :=
 /-! ## Known Sail-x86 defects -/
 
 /-- The defect class of a case whose Sail result differs from Janus' (and the hardware sides with
-Janus); docs/X86FORMAL.md, "Known defects of the Sail x86 model". -/
+Janus); docs/validation/X86FORMAL.md, "Known defects of the Sail x86 model". -/
 def defectClass (c : Case) (i : Janus.Amd64.Instr) (why : String) : String :=
   -- the REX prefix of the instruction (if any): the byte right before the opcode
   let opIdx := c.bytes.findIdx fun b => !(b == 0x66 || b == 0xF2 || b == 0xF3 || b == 0xF0 ||

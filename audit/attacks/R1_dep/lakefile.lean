@@ -2,7 +2,7 @@ import Lake
 open Lake DSL System
 
 /-!
-# R1 inject-dep: a dependency that plants a framework-namespace module (docs/AUDIT.md R1)
+# R1 inject-dep: a dependency that plants a framework-namespace module (docs/audit/AUDIT.md R1)
 
 In a `janus verify` workspace this package is `deps/r1dep/`, next to `janus/` and `root/`. While
 Lake elaborates this file it compiles `Janus/Backdoor.lean` (namespace `Janus`, so the auditor

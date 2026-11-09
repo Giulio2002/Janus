@@ -1,6 +1,6 @@
 /- Lean definitions the sail-arm model binds by name (`--lean-import-file`). Adapted from
 sail-arm's arm-v9.4-a/lean/ArmExtras.lean, minus its `decreasing_trivial` macro (whose last
-resort was `sorry`): no generated definition needs a termination proof (docs/ASL.md). -/
+resort was `sorry`): no generated definition needs a termination proof (docs/design/ASL.md). -/
 import Sail
 import THE_MODULE_NAME.Defs
 import THE_MODULE_NAME.SpecializationV1

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// Regression tests for the round-2 audit (docs/AUDIT-ROUND2.md): CRITICAL-1 (an inline
+// Regression tests for the round-2 audit (docs/audit/AUDIT-ROUND2.md): CRITICAL-1 (an inline
 // instance in the statement made the printed theorem lie) and U1 (the unshare fallback left
 // non-root mounts writable).
 

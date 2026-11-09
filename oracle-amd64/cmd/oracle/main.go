@@ -1,6 +1,6 @@
 // Command oracle generates differential test cases for the Janus x86-64 model, runs them
 // natively (cmd/runner, single-stepped on the host CPU) and through `janus-oracle-amd64`
-// (Janus.Amd64.step), and compares the two. See docs/ORACLE-AMD64.md.
+// (Janus.Amd64.step), and compares the two. See docs/validation/ORACLE-AMD64.md.
 //
 //	oracle gen      -n 600 -group 40000 -seed 1 -o gen.jsonl   targeted + random encodings
 //	oracle harvest  -k 3 -o harvest.jsonl BIN...               distinct instructions of Go amd64 ELFs

@@ -233,7 +233,7 @@ AVX-512 and `CPUID`/`XGETBV`.
 
 ### gcc-compiled C and `ENDBR64` (2026-10-24)
 
-The C code of cgo programs ([FFI.md](FFI.md)) needed one decoder addition, `ENDBR64`
+The C code of cgo programs ([FFI.md](../FFI.md)) needed one decoder addition, `ENDBR64`
 (`F3 0F 1E FA`, a NOP). Runs on the model with it:
 
 | run | cases | agree | model-gap | **MISMATCH** |
@@ -251,7 +251,7 @@ The harvested classes include `cmov`, `setcc`, `lea`, `imul`, `mul`, `div`/`idiv
 `F3 C3` (`REP RET`, `repz ret`) is the AMD branch-predictor idiom of perlasm/OpenSSL-style assembly: the
 CPU executes the `F3` prefix on a near `RET` as nothing (Intel SDM: `F3`/`F2` on `RET` have no
 effect; `F2 C3` is `BND RET`). It ends 98 of the 785 functions of the C libraries cgo links in the
-large application measured in [GAPS.md](GAPS.md), and the decoder rejected it. `Janus.Amd64.Decode`
+large application measured in [GAPS.md](../GAPS.md), and the decoder rejected it. `Janus.Amd64.Decode`
 now decodes `F3`/`F2` before `C3` and `C2 imm16` (with the REX prefixes the decoder already accepts
 there) as `RET` / `RET imm16`; `66`, segment overrides, a second `F2`/`F3` and the other prefix
 combinations stay rejected. The new `edge/repret` family (20,000 cases per run) puts both prefixes
@@ -581,7 +581,7 @@ instruction), `PER_CLASS`, `SEED`, `MODEL` (`MODEL=oracle-amd64/bin/fakemodel` e
 pipeline without Lean), `KEEP` (what the run leaves in `OUT`: by default `summary.md`,
 `repro.*`, `mismatches.jsonl` and the cases, hardware, model and verdict dumps zstd-compressed,
 with the generated and harvested inputs removed; `KEEP=zst` compresses everything, `KEEP=1`
-keeps everything raw; see docs/ORACLE.md and `scripts/lib/artifacts.sh`). After a model change
+keeps everything raw; see docs/validation/ORACLE.md and `scripts/lib/artifacts.sh`). After a model change
 the native side can be reused (decompress `hw.jsonl.zst` in `DIR` first):
 `oracle-amd64/bin/oracle run -reuse-native -runner oracle-amd64/bin/runner -model .lake/build/bin/janus-oracle-amd64 -cases A,B -out DIR`.
 `oracle minimize -out DIR` shrinks mismatching cases into `repro.md`/`repro.jsonl`. A full run

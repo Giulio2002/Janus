@@ -11,7 +11,7 @@ record; the packages here continue it as **N1–N8**.
 (branched from integ/wave1 `b52a353`): **N2** (amd64 `REP RET`/`BND RET`), **N5** (arm64 `MRS` of the
 feature-ID registers) and **R9′** (`KeepAlive` and the soft-float `fadd64`/`fsub64`/`fmul64`/`fdiv64`
 contracts). The rows they close are marked **done** in the ranked table (ranks 3, 5 and 6) and in
-the package table of section 4; their results are in [ORACLE-AMD64.md](ORACLE-AMD64.md) (N2),
+the package table of section 4; their results are in [ORACLE-AMD64.md](validation/ORACLE-AMD64.md) (N2),
 [SOUNDNESS.md](SOUNDNESS.md) and [RUNTIME-CONTRACTS.md](RUNTIME-CONTRACTS.md) (N5, R9′).
 
 **Baseline.**

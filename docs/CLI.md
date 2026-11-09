@@ -126,7 +126,7 @@ Extraction:
    Names are matched exactly; no suffix is stripped. A listed name counts only in a go1.26
    binary with an ELF symbol table, when no other function has the same name (any package can
    name an assembly function or a `//go:linkname` push `runtime.panicX`;
-   docs/AUDIT-ROUND7.md G1). Otherwise extraction stops with an error.
+   docs/audit/AUDIT-ROUND7.md G1). Otherwise extraction stops with an error.
 6. Records **runtime contracts** instead of copying them: `--contract SYM` (repeatable; a glob
    where `*` matches any run of characters including `.` and `/` and `?` one character; a name
    matches with or without its `.abi0`/`.abiinternal` suffix) names functions whose direct
@@ -654,7 +654,7 @@ with the model's version and hash and the assumptions in plain words; `janus exp
 A failure of this stage (`ASL coverage`, `ASL corollary`, `ASL audit`, …) prints `Invalid: ASL
 corollary: …` and exits 1, but leaves the verified theorem and its `verified.json` in place. **The
 first `--asl` run builds the JanusASL package in the cache: about an hour and 1 GB**, once per
-framework and JanusASL version. Details: [docs/ASL.md](ASL.md#janus-verify---asl-the-corollary-of-a-verified-theorem).
+framework and JanusASL version. Details: [docs/design/ASL.md](design/ASL.md#janus-verify---asl-the-corollary-of-a-verified-theorem).
 
 ### Threat model: the proof is untrusted code
 
@@ -715,7 +715,7 @@ printed statement is the one the kernel checked. To make that true, verification
   imports, `Extracted`, `JanusTrusted`, consumer and dependency modules), with passing results
   cached by content hash in the trusted cache.
 
-See [docs/AUDIT.md](AUDIT.md) for the attacks these defend against.
+See [docs/audit/AUDIT.md](audit/AUDIT.md) for the attacks these defend against.
 
 Steps; any failure prints `Invalid:` with its stage and exits `1`:
 
@@ -855,7 +855,7 @@ janus cache gc [--max SIZE] [--dry-run] [--grace DUR] [--all] [--janus-root DIR]
 ```
 
 Everything janus keeps between runs lives under `$JANUS_CACHE_DIR` (default `~/.cache/janus`),
-which must be private to the user (docs/AUDIT-ROUND8.md, C1):
+which must be private to the user (docs/audit/AUDIT-ROUND8.md, C1):
 
 | directory | entry | size | in use |
 |---|---|---|---|
@@ -995,7 +995,7 @@ Differences from arm64:
 ```sh
 go test -timeout 60m ./cmd/...   # includes Lean verification (several minutes; needs bubblewrap)
 go test -short ./cmd/...    # extraction, check and package validation only
-audit/run-all.sh            # every attack in docs/AUDIT.md: each row blocked or honest
+audit/run-all.sh            # every attack in docs/audit/AUDIT.md: each row blocked or honest
 JANUS_TEST_ASL=1 go test -run TestASL ./cmd/janus   # --asl: builds JanusASL once (about an hour)
 ```
 

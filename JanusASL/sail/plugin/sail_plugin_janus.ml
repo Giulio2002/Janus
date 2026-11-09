@@ -1,4 +1,4 @@
-(* Sail plugin for JanusASL (docs/ASL.md): `sail --janus-lean --janus-roots "f g ..." ...`
+(* Sail plugin for JanusASL (docs/design/ASL.md): `sail --janus-lean --janus-roots "f g ..." ...`
    slices the type-checked model to the definitions reachable from the root functions, keeping
    the Sail standard library, and only then runs the Lean target's own rewrite pipeline and
    printer (looked up from the installed Lean plugin, unchanged). Slicing before the Lean rewrites

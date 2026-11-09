@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round-9 regression rows (docs/AUDIT-ROUND9.md). Exits 1 if a blocked attack verifies, a
+# Round-9 regression rows (docs/audit/AUDIT-ROUND9.md). Exits 1 if a blocked attack verifies, a
 # control stops verifying, a kernel-checked model row changes verdict, or a real-binary probe
 # contradicts what the fixed statements assume.
 # Every janus verification uses --fresh and a private temporary cache. Writes only under

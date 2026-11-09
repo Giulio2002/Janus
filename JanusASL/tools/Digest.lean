@@ -2,7 +2,7 @@ import JanusASL.Proofs
 import Lean
 
 /-! Digest of every declaration of the generated model (`ArmASL.*` modules) and of the proofs
-(`JanusASL.*` modules), for checking that re-splitting modules changed nothing (docs/ASL.md,
+(`JanusASL.*` modules), for checking that re-splitting modules changed nothing (docs/design/ASL.md,
 "Memory"):
 
     lake env lean tools/Digest.lean > digest.txt

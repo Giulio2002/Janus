@@ -6,7 +6,7 @@ import Lean
 `janus verify` runs this logic as the compiled executable `janus-audit` (root
 `Janus.Tools.AuditMain`, built with the framework and pinned like its modules); consumer-package
 verification runs it through a trusted `#eval` script (`run`). Either way **no code from the
-proof ever runs** (A3, A6 in `docs/AUDIT.md`): it imports the proof's compiled
+proof ever runs** (A3, A6 in `docs/audit/AUDIT.md`): it imports the proof's compiled
 module with `importModules` and never calls `enableInitializersExecution`, which means the
 proof's `initialize` blocks, `#eval`s and macros do not execute here. Importing an `.olean`
 only loads declarations.
@@ -3607,7 +3607,7 @@ initializers. The `@[implemented_by]` wrapper lets the trusted `#eval` call the 
 @[implemented_by runImpl]
 opaque run (thm proofMod marker trusted : String) (depRoots : Array String) : IO Unit
 
-/-! ## The ASL corollary (`janus verify --asl`, docs/ASL.md#janus-verify---asl)
+/-! ## The ASL corollary (`janus verify --asl`, docs/design/ASL.md#janus-verify---asl)
 
 `janus verify --asl` derives, from the user's verified `Ensures` theorem, the same statement
 about Arm's ASL (JanusASL's `Ensures.toASL`). The derivation is `aslCorollary`: it is used both by

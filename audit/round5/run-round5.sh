@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round-5 regression rows (docs/AUDIT-ROUND5.md). Exits 1 if a blocked attack prints Verified, a
+# Round-5 regression rows (docs/audit/AUDIT-ROUND5.md). Exits 1 if a blocked attack prints Verified, a
 # control stops verifying or prints something else, or a model row disagrees with hardware.
 # Writes only under audit/round5/work/, audit/round5/bin/ and audit/round5/model/{bin,cases,out-*}.
 # Usage: audit/round5/run-round5.sh [-j N]     (SKIP_MODEL=1 skips the oracle rows; -j: blocks at

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rt-model red-team rows (docs/AUDIT-MODEL.md). Three axes:
+# rt-model red-team rows (docs/audit/AUDIT-MODEL.md). Three axes:
 #   SEQ    multi-instruction straight-line blocks on amd64 (host) and arm64 (qemu), full final
 #          state compared (axis 2) — the state-threading the single-step oracle cannot reach;
 #   CORNER flag/partial-register/shift corners on amd64: ADC/SBB chains, AH/BH partial writes,

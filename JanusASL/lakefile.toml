@@ -1,6 +1,6 @@
 # JanusASL: Janus' hand-written AArch64 model checked against Arm's ASL inside Lean.
 # A separate Lake package so that the main Janus library does not depend on the Sail Lean
-# library or on the (large) generated model. See docs/ASL.md.
+# library or on the (large) generated model. See docs/design/ASL.md.
 name = "janusasl"
 version = "0.1.0"
 defaultTargets = ["JanusASL", "janus-asl-check"]

@@ -2,7 +2,7 @@
 
 This round reviews two pieces that no earlier round examined.
 
-* **JanusASL** (`docs/ASL.md`, `JanusASL/**`). It claims that the Janus arm64 model equals Arm's
+* **JanusASL** (`docs/design/ASL.md`, `JanusASL/**`). It claims that the Janus arm64 model equals Arm's
   ASL (sail-arm v9.4-a, translated to Lean by Sail's Lean backend) for every integer
   data-processing class and every branch. `run_agree` and `Ensures.toASL` then carry the shipped
   example theorems over to the ASL. This round attacks what those statements **mean**: the state
@@ -34,7 +34,7 @@ be stated.
 
 **One item was BROKEN: C1, the concurrent-verify race. It failed closed, so it was never
 unsound. It is fixed, with regression tests. The JanusASL theorems hold and mean what
-docs/ASL.md says. The open items are an audit gap (A6), a latent backend defect that is not
+docs/design/ASL.md says. The open items are an audit gap (A6), a latent backend defect that is not
 reached (C2), and a prose overclaim (A4).** The runner passes: `audit/rt-asl/run.sh` prints "all
 rows as expected".
 
@@ -159,7 +159,7 @@ Take any Sail state with `LinuxEL0Config` in which every GPR and SP_EL0 is prese
 X1 = y, X30 = ret (an admissible return address) and PC = the entry of Add. Then `aslRun`
 returns to `ret` with X0 = (x + y) mod 2^64. The proof constructs the Janus state from the Sail
 state (`ofSail`, `ofSail_rel`). The corollaries are thus genuine statements about the generated
-ASL, under exactly the stated hypotheses. Remaining scope, as documented in docs/ASL.md: words
+ASL, under exactly the stated hypotheses. Remaining scope, as documented in docs/design/ASL.md: words
 come from the program's `fetch`, not from the ASL's translated instruction fetch, and Janus
 faults (`.error`) are not covered.
 
@@ -170,7 +170,7 @@ SP, PC and NZCV (A1). A postcondition about `js'.mem` or `js'.vregs` therefore c
 nothing in `s'`, yet the docstring calls the result "the same statement about the ASL". All four
 shipped examples have register-only postconditions, so their corollaries are faithful. Suggested
 fix (sent to the ASL agent): restrict the corollary to postconditions that depend only on
-X0–X30/SP/PC/NZCV, or say so in the docstring and in docs/ASL.md.
+X0–X30/SP/PC/NZCV, or say so in the docstring and in docs/design/ASL.md.
 
 ## A5 (blocked): the Sail backend patches against Sail's C backend
 
@@ -193,7 +193,7 @@ backend (built against the pinned lean-sail), and run on the same inputs:
 (Sail C: `mpq` floor/ceil). `abs`, comparisons and `to_real` are exact. `real_power x n` is
 `x ^ n` over `Rat` (checked: `2^-3 = 1/8`, `(-2)^3 = -8`). `sqrt_real` is reached by FSQRT
 since the scalar floating-point instructions are in the slice; `scripts/asl.sh gen` replaces the
-toolchain's `Float` version by a round-to-odd approximation at 2^-1100 (docs/ASL.md, fix 7).
+toolchain's `Float` version by a round-to-odd approximation at 2^-1100 (docs/design/ASL.md, fix 7).
 It is checked against Sail's C backend twice: the `rsq` probe above (the function itself), and row
 **A5 fsqrt**, which runs about 7,000 FSQRT cases (audit/rt-asl/sqrt/gen_cases.py: binary32 and
 binary64, all four rounding modes, FPCR.FZ and FPCR.DN on and off; exact squares, normals,
@@ -251,7 +251,7 @@ statement identity, no sandbox and no olean pins. Gaps:
 
 None of this is exploited today. All 44 theorems are present, are theorems, use only `propext`,
 `Classical.choice` and `Quot.sound`, and their statements (reviewed for this round, and the
-branch hypotheses checked for satisfiability via A2) are the ones docs/ASL.md describes.
+branch hypotheses checked for satisfiability via A2) are the ones docs/design/ASL.md describes.
 `audit/rt-asl/AuditStrict.lean` closes the gap as a row. It takes an explicit list of the 39
 names, each must be a `theorem` with standard axioms, any unlisted `JanusASL.*` declaration with
 those suffixes fails, and every statement is printed. `run.sh` compares the statements with the
@@ -273,7 +273,7 @@ Values pinned (decoded from `janus_init`) compared with Linux 6.x arm64:
 | item | config | Linux 6.x EL0 | effect on the proofs |
 |---|---|---|---|
 | TCR_EL1.TBI0 / TBI1 / TBID0 | 1 / 0 / 0 | TBI0 = 1 always (tagged-address ABI), TBI1 only with KASAN SW tags, TBID0 = 0 | faithful. `AArch64_BranchAddr` keeps an untagged target unchanged (bit 55 = 1 selects TBI1 = 0); tagged targets are excluded and Janus faults on them |
-| HCR_EL2.E2H / TGE | 0 / 0 | VHE hosts run EL0 with E2H = TGE = 1 (EL2&0 regime, TCR_EL2); nVHE hosts and KVM guests as here | **scope**: the theorems cover nVHE/guest Linux. A VHE host state does not satisfy the predicate (no claim is made about it, so nothing is false). docs/ASL.md should say so |
+| HCR_EL2.E2H / TGE | 0 / 0 | VHE hosts run EL0 with E2H = TGE = 1 (EL2&0 regime, TCR_EL2); nVHE hosts and KVM guests as here | **scope**: the theorems cover nVHE/guest Linux. A VHE host state does not satisfy the predicate (no claim is made about it, so nothing is false). docs/design/ASL.md should say so |
 | SCTLR_EL1 | M C I SA SA0 UCT DZE UCI nTWE EnIA/IB/DA/DB EPAN ATA0 …, BT0 = 0, TCF0 = 0 | the same family (`INIT_SCTLR_EL1_MMU_ON`); BT0 = 0 as Linux; TCF0 per process (MTE off by default) | none on integer/branch results |
 | PSTATE.BTYPE / PAN / UAO / DIT / TCO / SSBS | 0 | ERET from the kernel; DIT/SSBS per process | not read by the proved classes |
 | `InGuardedPage = false` | — | a page is guarded only with `PROT_BTI`, which the loader sets for ELF files with the GNU_PROPERTY_AARCH64_FEATURE_1_BTI note. Go's linker emits no BTI landing pads and no such note: `artifacts/examples-arm64` has only `.note.go.buildid` and `.note.gnu.build-id`, and no `PT_GNU_PROPERTY` (row A8) | faithful for Go binaries. `BranchTargetCheck` needs `InGuardedPage` |
@@ -307,7 +307,7 @@ The findings were sent to the ASL agent. It reports the following:
 * A6: `JanusASL/Audit.lean` now takes an explicit list of 41 names (the 39 above plus the new
   `ldstUImm_agree` and `ldstImm9_agree`). Each must exist as a theorem, unlisted names fail, and
   the statements are printed.
-* A4 and A8: docs/ASL.md now says that `Rel` is register-only (so `Ensures.toASL` transfers
+* A4 and A8: docs/design/ASL.md now says that `Rel` is register-only (so `Ensures.toASL` transfers
   only the register part of a postcondition) and that the predicate describes nVHE or guest
   Linux.
 * C2: there will be no let/var-bound blocks in new splice code. The patch set is unchanged.

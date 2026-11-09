@@ -307,7 +307,7 @@ stage; `--results FILE` writes every outcome as JSON in request order, each with
 `failure` (or `null`). The exit code is `0` only when every request verified. Every request first
 withdraws its previous `verified.json`; a failed request leaves none.
 
-With `--asl` every verified request also gets its ASL corollary ([docs/ASL.md](ASL.md#janus-verify---asl-the-corollary-of-a-verified-theorem));
+With `--asl` every verified request also gets its ASL corollary ([docs/design/ASL.md](design/ASL.md#janus-verify---asl-the-corollary-of-a-verified-theorem));
 `janus verify --proof-root … --asl` does the same for one request. The JanusASL build is shared
 by the whole batch. A result's `asl` is `"verified"` or `"invalid"` (with `aslFailure`), printed
 as an `ASL:` line under its `PASS`; an ASL failure does not make the request fail (its

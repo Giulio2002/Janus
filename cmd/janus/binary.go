@@ -103,7 +103,7 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 	}
 	// Reject PIE (ET_DYN). The extracted program records link-time virtual addresses, while a
 	// position-independent executable is loaded at base+vaddr chosen at runtime, so the model's
-	// addresses would not be the ones the code runs at. Only ET_EXEC is sound. (F6 in docs/AUDIT.md.)
+	// addresses would not be the ones the code runs at. Only ET_EXEC is sound. (F6 in docs/audit/AUDIT.md.)
 	if f.Type == elf.ET_DYN && !allowPIE {
 		return nil, &diag{
 			Msg:   fmt.Sprintf("%s is a position-independent executable (ET_DYN); Janus supports only non-PIE executables (ET_EXEC).", path),
@@ -160,7 +160,7 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 	// (it re-reads the same section headers). Validate that every file-backed allocated section
 	// is covered by a PT_LOAD whose file->vaddr mapping matches the section, with `.text`
 	// executable, so the byte at any vaddr Janus reads equals the byte the kernel maps there.
-	// (rt-model, docs/AUDIT-MODEL.md EX1.)
+	// (rt-model, docs/audit/AUDIT-MODEL.md EX1.)
 	lv, err := validateSegments(f, data, path)
 	if err != nil {
 		return nil, err

@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/banner.svg">
-    <source media="(prefers-color-scheme: light)" srcset="assets/banner-light.svg">
-    <img alt="Janus: on the left, the Go source of Add; on the right, the arm64 and amd64 machine code the compiler emitted for it; in the doorway between them, a kernel-checked proof." src="assets/banner-light.svg" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/banner-light.svg">
+    <img alt="Janus: on the left, the Go source of Add; on the right, the arm64 and amd64 machine code the compiler emitted for it; in the doorway between them, a kernel-checked proof." src="docs/assets/banner-light.svg" width="100%">
   </picture>
 </p>
 
@@ -116,7 +116,7 @@ Three design decisions carry the soundness argument:
   so only a genuine `RET` through the caller's link register counts as returning, and a computed
   jump to a fixed address cannot fake one.
 
-More in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+More in [docs/design/ARCHITECTURE.md](docs/design/ARCHITECTURE.md).
 
 ## Break it and watch the proof fail
 
@@ -343,12 +343,12 @@ succeeds) only costs coverage.
 
 | Reference | What runs | Cases | MISMATCH | Details |
 |---|---|---:|---:|---|
-| qemu-aarch64 10.2.1 user mode (`-cpu max`) | arm64 model vs qemu, one instruction per case (whole ISA, plus a 1.13M-case scalar floating-point corpus with random `FPCR`/`FPSR`) | 766,650 + 1,131,099 | **0** | [ORACLE.md](docs/ORACLE.md) |
-| Sail `arm-v9.4-a` (Arm's official ASL, translated) | arm64 model vs Arm's specification, same corpora | 766,650 + 1,131,099 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
-| Sail, misaligned-SP corpus | SP-alignment rule, which qemu cannot check | 102,460 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
-| Berkeley TestFloat 3e / SoftFloat 3e | the IEEE core and both floating-point wrappers vs SoftFloat (`ARM-VFPv2`, `-defaultNaN`, `8086-SSE`), every operation and rounding mode | 1,018,014,672 | **0** | [ORACLE.md](docs/ORACLE.md#testfloat-berkeley-testfloat-3e--softfloat-3e) |
-| Native x86-64 (Xeon Gold 5412U, trap flag single-step) | amd64 model vs the host CPU, two seeds plus a vector harvest (incl. atomics, `REP` string ops in both directions, `FS`, YMM/AVX2, SSE, and 1.08M SSE scalar floating-point cases with random `MXCSR`) | 6,525,052 | **0** | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) |
-| Sail/ACL2 X86isa | amd64 undefined-flag sets (sampled), and the `FS`/YMM/SSE-move/`RCL`/`RCR` classes it implements | 20,000 + 113,920 | 0 flags undefined there but defined by Janus | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md#formal-x86-model-third-reference) |
+| qemu-aarch64 10.2.1 user mode (`-cpu max`) | arm64 model vs qemu, one instruction per case (whole ISA, plus a 1.13M-case scalar floating-point corpus with random `FPCR`/`FPSR`) | 766,650 + 1,131,099 | **0** | [ORACLE.md](docs/validation/ORACLE.md) |
+| Sail `arm-v9.4-a` (Arm's official ASL, translated) | arm64 model vs Arm's specification, same corpora | 766,650 + 1,131,099 | **0** | [ORACLE-SAIL.md](docs/validation/ORACLE-SAIL.md) |
+| Sail, misaligned-SP corpus | SP-alignment rule, which qemu cannot check | 102,460 | **0** | [ORACLE-SAIL.md](docs/validation/ORACLE-SAIL.md) |
+| Berkeley TestFloat 3e / SoftFloat 3e | the IEEE core and both floating-point wrappers vs SoftFloat (`ARM-VFPv2`, `-defaultNaN`, `8086-SSE`), every operation and rounding mode | 1,018,014,672 | **0** | [ORACLE.md](docs/validation/ORACLE.md#testfloat-berkeley-testfloat-3e--softfloat-3e) |
+| Native x86-64 (Xeon Gold 5412U, trap flag single-step) | amd64 model vs the host CPU, two seeds plus a vector harvest (incl. atomics, `REP` string ops in both directions, `FS`, YMM/AVX2, SSE, and 1.08M SSE scalar floating-point cases with random `MXCSR`) | 6,525,052 | **0** | [ORACLE-AMD64.md](docs/validation/ORACLE-AMD64.md) |
+| Sail/ACL2 X86isa | amd64 undefined-flag sets (sampled), and the `FS`/YMM/SSE-move/`RCL`/`RCR` classes it implements | 20,000 + 113,920 | 0 flags undefined there but defined by Janus | [ORACLE-AMD64.md](docs/validation/ORACLE-AMD64.md#formal-x86-model-third-reference) |
 
 Cases come from every distinct instruction word in real Go binaries (`math/big`, `crypto/sha256`,
 `encoding/json`, `regexp`, …), targeted random encodings per instruction class, and fully random
@@ -356,7 +356,7 @@ words that check the decoder rejects what it does not understand. The amd64 orac
 bug before the final run (32-bit shifts by a masked count of 0 must still zero-extend); it is fixed
 and pinned by a test.
 
-<!-- TODO(coordinator): docs/ASL.md does not exist yet. JanusASL/ (a Sail slice of the Arm ASL) is in
+<!-- TODO(coordinator): docs/design/ASL.md does not exist yet. JanusASL/ (a Sail slice of the Arm ASL) is in
 progress; once there is an in-Lean ASL check with results, add it as a row here. -->
 
 ## Trusted computing base
@@ -416,7 +416,7 @@ statement holds. `janus verify`:
   is also read-only to the sandboxed Lake build), and hashes every other compiled `.olean` once it is
   final.
 
-These defences answer an internal red-team audit, [docs/AUDIT.md](docs/AUDIT.md), which records the
+These defences answer an internal red-team audit, [docs/audit/AUDIT.md](docs/audit/AUDIT.md), which records the
 attacks as found (a forged audit via `initialize`, IO from `#eval`, a shadowed `Extracted`, misleading
 unexpanders, and others) together with the fixes. Each attack has a regression test in
 [`cmd/janus/hardening_test.go`](cmd/janus/hardening_test.go), and `audit/run-all.sh` replays them all.
@@ -429,7 +429,7 @@ Lean errors (2):
       file: /srv/janus/audit/work/A6-written-during-verify.txt
 ```
 
-<!-- TODO(coordinator): docs/AUDIT.md's summary table still shows the original "BROKEN" status of
+<!-- TODO(coordinator): docs/audit/AUDIT.md's summary table still shows the original "BROKEN" status of
 each finding (the snapshot before the fixes). The fixes F1–F6 are present in the code (sandbox.go,
 Janus/Tools/Audit.lean, GoABI.NeverPanics/RetAddr, the 2^48 bound in Memory.accessible, PIE
 rejection in binary.go), but the audit doc should get a "Status after fixes" column before release. -->
@@ -486,7 +486,7 @@ leaves none.
 |---|---|
 | [TUTORIAL.md](docs/TUTORIAL.md) | Your first proof, step by step, with real output |
 | [PROOFS.md](docs/PROOFS.md) | Writing proofs: `janus_run`, the spec vocabulary, loops, calls, aliasing, data |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map, data flow, the program/state/outcome model |
+| [ARCHITECTURE.md](docs/design/ARCHITECTURE.md) | Module map, data flow, the program/state/outcome model |
 | [SOUNDNESS.md](docs/SOUNDNESS.md) | The trusted base and exactly what a theorem means |
 | [CLI.md](docs/CLI.md) | Every command, artifact format and diagnostic |
 | [CONSUMERS.md](docs/CONSUMERS.md) | Proofs in your own Lake package, batch verification, caches |
@@ -495,8 +495,8 @@ leaves none.
 | [FFI.md](docs/FFI.md) | Go calling C (cgo): the C ABIs, `CEnsures`, the cgo contract, the composition theorem |
 | [ABI0.md](docs/ABI0.md) | Go assembly: the ABI0 convention, `Ensures0`/`Summary0`, the ABI wrappers, direct ABI0 calls, re-entry on amd64 |
 | [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime functions as stated contracts (`janus extract --contract`): allocation, strings, slices, write barriers, dynamic calls, maps, interfaces, cgo |
-| [ORACLE.md](docs/ORACLE.md), [ORACLE-SAIL.md](docs/ORACLE-SAIL.md), [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) | The differential oracles and their results |
-| [AUDIT.md](docs/AUDIT.md) | The red-team audit of `janus verify` and its fixes |
+| [ORACLE.md](docs/validation/ORACLE.md), [ORACLE-SAIL.md](docs/validation/ORACLE-SAIL.md), [ORACLE-AMD64.md](docs/validation/ORACLE-AMD64.md) | The differential oracles and their results |
+| [AUDIT.md](docs/audit/AUDIT.md) | The red-team audit of `janus verify` and its fixes |
 
 ## License
 

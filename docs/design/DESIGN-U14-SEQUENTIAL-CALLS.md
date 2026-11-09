@@ -22,7 +22,7 @@ that does not exist at the theorem's entry.
 
 A `Summary` speaks about every state that satisfies its precondition. A contract whose postcondition
 re-establishes everything its precondition needs can be applied again to its own output, without bound, from
-one call state. Two things then go wrong, both found by the round 10 audit (`docs/AUDIT-ROUND10.md`):
+one call state. Two things then go wrong, both found by the round 10 audit (`docs/audit/AUDIT-ROUND10.md`):
 
 * **V2 (critical, kernel-checked)**: the map contracts handed `M.Env` back. `2^64` inserts of distinct keys (or
   `2^48 + 1` new maps) in the model's fixed finite memory contradict the model's own laws:

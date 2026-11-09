@@ -218,7 +218,7 @@ So could the reported `Entry: example.com/basic.Add` be wrong about which code w
 code proved is always exactly the bytes at that symbol's address, in the binary whose SHA-256 the
 report records. The symbol name, the module path and the Go version are what the binary says
 about itself. They are not authenticated, and the binary is the subject, not the adversary
-(docs/AUDIT.md §4). They used to matter for soundness through G1's Go-version gate (see its
+(docs/audit/AUDIT.md §4). They used to matter for soundness through G1's Go-version gate (see its
 residual); since round 8 (G3) stub classification does not read build info.
 
 ## 5. Probes with no issue
@@ -239,7 +239,7 @@ residual); since round 8 (G3) stub classification does not read build info.
 ## 6. Review of main 1d0b147 (testinfra + memguard): the result cache, the compiled audit and the memory guard
 
 This is a code review, now of the merged tree (main 1d0b147). agent/memguard already ships live rows for the cache
-(RC1–RC6 in its own `docs/AUDIT-ROUND7.md`: proof and lakefile probes, a tampered entry, a
+(RC1–RC6 in its own `docs/audit/AUDIT-ROUND7.md`: proof and lakefile probes, a tampered entry, a
 stale framework, `--fresh`, `--unsafe-no-sandbox`). This review does not repeat them. It found
 **no BROKEN item**.
 
@@ -273,7 +273,7 @@ stale framework, `--fresh`, `--unsafe-no-sandbox`). This review does not repeat 
   `memOutcome` also turns *any* kill recorded during the run into the resource-limit
   diagnostic, even if a later step passed. `Verified` is printed only after `memOutcome`.
   The prlimit text heuristic can at most relabel a failure as a resource failure.
-* **Merge note.** agent/memguard also brought a `docs/AUDIT-ROUND7.md` and
+* **Merge note.** agent/memguard also brought a `docs/audit/AUDIT-ROUND7.md` and
   `audit/round7/run-round7.sh` (the cache rows). After merging main 1d0b147, those rows are
   §7 below, and their runner is `audit/round7/run-cache.sh`, which `run-round7.sh` runs last.
   Every other round-7 row passes `--fresh`, so it takes the cold path.

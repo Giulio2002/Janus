@@ -18,7 +18,7 @@ import Janus.Tools.Audit
   theorem, with the three facts about the program discharged by `covered_sound`.
 
 The trusted auditor (`JanusAudit.runASL`) then re-derives the type with the same function and
-checks the corollary has exactly that type. See docs/ASL.md. -/
+checks the corollary has exactly that type. See docs/design/ASL.md. -/
 
 namespace JanusASL.Verify
 open Janus JanusASL.Classify JanusASL.Proofs

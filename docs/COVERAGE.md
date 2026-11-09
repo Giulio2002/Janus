@@ -369,7 +369,7 @@ environment-value contract or a modelled register. All are in [WP-C](#6-work-pla
 
 ### 1.4 What earlier measurements said, and what changed
 
-[ORACLE-AMD64.md](ORACLE-AMD64.md) measured `bytes`, `strings`, `sync/atomic`, `math`, `strconv`
+[ORACLE-AMD64.md](validation/ORACLE-AMD64.md) measured `bytes`, `strings`, `sync/atomic`, `math`, `strconv`
 and `sort` at 97.9–100% (amd64 v1, per binary, runtime included). This page covers all of std,
 deduplicated by function, and also measures arm64 and amd64 v3. The amd64 v1 result (100% of
 Go-compiled std) confirms that the floating-point, `FS`, string, atomic and SSE-move rounds
@@ -384,7 +384,7 @@ Package A closed it (exclusive monitor and environment choice); the `anyCPU` the
 ### 1.5 Independent formal cross-check of the amd64 model (JanusX86, 2026-10-27)
 
 `scripts/x86formal.sh check` runs Janus' `step` and the Sail x86 model (ACL2 X86isa) side by side
-(`docs/X86FORMAL.md`). The vendored Sail slice used to keep only the opcodes of the first,
+(`docs/validation/X86FORMAL.md`). The vendored Sail slice used to keep only the opcodes of the first,
 integer decoder, so every SSE, SSSE3, SSE4, x87, crypto, BMI and AVX-512 case that the current
 decoder accepts was reported as "janus decodes, the slice excludes it": 452,644 such verdicts over
 the 3,293,526 cases of the `full`, `sse`, `x87`, `fp`, `v3`, `crypto`, `avx` and `avx512` corpora

@@ -9,7 +9,7 @@ Run: `cd /srv/janus && lake env lean audit/model/Model.lean`
 read-only region overlapping a write): M1, M2 and M3 are blocked; each section below now has a
 `decide` control showing the faulting behaviour.
 
-The decoder and the per-instruction semantics held up (see docs/AUDIT.md, section 3). The
+The decoder and the per-instruction semantics held up (see docs/audit/AUDIT.md, section 3). The
 mismatches below are all in the *memory model*: `Memory.accessible` compares `Nat` bounds
 against caller-supplied regions without bounding them to the architectural address space,
 so a precondition can admit regions that hardware cannot have, and on those states `step`

@@ -8,7 +8,7 @@ The x87 FPU of x86-64 as C compilers use it for `long double` (gcc and clang, Sy
 80-bit double-extended value, 16 bytes in memory). Written from the Intel SDM Vol. 1 ch. 8
 ("Programming with the x87 FPU") and §4.2.2, §4.8, §4.9, and the Vol. 2 `Operation`,
 "FPU Flags Affected" and "Floating-Point Exceptions" sections of each instruction; the corner
-cases below were checked on the oracle host (Intel Sapphire Rapids, `docs/ORACLE-AMD64.md`).
+cases below were checked on the oracle host (Intel Sapphire Rapids, `docs/validation/ORACLE-AMD64.md`).
 This file is pure: formats, the operations on 80-bit encodings, the register-stack state and
 the instruction AST. `Janus.Amd64.X87Exec` executes the AST on `State`.
 

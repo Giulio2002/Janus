@@ -112,7 +112,7 @@ of `0x1F80` (round to nearest even, every exception masked, no flushing) and the
 The flags are sticky and Go code never clears them: in a running Go program `PE` is already set
 when `main` starts (`MXCSR = 0x1FA0`; the runtime's own floating point is inexact), so a
 precondition `s.mxcsr = 0x1F80` would exclude practically every real call
-(`docs/AUDIT-FP.md`, X64-MXCSR-STICKY). Floating-point theorems state this instead. -/
+(`docs/audit/AUDIT-FP.md`, X64-MXCSR-STICKY). Floating-point theorems state this instead. -/
 def GoMXCSR (s : State) : Prop := s.mxcsr.toNat / 64 = 0x1F80 / 64
 
 /-- The first `k` integer result registers. -/

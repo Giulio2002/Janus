@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Split Sail's single-file Lean output into a chain of modules (docs/X86FORMAL.md (copied from JanusASL/sail/split_lean.py with the module name changed)).
+"""Split Sail's single-file Lean output into a chain of modules (docs/validation/X86FORMAL.md (copied from JanusASL/sail/split_lean.py with the module name changed)).
 
     split_lean.py X86Sail.lean OUTDIR [N]
 

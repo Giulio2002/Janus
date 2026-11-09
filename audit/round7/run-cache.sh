@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round 7 cache rows (docs/AUDIT-ROUND7.md §7, docs/SOUNDNESS.md, "Verification-result cache"): attempts to poison or misuse the
+# Round 7 cache rows (docs/audit/AUDIT-ROUND7.md §7, docs/SOUNDNESS.md, "Verification-result cache"): attempts to poison or misuse the
 # trusted verification-result cache. Exits 1 if a row regresses (BROKEN).
 # Usage: audit/round7/run-cache.sh [-j N]   (-j: rows at once, scripts/lib/parallel.sh)
 # Writes only under audit/round7/work/ and a temporary janus cache (removed at the end).

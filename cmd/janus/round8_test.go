@@ -1,6 +1,6 @@
 package main
 
-// Round 8 unit rows (docs/AUDIT-ROUND8.md): L1 (the toolchain's cache identity covers its
+// Round 8 unit rows (docs/audit/AUDIT-ROUND8.md): L1 (the toolchain's cache identity covers its
 // library), M1 (trusted-compile manifests are authenticated) and C1 (the cache root is private).
 
 import (

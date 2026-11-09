@@ -1,6 +1,6 @@
 # Janus soundness audit, round 8
 
-Round 8 attacks the residuals that round 7 listed (§6 of docs/AUDIT-ROUND7.md: the toolchain
+Round 8 attacks the residuals that round 7 listed (§6 of docs/audit/AUDIT-ROUND7.md: the toolchain
 part of the cache keys, the unauthenticated trusted-compile cache) and two directions nobody had
 tried: object names inside a statement, and a cache directory that another user can write. It
 also keeps a regression row for kernel native reduction.

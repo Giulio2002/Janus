@@ -27,7 +27,7 @@ functions instruction by instruction from the extracted words. gcc vectorises th
 `ADDP D` and `FMOV`, then a scalar loop (`LDRB`, `CMP`, `CINC`) over the last `len mod 16`
 bytes (or all of them when `len < 16`). `ZIP1`, `ZIP2`, `UADDW`, `UADDW2` and scalar `ADDP` are
 modelled by `Janus.Arm64.NeonInstr` (`DecodeNeon`, `ExecNeon`), the rest by the original SIMD
-subset; each is checked against qemu and the Arm ASL (Sail) (`docs/ORACLE.md`).
+subset; each is checked against qemu and the Arm ASL (Sail) (`docs/validation/ORACLE.md`).
 
 **How.** `vloop` is the invariant of the vector loop: after `k` blocks the two 64-bit lanes of
 `v26` add up to the count of the first `16 k` bytes (modulo `2^64`); one iteration is executed

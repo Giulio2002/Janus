@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reproduce the round-2 attacks (docs/AUDIT-ROUND2.md) and check the fixes: exits 1 if a fixed
+# Reproduce the round-2 attacks (docs/audit/AUDIT-ROUND2.md) and check the fixes: exits 1 if a fixed
 # finding (CRITICAL-1, U1) regresses. Writes only under audit/round2/work/ (and temporary cache
 # dirs / marker files under /tmp, removed again).
 # Usage: audit/round2/run-round2.sh [-j N]   (-j: rows at once, default the core count capped by

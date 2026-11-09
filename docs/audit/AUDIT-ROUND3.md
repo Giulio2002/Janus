@@ -4,7 +4,7 @@ Third independent adversarial review of the claim: *if `janus verify` (or `verif
 consumer `--proof-root` verification) prints `Verified`, the printed statement is exactly what was
 proved, and it holds for the actual bytes of this binary under the documented semantics.*
 
-Rounds 1 and 2 (`docs/AUDIT.md`, `docs/AUDIT-ROUND2.md`) fixed forged audits, pretty-printer and
+Rounds 1 and 2 (`docs/audit/AUDIT.md`, `docs/audit/AUDIT-ROUND2.md`) fixed forged audits, pretty-printer and
 unexpander tricks, sandbox/replay holes, dependency pinning, and the inline-instance hole in the
 theorem *type* (round-2 CRITICAL-1: `checkInstArgs` + statement round-trip). This round attacks
 the round-2 fixes themselves: the round-trip check, the instance-argument check, the new sandbox

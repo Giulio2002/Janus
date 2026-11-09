@@ -3,7 +3,7 @@
 
 usage: spalign.py CASES.jsonl > spalign.jsonl
 
-qemu user mode does not check SP alignment (docs/ORACLE.md), so the qemu oracle can only show
+qemu user mode does not check SP alignment (docs/validation/ORACLE.md), so the qemu oracle can only show
 that Janus's spMisaligned rule is conservative. The Sail model implements SCTLR_EL1.SA0 = 1
 (Linux), so it can confirm or refute it. Takes every load/store case of the corpus whose base
 register field is 31 (SP) and re-emits it with SP + k (k = 1..15, k = 8 included: 8-aligned

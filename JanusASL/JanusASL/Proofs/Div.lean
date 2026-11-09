@@ -4,7 +4,7 @@ import JanusASL.Proofs.Maddl
 
 Words `sf 0 0 11010110 Rm 00001 o1 Rn Rd` (bits 30:21 = `0011010110`, bits 15:11 = `00001`;
 2^17 words). ASL computes `RoundTowardsZero(Real(a) / Real(b))` over the reals (exact rationals,
-see docs/ASL.md); `rtz` proves that this is `Int.tdiv`. -/
+see docs/design/ASL.md); `rtz` proves that this is `Int.tdiv`. -/
 
 set_option linter.unusedSimpArgs false
 set_option linter.unusedVariables false

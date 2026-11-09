@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round-14 regression rows (docs/AUDIT.md, docs/SOUNDNESS.md "Round 14"): the runtime of a MAIN theorem is
+# Round-14 regression rows (docs/audit/AUDIT.md, docs/SOUNDNESS.md "Round 14"): the runtime of a MAIN theorem is
 # quantified, never chosen, and witnesses have a checked shape.
 #   V2  a theorem about `Extracted.program.link impl` for a CONCRETE `impl` (the consumer's toy allocator) with no
 #       contract hypothesis used to verify and be reported as assuming the pinned `runtime.newobject` contract;

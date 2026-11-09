@@ -8,7 +8,7 @@ region at `0x10_0004_0000` (the check's data buffer address): `Rel`, `MemRel` an
 `LinuxEL0Config` hold for them (kernel-checked), and `ldstUImm_agree` instantiated at `LDR X0,
 [X1]` and `STR X0, [X1]` (with `X1` the region's base) gives the ASL step's agreement for these
 real accesses. `UserMapped` stays a hypothesis of the instances: it is a statement about the
-translation tables, evaluated (not proved) by `janus-asl-check` on its base state (docs/ASL.md). -/
+translation tables, evaluated (not proved) by `janus-asl-check` on its base state (docs/design/ASL.md). -/
 
 set_option linter.unusedSimpArgs false
 

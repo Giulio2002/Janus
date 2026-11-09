@@ -6,7 +6,7 @@ import Janus
 `Ensures.toASL` turns a Janus `Ensures` specification of a program whose words are all in the
 proved subset into the same statement about the ASL run (`aslRun`), for every ASL state related to
 the call state under `LinuxEL0Config`. `janus verify --asl` applies it to a verified theorem about
-the identity-checked `Extracted.program` (JanusASL/JanusASL/Verify.lean, docs/ASL.md); the shipped
+the identity-checked `Extracted.program` (JanusASL/JanusASL/Verify.lean, docs/design/ASL.md); the shipped
 examples Add, Max, Mul64 and Add128 are transferred that way, from their artifacts
 (`cmd/janus` test `TestASLExamples`, `.github/workflows/asl.yml`). -/
 

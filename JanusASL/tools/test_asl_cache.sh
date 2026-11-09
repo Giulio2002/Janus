@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests of the shared ArmASL build cache key (scripts/asl.sh ASL_CACHE; docs/ASL.md "Build cache").
+# Tests of the shared ArmASL build cache key (scripts/asl.sh ASL_CACHE; docs/design/ASL.md "Build cache").
 #
 #   JanusASL/tools/test_asl_cache.sh              key tests (seconds): edits that cannot change
 #                                                 the ArmASL build keep the key, edits that can change it

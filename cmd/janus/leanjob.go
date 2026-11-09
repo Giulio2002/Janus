@@ -4,7 +4,7 @@ package main
 // used by the single-file verify path and (through the audit-script helpers) the consumer
 // path. Everything that loads untrusted Lean runs under a sandbox with a private, ordered
 // LEAN_PATH; the trusted janus-audit logic runs without executing the proof's initializers,
-// and every compiled olean is hash-bound and re-checked. See docs/AUDIT.md F1/F2.
+// and every compiled olean is hash-bound and re-checked. See docs/audit/AUDIT.md F1/F2.
 
 import (
 	"bytes"

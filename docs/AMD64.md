@@ -19,7 +19,7 @@ proofs.
 | Go ABIInternal on amd64, specs | `Janus/Amd64/GoABI.lean` |
 | proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies), `Janus/Amd64/TacticSSE.lean` (stepping `ExecSSE`, element lemmas), `Janus/Amd64/TacticAVX2.lean` (stepping `ExecAVX`, the zero-upper theorems, 256-bit element lemmas, `dot32`), `Janus/Amd64/TacticEVEX.lean` (stepping `ExecEVEX`, 512-bit re-assembly, the EVEX zero-upper rule, VEX/SSE on the AVX-512 state, WP-D/WP-F compatibility) |
 | extractor | `cmd/janus/amd64.go` (plus small dispatch edits) |
-| differential oracle | `oracle-amd64/`, `Oracle/Amd64Main.lean`, `docs/ORACLE-AMD64.md` |
+| differential oracle | `oracle-amd64/`, `Oracle/Amd64Main.lean`, `docs/validation/ORACLE-AMD64.md` |
 | tests | `JanusTests/Amd64.lean`, `cmd/janus/amd64_test.go` |
 | proofs | `examples/proofs-amd64/<Function>/Proof.lean` |
 
@@ -70,7 +70,7 @@ handles legacy prefixes, REX, the one- and two-byte opcode maps, ModRM, SIB, RIP
   and segment overrides on string instructions are rejected) or are ignored: `F3 C3` (`REP RET`,
   the AMD branch-predictor idiom of perlasm code) and `F2 C3` (`BND RET`), and the same before
   `C2 imm16`, decode as `RET` / `RET imm16` (the CPU ignores the prefix on a near `RET`; the amd64
-  oracle's `edge/repret` family checks it against hardware, [ORACLE-AMD64.md](ORACLE-AMD64.md));
+  oracle's `edge/repret` family checks it against hardware, [ORACLE-AMD64.md](validation/ORACLE-AMD64.md));
 * segment overrides on branches (hints), except `3E` (CET `NOTRACK`) on the indirect
   `JMP`/`CALL r/m` (`FF /4`, `FF /2`), which executes as the plain branch (see below);
 * on the x87 escape opcodes `D8`–`DF`: `66`, `F2`/`F3` and `REX.W` (they select the
@@ -204,7 +204,7 @@ branches and the padded TLS call.
 
 In the `sync/atomic`, `bytes`
 and `strings` test binaries 97.9–98.1% of the Go-compiled functions and 53% of the assembly
-functions decode completely (`docs/ORACLE-AMD64.md`); with the SSE scalar floating point
+functions decode completely (`docs/validation/ORACLE-AMD64.md`); with the SSE scalar floating point
 (`UCOMISD`, `CVT*`, arithmetic, `ROUNDSD`) now modelled, what is left is `SYSCALL`,
 AES/SHA, AVX-512 (scalar FMA is modelled since WP-B, `CRC32` and `PCMPESTRI` since WP-D).
 
@@ -444,7 +444,7 @@ blockers` works on amd64 binaries, judging each x86asm-found instruction with `J
 * **Trusted:**
   - the Lean x86-64 model (`Decode`, `Exec`, `State`). It is differentially tested against the
     host CPU, with 0 mismatches over 3,420,590 cases (the final runs of this model: `FS`, AVX, `DF`, split locks), and its undefined-flag sets are
-    cross-checked against the Sail/ACL2 X86isa model (`docs/ORACLE-AMD64.md`). It is not
+    cross-checked against the Sail/ACL2 X86isa model (`docs/validation/ORACLE-AMD64.md`). It is not
     proved;
   - the ELF byte copy in `cmd/janus/amd64.go`;
   - the stub classification (unchanged);

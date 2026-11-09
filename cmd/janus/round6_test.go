@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Round 6 F1/F2 (docs/AUDIT-ROUND6.md): a proof-local name with lookalike letters
+// Round 6 F1/F2 (docs/audit/AUDIT-ROUND6.md): a proof-local name with lookalike letters
 // (`Εxtracted.program`, `Janus.GoABI.Εnsures`) or a `«Extracted.program»` component prints like
 // the trusted constant it imitates, and an out-of-range numeral (`18446744073709551616` at
 // `BitVec 64`) reads as a value it is not. All must be rejected at the statement-identity stage;

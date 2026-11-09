@@ -199,7 +199,7 @@ b = []
 p = b.append
 p("# Janus vs Sail vs qemu: three-way agreement\n")
 p(f"{len(ids)} cases. Sail = rems-project sail-arm arm-v9.4-a (Arm ASL), EL0 Linux-like state; "
-  "see docs/ORACLE-SAIL.md. Verdicts are the qemu agent's comparator: `agree` (identical "
+  "see docs/validation/ORACLE-SAIL.md. Verdicts are the qemu agent's comparator: `agree` (identical "
   "successor state, or both fault), `MISMATCH` (the *model* side succeeded with a state the "
   "*hardware* side does not produce, or succeeded where it faults), `model-gap` (model faulted, "
   "hardware succeeded), `unobserved`, `model-error`.\n")

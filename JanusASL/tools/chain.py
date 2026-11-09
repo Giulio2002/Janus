@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate decode-chain lemmas for JanusASL.Proofs (docs/ASL.md).
+"""Generate decode-chain lemmas for JanusASL.Proofs (docs/design/ASL.md).
 
 The generated `__DecodeA64_<class>` functions are if-chains, one `if` per sail-arm decode clause:
 

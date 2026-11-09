@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round-7 row J1a (docs/AUDIT-ROUND7.md J1): the report discloses a pinned dependency definition's body.
+# Round-7 row J1a (docs/audit/AUDIT-ROUND7.md J1): the report discloses a pinned dependency definition's body.
 # A consumer verification with --fresh (the cold path, exactly as when it was part of run-round7.sh: the
 # framework is built from scratch in a temporary workspace, no replay, trusted or verdict cache), as its own
 # lane (r7j) so it overlaps the others. It also asserts that the verdict was computed in this run.

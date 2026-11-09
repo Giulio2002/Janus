@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// Regression tests for the soundness fixes in docs/AUDIT.md (F1, F2, F6). Each reproduces an
+// Regression tests for the soundness fixes in docs/audit/AUDIT.md (F1, F2, F6). Each reproduces an
 // attack from audit/attacks and asserts the verifier now blocks it (or verifies it with an
 // honest, non-misleading statement). They run Lean, so -short skips them.
 

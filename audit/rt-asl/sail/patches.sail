@@ -2,7 +2,7 @@ default Order dec
 $include <prelude.sail>
 $include <real.sail>
 
-/* Probes of JanusASL's Sail Lean-backend fixes (docs/ASL.md, Sail patches; docs/AUDIT-ASL.md A5).
+/* Probes of JanusASL's Sail Lean-backend fixes (docs/design/ASL.md, Sail patches; docs/audit/AUDIT-ASL.md A5).
    The same functions are run by Sail's C backend and by the (patched) Lean backend. */
 
 val dummy0 : unit -> int

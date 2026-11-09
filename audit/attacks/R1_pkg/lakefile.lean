@@ -2,7 +2,7 @@ import Lake
 open Lake DSL System
 
 /-!
-# R1 attack: a consumer lakefile that rewrites the compiled framework (docs/AUDIT.md R1)
+# R1 attack: a consumer lakefile that rewrites the compiled framework (docs/audit/AUDIT.md R1)
 
 `janus verify --proof-root` runs Lake in a workspace whose layout is `root/` (this package)
 next to `janus/` (the framework package, with its compiled `.lake/build`). Lake elaborates this

@@ -2,7 +2,7 @@ import Extracted
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 
-/-! ASL forgery X1 (docs/ASL.md, audit/asl): the proof declares JanusASL's transfer theorem itself,
+/-! ASL forgery X1 (docs/design/ASL.md, audit/asl): the proof declares JanusASL's transfer theorem itself,
 `JanusASL.Proofs.Ensures.toASL`, with a statement of its choosing, hoping the corollary is built
 from it. The main theorem is the honest Add proof and verifies; the ASL stage must reject the
 shadowing name (the corollary module cannot import both, and the auditor refuses any untrusted

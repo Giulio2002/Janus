@@ -19,7 +19,7 @@ every implicit and instance argument shown. The body of each plain proof-local `
 statement names (disclosed in `definitions`, and part of what the guarantee means) is held to the
 same instance check, so a `def` whose displayed body reads as one operation while an inline
 instance makes it compute another is rejected. See CRITICAL-1 in
-[AUDIT-ROUND2.md](AUDIT-ROUND2.md) and R1 in [AUDIT-ROUND3.md](AUDIT-ROUND3.md).
+[AUDIT-ROUND2.md](audit/AUDIT-ROUND2.md) and R1 in [AUDIT-ROUND3.md](audit/AUDIT-ROUND3.md).
 
 ## Trusted computing base
 
@@ -36,7 +36,7 @@ These are trusted, not proved.
    given a guessed meaning. The same holds for **the Lean x86-64 model**
    (`Janus/Amd64/Decode.lean`, `Instr.lean`, `Exec.lean`, `State.lean`, `Float.lean`, and the
    x87 FPU of C `long double`, `X87.lean` and `X87Exec.lean`; [AMD64.md](AMD64.md)), checked
-   against the host CPU by the native oracle (`docs/ORACLE-AMD64.md`).
+   against the host CPU by the native oracle (`docs/validation/ORACLE-AMD64.md`).
 2. **The ELF word copy** (`cmd/janus`: `binary.go`, `extract.go`, `identity.go`): finding the
    symbol's `[addr, addr+size)` in `.text` and copying its little-endian 32-bit words (trailing
    zero padding words are dropped). `janus verify` re-runs this copy against the binary
@@ -48,7 +48,7 @@ These are trusted, not proved.
 3. **Stub classification**: the extractor treats as `panic` stubs the go1.26 runtime's panic
    functions and as `morestack` stubs `runtime.morestack.abi0`/`runtime.morestack_noctxt.abi0`,
    by exact ELF symbol name, only in a binary with a symbol table and only when the name is
-   unique (docs/AUDIT-ROUND6.md F3, docs/AUDIT-ROUND7.md G1: any package can define an
+   unique (docs/audit/AUDIT-ROUND6.md F3, docs/audit/AUDIT-ROUND7.md G1: any package can define an
    assembly function or push a `//go:linkname` named `runtime.panicX`; the runtime's own
    definition makes a same-ABI copy a link error and an other-ABI copy a mangled name). That
    argument needs the runtime to define every listed name, which round 7 read from the
@@ -305,7 +305,7 @@ consumer workspace the framework package is additionally **mounted read-only** f
 sandboxed process (a mount point cannot be renamed or removed from inside), and the
 workspace's framework build is replaced from the trusted cache whenever it differs from the
 pins. A changed, corrupted, missing or extra framework module is rejected (`framework
-integrity`). See finding R1 in [docs/AUDIT.md](AUDIT.md).
+integrity`). See finding R1 in [docs/audit/AUDIT.md](audit/AUDIT.md).
 
 **The ready stamp names the sources the build was compiled from** (round 10 F1). A build's stamp
 records the framework's SHA-256 and the hash of every compiled module. A `--janus-root` checkout
@@ -681,7 +681,7 @@ content-addressed cache (`ASL_CACHE`, on by default: `/srv/janus-asl-cache` if i
 section says what is cached and why a stale, forged or tampered entry cannot produce a pass.
 
 **Natively linked objects have no kernel-replay backstop.** The `armobj` entries (compiled C objects of ArmASL,
-lean-sail and JanusASL, docs/ASL.md "Compiled objects") are machine code the linker uses; unlike an `.olean` nothing
+lean-sail and JanusASL, docs/design/ASL.md "Compiled objects") are machine code the linker uses; unlike an `.olean` nothing
 re-checks them. Their integrity is the content key (C hashes, compiler binary content, flags incl. weak args,
 environment), the per-user HMAC, the stage bindings (Lake's file hash recomputed, the logged compile command EQUAL to the one built from the keyed compiler path and prefix, the signed C set bound to the id),
 the sandboxed recompile sample, and the nightly cold-side audit (`gate-cachecmp.py` + `objaudit`: any difference is a
@@ -736,7 +736,7 @@ produces (the key below), and the kernel replay re-checks them anyway.
   until the same evidence exists for the driver (`scripts/lib/test-rt-bcache.sh` checks both).
 
 An input that is not in the key does not reach the outputs (the reasoning is in the three tools'
-docstrings and docs/ASL.md "Build cache"); the default for an unknown setting is to key it. Lake
+docstrings and docs/design/ASL.md "Build cache"); the default for an unknown setting is to key it. Lake
 also remains the judge for `mod` and `armasl` entries: a restored module whose trace differs from
 the one Lake computes here is rebuilt.
 
@@ -792,7 +792,7 @@ consistent.
 ## The ASL corollary (`janus verify --asl`)
 
 `--asl` adds a second, separate guarantee: the verified `Ensures` theorem, transferred to Arm's
-ASL as translated to Lean (the JanusASL package, [docs/ASL.md](ASL.md)). Its statement is recorded
+ASL as translated to Lean (the JanusASL package, [docs/design/ASL.md](design/ASL.md)). Its statement is recorded
 under `asl` in `verified.json`; it says that from every ASL state related to the Go call state
 (`Rel`) under the Linux EL0 configuration (`LinuxEL0Config`), the ASL run of the extracted words
 returns to the caller in a state related to one satisfying the ABI and the postcondition.
@@ -805,7 +805,7 @@ corollary's type is exactly that derivation from the verified theorem; no untrus
 declare a JanusASL, ArmASL, Sail or generated-module name; the corollary's whole closure,
 the ArmASL model included, is kernel-replayed and its compiled modules are pinned.
 
-It additionally trusts what [docs/ASL.md](ASL.md#trust-story) lists: Arm's ASL to Sail
+It additionally trusts what [docs/design/ASL.md](design/ASL.md#trust-story) lists: Arm's ASL to Sail
 (sail-arm), Sail's Lean backend with JanusASL's patches (checked against qemu and the C++ build
 of the same Sail on a 583,756-case corpus, not proved), the slice and splices, the `janus_step`
 harness and lean-sail. The ASL run fetches instructions with the program's own `fetch`, not the
@@ -1285,7 +1285,7 @@ and the environment's outcome stream, "Atomics, exclusives and system registers"
 The legacy-SSE packed instructions of WP-D (`Janus/Amd64/InstrSSE.lean`, `DecodeSSE.lean`,
 `ExecSSE.lean`) are part of the trusted amd64 model, like `Decode.lean` and `Exec.lean`: they
 are written from the Intel SDM `Operation` sections and differentially tested on the host CPU
-(`scripts/oracle-amd64.sh sse`, docs/ORACLE-AMD64.md: 0 MISMATCH), not proved. What a theorem
+(`scripts/oracle-amd64.sh sse`, docs/validation/ORACLE-AMD64.md: 0 MISMATCH), not proved. What a theorem
 relies on beyond the SDM text:
 
 * **CPU features.** The model executes SSE3, SSSE3, SSE4.1 and SSE4.2 instructions whenever they
@@ -1308,7 +1308,7 @@ relies on beyond the SDM text:
 AES-NI, `PCLMULQDQ`, SHA-NI and ADX (WP-E, `Janus/Amd64/InstrCrypto.lean`, `DecodeCrypto.lean`,
 `ExecCrypto.lean`) are part of the trusted amd64 model. They are written from the Intel SDM
 `Operation` sections and differentially tested on the host CPU, which has all four features
-(`scripts/oracle-amd64.sh crypto`, docs/ORACLE-AMD64.md: 0 MISMATCH). What a theorem relies on:
+(`scripts/oracle-amd64.sh crypto`, docs/validation/ORACLE-AMD64.md: 0 MISMATCH). What a theorem relies on:
 
 * **CPU features (assumed).** The model executes these instructions whenever they occur, as a CPU
   with AES-NI, PCLMULQDQ, SHA-NI and ADX does; on a CPU without one of them they are `#UD`, which
@@ -1333,7 +1333,7 @@ AES-NI, `PCLMULQDQ`, SHA-NI and ADX (WP-E, `Janus/Amd64/InstrCrypto.lean`, `Deco
 The VEX-encoded instructions of WP-F (`Janus/Amd64/InstrAVX.lean`, `DecodeAVX.lean`,
 `ExecAVX.lean`) are part of the trusted amd64 model too: written from the Intel SDM `Operation`
 sections on top of WP-D's lane operations and differentially tested on the host CPU (an AVX2,
-FMA, F16C and AVX-512 machine; `scripts/oracle-amd64.sh avx`, docs/ORACLE-AMD64.md: 0 MISMATCH),
+FMA, F16C and AVX-512 machine; `scripts/oracle-amd64.sh avx`, docs/validation/ORACLE-AMD64.md: 0 MISMATCH),
 not proved. What a theorem relies on beyond the SDM text:
 
 * **YMM state.** `State.ymmHi` holds bits 255:128 of `YMM0`–`YMM15`; a VEX.128 register write
@@ -1375,7 +1375,7 @@ The EVEX-encoded instructions of WP-G (`Janus/Amd64/InstrEVEX.lean`, `DecodeEVEX
 of the trusted amd64 model: written from the Intel SDM `Operation` sections, reusing WP-D's lane
 operations and WP-F's width-generic ones (`ExecAVX.perLane` now covers four 128-bit lanes), and
 differentially tested on the host CPU (an Intel Xeon Gold 5412U, Sapphire Rapids, natively;
-`scripts/oracle-amd64.sh avx512`, docs/ORACLE-AMD64.md: 0 MISMATCH), not proved. What a theorem
+`scripts/oracle-amd64.sh avx512`, docs/validation/ORACLE-AMD64.md: 0 MISMATCH), not proved. What a theorem
 relies on beyond the SDM text:
 
 * **State.** `State.zmmHi` holds bits 511:256 of `ZMM0`–`ZMM31`, and `xmm`/`ymmHi` at indices
@@ -1480,7 +1480,7 @@ read through `X87.std` as the IEEE format (15, 63) of the same core; the precisi
 to 24, 53 or 64 bits with the extended exponent range, tininess is after rounding, NaNs follow
 the x87 rules (SDM Table 4-7), unnormals, pseudo-infinities and pseudo-NaNs are invalid
 operands, pseudo-denormals are read as their value. Each of these choices was checked on the
-host (`docs/ORACLE-AMD64.md`, x87 mode). The model is *conservative* where the x87 is
+host (`docs/validation/ORACLE-AMD64.md`, x87 mode). The model is *conservative* where the x87 is
 asynchronous: an exception that is unmasked in the control word (or pending with `ES` set)
 faults at the instruction that raises it, while the hardware completes it, stores a result
 (for overflow and underflow a re-biased one) and raises `#MF` only at the next waiting x87
@@ -1503,7 +1503,7 @@ sticky, and Go's own floating point raises them. `MXCSR` holds both, and in a ru
 it is already `0x1FA0` (`PE` set) when `main` starts (`audit/rt-fp/probe/mxcsr`). So the amd64
 examples state `GoABI.GoMXCSR s` (the control bits of `0x1F80`, reserved bits zero, **any**
 flags), not `s.mxcsr = 0x1F80`, which no call from initialised Go code satisfies
-(`docs/AUDIT-FP.md`, X64-MXCSR-STICKY). On arm64 the flags live in `FPSR`, which the examples
+(`docs/audit/AUDIT-FP.md`, X64-MXCSR-STICKY). On arm64 the flags live in `FPSR`, which the examples
 leave arbitrary; they state `s.fpcr = 0` (what a Go program sees) and, on arm64, an `exact`
 theorem for every `FPCR` without trap enables. On return, Go's ABI treats `FPSR` as scratch and
 calls the `MXCSR` status bits callee-save, but Go code does not preserve them (an inexact
@@ -1522,7 +1522,7 @@ proved, not trusted.
 
 **Validation.** The core and both wrappers are checked against qemu and the Arm ASL (Sail) on
 arm64, the host CPU on amd64, and Berkeley TestFloat/SoftFloat (`scripts/testfloat.sh`); see
-`docs/ORACLE.md`, `docs/ORACLE-SAIL.md` and `docs/ORACLE-AMD64.md`.
+`docs/validation/ORACLE.md`, `docs/validation/ORACLE-SAIL.md` and `docs/validation/ORACLE-AMD64.md`.
 
 ## Runtime contracts
 
@@ -2207,7 +2207,7 @@ None of these has a result the user-mode state determines. The design (WP-C,
   model reports `kernel`, and the comparators check the hardware's result against the contract's
   frame (`compareEnv`/`compareEnv64`: only the destination registers change, with values in the
   contract's range; everything else, including memory and the flags, is unchanged; 0 mismatches,
-  docs/ORACLE.md and docs/ORACLE-AMD64.md). `SVC`/`SYSCALL` are not run natively. `PUSHFQ` pushes
+  docs/validation/ORACLE.md and docs/validation/ORACLE-AMD64.md). `SVC`/`SYSCALL` are not run natively. `PUSHFQ` pushes
   `0x202` plus the status flags and `DF`; `POPFQ` faults (`Fault.systemFlag`) if it would set
   `TF`, `NT`, `AC` or `ID`, which the model does not track.
 

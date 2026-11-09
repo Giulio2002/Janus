@@ -42,7 +42,7 @@ def strKey (m : Memory) (p n : Nat) : Nat × Nat := (n, m.readLE p n)
 
 /-- Decidable equality of string keys, as a named instance: the one instance synthesis finds for
 `Nat × Nat` (`instDecidableEqProd`) comes out eta-expanded (`fun a b => …`), which the statement
-audit rejects as an inline instance (docs/AUDIT-ROUND2.md CRITICAL-1); `AMap.set`/`AMap.erase`
+audit rejects as an inline instance (docs/audit/AUDIT-ROUND2.md CRITICAL-1); `AMap.set`/`AMap.erase`
 on a string-keyed map use this one. -/
 instance (priority := high) strKeyDecEq : DecidableEq (Nat × Nat) := fun a b => instDecidableEqProd a b
 

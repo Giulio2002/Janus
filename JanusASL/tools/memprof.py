@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Peak memory of a command and of every process it starts (docs/ASL.md, "Memory").
+"""Peak memory of a command and of every process it starts (docs/design/ASL.md, "Memory").
 
     memprof.py [--json OUT] [--interval S] [--cap GB] -- CMD ARGS...
 

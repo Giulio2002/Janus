@@ -1,4 +1,4 @@
-// Command genx64 writes the amd64 SSE floating-point red-team corpus (docs/AUDIT-FP.md, rows
+// Command genx64 writes the amd64 SSE floating-point red-team corpus (docs/audit/AUDIT-FP.md, rows
 // X64-*): special-operand grids crossed with every MXCSR exception-mask combination (several
 // unmasked at once, for the #XM precedence), DAZ/FTZ under each rounding mode, CMPSD/CMPSS
 // predicates, UCOMIS vs COMIS, conversions at the integer and format boundaries, ROUNDSD ties.

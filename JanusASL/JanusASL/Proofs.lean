@@ -54,4 +54,4 @@ import JanusASL.Proofs.FPChain.Basic
 Each `*_agree` theorem states: for every word of the encoding class and every pair of states
 related by `Rel` (the Sail state holds Janus' X0-X30, SP, PC and NZCV, at EL0 with SP_EL0), Janus'
 `step` succeeds, the generated ASL step (`janus_step`) completes with outcome `Janus_OK`, and the
-results are related again. See docs/ASL.md. -/
+results are related again. See docs/design/ASL.md. -/

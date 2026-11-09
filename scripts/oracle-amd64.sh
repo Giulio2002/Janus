@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Differential test of the Lean x86-64 model (Janus.Amd64.step) against native execution on
-# the x86-64 host (single-stepped, see oracle-amd64/cmd/runner). See docs/ORACLE-AMD64.md.
+# the x86-64 host (single-stepped, see oracle-amd64/cmd/runner). See docs/validation/ORACLE-AMD64.md.
 #
 #   scripts/oracle-amd64.sh selftest   build, then check the native harness on known answers
 #   scripts/oracle-amd64.sh quick      generated cases only (~100k)

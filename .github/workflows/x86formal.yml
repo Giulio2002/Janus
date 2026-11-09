@@ -2,7 +2,7 @@ name: x86 formal (Sail x86)
 
 # Builds the Lean translation of the Sail x86 model (sail-x86-from-acl2, sliced to the opcodes
 # Janus decodes; vendored, JanusX86/vendor/X86Sail.tar.gz), the kernel-checked class theorems
-# between it and the Janus amd64 model, and audits their axioms (docs/X86FORMAL.md). Weekly, on
+# between it and the Janus amd64 model, and audits their axioms (docs/validation/X86FORMAL.md). Weekly, on
 # demand, and when the amd64 model or JanusX86 changes.
 on:
   workflow_dispatch:

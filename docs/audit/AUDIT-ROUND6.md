@@ -88,7 +88,7 @@ hold (`Janus/Tools/Audit.lean`):
 | A8 | Tagged (not round-tripped) definitions hide nothing that changes meaning | **Residual, unchanged.** See §3. |
 | A9 | Dependency bodies mean what their pinned source says | **Residual** (r5). They are listed by name, and F1's plain-name rule now applies to them too. |
 | A10 | `Extracted.program` is the binary's code | **Holds**: byte-for-byte regeneration plus the kernel-defeq identity check. `withExit` and structure eta change nothing, because any rewrite of the program in `T` is printed (for example `{ Extracted.program with stubs := [] }` prints as a structure literal). The F1 lookalike route is now closed. |
-| A11 | A stub's outcome is what the runtime function does | **Was false** for non-runtime packages with a `runtime.panic…`/`runtime.morestack…` import path (F3). **Fixed.** Residual (unchanged, out of threat model): a `-checklinkname=0` push into package `runtime`, or a hand-made ELF. The binary is the subject, not the adversary (docs/AUDIT.md §4). |
+| A11 | A stub's outcome is what the runtime function does | **Was false** for non-runtime packages with a `runtime.panic…`/`runtime.morestack…` import path (F3). **Fixed.** Residual (unchanged, out of threat model): a `-checklinkname=0` push into package `runtime`, or a hand-made ELF. The binary is the subject, not the adversary (docs/audit/AUDIT.md §4). |
 | A12 | Hypotheses are read | Not the auditor's job. A false hypothesis (`h : x * y = x + y`) makes a weaker but disclosed claim (r3 R2). |
 
 ---

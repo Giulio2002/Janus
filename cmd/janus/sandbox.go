@@ -1,7 +1,7 @@
 package main
 
 // Sandboxing for every Lean process that elaborates or loads untrusted code (the proof, the
-// consumer package's modules and its Lake configuration). See docs/AUDIT.md F1 and the threat
+// consumer package's modules and its Lake configuration). See docs/audit/AUDIT.md F1 and the threat
 // model in docs/CONSUMERS.md.
 //
 // A proof file, a lakefile.lean and any elaborator they import are arbitrary code that runs

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Differential test of the Lean AArch64 model (Janus.Arm64.step) against native execution
-# under qemu-aarch64. See docs/ORACLE.md.
+# under qemu-aarch64. See docs/validation/ORACLE.md.
 #
 #   scripts/oracle.sh selftest        build, then check the native harness on known answers
 #   scripts/oracle.sh quick           ~60k generated cases

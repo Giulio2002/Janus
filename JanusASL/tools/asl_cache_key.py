@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The key of the shared ArmASL build cache (scripts/asl.sh, ASL_CACHE; docs/ASL.md "Build cache").
+"""The key of the shared ArmASL build cache (scripts/asl.sh, ASL_CACHE; docs/design/ASL.md "Build cache").
 
     python3 -I JanusASL/tools/asl_cache_key.py REPO_ROOT          the key (32 hex digits)
     python3 -I JanusASL/tools/asl_cache_key.py REPO_ROOT --show   the canonical inputs it hashes

@@ -7,7 +7,7 @@ import Janus.Contracts.Stack
 Byte strings are taken from `go build` (Go 1.26, `GOARCH=amd64`) output of `examples/basic`
 and from the Go standard library; the comment above each test is the `objdump -M intel`
 disassembly. Decoding is checked by `decide` (kernel evaluation on the literal bytes), and the
-executor by `simp`/`rfl` on concrete states. The differential oracle (`docs/ORACLE-AMD64.md`)
+executor by `simp`/`rfl` on concrete states. The differential oracle (`docs/validation/ORACLE-AMD64.md`)
 is the real test; these pin the reducibility the proof automation relies on.
 -/
 

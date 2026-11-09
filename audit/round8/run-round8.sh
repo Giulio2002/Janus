@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round-8 regression rows (docs/AUDIT-ROUND8.md). Exits 1 if a blocked attack prints Verified (or
+# Round-8 regression rows (docs/audit/AUDIT-ROUND8.md). Exits 1 if a blocked attack prints Verified (or
 # is blocked without the expected diagnostic), a control stops verifying, or a cache row
 # regresses. G3a (fixed by stub code pins) must be rejected at extraction.
 # Every attack verification passes --fresh (the cold path) and uses a private temporary cache;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests of the per-module JanusASL build cache (JanusASL/tools/asl_mod_cache.py; scripts/asl.sh
-# ASL_CACHE; docs/ASL.md "Build cache").
+# ASL_CACHE; docs/design/ASL.md "Build cache").
 #
 #   JanusASL/tools/test_asl_mod_cache.sh              key tests (seconds)
 #   JanusASL/tools/test_asl_mod_cache.sh --e2e CACHE  also end to end, with CACHE holding this

@@ -19,7 +19,7 @@ the extracted words, including memequal's 64-byte SIMD loop: two `LD1 {v0.2d-v3.
 four `CMEQ .2D` (each 64-bit lane all-ones iff equal), three `AND .16B`, two `UMOV x, v.d[i]`
 and the `CBZ` tests, plus the shortcut for `a = b`. The vector registers are part of the state
 (`State.vregs`), arbitrary at the call, and the model of each instruction is checked against
-qemu and the Arm ASL (Sail) model (`docs/ORACLE.md`, `docs/ORACLE-SAIL.md`).
+qemu and the Arm ASL (Sail) model (`docs/validation/ORACLE.md`, `docs/validation/ORACLE-SAIL.md`).
 -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec

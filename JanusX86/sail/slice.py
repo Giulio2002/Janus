@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Slice sail-x86-from-acl2's model to the opcodes Janus' amd64 decoder accepts (docs/X86FORMAL.md).
+"""Slice sail-x86-from-acl2's model to the opcodes Janus' amd64 decoder accepts (docs/validation/X86FORMAL.md).
 
     slice.py MODEL_DIR OUT_DIR KEEP_FILE
 

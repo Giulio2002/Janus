@@ -26,7 +26,7 @@ jobs:
         run: scripts/ci-axiom-guard.sh
 
       # Keys of the shared JanusASL build caches (ArmASL entry and per-module entries): edits that
-      # cannot change a build keep its key, edits that can change it (seconds; docs/ASL.md).
+      # cannot change a build keep its key, edits that can change it (seconds; docs/design/ASL.md).
       - name: JanusASL build cache keys
         run: |
           JanusASL/tools/test_asl_cache.sh
@@ -123,7 +123,7 @@ jobs:
       - name: go test ./cmd/...
         run: bash scripts/lib/memguard.sh run -n go-test -- go test -timeout 40m ./cmd/...
 
-  # The arm64 example proofs, decoder coverage, the qemu oracle and the docs/AUDIT.md attacks.
+  # The arm64 example proofs, decoder coverage, the qemu oracle and the docs/audit/AUDIT.md attacks.
   arm64:
     name: arm64 example proofs, oracle, soundness audit
     runs-on: ubuntu-latest

@@ -14,7 +14,7 @@ import (
 )
 
 // Tests for the framework olean pins, the closure check, the replay cache keys, the read-only
-// framework overlay and the R1 attacks of docs/AUDIT.md (audit/attacks/R1_*).
+// framework overlay and the R1 attacks of docs/audit/AUDIT.md (audit/attacks/R1_*).
 
 func writeBytes(t *testing.T, p string, b []byte) {
 	t.Helper()

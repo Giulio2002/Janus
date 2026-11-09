@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Split Sail's single-file Lean output into a chain of modules (docs/ASL.md).
+"""Split Sail's single-file Lean output into a chain of modules (docs/design/ASL.md).
 
     split_lean.py ArmASL.lean OUTDIR [N]           N parts of about equally many declarations
     split_lean.py ArmASL.lean OUTDIR --bytes B     parts of at most B bytes of declarations
@@ -14,7 +14,7 @@ namespaces are the same). Lake then caches and reports per part.
 
 With `--bytes B` (what `scripts/asl.sh gen` uses) the parts are filled greedily in order up to B
 bytes, and a declaration larger than B gets a part of its own: the memory of elaborating a part
-grows with its size (docs/ASL.md, "Memory"), so the few huge decode and system-register
+grows with its size (docs/design/ASL.md, "Memory"), so the few huge decode and system-register
 functions are isolated and the rest is cut into many small parts.
 """
 import os

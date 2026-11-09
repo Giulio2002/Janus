@@ -1,6 +1,6 @@
 import JanusASL.Proofs.Mem
 
-/-! # Stores through the ASL: `Mem_set` on `UserMapped` addresses (see Mem.lean, docs/ASL.md) -/
+/-! # Stores through the ASL: `Mem_set` on `UserMapped` addresses (see Mem.lean, docs/design/ASL.md) -/
 
 set_option linter.unusedSimpArgs false
 set_option linter.deprecated false

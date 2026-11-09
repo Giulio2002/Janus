@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// Tests for janus verify --asl (asl.go, docs/ASL.md). The unit tests run always. Those that build
+// Tests for janus verify --asl (asl.go, docs/design/ASL.md). The unit tests run always. Those that build
 // and use the JanusASL package (the ArmASL model, about an hour on the first run, then cached in
 // the test cache) run only with JANUS_TEST_ASL=1; JANUS_TEST_ASL_SEED may name a built JanusASL
 // package directory (with its .lake) whose build seeds the test cache (Lake reuses it by content).

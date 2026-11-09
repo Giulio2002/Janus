@@ -213,7 +213,7 @@ WF auxiliary theorem `countdown._unary._proof_1` was disclosed as `:= <opaque>`.
 
 ## Model level (item 6): targeted oracle cases
 
-`docs/ASL.md` does **not** exist in this tree. No arm64 class is recorded as proved equal to the
+`docs/design/ASL.md` does **not** exist in this tree. No arm64 class is recorded as proved equal to the
 ASL, so all of them are only tested (qemu and, in earlier rounds, Sail). I picked the three
 families per architecture with the fewest oracle cases relative to their encoding space. Edge
 cases were hand-derived from the Arm ARM ASL and the Intel SDM pseudocode; the derivations are

@@ -1,7 +1,7 @@
 package main
 
 // Framework olean pinning and the kernel replay of a theorem's whole import closure. See
-// docs/AUDIT.md (finding R1) and docs/SOUNDNESS.md (Trusted computing base).
+// docs/audit/AUDIT.md (finding R1) and docs/SOUNDNESS.md (Trusted computing base).
 //
 // A compiled module (.olean) is only data, but it is the data every later step believes: the
 // audit reads the statement's constants from it, and the kernel replay (leanchecker) checks a

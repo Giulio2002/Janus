@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JanusX86: Janus' amd64 model against the Sail x86 model (ACL2 X86isa) inside Lean (docs/X86FORMAL.md).
+# JanusX86: Janus' amd64 model against the Sail x86 model (ACL2 X86isa) inside Lean (docs/validation/X86FORMAL.md).
 #
 #   scripts/x86formal.sh deps    the pinned toolchain: JanusASL's opam root with Sail 0.20.3 and its
 #                                patches (scripts/asl.sh deps), the slicing plugin (JanusASL's, built
@@ -41,7 +41,7 @@ JOBS="${JOBS:-$(nproc)}"
 pkg="$root/JanusX86"
 here="$pkg/sail"
 
-# ---- pins (keep in sync with docs/X86FORMAL.md) ----
+# ---- pins (keep in sync with docs/validation/X86FORMAL.md) ----
 X86_URL=https://github.com/rems-project/sail-x86-from-acl2
 X86_REV=0c6c023dccc7c20d8d9dbfc481f01d9bb49d62bf   # Nov 2024; the commit oracle-amd64-formal/build.sh uses
 SWITCH=sail-0.20.3-janus                          # JanusASL's opam switch (Sail 0.20.3 + patches)

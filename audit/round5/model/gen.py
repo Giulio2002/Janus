@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Round-5 targeted oracle cases (docs/AUDIT-ROUND5.md, item 6: model level).
+"""Round-5 targeted oracle cases (docs/audit/AUDIT-ROUND5.md, item 6: model level).
 
 Six instruction families picked for few oracle cases relative to their encoding space.
 The words and states below are derived from the Arm ARM (DDI 0487) / Intel SDM pseudocode;

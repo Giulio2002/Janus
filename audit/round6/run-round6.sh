@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round-6 regression rows (docs/AUDIT-ROUND6.md). Exits 1 if a blocked attack prints Verified, a
+# Round-6 regression rows (docs/audit/AUDIT-ROUND6.md). Exits 1 if a blocked attack prints Verified, a
 # control stops verifying or prints something else, or the stub fixture is misclassified.
 # Writes only under audit/round6/work/ and audit/round6/bin/.
 # Usage: audit/round6/run-round6.sh

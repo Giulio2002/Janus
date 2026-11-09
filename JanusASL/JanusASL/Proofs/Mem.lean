@@ -225,7 +225,7 @@ access (`TFrame`), the ASL's own `AArch64_TranslateAddress` maps every byte of `
 (as an EL0 load, or as a store for writable regions) to the identity physical address as
 Normal write-back memory with no fault and without changing the state; and no region byte lies in
 the model's GIC or UART windows. This is the hypothesis of the load/store theorems; the check
-evaluates it on its tables (`janus-asl-check`, docs/ASL.md). -/
+evaluates it on its tables (`janus-asl-check`, docs/design/ASL.md). -/
 structure UserMapped (m : Janus.Arm64.Memory) (s : SState) : Prop where
   trans : ∀ s', TFrame m s s' → ∀ (va : BitVec 64) (w aligned : Bool) (size : Int), InRegion m va.toNat w →
     ∃ d, (AArch64_TranslateAddress va (gprAcc w) aligned size).run s' = .ok d s' ∧ TransOK d va
