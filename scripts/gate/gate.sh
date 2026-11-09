@@ -431,7 +431,7 @@ mktree() { # DIR [private]: a private copy of the sources and of the finished fr
   ln -sfn "$root/models/x86/.lake" "$1/models/x86/.lake"; ln -sfn "$root/validation/reference-models/sail-arm/target" "$1/validation/reference-models/sail-arm/target"
   mkdir -p "$1/bin"; cp -f bin/janus "$1/bin/janus"; : > "$1/.gate-tree-ready"
 }
-# x86 has a tree of its own, the JanusASL/oracle/rt-asl lanes another: two lakes in one tree race on its .oleans
+# x86 has a tree of its own, the asl/oracle/rt-asl lanes another: two lakes in one tree race on its .oleans
 tree_x86="$treebase/x86" tree="$treebase/asl" tree_aslv="$treebase/aslv" tree_go="$treebase/go"
 mkdir -p "$treebase"
 exec {treelock}>"$treebase.lock"

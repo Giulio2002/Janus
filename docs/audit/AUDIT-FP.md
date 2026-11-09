@@ -120,7 +120,7 @@ the flag's memory stated in a precondition (a writable `.noptrbss` byte, never c
 
 ## Models against hardware (no issue)
 
-The stock corpora (`docs/ORACLE*.md`) sample `FPCR`/`MXCSR` at random. These rows add
+The stock corpora (`docs/validation/ORACLE*.md`) sample `FPCR`/`MXCSR` at random. These rows add
 systematic grids where random sampling is thin.
 
 **A64-QEMU** (`gen-a64`, 469,029 cases against qemu 10.2.1 `-cpu max`, 0 MISMATCH, 0 gap):
