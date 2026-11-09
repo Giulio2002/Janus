@@ -60,7 +60,7 @@ mk "$t/a" c1 0 PASS h1; mk "$t/b" c1 0 PASS h1
 # hashes on a fake worktree
 mkdir -p "$t/w/models/asl/.lake/build/lib/lean" "$t/w/validation/reference-models/sail-arm/target/release"; echo o > "$t/w/models/asl/.lake/build/lib/lean/ArmASL.olean"; echo d > "$t/w/validation/reference-models/sail-arm/target/release/janus-oracle-sail"
 python3 -I "$cmp_py" hashes "$t/w" "$t/h1.json"; echo p >> "$t/w/validation/reference-models/sail-arm/target/release/janus-oracle-sail"; python3 -I "$cmp_py" hashes "$t/w" "$t/h2.json"
-mkdir -p "$t/w/scripts"; printf 'SAIL_SPLIT_PARTS=48\n' > "$t/w/scripts/validation/sail-arm.sh"
+mkdir -p "$t/w/scripts/validation"; printf 'SAIL_SPLIT_PARTS=48\n' > "$t/w/scripts/validation/sail-arm.sh"
 python3 -I "$cmp_py" hashes "$t/w" "$t/h3.json"; SAIL_SPLIT=0 python3 -I "$cmp_py" hashes "$t/w" "$t/h4.json"
 # every ir/*.c and ir/*.c.o.* of every Lake tree is hashed (traces are not: they hold worktree paths), and a changed Janus.* object is P0
 w2="$t/w2"; mkdir -p "$w2/.lake/build/ir/Janus" "$w2/models/asl/.lake/build/ir/ArmASL" "$w2/models/asl/.lake/build/ir/JanusASL" "$w2/models/asl/.lake/packages/Sail/.lake/build/ir/Sail" "$w2/models/asl/.lake/build/lib/lean"

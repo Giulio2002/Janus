@@ -148,7 +148,7 @@ fi
 if want root; then
 par_run 'C=$W/janus-root-copy
 rm -rf $C; mkdir -p $C
-cp -a --parents lakefile.toml lake-manifest.json lean-toolchain Janus.lean Janus test/lean Oracle .lake $C/
+cp -a --parents lakefile.toml lake-manifest.json lean-toolchain Janus.lean Janus test/lean validation/model-runner .lake $C/
 cp test/redteam/attacks/C1_fake_Extracted.lean $C/Extracted.lean
 (cd $C && lake env lean -o .lake/build/lib/lean/Extracted.olean Extracted.lean && rm Extracted.lean)
 row C1_shadow_library blocked "$("$J" verify --janus-root $C --proof test/redteam/attacks/C1_proof.lean $W/Add 2>&1 | verdict_reason)"
@@ -214,7 +214,7 @@ fi
 if want root; then
 par_run 'F=$W/janus-root-forged
 rm -rf $F; mkdir -p $F/.lake $F/forge/Janus
-cp -a --parents lakefile.toml lake-manifest.json lean-toolchain Janus.lean Janus test/lean Oracle $F/
+cp -a --parents lakefile.toml lake-manifest.json lean-toolchain Janus.lean Janus test/lean validation/model-runner $F/
 cp -a .lake/build $F/.lake/
 { echo "import Lean"; cat Janus/GoABI.lean test/redteam/attacks/R1_forged_lemma.lean; } > $F/forge/Janus/GoABI.lean
 (cd $F && lake env lean --root=forge -o .lake/build/lib/lean/Janus/GoABI.olean forge/Janus/GoABI.lean >/dev/null && rm -rf forge)
@@ -227,7 +227,7 @@ rm -rf $F'
 for ns in "" --unsafe-no-sandbox; do
   par_run 'O=$W/janus-root-overwrite${ns:+-ns}
   rm -rf $O; mkdir -p $O/.lake
-  cp -a --parents lakefile.toml lake-manifest.json lean-toolchain Janus.lean Janus test/lean Oracle $O/
+  cp -a --parents lakefile.toml lake-manifest.json lean-toolchain Janus.lean Janus test/lean validation/model-runner $O/
   cp -a .lake/build $O/.lake/
   res="$("$J" verify --janus-root $O --proof test/redteam/attacks/R1_proof_overwrite.lean $W/Add $ns 2>&1 | verdict_reason)"
   if [ -z "$ns" ]; then row R1_proof_overwrite mitigated "$res"; else row R1_proof_overwrite_nosandbox blocked "$res"; fi

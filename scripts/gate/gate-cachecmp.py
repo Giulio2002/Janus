@@ -189,7 +189,7 @@ def config(worktree):
     """The build configuration the Sail driver is a function of, recorded next to its hash."""
     parts = "unknown"
     try:
-        m = re.search(r"^SAIL_SPLIT_PARTS=(\d+)\s*$", open(os.path.join(worktree, "scripts", "sail-arm.sh")).read(), re.M)
+        m = re.search(r"^SAIL_SPLIT_PARTS=(\d+)\s*$", open(os.path.join(worktree, "scripts", "validation", "sail-arm.sh")).read(), re.M)
         if m:
             parts = m.group(1)
     except OSError:
