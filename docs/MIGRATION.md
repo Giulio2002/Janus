@@ -1,3 +1,39 @@
+# Migrating from v0.1 to v0.2
+
+v0.2.0 reorganises the repository. **The Lean API is unchanged:** `Janus.*`, `JanusTests.*` and
+`Oracle.*` module names, every theorem and every tactic keep their names, so proofs and consumer
+packages (`require janus ...`) need no source edit. What changed is where files live in the
+repository, and therefore the embedded sources of the `janus` binary:
+
+* **The verifier identity changes** (the embedded framework/ASL/Go sources moved), so result and
+  framework caches rebuild once under the new binary; nothing else is needed.
+* Repository paths (scripts, CI, docs links) changed. Old to new:
+
+| v0.1 | v0.2 |
+|---|---|
+| `JanusASL/`, `JanusX86/` | `models/asl/`, `models/x86/` (Lake packages; module names `JanusASL`, `JanusX86` unchanged) |
+| `JanusTests.lean`, `JanusTests/` | `test/lean/` (`lean_lib JanusTests`, `srcDir = "test/lean"`) |
+| `Oracle/` | `validation/model-runner/Oracle/` (`srcDir`; modules `Oracle.*` unchanged) |
+| `oracle/`, `oracle-amd64/` | `validation/hardware-comparison/arm64/`, `.../amd64/` |
+| `oracle-sail/`, `oracle-amd64-formal/` | `validation/reference-models/sail-arm/`, `.../sail-x86/` |
+| `audit/` | `test/redteam/` (`audit/round*`, `rt-*`, `rtstr` -> `test/redteam/rounds/`) |
+| `scripts/gate.sh`, `check-merge.sh`, `lib/` | `scripts/gate/...` (`scripts/gate/lib/`) |
+| `scripts/build-examples*.sh`, `asl.sh`, `x86formal.sh` | `scripts/build/` |
+| `scripts/verify-*.sh`, `example-*.sh` | `scripts/verify/` |
+| `scripts/oracle.sh`, `oracle-amd64.sh`, `oracle-sail.sh` | `scripts/validation/hardware-arm64.sh`, `hardware-amd64.sh`, `sail-arm.sh` |
+| `scripts/jx*`, `break-demo.sh`, `incr-sample.py` | `scripts/archive/` |
+| `docs/ARCHITECTURE.md`, `DESIGN-*.md`, `ASL.md` | `docs/design/` |
+| `docs/AUDIT*.md` | `docs/audit/` |
+| `docs/ORACLE*.md`, `X86FORMAL.md` | `docs/validation/` |
+| `NOTES.md`, `assets/` | `docs/dev-notes/NOTES.md`, `docs/assets/` |
+
+* `janus` builds for linux/arm64 hosts (`blockers_amd64.go` is now `blockers_x86.go`).
+* A `--janus-root` checkout must have the v0.2 layout: the ASL package is read from `models/asl/`.
+* Pin consumers to the commit/tag you verified against; a consumer that pinned v0.1.0 keeps working
+  unchanged (the tag is immutable).
+
+See `Structure/README.md` for the full map.
+
 # Migrating to wave 2
 
 Wave 2 changes the shape of several public definitions. Proofs written against the previous
