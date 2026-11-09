@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Lane count and order of audit/run-rounds.sh (sourced; self-test: scripts/lib/test-roundslanes.sh).
+# Lane count and order of test/redteam/run-rounds.sh (sourced; self-test: scripts/lib/test-roundslanes.sh).
 #
 # rounds_lane_count CORES LOAD1 MEMAVAIL_KB: how many audit lanes to run at once.
 #   Each lane peaks at 8-15 GiB and uses several cores, so: lanes = min(free cores / 8, (MemAvailable -

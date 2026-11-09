@@ -419,14 +419,14 @@ statement holds. `janus verify`:
 These defences answer an internal red-team audit, [docs/audit/AUDIT.md](docs/audit/AUDIT.md), which records the
 attacks as found (a forged audit via `initialize`, IO from `#eval`, a shadowed `Extracted`, misleading
 unexpanders, and others) together with the fixes. Each attack has a regression test in
-[`cmd/janus/hardening_test.go`](cmd/janus/hardening_test.go), and `audit/run-all.sh` replays them all.
+[`cmd/janus/hardening_test.go`](cmd/janus/hardening_test.go), and `test/redteam/run-all.sh` replays them all.
 For example, the audit's file-writing attack now dies inside the sandbox:
 
 ```text
-Invalid: Lean rejected the proof audit/attacks/A6_eval_io.lean.
+Invalid: Lean rejected the proof test/redteam/attacks/A6_eval_io.lean.
 Lean errors (2):
-  audit/attacks/A6_eval_io.lean:7:0: error: read-only file system (error code: 30)
-      file: /srv/janus/audit/work/A6-written-during-verify.txt
+  test/redteam/attacks/A6_eval_io.lean:7:0: error: read-only file system (error code: 30)
+      file: /srv/janus/test/redteam/work/A6-written-during-verify.txt
 ```
 
 <!-- TODO(coordinator): docs/audit/AUDIT.md's summary table still shows the original "BROKEN" status of

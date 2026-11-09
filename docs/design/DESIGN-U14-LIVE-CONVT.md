@@ -68,12 +68,12 @@ Theorem-level non-vacuity for `Value`: `Witness.nonvacuous` built on `LiveToy` a
 ## 5. Red-team checklist (specific to this addition)
 1. `cost := 0` for the allocating branch (mis-stated cheap contract -> unbounded chains again, V3): check `cost >= 1` whenever `len > 0` / `v >= 256`; add a Lean lemma `convT*_cost_pos` and a mutant test.
 2. The "static" branch claiming a fresh object (adds `&zeroVal` to `L`): a later allocation could then be forced apart from runtime static data (over-constrains, but also lets `LiveFrame` claims about static memory); `fresh := []` there; mutant: put it in `fresh`.
-3. Box contents for `len = 0`: `(0,0)` not `(ptr,0)` (the existing `ConvTstring` states `if len = 0 then 0 else ptr`); mutant swapping this must fail a witness on the real runtime (`audit/rtstr`-style probe: 20000 random inputs vs Go's `any(s)`; add `convT*` rows) .
+3. Box contents for `len = 0`: `(0,0)` not `(ptr,0)` (the existing `ConvTstring` states `if len = 0 then 0 else ptr`); mutant swapping this must fail a witness on the real runtime (`test/redteam/rounds/rtstr`-style probe: 20000 random inputs vs Go's `any(s)`; add `convT*` rows) .
 4. Readiness: no `H` in the live contract; `R.ok addr [ptr,len]` is the only per-call premise (like `NewobjectLive`): check the auditor rejects `R.ok` instantiated with constants for these addresses (round 10 V1 rule covers `R` as variable).
 5. Mixed use: a path that calls the single-call `ConvTstring` after a live call (the old situation) must still be unprovable, not silently assumed (docs rule, section 9.5 of DESIGN-U14-SEQUENTIAL-CALLS).
 6. `R.rt` containing the caller's string bytes: `Outside` facts required for the string pointee (it is the caller's or earlier allocated; earlier allocated = in `L`, outside `R.inv`'s view).
-7. The real-runtime probe (`audit/round10/probe`, 100000 boxes distinct, both ISAs) must keep passing with live statements; add a probe row that interleaves `convTstring` and `growslice` and checks distinctness/non-overlap.
-8. Pin: extraction stays `pinned: true`; `audit/roundfw` P_* mutates one byte of `convT64`/`convTstring` (already listed) -> still rejected.
+7. The real-runtime probe (`test/redteam/rounds/round10/probe`, 100000 boxes distinct, both ISAs) must keep passing with live statements; add a probe row that interleaves `convTstring` and `growslice` and checks distinctness/non-overlap.
+8. Pin: extraction stays `pinned: true`; `test/redteam/rounds/roundfw` P_* mutates one byte of `convT64`/`convTstring` (already listed) -> still rejected.
 
 ## 6. Unlocks
 `Value` (arm64, amd64). `UnmarshalSSZ`/`MarshalSSZInto` convT64 error paths (still needs `fmt.errorf`, U5: partial theorems only). Any future `any(x)` in an allocating function.

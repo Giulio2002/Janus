@@ -118,7 +118,7 @@ allocation, slice and write-barrier entries `runtime.mallocgc`, `newobject`, `ma
 `growslice` and `gcWriteBarrier1`–`8` (`allocContractStubs`). Its normalized code must be one of
 the hashes `scripts/gen-stubpins.sh` measured for the pinned toolchains, so the contract
 hypothesis is about the Go runtime's own function, not about whatever code a binary placed under
-that name. `audit/roundfw/run-roundfw.sh` (rows `P_*`) changes one byte of each of those five
+that name. `test/redteam/rounds/roundfw/run-roundfw.sh` (rows `P_*`) changes one byte of each of those five
 functions on both ISAs and checks that the extraction is rejected, and that the unchanged binary
 records `"pinned": true`. (`runtime.typehash` stays unpinned: its jump table makes its
 normalized code differ between programs.)
@@ -133,11 +133,11 @@ written to be satisfiable by the real runtime under the model's rules: for insta
 add memory regions (instructions cannot), see below. **Every contract needs a kernel-checked
 satisfiability witness** `theorem <name>_satisfiable` in `Janus/Contracts/<File>Sat.lean`
 (`<File>SatAmd64.lean`): an implementation, its parameters, and a call state satisfying the whole
-precondition (`AllocSat.lean`; for a whole theorem, `audit/round9/controls/NewPair_witness.lean`).
-`audit/round9/run-round9.sh` (row SAT) fails for any contract without one, except those listed as
-open in `audit/round9/sat-pending.txt`: before round 9 the allocation
+precondition (`AllocSat.lean`; for a whole theorem, `test/redteam/rounds/round9/controls/NewPair_witness.lean`).
+`test/redteam/rounds/round9/run-round9.sh` (row SAT) fails for any contract without one, except those listed as
+open in `test/redteam/rounds/round9/sat-pending.txt`: before round 9 the allocation
 contracts had none and were false for every implementation (round 9 C1,
-`audit/round9/model/Unsat.lean`).
+`test/redteam/rounds/round9/model/Unsat.lean`).
 
 **Witnessing a whole theorem that uses an allocation contract (`janus_alloc_witness`).** A theorem
 about a function that calls `runtime.newobject` quantifies over `impl`, `rt` and `H` and takes
@@ -160,7 +160,7 @@ contract is about the runtime's own code `Extracted.program.ofImpl impl` and whi
 holds `impl`, `rt`, `H`, `linked` (the `link` program, for the call setup), `linkedO` (the `ofImpl` program),
 `hap : ImplApart Extracted.program impl` (by `decide`: the placement premise a Witness must exhibit) and `hnewO` (the
 contract over `ofImpl impl`, by `janus_run`). The main theorem derives the `link` contract it executes with
-`NewobjectContract.of_codeIn (codeIn_ofImpl_of_apart hap) hnewO`; the audit round (`audit/roundofimpl`) checks both a
+`NewobjectContract.of_codeIn (codeIn_ofImpl_of_apart hap) hnewO`; the audit round (`test/redteam/rounds/roundofimpl`) checks both a
 witness exhibiting `hap` (accepted) and one that omits it (rejected, like any hypothesis the witness does not state).
 **Witnessing other contract families (stubs at the program's own contract addresses).** `janus verify`
 requires a non-vacuity witness for every main theorem that assumes runtime contracts
@@ -197,7 +197,7 @@ runtime owns it (`rtView rt m`: `m`'s bytes inside `rt`, every other byte 0, and
   hypothesis is met by the real binary exactly at the calls the runtime serves as described:
   in the common case a free slot in the `mcache` span, enough heap, no stack growth, no GC
   assist that parks or shrinks the stack, no `mmap`. A call outside that (`make([]uint64, 1<<44)`
-  throws `out of memory`, `audit/round9/probe`) is simply not one the theorem speaks about.
+  throws `out of memory`, `test/redteam/rounds/round9/probe`) is simply not one the theorem speaks about.
 
 * **A satisfiable contract can still be instantiated into a vacuous one** (round 10 V1). The
   theorem must quantify the runtime: `janus verify` (the auditor) rejects a statement in which
@@ -205,7 +205,7 @@ runtime owns it (`rtView rt m`: `m`'s bytes inside `rt`, every other byte 0, and
   statement for its runtime arguments (`impl` inside `Extracted.program.link impl`, `rt`, `H`, the models `R`/`M`), or in
   which another premise mentions such a variable (only the model laws `R.Laws`/`M.Laws` may).
   `H := fun _ _ _ _ => True` ("always ready") brought round 9 C1 back: the contract is false for
-  every implementation and NewPair "returned 42" (`audit/round10/attacks/V1a_contract_H_true.lean`);
+  every implementation and NewPair "returned 42" (`test/redteam/rounds/round10/attacks/V1a_contract_H_true.lean`);
   likewise `rt := []`, `(hrt : rt = [])`, a contract about `Extracted.program` itself, or the toy
   model `R0`. What the rule does not catch: constraints inside the theorem's own precondition
   (the `Ensures … pre`) and the numeric parameters such as `stack`, which the reader checks as
@@ -560,10 +560,10 @@ fault. The contracts are satisfiable (`ICallSat`, `ICallSatAmd64`: a writer retu
 callee address `fn` must be a variable (a dynamic callee) or exactly `Extracted.program.contractAddr "name"` (a static call to a
 non-extracted function that the extraction lists as a `--contract` stub, e.g. `fmt.Fprint`); never a numeral, `Extracted.entry`,
 the address of an extracted function, or an offset of a stub address (`test/lean/JanusTests/ICallAudit.lean`); `P` and `keep` may be closed terms (they are the
-statement's claims about the call, mention no runtime variable); NO theorem premise may constrain `rt` through `Outside a n rt` (red team B3-B6: `Outside 0 2^48 rt`, or two that cover the space, force `rt = []`; the caller's frame is stated in the `Ensures` precondition, where it is an obligation); no premise may mention the callee address `fn` of an `ICallContract` except the contract hypotheses themselves (B1/B2: `fn = Extracted.entry` or `fn = <numeral>` would choose the callee); and a numeral stack or frame size of 2^47 or more is rejected (B12: it cannot exist, so the hypothesis would be vacuous). **`preserves` (U-ICALL-PRESERVES).** The last parameter of `ICallContract`/`ICallContract64` is `preserves : State → Memory → Prop`, default `fun _ _ => True` (nothing assumed; existing consumers are unchanged). The post of the callee then also says `preserves s m` for the memory `m` it leaves. The one other accepted form is `RtPreserves R2` (`RtPreserves64 R2` on amd64) for a VARIABLE `R2 : RtInv` of the statement: `∀ b L, R2.inv b L g (view R2.rt L s.mem) → R2.inv b L g (view R2.rt L m)` — the callee may write the heap (allocate, collect) and leaves the allocator invariant intact. It is a disclosed ASSUMPTION ABOUT THE CALLEE, beyond the ABI, in the contract itself (a separate premise of the same shape is rejected by the premise rule); any other `preserves` (bytes, values, registers, `False`, a closed model, an eta-expanded `RtPreserves`) is refused. Note the form is per budget: a callee that consumes allocation budget does not preserve `toyInv b` for the same `b`, so the form fits runtimes whose invariant is budget-free for the callee's allocations. Satisfiable: `iCallPreserves_satisfiable`, `iCallPreserves64_satisfiable` (a callee that leaves memory as found preserves every `R2`). Rows: `test/lean/JanusTests/ICallAudit.lean`, `audit/icall/run-preserves64.sh`, `audit/icall/attacks/P*.lean`.
+statement's claims about the call, mention no runtime variable); NO theorem premise may constrain `rt` through `Outside a n rt` (red team B3-B6: `Outside 0 2^48 rt`, or two that cover the space, force `rt = []`; the caller's frame is stated in the `Ensures` precondition, where it is an obligation); no premise may mention the callee address `fn` of an `ICallContract` except the contract hypotheses themselves (B1/B2: `fn = Extracted.entry` or `fn = <numeral>` would choose the callee); and a numeral stack or frame size of 2^47 or more is rejected (B12: it cannot exist, so the hypothesis would be vacuous). **`preserves` (U-ICALL-PRESERVES).** The last parameter of `ICallContract`/`ICallContract64` is `preserves : State → Memory → Prop`, default `fun _ _ => True` (nothing assumed; existing consumers are unchanged). The post of the callee then also says `preserves s m` for the memory `m` it leaves. The one other accepted form is `RtPreserves R2` (`RtPreserves64 R2` on amd64) for a VARIABLE `R2 : RtInv` of the statement: `∀ b L, R2.inv b L g (view R2.rt L s.mem) → R2.inv b L g (view R2.rt L m)` — the callee may write the heap (allocate, collect) and leaves the allocator invariant intact. It is a disclosed ASSUMPTION ABOUT THE CALLEE, beyond the ABI, in the contract itself (a separate premise of the same shape is rejected by the premise rule); any other `preserves` (bytes, values, registers, `False`, a closed model, an eta-expanded `RtPreserves`) is refused. Note the form is per budget: a callee that consumes allocation budget does not preserve `toyInv b` for the same `b`, so the form fits runtimes whose invariant is budget-free for the callee's allocations. Satisfiable: `iCallPreserves_satisfiable`, `iCallPreserves64_satisfiable` (a callee that leaves memory as found preserves every `R2`). Rows: `test/lean/JanusTests/ICallAudit.lean`, `test/redteam/icall/run-preserves64.sh`, `test/redteam/icall/attacks/P*.lean`.
 
-Red team: `audit/icall/attacks.sh` (twenty rows: A1-A8, B1-B6 and B12, C0, P0-P3), `test/lean/JanusTests/ICallRedTeam.lean`
-(a callee that clobbers `X28`/`X29`/`SP` or writes the caller's frame does not satisfy the postcondition), `audit/icall/run.sh`
+Red team: `test/redteam/icall/attacks.sh` (twenty rows: A1-A8, B1-B6 and B12, C0, P0-P3), `test/lean/JanusTests/ICallRedTeam.lean`
+(a callee that clobbers `X28`/`X29`/`SP` or writes the caller's frame does not satisfy the postcondition), `test/redteam/icall/run.sh`
 (wrong argument bytes, forged `fn`).
 
 ### Maps (`Janus/Spec/Map.lean`, `Janus/Contracts/Map.lean`, `MapVar.lean`, `MapStr.lean` and their `…Amd64.lean` files)
@@ -659,7 +659,7 @@ inside are not covered by these contracts (their abstract key is not their bytes
 satisfying `RTPre`, and `RTPre` comes back after every call (`M.Env` holds again): from one non-nil
 map, `2^64` assignments of new keys would build a map whose count no header word holds
 (`MapModel.Laws.len`), and `2^48 + 1` calls of `makemap_small` would need that many distinct map
-addresses below `2^48`. `audit/maps/model/Unsat.lean` proves both old contracts false, on both
+addresses below `2^48`. `test/redteam/maps/model/Unsat.lean` proves both old contracts false, on both
 ISAs, for every call state whose guard word lies outside what the call may write
 (`old_assign_unsat`, `old_makeSmall_unsat`, `…64`), and `old_*_vacuous` show that every theorem's
 `CallerOK` provides that condition: `Insert`, `InsertGet` and `NewMap` were vacuous. The real
@@ -700,8 +700,8 @@ The common shape, `RTPre` and `RTReturn`:
   never the return-address slot) and the argument spill slots (`MemFrame … (rtWrites M s nargs ++
   extra)`); `M.Env` holds again; every other map keeps its contents (`OthersKept`).
 
-**Round 10 V2** found the same vacuity independently (`audit/round10/model/MapUnsat.lean` proves
-it in the kernel; `audit/round10/attacks/V2a_map_assign_vacuous.lean` used it to "verify" that
+**Round 10 V2** found the same vacuity independently (`test/redteam/rounds/round10/model/MapUnsat.lean` proves
+it in the kernel; `test/redteam/rounds/round10/attacks/V2a_map_assign_vacuous.lean` used it to "verify" that
 Insert stores `v + 1`). It is closed by the R3-C1 readiness above (`Contracts.Ready H M.priv args
 s`, not handed back by the call); witnesses: `Janus/Contracts/MapSat.lean`, `MapSatAmd64.lean`.
 
@@ -877,7 +877,7 @@ and `liveSpecOf`; the address `st` is checked exactly as for the plain `RtContra
 fresh block (and only it) joins the live set (`fresh`), while the buffer or table bytes are `keep`t. Satisfiability witness for the
 empty string, both ISAs: `SbtsLiveSat[Amd64].lean` (`slicebytetostringLive_satisfiable`, `slicebytetostringLive64_satisfiable`), and the
 tactics `janus_live_sbts_empty` / `janus64_live_sbts_empty` (the `RET` stub at the contract address, request `buf = ptr = n = 0`).
-Red team: `audit/roundspecbind/attacks/SbtsAddr.lean` (c2 control; a5 forged address, a6 variable address, a7/a8/a9 another spec or
+Red team: `test/redteam/rounds/roundspecbind/attacks/SbtsAddr.lean` (c2 control; a5 forged address, a6 variable address, a7/a8/a9 another spec or
 other live data are rejected) and `test/lean/JanusTests/LiveStubSbts.lean`. Non-empty strings: `janus_live_sbts n A hok` / `janus64_live_sbts n A hok` (`LiveStubSbts[Amd64].lean`: the stub copies the `n` bytes at `ptr` into a fresh block of
 the toy allocator and returns `(block, n)`; `buf = 0`, `n` a size class — 16, 24, 32, 48, … — `n ≤ A ≤ 64 n`; satisfiability
 `slicebytetostringLive[64]_satisfiable_copy`). The empty string with ANY caller buffer (the real wrappers always pass a stack buffer): `janus_live_sbts_empty_buf` / `janus64_live_sbts_empty_buf` (`hok : ∀ args, ok a args → ∃ buf p, args = [buf, p, 0]`; the stub `MOV X1, X2; RET` / `MOV RBX, RCX; RET`; nothing written or allocated). Not witnessable on the toy runtime: `n = 1` (the result is the binary's static table, a fact
@@ -890,7 +890,7 @@ buffer is on the stack): use `n = 0` or a size class `n ≥ 16`.
 `ConvTstring`, `ConvTslice`, `TypeAssert` and `InterfaceSwitch` take a readiness predicate
 `H : RtReady`, required at the call for its argument registers, `g`, `SP` and
 `rtView R.priv mem`, and not handed back. Each of them may allocate (a box on every
-`convT64(v)` with `v ≥ 256`: `audit/round10/probe` keeps 100000 boxes and gets 100000 distinct
+`convT64(v)` with `v ≥ 256`: `test/redteam/rounds/round10/probe` keeps 100000 boxes and gets 100000 distinct
 addresses; a new cache when `typeAssert`/`interfaceSwitch` rebuild it), while every contract
 hands `R.Env` back. Without `H` a contract demanded that, from any `R.Env` state, an unbounded
 chain of such calls succeeds; in the model the regions are fixed and the collector cannot run,
@@ -903,7 +903,7 @@ comparisons do not allocate without bound and are unchanged.
 **`typeAssert` with a nil type** (round 10 I1). The contract used to admit a nil `t` with
 `CanFail`, returning `0`. The runtime does return `nil` there, but then, about once in 1000 calls,
 it rebuilds the cache with `buildTypeAssertCache(oldC, nil, nil)`, which reads `nil.Hash` and
-faults (`audit/round10/probe tanil`: about 200 faults in 200000 calls, both ISAs). Compiled code
+faults (`test/redteam/rounds/round10/probe tanil`: about 200 faults in 200000 calls, both ISAs). Compiled code
 tests for nil before the call, so the contract now requires a non-nil `t`.
 
 Every panic and throw path is excluded by a precondition, not specified: `TypeAssertionError`
@@ -1080,7 +1080,7 @@ where the result `(r0, n)` is, so that a consumer can call a second runtime func
   `Extracted.dataAddr.«runtime.staticuint64s»` (an extraction error otherwise; `janus check` regenerates
   `Extracted.lean` from the binary, so the constant cannot be edited). The auditor accepts that constant and nothing else as
   the argument of `slicebytetostringSpec` (a numeral, a variable, an offset, an address from another program are rejected:
-  `audit/roundspecbind/attacks/SbtsAddr.lean`, rows `a1`–`a4`; control `c1`).
+  `test/redteam/rounds/roundspecbind/attacks/SbtsAddr.lean`, rows `a1`–`a4`; control `c1`).
 * `concatstringSpec k`, `concatstringsSpec`: `n = 0`; the result is one of the operands (Go returns the operand itself when
   one is non-empty and either a buffer was passed or its data is not on the stack); the caller's buffer (`1 ≤ n ≤ 32`); else a new
   block inside `rt`.
@@ -1125,7 +1125,7 @@ flush `wbBufFlush` stays out as a contract and is never reached). The amd64 coun
 (`countrunes`), `AppendPoint` (`growslice` with a 24-byte struct), `CopyNodes`
 (`typedslicecopy`), `WriteBarrier`. Each has a `Witness` section (`nonvacuous`, `returns`).
 
-**Probes of the real runtime** (`audit/rtstr/run.sh`, both ISAs, arm64 under qemu): every
+**Probes of the real runtime** (`test/redteam/rounds/rtstr/run.sh`, both ISAs, arm64 under qemu): every
 string example agrees with Go's own builtins on 20,000 random inputs; the capacities the runtime
 chooses for a full `[]Point` (`l ≤ 1200`) and for `[]byte(s)` (`len ≤ 3000`) are checked in Lean
 against `growCap 24 true` and `roundupsize · true` by `decide +kernel`; and under gdb (amd64) the
@@ -1835,6 +1835,6 @@ per extraction and the four theorems of an example share that build and the kern
 
 The output formats of the remaining print functions (`printhex`, `printpointer`, `printslice`,
 `printeface`/`printiface`, `printfloat64/32`, `printcomplex128/64`) are specified in
-`Janus.Spec.Print` and checked against the Go 1.26 runtime by row RT-PRINT (`audit/rt-print`), but
+`Janus.Spec.Print` and checked against the Go 1.26 runtime by row RT-PRINT (`test/redteam/rounds/rt-print`), but
 not yet proved from machine code.
 

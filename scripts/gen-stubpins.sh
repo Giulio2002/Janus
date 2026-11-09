@@ -82,7 +82,7 @@ for tc in "${toolchains[@]}"; do
   for arch in arm64 amd64; do
     while IFS='|' read -r mode env flags; do
       progs=("examples/basic|./cmd" "scripts/stubpins|.")
-      [ "$arch" = arm64 ] && progs+=("audit/round7/asmstub|./cmd")
+      [ "$arch" = arm64 ] && progs+=("test/redteam/rounds/round7/asmstub|./cmd")
       # the cgo examples: the cgo boundary stubs (_cgo_topofstack is only linked with cgo),
       # externally linked with the C compiler of scripts/build-examples-cgo.sh (not as PIE)
       [ "$mode" != pie ] && progs+=("examples/cgo|./cmd")

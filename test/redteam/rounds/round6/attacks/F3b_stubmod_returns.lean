@@ -1,7 +1,7 @@
 import Extracted
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
 
-/-! Round 6 F3b (control): on the round-6 extraction of `main.Add` (audit/round6/stubmod),
+/-! Round 6 F3b (control): on the round-6 extraction of `main.Add` (test/redteam/rounds/round6/stubmod),
 `runtime.panicky/lib.Zero` is ordinary code, and Add returns `x + y`, as it does on hardware. -/
 namespace Proof
 theorem correctness (x y : BitVec 64) :

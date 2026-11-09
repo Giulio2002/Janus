@@ -10,12 +10,12 @@ import (
 )
 
 // Regression tests for the soundness fixes in docs/audit/AUDIT.md (F1, F2, F6). Each reproduces an
-// attack from audit/attacks and asserts the verifier now blocks it (or verifies it with an
+// attack from test/redteam/attacks and asserts the verifier now blocks it (or verifies it with an
 // honest, non-misleading statement). They run Lean, so -short skips them.
 
 func attackPath(t *testing.T, name string) string {
 	t.Helper()
-	p := filepath.Join(repoRoot, "audit", "attacks", name)
+	p := filepath.Join(repoRoot, "test", "redteam", "attacks", name)
 	if _, err := os.Stat(p); err != nil {
 		t.Skipf("attack file %s not present", name)
 	}
@@ -147,7 +147,7 @@ func TestHardeningAttacks(t *testing.T) {
 	t.Run("A6_eval_io cannot write outside the sandbox", func(t *testing.T) {
 		defer parallel(t)()
 		add := mustExtract(t, "example.com/basic.Add")
-		target := filepath.Join(repoRoot, "audit", "work", "A6-written-during-verify.txt")
+		target := filepath.Join(repoRoot, "test", "redteam", "work", "A6-written-during-verify.txt")
 		_ = os.Remove(target)
 		verifyAttack(t, add, attackPath(t, "A6_eval_io.lean"), "Proof.correctness")
 		if _, err := os.Stat(target); err == nil {
@@ -166,7 +166,7 @@ func TestHardeningB1(t *testing.T) {
 	if _, err := detectSandbox(false); err != nil {
 		t.Skip("no sandbox available")
 	}
-	spec := filepath.Join(repoRoot, "audit", "specs", "B1_neverpanics_fault.lean")
+	spec := filepath.Join(repoRoot, "test", "redteam", "specs", "B1_neverpanics_fault.lean")
 	if _, err := os.Stat(spec); err != nil {
 		t.Skip("B1 spec not present")
 	}
@@ -180,7 +180,7 @@ func TestHardeningB1(t *testing.T) {
 
 // F6: PIE (ET_DYN) binaries are rejected by list/extract.
 func TestRejectPIE(t *testing.T) {
-	pie := filepath.Join(repoRoot, "audit", "work", "examples-arm64-pie")
+	pie := filepath.Join(repoRoot, "test", "redteam", "work", "examples-arm64-pie")
 	if _, err := os.Stat(pie); err != nil {
 		// no prebuilt fixture: build the example as a PIE (an ET_DYN executable), as scripts would have
 		pie = filepath.Join(t.TempDir(), "examples-arm64-pie")

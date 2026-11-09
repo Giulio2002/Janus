@@ -9,7 +9,7 @@ regular memory, `MapModel0.TY`/`KT`), the `_fat` lookups, the `_fast32` entry po
 `mapassign_fast64ptr` (values of `vs = 8` bytes): the models `MapModel0.ME` (lookups,
 deletes) and `MapModel0.MC` (assignments, `makemap`), x86-64 code from GNU `as`, and a call
 state satisfying each contract's whole precondition, with the non-nil map `MP`
-(`<contract>_satisfiable`; `audit/round9/sat_check.py`, row SAT).
+(`<contract>_satisfiable`; `test/redteam/rounds/round9/sat_check.py`, row SAT).
 -/
 
 namespace Janus.Contracts.MapVarSatAmd64

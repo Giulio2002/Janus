@@ -11,7 +11,7 @@ import (
 // Expensive: needs forged fixtures (RT_BASE = a copy of the framework library, RT_FX = the forged
 // oleans, RT_TMP = scratch on disk). With RT_BASE and RT_FX set they are used as given; otherwise, in the nightly gates
 // (JANUS_NIGHTLY=1), rtFixtures builds them from the repository's framework library with the real `lean` (the forged modules are
-// the kernel-skipping `forged` theorem of audit/attacks/R1_forged_lemma.lean under other names); elsewhere the tests skip,
+// the kernel-skipping `forged` theorem of test/redteam/attacks/R1_forged_lemma.lean under other names); elsewhere the tests skip,
 // and the gate's SKIPPED-COVERAGE line says so.
 func rtFixtures(t *testing.T) (base, fx, tmp string) {
 	t.Helper()

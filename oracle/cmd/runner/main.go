@@ -293,7 +293,7 @@ func runCase(c *L.Case, seq int64) L.HW {
 	}
 	clear(code)
 	if len(c.Words) > 0 {
-		// audit/rt-model straight-line block: lay the words out from TestPC; the rest of the
+		// test/redteam/rounds/rt-model straight-line block: lay the words out from TestPC; the rest of the
 		// page stays 0 (UDF #0), so a non-branching block falls through to a UDF after its last
 		// instruction and the captured state is the state after the whole block.
 		if len(c.Words) > 0x180 {

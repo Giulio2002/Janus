@@ -1,7 +1,7 @@
 import Extracted
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
 
-/-! Round 7 G1c (control): on the round-7 extraction of `main.Add` (audit/round7/asmstub),
+/-! Round 7 G1c (control): on the round-7 extraction of `main.Add` (test/redteam/rounds/round7/asmstub),
 `runtime.panicJanusR7` is ordinary code, and Add returns `x + y`, as it does on hardware. -/
 namespace Proof
 theorem correctness (x y : BitVec 64) :

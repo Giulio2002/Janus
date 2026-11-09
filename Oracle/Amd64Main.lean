@@ -93,7 +93,7 @@ structure Case where
   init : List (Nat × Nat)
   /-- `MXCSR` (absent: `0x1F80`, the Linux/Go default) -/
   mxcsr : Nat
-  /-- audit/rt-model sequence mode: the instructions laid out one after another at `TestPC`
+  /-- test/redteam/rounds/rt-model sequence mode: the instructions laid out one after another at `TestPC`
   (`bytes` is ignored when non-empty) -/
   seq : List (List Nat) := []
   /-- the x87 state (`x87`: FCW, FSW, abridged FTW, `ST(0)`..`ST(7)`), absent: after `FNINIT` -/

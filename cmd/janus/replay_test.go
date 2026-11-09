@@ -14,7 +14,7 @@ import (
 )
 
 // Tests for the framework olean pins, the closure check, the replay cache keys, the read-only
-// framework overlay and the R1 attacks of docs/audit/AUDIT.md (audit/attacks/R1_*).
+// framework overlay and the R1 attacks of docs/audit/AUDIT.md (test/redteam/attacks/R1_*).
 
 func writeBytes(t *testing.T, p string, b []byte) {
 	t.Helper()
@@ -296,13 +296,13 @@ func TestProtectedOverlay(t *testing.T) {
 	}
 }
 
-// r1Package copies audit/attacks/R1_pkg (and with dep, R1_dep) into a new directory, requiring
+// r1Package copies test/redteam/attacks/R1_pkg (and with dep, R1_dep) into a new directory, requiring
 // janus from the repository checkout, and writes its manifest.
 func r1Package(t *testing.T, dep bool) string {
 	t.Helper()
 	d := filepath.Join(t.TempDir(), "r1")
 	copyAttack := func(src, dst string) {
-		if err := copyTree(filepath.Join(repoRoot, "audit", "attacks", src), dst); err != nil {
+		if err := copyTree(filepath.Join(repoRoot, "test", "redteam", "attacks", src), dst); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -324,7 +324,7 @@ func r1Package(t *testing.T, dep bool) string {
 }
 
 // TestR1FrameworkTamper: consumer lakefiles and dependency build steps that replace, corrupt
-// or add compiled framework modules (audit/attacks/R1_*) are rejected: under the sandbox the
+// or add compiled framework modules (test/redteam/attacks/R1_*) are rejected: under the sandbox the
 // framework build is read-only (the write fails, so the false theorem does not even compile),
 // and without one the framework pins catch the change.
 func TestR1FrameworkTamper(t *testing.T) {
@@ -417,7 +417,7 @@ func TestR1ForgedFrameworkLemma(t *testing.T) {
 		t.Skip("the repository's Janus build is not present (run lake build Janus Janus.Tools.Audit)")
 	}
 	src, _ := os.ReadFile(filepath.Join(repoRoot, "Janus", "GoABI.lean"))
-	forge, _ := os.ReadFile(filepath.Join(repoRoot, "audit", "attacks", "R1_forged_lemma.lean"))
+	forge, _ := os.ReadFile(filepath.Join(repoRoot, "test", "redteam", "attacks", "R1_forged_lemma.lean"))
 	fdir := filepath.Join(t.TempDir(), "forge")
 	writeBytes(t, filepath.Join(fdir, "Janus", "GoABI.lean"), append(append([]byte("import Lean\n"), src...), forge...))
 	lake, _ := findLake()
@@ -450,7 +450,7 @@ func TestR1ForgedFrameworkLemma(t *testing.T) {
 	for _, plant := range []string{markerHeader + markerMAC([]byte(strings.Repeat("x", 32)), "framework", k) + "\nleanchecker Janus passed\n"} {
 		writeBytes(t, frameworkVerdictPath(k), []byte(plant))
 		phase = time.Now()
-		code, out, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(repoRoot, "audit", "attacks", "R1_forged_proof.lean"), "--janus-root", root)
+		code, out, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(repoRoot, "test", "redteam", "attacks", "R1_forged_proof.lean"), "--janus-root", root)
 		t.Logf("verify with the planted verdict (kernel replay of the forged build) took %.1fs", time.Since(phase).Seconds())
 		if os.Getenv("JANUS_TIMINGS") != "" {
 			t.Logf("stage timings:\n%s", stderr)
@@ -591,7 +591,7 @@ func TestOrphanOleanIgnored(t *testing.T) {
 		t.Skip("the repository's Janus build is not present (run lake build Janus Janus.Tools.Audit)")
 	}
 	src, _ := os.ReadFile(filepath.Join(repoRoot, "Janus", "GoABI.lean"))
-	forge, _ := os.ReadFile(filepath.Join(repoRoot, "audit", "attacks", "R1_forged_lemma.lean"))
+	forge, _ := os.ReadFile(filepath.Join(repoRoot, "test", "redteam", "attacks", "R1_forged_lemma.lean"))
 	fdir := filepath.Join(t.TempDir(), "orphan")
 	writeBytes(t, filepath.Join(fdir, "Janus", "OrphanForged.lean"), append(append([]byte("import Lean\n"), src...), forge...))
 	lake, _ := findLake()

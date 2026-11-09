@@ -26,7 +26,7 @@ one call state. Two things then go wrong, both found by the round 10 audit (`doc
 
 * **V2 (critical, kernel-checked)**: the map contracts handed `M.Env` back. `2^64` inserts of distinct keys (or
   `2^48 + 1` new maps) in the model's fixed finite memory contradict the model's own laws:
-  `audit/round10/model/MapUnsat.lean` proves `M.Laws ∧ Assign … ∧ (one call state) → False`. Every theorem
+  `test/redteam/rounds/round10/model/MapUnsat.lean` proves `M.Laws ∧ Assign … ∧ (one call state) → False`. Every theorem
   that assumed such a contract was vacuous (`V2a` proved a false statement about the real binary).
 * **V3 (high)**: `convT64(v)`, `v >= 256`, allocates a fresh box per call; handing `R.Env` back demands
   unboundedly many disjoint boxes from any `R.Env` state, which the real runtime (finite heap, no `mmap` in the

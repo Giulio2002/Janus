@@ -4,10 +4,10 @@
 # `lake build JanusTests.RedTeamN9`; a regression there fails the build). This script runs the auditor-level rows:
 # RetLow smuggled into a consumer statement. Rows: b1-b7 and b9 must be rejected by the auditor with the reason checked; b8 (CallOK64 as-is) is the control and verifies. Exits 1 if a row differs.
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-R=audit/roundn9
+R=test/redteam/rounds/roundn9
 J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
 if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; go build -o "$J" ./cmd/janus || exit 1; fi
 if [ "${JANUS_AUDIT_PREBUILT:-}" != 1 ]; then
@@ -27,7 +27,7 @@ all="$("$J" verify --audit-only --janus-root "$root" --proof "$R/attacks/RetLowA
   --theorem $P.b1 --theorem $P.b2 --theorem $P.b3 --theorem $P.b4 --theorem $P.b5 --theorem $P.b6 --theorem $P.b7 --theorem $P.b8 --theorem $P.b9 --theorem $P.b10 --theorem $P.b11 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"
 printf '%s\n' "$all" > "$W/RetLowAlias64.txt"
 blk() { awk -v n="=== $P.$1:" 'index($0,n)==1{p=1;print;next} /^=== /{p=0} p' <<<"$all"; }
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 row() { # NAME blocked pattern
   local name=$1 expect=$2 pat=${3:-} out verdict status=""
   out="$(blk "$name")"; verdict="$(grep -m1 -E '^=== ' <<<"$out" | cut -c1-100)"
@@ -37,8 +37,8 @@ row() { # NAME blocked pattern
     blocked) case $verdict in *verified*) status=BROKEN ;; esac; grep -qF -- "$pat" <<<"$out" || status=BROKEN ;;
     gap) case $verdict in *verified*) ;; *) status=BROKEN ;; esac ;;
   esac
-  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check roundn9/run-roundn9.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  # blocked rows: pinned reason, and no Lean elaboration failure (test/redteam/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check rounds/roundn9/run-roundn9.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-6s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name"); return 0
 }

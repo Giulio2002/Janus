@@ -3,7 +3,7 @@ import Extracted
 
 /-! Red team for the abstract-callee contract: rows 3 and 4 (amd64). Controls: `examples/proofs-amd64/WriteTo/Proof.lean`
 verifies. Each theorem below is the same statement with ONE change and the tactic must REFUSE it (`fail_if_success`); the
-`sorry` after it is never reached in a passing run and this file is not part of the verified set. Run: `audit/icall/run64.sh`.
+`sorry` after it is never reached in a passing run and this file is not part of the verified set. Run: `test/redteam/icall/run64.sh`.
 
 * **Row 3, wrong argument bytes:** the contract hypothesis assumes the callee is entered with a slice of length `len + 1`, the
   call passes `len`: `janus64_run` must fail to prove the call-site property `P`.

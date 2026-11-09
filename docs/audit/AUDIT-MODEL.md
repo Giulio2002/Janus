@@ -17,7 +17,7 @@ Axes:
 3. **Extractor and ELF** — can a binary make Janus prove a theorem about bytes that are not what
    executes?
 
-Rows: `audit/rt-model/run.sh` (SEQ, CORNER, EX1), `cmd/janus/rtmodel_test.go`
+Rows: `test/redteam/rounds/rt-model/run.sh` (SEQ, CORNER, EX1), `cmd/janus/rtmodel_test.go`
 (`TestSegmentMismatchRejected`). The model/decoder/runner infrastructure is built on the
 existing oracles (`docs/validation/ORACLE-AMD64.md`, `docs/validation/ORACLE.md`, `docs/validation/ORACLE-SAIL.md`); the
 sequence mode added here is a new `seq`/`words` field in the oracle case format
@@ -58,7 +58,7 @@ the binary's SHA-256 pins exactly the tampered file.
 
 ### Reproduction (before the fix)
 
-`audit/rt-model/ex1_tamper.py` takes a normal `go build` executable and advances **only** the
+`test/redteam/rounds/rt-model/ex1_tamper.py` takes a normal `go build` executable and advances **only** the
 `.text` section header's `sh_offset` by `0x40`, leaving every program header untouched:
 
 ```
@@ -113,7 +113,7 @@ still rejected earlier, as before.
 The first version of `validateSegments` accepted a section once the *first* `PT_LOAD` covered
 it, so a later overlapping `PT_LOAD` (which the kernel maps last) could change the executed code
 while extraction read the original bytes; red-team 11b confirmed a false `Verified` (O1). Round 12
-(`audit/round12/`, docs/SOUNDNESS.md "ELF loader semantics") rejects overlapping, malformed and
+(`test/redteam/rounds/round12/`, docs/SOUNDNESS.md "ELF loader semantics") rejects overlapping, malformed and
 W+X `PT_LOAD`s, reads every extracted byte through the loader's address map and cross-checks every
 section against it.
 
@@ -132,7 +132,7 @@ The oracle case format gained a `seq` (amd64, instruction byte strings laid cont
 `TestPC`) / `words` (arm64, words laid contiguously, falling through to the trailing `UDF`/`INT3`
 so the captured state is the state after the whole block) field. The native runners single-step
 through the block; the Lean models (`Oracle.Amd64Main.runSeq`, `Oracle.Main.runSeq`) thread their
-own `State` through it. Generators and comparators are in `audit/rt-model/`.
+own `State` through it. Generators and comparators are in `test/redteam/rounds/rt-model/`.
 
 The generators draw from the register/immediate and short memory forms of the accepted subset
 (no control transfer, no RIP-relative, so a block is position-independent): on amd64 the full
@@ -187,7 +187,7 @@ flag definedness tracking is consistent across steps.
 * **arm64 decoder.** Writeback with `Rn == Rt`, load-pair `Rt == Rt2`, store-exclusives, exclusive
   pairs (`LDXP`/`STXP`), odd-register `CASP`, `CCMP` `NZCV` immediate mapping and the bitfield
   aliases are all rejected or handled as the ARM ARM prescribes (`Janus/Arm64/Decode.lean`, and
-  the 48 reserved-encoding facts of `audit/round2/model`). The sequence runs add 65k accepted
+  the 48 reserved-encoding facts of `test/redteam/rounds/round2/model`). The sequence runs add 65k accepted
   blocks with 0 mismatch against both qemu and (via the same corpus) the semantics the Sail
   oracle validates.
 * **Extractor, other ELF shapes.** PIE (`ET_DYN`) is rejected (E1/F6). Stripped (`-s -w`, pclntab
@@ -199,15 +199,15 @@ flag definedness tracking is consistent across steps.
 
 ## Regression status
 
-`audit/rt-model/run.sh` (SEQ, CORNER, EX1) passes. `cmd/janus/rtmodel_test.go`
+`test/redteam/rounds/rt-model/run.sh` (SEQ, CORNER, EX1) passes. `cmd/janus/rtmodel_test.go`
 (`TestSegmentMismatchRejected`) passes. The full suite — `scripts/verify-all-examples.sh`,
-`audit/run-all.sh`, `audit/round2`–`round7`, `go test ./cmd/...`, and the amd64/arm64 oracles —
+`test/redteam/run-all.sh`, `test/redteam/rounds/round2`–`round7`, `go test ./cmd/...`, and the amd64/arm64 oracles —
 is run one job at a time before reporting.
 
 ## Reproduce
 
 ```
-audit/rt-model/run.sh                       # quick (N=5000 per batch)
-N=40000 AN=40000 CN=30000 SEEDS="1 2 3" audit/rt-model/run.sh   # full sweep
+test/redteam/rounds/rt-model/run.sh                       # quick (N=5000 per batch)
+N=40000 AN=40000 CN=30000 SEEDS="1 2 3" test/redteam/rounds/rt-model/run.sh   # full sweep
 go test ./cmd/janus/ -run TestSegmentMismatchRejected
 ```

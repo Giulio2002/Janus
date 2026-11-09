@@ -8,7 +8,7 @@ for **every** program, address and runtime-owned list `rt`. A call state with a 
 satisfies its precondition, and no code can return a writable 2^47-byte object there (memory
 regions never change). So every theorem that assumed it held vacuously.
 `NewobjectContract` itself (with the round-9 readiness hypothesis `H`) is satisfiable:
-`audit/round9/controls/NewPair_witness.lean`. -/
+`test/redteam/rounds/round9/controls/NewPair_witness.lean`. -/
 
 namespace R9
 

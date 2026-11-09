@@ -5,7 +5,7 @@ import Janus.FFI
 
 A contract whose `next` is empty for an allowed call makes every theorem about a run reaching
 that call vacuous there. For each contract of `Janus/FFI.lean` this module shows that `next` is
-non-empty (audit/round9 SAT row, which scans `Janus/FFI.lean` too):
+non-empty (test/redteam/rounds/round9 SAT row, which scans `Janus/FFI.lean` too):
 
 * `topOfStack_satisfiable`, `cgoSpec_satisfiable`, `callbackSpec_satisfiable`: total;
 * `cgoCall_satisfiable`: every allowed `cgocall` has a result, given what every real cgo call

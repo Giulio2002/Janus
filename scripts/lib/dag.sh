@@ -10,7 +10,7 @@
 # Stages (pre-*: the prebuild; tree-*: private copies of the finished framework build for the lake lanes; the rest: lanes):
 #   pre-gobin      go build bin/janus                         pre-lake    lake build (the shared framework build: the ONLY writer)
 #   pre-ex-*       the example binaries (ex-amd64 also rebuilds bin/janus: after pre-gobin)
-#   pre-rounds-bin audit/bin/janus-rounds (after pre-gobin)   pre-warm    one verification of Add (framework build + replay verdict)
+#   pre-rounds-bin test/redteam/bin/janus-rounds (after pre-gobin)   pre-warm    one verification of Add (framework build + replay verdict)
 #   pre-stamp      one verification of Add with --janus-root <checkout>: janus stamps the checkout's own framework build
 #                  (and may delete and rebuild modules whose files no longer match an OLD stamp), so every write janus can make to the
 #                  shared build happens BEFORE the pin; afterwards the stamp is fresh and a --janus-root verification only reads
@@ -90,8 +90,8 @@ DAG_RES=(
   [prewarm-artifact]="w:pre-warm"
   [bin/janus]="w:pre-gobin w:pre-ex-amd64 r:pre-stamp r:pre-warm r:pre-rounds-bin r:verify r:rounds r:decoder r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
   [framework-build]="w:pre-lake w:pre-stamp r:pre-pin r:pre-fixture r:verify r:gotest r:rounds r:decoder r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
-  [audit/bin/janus-rounds]="w:pre-rounds-bin r:rounds"
-  [audit/bin/janus-decode-gate]="w:pre-lake r:rounds"
+  [test/redteam/bin/janus-rounds]="w:pre-rounds-bin r:rounds"
+  [test/redteam/bin/janus-decode-gate]="w:pre-lake r:rounds"
   [go-test-fixture]="w:pre-fixture-emb w:pre-fixture r:gotest r:rtasl-go r:rounds"
   [examples-arm64]="w:pre-ex-arm64 r:pre-stamp r:pre-warm r:verify r:rounds r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
   [examples-amd64]="w:pre-ex-amd64 r:verify r:rounds r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"

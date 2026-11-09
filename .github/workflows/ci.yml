@@ -238,8 +238,8 @@ jobs:
 
       # Every "blocked" row must be rejected and every Verified / Verified-honest / mitigated
       # control must verify; run-all.sh marks a regression BROKEN and exits non-zero.
-      - name: Soundness audit attacks (audit/run-all.sh, rows in parallel)
-        run: audit/run-all.sh
+      - name: Soundness audit attacks (test/redteam/run-all.sh, rows in parallel)
+        run: test/redteam/run-all.sh
 
   # The amd64 backend: Lean model + oracle executable, the amd64 example proofs, and the native
   # differential oracle. Runs in parallel with the other jobs.

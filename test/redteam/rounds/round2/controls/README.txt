@@ -4,7 +4,7 @@ Positive controls for round-2. Each proves a shipped example's precondition is s
 To run (from a copy of the repo; do not build inside the shared worktree):
   cp -a <repo> /tmp/j && cd /tmp/j
   lake build Janus
-  W=audit/round2/work; mkdir -p $W/AtomicAdd $W/CopyBlock
+  W=test/redteam/rounds/round2/work; mkdir -p $W/AtomicAdd $W/CopyBlock
   bin/janus extract artifacts/examples-arm64 example.com/basic.AtomicAdd $W/AtomicAdd
   bin/janus extract artifacts/examples-arm64 example.com/basic.CopyBlock $W/CopyBlock
   for n in AtomicAdd CopyBlock; do

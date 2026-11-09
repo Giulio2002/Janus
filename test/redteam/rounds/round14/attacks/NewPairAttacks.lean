@@ -177,7 +177,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtR
 end Witness
 
 
-/-! ## Round 14 attacks (audit/round14/run-round14.sh): each theorem below is verified by name and must be
+/-! ## Round 14 attacks (test/redteam/rounds/round14/run-round14.sh): each theorem below is verified by name and must be
 rejected, except the controls (`Proof.correctness`, `Proof.Witness.nonvacuous`, `Proof.Witness.returns`). -/
 
 def NPre (rt : List (Nat × Nat)) (H : RtReady) (s : State) : Prop :=

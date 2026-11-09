@@ -1,5 +1,5 @@
 # Shared by the oracle drivers (scripts/oracle.sh, oracle-amd64.sh, oracle-sail.sh, asl.sh,
-# x86formal.sh, audit/round5/model/run-model.sh): what a run leaves in its output directory.
+# x86formal.sh, test/redteam/rounds/round5/model/run-model.sh): what a run leaves in its output directory.
 #
 # A full oracle run writes multi-GB JSON-lines dumps (gen.jsonl, harvest.jsonl, cases.jsonl,
 # hw.jsonl, model.jsonl, verdicts.jsonl; the Sail run copies them again per comparison), and

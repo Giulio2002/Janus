@@ -653,7 +653,7 @@ func TestParallelFrameworkReplayCatchesForgeryInEveryPartition(t *testing.T) {
 	if out, err, _, _ := realParFiles(t, tc, lib0, runIn, 4, files); err != nil {
 		t.Fatalf("control: the honest mini framework fails the replay: %v\n%s", err, out)
 	}
-	forge, _ := os.ReadFile(filepath.Join(repoRoot, "audit", "attacks", "R1_forged_lemma.lean"))
+	forge, _ := os.ReadFile(filepath.Join(repoRoot, "test", "redteam", "attacks", "R1_forged_lemma.lean"))
 	for _, mod := range []string{"Janus", "Janus.GoABI", "Janus.Tactic", "Janus.Amd64.Tactic"} {
 		rel := strings.ReplaceAll(mod, ".", "/")
 		lib := filepath.Join(t.TempDir(), "lib")
@@ -703,7 +703,7 @@ func realForgeryCheck(t *testing.T, mod string) {
 	defer parallel(t)()
 	lib0, tc, _, runIn := realParFixture(t)
 	lake, _ := findLake()
-	forge, _ := os.ReadFile(filepath.Join(repoRoot, "audit", "attacks", "R1_forged_lemma.lean"))
+	forge, _ := os.ReadFile(filepath.Join(repoRoot, "test", "redteam", "attacks", "R1_forged_lemma.lean"))
 	rel := strings.ReplaceAll(mod, ".", "/")
 	lib := filepath.Join(t.TempDir(), "lib")
 	if err := copyTree(lib0, lib); err != nil {

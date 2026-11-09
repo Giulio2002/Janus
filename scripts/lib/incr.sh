@@ -47,7 +47,7 @@ incr_script_flags() {
     sys) fs+=(scripts/verify-sys-examples.sh scripts/build-examples-sys.sh) ;;
     print) fs+=(scripts/verify-print-examples.sh scripts/build-examples-print.sh scripts/gen-print-code.py scripts/gen-print-examples.py) ;;
     cgo) fs+=(scripts/verify-cgo-examples.sh scripts/build-examples-cgo.sh) ;;
-    lane) fs+=(scripts/gotest-shards.sh scripts/ci-axiom-guard.sh scripts/x86formal.sh scripts/asl.sh audit/run-rounds.sh audit/rt-asl/run.sh) ;;
+    lane) fs+=(scripts/gotest-shards.sh scripts/ci-axiom-guard.sh scripts/x86formal.sh scripts/asl.sh test/redteam/run-rounds.sh test/redteam/rounds/rt-asl/run.sh) ;;
   esac
   for f in "${fs[@]}"; do printf '%s\n' --script "$f"; done
 }

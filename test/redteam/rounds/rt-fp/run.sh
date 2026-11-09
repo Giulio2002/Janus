@@ -2,7 +2,7 @@
 # Red-team round FP (docs/audit/AUDIT-FP.md): the floating-point models, decoders, specifications and
 # example theorems. Writes only to a mktemp directory (and the Go/Lake build caches).
 #
-#   audit/rt-fp/run.sh                 every row
+#   test/redteam/rounds/rt-fp/run.sh                 every row
 #   RT_FP_SKIP_SAIL=1 ...              skip A64-SAIL (needs oracle-sail/target/release/janus-oracle-sail,
 #                                      built by `scripts/oracle-sail.sh build`, about 30 min once)
 #   RT_FP_SKIP_SPEC=1 ...              skip SPEC-TF (about 4 min, needs /srv/janus-fp-deps)
@@ -11,11 +11,11 @@
 # Every row prints its result; a row whose result contradicts its expectation is marked BROKEN
 # and the script exits 1.
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# shellcheck source=../../scripts/lib/memguard.sh
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+# shellcheck source=../../../../scripts/lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
 memguard_self "$@"
-here="$root/audit/rt-fp"
+here="$root/test/redteam/rounds/rt-fp"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"

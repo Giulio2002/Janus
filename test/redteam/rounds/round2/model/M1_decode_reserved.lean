@@ -6,7 +6,7 @@ LD2 multiple/LD2R, a valid instruction outside the subset) and the ARM ARM decod
 marks UNDEFINED/reserved; every `some` is its allocated neighbour. All are kernel-checked
 (`decide`), so this file failing to compile means the decoder changed.
 Result: BLOCKED (decoder correct) for every case.
-Run: lake env lean audit/round2/model/M1_decode_reserved.lean -/
+Run: lake env lean test/redteam/rounds/round2/model/M1_decode_reserved.lean -/
 open Janus.Arm64
 
 -- Ordered / exclusive / CAS (`size 001000 o2 L o1 Rs o0 Rt2 Rn Rt`)

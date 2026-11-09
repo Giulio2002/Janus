@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FSQRT probe cases for the `sqrt_real` replacement (audit/rt-asl/run.sh, row A5 fsqrt).
+"""FSQRT probe cases for the `sqrt_real` replacement (test/redteam/rounds/rt-asl/run.sh, row A5 fsqrt).
 
     gen_cases.py > cases.jsonl
 

@@ -4,17 +4,17 @@
 # non-numeric contract argument, not only RtReady/IfaceModel/MapModel/List (Nat x Nat). Exits 1
 # if a blocked attack verifies, a control stops verifying, or a kernel-checked model row changes
 # verdict. Every janus verification uses --fresh and a private temporary cache. Writes only under
-# audit/round11/work/, audit/round11/bin/ and a mktemp directory (removed at the end).
-# Usage: audit/round11/run-round11.sh
+# test/redteam/rounds/round11/work/, test/redteam/rounds/round11/bin/ and a mktemp directory (removed at the end).
+# Usage: test/redteam/rounds/round11/run-round11.sh
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 . "$root/scripts/lib/tmark.sh"
 export PATH=/usr/local/go/bin:$PATH
-R=audit/round11
+R=test/redteam/rounds/round11
 J="$root/$R/bin/janus"; mkdir -p "$(dirname "$J")"
 CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
-# JANUS_AUDIT_PREBUILT=1 (audit/run-rounds.sh built everything once): no build here (a concurrent lake build rewrites the framework
+# JANUS_AUDIT_PREBUILT=1 (test/redteam/run-rounds.sh built everything once): no build here (a concurrent lake build rewrites the framework
 # under the other lanes: "the Janus framework build changed after the trusted compile").
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
@@ -35,7 +35,7 @@ for f in DeferTwice AlgMemhash16 RecoverSet Concat HashFKey; do extract "$f"; do
 broken=()
 A=$R/attacks
 
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 row() {
   local name=$1 expect=$2 verdict status="" pat
   shift 2
@@ -46,8 +46,8 @@ row() {
     Verified) case $verdict in Verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
-  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check round11/run-round11.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  # blocked rows: pinned reason, and no Lean elaboration failure (test/redteam/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check rounds/round11/run-round11.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-40s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0

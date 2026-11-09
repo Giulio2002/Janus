@@ -1,7 +1,7 @@
 import Janus
 open Janus.Amd64
 
-/-! Decoder/executor probes. Run: `lake env lean audit/round2/amd64/Probe.lean`. -/
+/-! Decoder/executor probes. Run: `lake env lean test/redteam/rounds/round2/amd64/Probe.lean`. -/
 
 def dec (bs : List Nat) : String := match decode bs with
   | some (i, n) => " ".intercalate (((toString (repr i)).replace "Janus.Amd64." "").splitOn "\n" |>.map String.trimAscii |>.map (·.toString)) ++ s!" len={n}"

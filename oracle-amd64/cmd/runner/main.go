@@ -217,7 +217,7 @@ func runCase(c *L.Case, seq int64) L.HW {
 	var b []byte
 	var err error
 	if len(c.Seq) > 0 {
-		// audit/rt-model sequence mode: every instruction is checked on its own
+		// test/redteam/rounds/rt-model sequence mode: every instruction is checked on its own
 		for _, h := range c.Seq {
 			x, err := hex.DecodeString(strings.TrimPrefix(h, "0x"))
 			if err != nil || len(x) == 0 || len(x) > 15 {

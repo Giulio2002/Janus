@@ -11,12 +11,12 @@ Files
 -----
 Probe.lean          decoder acceptance/rejection of ~80 encodings (prefix combinations on
                     string ops, LOCK on every form, SSE/AVX/fences/FS/GS/67).
-                    lake env lean audit/round2/amd64/Probe.lean
+                    lake env lean test/redteam/rounds/round2/amd64/Probe.lean
 ExecProbe.lean      executor on concrete states (IMUL/IDIV signs, CMPXCHG 32-bit RAX
                     write-back on success/failure, CMPXCHG8B, XADD AH, REP with RCX = 0 and
                     unmapped pointers, overlapping REP MOVSB, BSF/LZCNT/TZCNT, MOVAPS/XORPS/
                     CMPXCHG16B alignment, 87 C0 vs 90).
-                    lake env lean audit/round2/amd64/ExecProbe.lean
+                    lake env lean test/redteam/rounds/round2/amd64/ExecProbe.lean
 host/probe.c        the same cases on the host CPU (plus DF = 1 REP MOVSB copying backwards):
                     gcc -O1 -o /tmp/probe host/probe.c && /tmp/probe
                     All values agree with ExecProbe (host: Intel Xeon Gold 5412U).
@@ -24,7 +24,7 @@ host/splitlock.c    LOCK XADDQ across a 64-byte line: #AC split-lock trap (dmesg
                     under split_lock_detect=fatal.
 build-controls.sh   compiles Extracted + the shipped Proof for AtomicAdd AtomicMax CopyWords
                     CopyBlock ClearWords into work/<E>/ and checks controls/<E>_witness.lean:
-                    audit/round2/amd64/build-controls.sh          (all five; ~2 min, ClearWords
+                    test/redteam/rounds/round2/amd64/build-controls.sh          (all five; ~2 min, ClearWords
                     proof is the slow one)
 controls/*_witness.lean
                     positive controls: an explicit call state satisfying CallSetup + the
@@ -39,8 +39,8 @@ controls/DFMemmove.lean
                     runtime.memmove's REP MOVSQ at 0x47d6e9 (right after STD) saying it copies
                     forward; on hardware every state at that PC has DF = 1.
                     after build-controls.sh:
-                    LEAN_PATH=$PWD/audit/round2/amd64/work/CopyBlock:$(lake env printenv LEAN_PATH) \
-                      lake env lean audit/round2/amd64/controls/DFMemmove.lean
+                    LEAN_PATH=$PWD/test/redteam/rounds/round2/amd64/work/CopyBlock:$(lake env printenv LEAN_PATH) \
+                      lake env lean test/redteam/rounds/round2/amd64/controls/DFMemmove.lean
                     bin/janus verify artifacts/amd64/CopyBlock \
-                      --proof audit/round2/amd64/controls/DFMemmove.lean \
+                      --proof test/redteam/rounds/round2/amd64/controls/DFMemmove.lean \
                       --theorem DFRepro.memmove_backward_rep_copies_forward   # prints Verified

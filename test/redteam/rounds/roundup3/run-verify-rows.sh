@@ -5,12 +5,12 @@
 #   controls   ctl/*.lean (witness-bearing, frozen shape) must VERIFY (correctness + Witness.nonvacuous); statement-only controls (C1 V15 F01 F08 W02 W03,
 #              pre False: no witness can exist) must pass the statement audit (--audit-only prints `Audit-only:`)
 #   known-accepted  vrows/KA1.lean: ACCEPTED on purpose (path reachability is not required)
-# Usage: audit/roundup3/run-verify-rows.sh   (env: JANUS_AUDIT_BIN, JANUS_AUDIT_PREBUILT=1)   Exits 1 if a row differs.
+# Usage: test/redteam/rounds/roundup3/run-verify-rows.sh   (env: JANUS_AUDIT_BIN, JANUS_AUDIT_PREBUILT=1)   Exits 1 if a row differs.
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-R=audit/roundup3
+R=test/redteam/rounds/roundup3
 J="${JANUS_AUDIT_BIN:-$root/bin/janus}"
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || { CGO_ENABLED=0 go build -o "$J" ./cmd/janus && lake build Janus Janus.Tools.Audit >/dev/null || { echo "build failed"; exit 1; }; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
@@ -20,7 +20,7 @@ mkdir -m 700 "$W/cache"; export JANUS_CACHE_DIR="${JANUS_CACHE_DIR:-$W/cache}"
 . scripts/example-contracts.sh
 mapfile -t tg < <(scripts/example-targets.sh Add)
 "$J" extract artifacts/examples-arm64 "$(example_symbol Add)" "$W/Add" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || { echo "extract Add failed"; exit 1; }
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 RT=/srv/janus-rt-n11/audit/roundn11
 bad=0
 # verdict of one verify run on ARTIFACT/PROOF with THEOREMS: prints verified|rejected and leaves the output in $out
@@ -44,8 +44,8 @@ check_rejected() { # file label thm...
     local v; v=$(vrun "${ART:-$W/Add}" "$f" "$fl" "$@"); out="$(cat "$W/out.txt")"
     if [ "$v" = verified ]; then printf '%-34s %-20s VERIFIED   <-- BROKEN\n' "$n" "${fl:-no-flag}"; bad=1
     elif printf '%s' "$out" | grep -qE "$want"; then
-      # the pinned reason (audit/lib/blocked-pins.tsv; the Expected-reason header alone defaults to '.'), never a Lean elaboration failure
-      why="$(blocked_check roundup3/run-verify-rows.sh "$n" "$out")"
+      # the pinned reason (test/redteam/lib/blocked-pins.tsv; the Expected-reason header alone defaults to '.'), never a Lean elaboration failure
+      why="$(blocked_check rounds/roundup3/run-verify-rows.sh "$n" "$out")"
       if [ -n "$why" ]; then printf '%-34s %-20s rejected for the WRONG reason   <-- BROKEN: %s\n' "$n" "${fl:-no-flag}" "$why"; bad=1
       else printf '%-34s %-20s rejected ok  [%s]\n' "$n" "${fl:-no-flag}" "$(reason_of)"; fi
     else printf '%-34s %-20s rejected for ANOTHER reason (wanted /%s/)   <-- BROKEN\n' "$n" "${fl:-no-flag}" "$want"; printf '%s\n' "$out" | grep -m3 '^Invalid' | cut -c1-300 | sed 's/^/    /'; bad=1; fi

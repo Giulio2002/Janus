@@ -8,7 +8,7 @@ import Janus.Contracts.MapSat
 
 For every contract of `Janus.Contracts.MapStr`: a model of the map runtime, machine code at
 `IfaceSat.A0` proved (by symbolic execution) to meet the contract for that model, and a call
-state that satisfies the contract's whole precondition (`audit/round9/sat_check.py`, row SAT).
+state that satisfies the contract's whole precondition (`test/redteam/rounds/round9/sat_check.py`, row SAT).
 `Access2Str` uses the model `MS0` (every map is nil); the other contracts use the models of
 `Janus.Contracts.MapModel0` (`ME`, one empty non-nil map; `MC ckStr`, one map of at most one
 entry, whose key is the string whose header the code stores) with the witness state of

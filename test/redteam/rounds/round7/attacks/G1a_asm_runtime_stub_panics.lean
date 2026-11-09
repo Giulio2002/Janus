@@ -1,7 +1,7 @@
 import Extracted
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
 
-/-! Round 7 G1a: `main.Add` (audit/round7/asmstub) calls `lib.Zero`, whose Go-assembly body
+/-! Round 7 G1a: `main.Add` (test/redteam/rounds/round7/asmstub) calls `lib.Zero`, whose Go-assembly body
 calls `runtime·panicJanusR7`, an assembly function **of package lib** whose linker symbol is
 `runtime.panicJanusR7`. It returns 0 (`MOVD $0, R0; RET`), so Add returns `x + y` (qemu prints 3).
 No `-checklinkname=0` and no linkname are needed: the Go assembler lets any package define a

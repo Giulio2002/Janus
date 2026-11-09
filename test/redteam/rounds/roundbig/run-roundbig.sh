@@ -24,10 +24,10 @@
 # a control stops verifying, or a forgery is accepted. Private temporary cache.
 set -u
 pids=()
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-R=audit/roundbig
+R=test/redteam/rounds/roundbig
 J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
 if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; go build -o "$J" ./cmd/janus || exit 1; fi
 if [ "${JANUS_AUDIT_PREBUILT:-}" != 1 ]; then
@@ -58,7 +58,7 @@ build() { # ARCH LINES NAME
 }
 FRESHFLAG=(); [ "${FRESH:-}" = 1 ] && FRESHFLAG=(--fresh)
 v() { "$J" verify "${FRESHFLAG[@]}" --janus-root "$root" "$@" 2>&1; }
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 row() { # NAME expect(blocked|Verified) OUTPUT pattern...
   local name=$1 expect=$2 out=$3 verdict status="" pat; shift 3
   verdict="$(grep -m1 -E '^=== |^Error|^Rejected|^Invalid|^Verified' <<<"$out" | cut -c1-120)"
@@ -68,8 +68,8 @@ row() { # NAME expect(blocked|Verified) OUTPUT pattern...
     Verified) case $verdict in *verified*|*Verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
-  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check roundbig/run-roundbig.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  # blocked rows: pinned reason, and no Lean elaboration failure (test/redteam/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check rounds/roundbig/run-roundbig.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-14s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && echo "$name" >> "$BF"
   return 0

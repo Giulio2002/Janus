@@ -8,7 +8,7 @@ of a theorem that holds for the actual bytes of this binary under the documented
 Round 4 left six areas checked only by reading the code, with no live attack or regression row.
 This round attacks each of them live: `Decidable` instances, instance stand-ins, proof-local
 types, proof-local notation, the D4 residual, and the instruction semantics. Rows are in
-`audit/round5/` (`attacks/`, `dep/`, `model/`, `run-round5.sh`) and
+`test/redteam/rounds/round5/` (`attacks/`, `dep/`, `model/`, `run-round5.sh`) and
 `cmd/janus/round5_test.go`.
 
 Severity, as in earlier rounds: **critical** = a misleading account prints `Verified`;
@@ -31,7 +31,7 @@ Severity, as in earlier rounds: **critical** = a misleading account prints `Veri
 
 ## E5 (CRITICAL, BROKEN → fixed): an instance bound inside the statement
 
-**Files:** `audit/round5/attacks/E5a`–`E5f`. Target: the shipped `example.com/basic.Add`, which
+**Files:** `test/redteam/rounds/round5/attacks/E5a`–`E5f`. Target: the shipped `example.com/basic.Add`, which
 computes `x + y`.
 
 ### What happens
@@ -116,7 +116,7 @@ means. Janus is stricter than that and rejects non-canonical instances anyway:
 | E1e | `decide` with a custom def inside a disclosed def body | Invalid: class-valued def (round-3 body check) |
 | E1g | the instance projected out of a non-class def, `(pair x).1 : Decidable …` | Invalid: inline instance (`instArgOk`: a projection of a non-instance) |
 | E1f | control: canonical `decide`/`if` in the statement and a hypothesis | Verified, printed as `Decidable.decide (x = x) = Bool.true` |
-| E1h | **dependency** (pinned git, `audit/round5/dep/`): a high-priority `instance … : Decidable (x = 0)` that `decide` in a hypothesis picks up | Invalid: dependency instance (`checkExternal`) |
+| E1h | **dependency** (pinned git, `test/redteam/rounds/round5/dep/`): a high-priority `instance … : Decidable (x = 0)` that `decide` in a hypothesis picks up | Invalid: dependency instance (`checkExternal`) |
 | E1i | dependency def of type `Decidable …` | Invalid: class-valued dependency def |
 | E1j | dependency **def body** using that instance (`DecLib.isZero`) | Verified, listed as `DecLib.isZero (def, DecLib)`. Dependency bodies are not unfolded, and the subsingleton argument makes it harmless |
 
@@ -217,8 +217,8 @@ WF auxiliary theorem `countdown._unary._proof_1` was disclosed as `:= <opaque>`.
 ASL, so all of them are only tested (qemu and, in earlier rounds, Sail). I picked the three
 families per architecture with the fewest oracle cases relative to their encoding space. Edge
 cases were hand-derived from the Arm ARM ASL and the Intel SDM pseudocode; the derivations are
-comments in `audit/round5/model/gen.py`. The references are qemu-aarch64 10.2.1 `-cpu max` for
-arm64, and this host's Xeon (Sapphire Rapids) for amd64. `audit/round5/model/HandDerived.lean`
+comments in `test/redteam/rounds/round5/model/gen.py`. The references are qemu-aarch64 10.2.1 `-cpu max` for
+arm64, and this host's Xeon (Sapphire Rapids) for amd64. `test/redteam/rounds/round5/model/HandDerived.lean`
 has 23 `decide` checks of `Janus.Arm64.step`/`Janus.Amd64.step` against values computed by
 hand. The same words and states also run on hardware (`r5/*.hand`), and one flipped expected
 value was confirmed to be rejected.
@@ -282,8 +282,8 @@ No model file was changed.
 ## Regression status
 
 With this branch's changes, all of these pass: `scripts/verify-examples.sh`,
-`scripts/verify-amd64-examples.sh`, `audit/run-all.sh`, `audit/round2/run-round2.sh`,
-`audit/round3/run-round3.sh`, `audit/round4/run-round4.sh`, `audit/round5/run-round5.sh` and
+`scripts/verify-amd64-examples.sh`, `test/redteam/run-all.sh`, `test/redteam/rounds/round2/run-round2.sh`,
+`test/redteam/rounds/round3/run-round3.sh`, `test/redteam/rounds/round4/run-round4.sh`, `test/redteam/rounds/round5/run-round5.sh` and
 `go test -timeout 50m ./cmd/...`.
 
 Round 4's P1 (the round-2 MEDIUM-1 `DFRepro` row) is resolved on this base. The merged round-2
@@ -293,6 +293,6 @@ commits changed the row's expectation: the repro's `DF = 0` state makes the theo
 ## Reproduce
 
 ```
-audit/round5/run-round5.sh                 # all rows, including the oracle rows (SKIP_MODEL=1 skips them)
-audit/round5/model/run-model.sh            # the model-level rows only (about a minute)
+test/redteam/rounds/round5/run-round5.sh                 # all rows, including the oracle rows (SKIP_MODEL=1 skips them)
+test/redteam/rounds/round5/model/run-model.sh            # the model-level rows only (about a minute)
 ```

@@ -995,7 +995,7 @@ Differences from arm64:
 ```sh
 go test -timeout 60m ./cmd/...   # includes Lean verification (several minutes; needs bubblewrap)
 go test -short ./cmd/...    # extraction, check and package validation only
-audit/run-all.sh            # every attack in docs/audit/AUDIT.md: each row blocked or honest
+test/redteam/run-all.sh            # every attack in docs/audit/AUDIT.md: each row blocked or honest
 JANUS_TEST_ASL=1 go test -run TestASL ./cmd/janus   # --asl: builds JanusASL once (about an hour)
 ```
 
@@ -1010,7 +1010,7 @@ The `--asl` tests (`asl_test.go`) run only with `JANUS_TEST_ASL=1`; `JANUS_TEST_
 seeds the test cache's JanusASL build from a built package (e.g. `JanusASL` after
 `scripts/asl.sh build`). They derive the corollaries of Add, Max, Mul64 and Add128 from their
 artifacts, check that Get's load is reported as uncovered, run the forgery attacks of
-`audit/asl/attacks` and the consumer and batch paths.
+`test/redteam/asl/attacks` and the consumer and batch paths.
 
 The Lean tests need a working sandbox (bubblewrap, or unprivileged user namespaces); on Ubuntu
 24.04 runners that restrict them via AppArmor, CI runs

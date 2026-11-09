@@ -2,35 +2,35 @@
 # Round-7 regression rows (docs/audit/AUDIT-ROUND7.md). Exits 1 if a blocked attack prints Verified, a
 # control stops verifying or prints something else, or a stub fixture is misclassified.
 # Every attack verification passes --fresh (no result or replay cache: the cold path); the cache
-# itself is attacked by audit/round7/run-cache.sh, which this script runs last (under
-# audit/run-rounds.sh it is the separate lane r7c, and JANUS_R7_NO_CACHE_ROWS=1 skips it here, and
-# likewise the consumer row J1a, audit/round7/run-j1.sh, the lane r7j).
-# Writes only under audit/round7/work/ and audit/round7/bin/ (run-cache.sh: audit/round7/work-cache/ and a temporary cache).
-# Usage: audit/round7/run-round7.sh [-j N]   (the --fresh verifications, each a cold kernel replay of
+# itself is attacked by test/redteam/rounds/round7/run-cache.sh, which this script runs last (under
+# test/redteam/run-rounds.sh it is the separate lane r7c, and JANUS_R7_NO_CACHE_ROWS=1 skips it here, and
+# likewise the consumer row J1a, test/redteam/rounds/round7/run-j1.sh, the lane r7j).
+# Writes only under test/redteam/rounds/round7/work/ and test/redteam/rounds/round7/bin/ (run-cache.sh: test/redteam/rounds/round7/work-cache/ and a temporary cache).
+# Usage: test/redteam/rounds/round7/run-round7.sh [-j N]   (the --fresh verifications, each a cold kernel replay of
 #        the framework, run N at once: scripts/lib/parallel.sh; fixtures are built first, in order)
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../scripts/lib/parallel.sh
+# shellcheck source=../../../../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
 par_init "$@"
 tmark "start"
-J="$root/audit/round7/bin/janus"; mkdir -p "$(dirname "$J")"
-# audit/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
+J="$root/test/redteam/rounds/round7/bin/janus"; mkdir -p "$(dirname "$J")"
+# test/redteam/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
-W=audit/round7/work; rm -rf "$W"; mkdir -p $W
+W=test/redteam/rounds/round7/work; rm -rf "$W"; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1
 broken=()
-A=audit/round7/attacks
+A=test/redteam/rounds/round7/attacks
 
 # row NAME EXPECT [PATTERN...]: verdict of $out. EXPECT "blocked" (must not print Verified; if a
 # PATTERN is given the output must contain it) or "Verified" (must print Verified and contain
 # every PATTERN).
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 row() {
   local name=$1 expect=$2 verdict status="" pat
   shift 2
@@ -41,8 +41,8 @@ row() {
     Verified) case $verdict in Verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
-  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check round7/run-round7.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  # blocked rows: pinned reason, and no Lean elaboration failure (test/redteam/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check rounds/round7/run-round7.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-36s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0
@@ -50,14 +50,14 @@ row() {
 v() { out="$("$J" verify --full-errors --fresh --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" 2>&1)"; }
 # UP3d: honest rows verify together with their Witness.nonvacuous
 vw() { out="$("$J" verify --fresh --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" --theorem Proof.correctness --theorem Proof.Witness.nonvacuous 2>&1)"; }
-gob() { ( cd audit/round7/asmstub && GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}" CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+gob() { ( cd test/redteam/rounds/round7/asmstub && GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}" CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
     go build -trimpath -buildvcs=false "$@" ) ; }
 
 # Fixtures first, in order (builds, extractions and the hardware checks); then the verification
 # rows as independent parallel blocks, each on its own copy of the extraction it verifies (a
 # successful verification writes verified.json into it). Output is printed in this order.
-echo "== G1: runtime stubs by exact go1.26 name (audit/round7/asmstub: assembly in package lib)"
-tmark "== G1: runtime stubs by exact go1.26 name (audit/r"
+echo "== G1: runtime stubs by exact go1.26 name (test/redteam/rounds/round7/asmstub: assembly in package lib)"
+tmark "== G1: runtime stubs by exact go1.26 name (test/redteam/r"
 gob -o "$root/$W/asmstub" ./cmd || { echo "  asmstub build failed"; broken+=(G1-build); }
 xa="$("$J" extract $W/asmstub main.Add $W/AsmAdd 2>&1)"; xi="$("$J" extract $W/asmstub main.Inc $W/AsmInc 2>&1)"
 if grep -qE 'code .* runtime\.panicJanusR7$' <<<"$xa" && grep -qE 'code .* runtime\.morestackJanusR7$' <<<"$xi" &&
@@ -81,11 +81,11 @@ g1c_pat="ABIReturn s s' ∧ s'.regs 0 = x + y"
 par_run 'vw G1c_asmstub_returns $W/AsmAdd-c;            row G1c_asmstub_returns Verified "$g1c_pat"'
 par_wait
 
-echo "== G3 (round 8): stubs pinned to their code, not to build info (audit/round8/govers: go1.25.5 labelled go1.26.0)"
+echo "== G3 (round 8): stubs pinned to their code, not to build info (test/redteam/rounds/round8/govers: go1.25.5 labelled go1.26.0)"
 tmark "== G3 (round 8): stubs pinned to their code, not t"
 # lib's assembly runtime·panicSimdImm returns 0; the go1.25 runtime has no function of that name
 # and the binary claims go1.26.0 (-X runtime.buildVersion). Built by the round-8 red team.
-G3=audit/round8
+G3=test/redteam/rounds/round8
 if ( cd $G3/govers && GOTOOLCHAIN=go1.25.5 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
      go build -trimpath -buildvcs=false -ldflags=-X=runtime.buildVersion=go1.26.0 -o "$root/$W/govers" ./cmd ); then
   gv="$(go version "$W/govers" 2>&1)"
@@ -134,20 +134,20 @@ par_wait
 
 echo "== unit rows (go test)"
 tmark "== unit rows (go test)"
-(cd cmd/janus && . "$root/audit/lib/gotest-row.sh" && gotest_row round7-stubs go test -timeout 60m -run 'TestStubKind|TestClassifyStub|TestStubPin|TestTermSafe' .) ||
+(cd cmd/janus && . "$root/test/redteam/lib/gotest-row.sh" && gotest_row round7-stubs go test -timeout 60m -run 'TestStubKind|TestClassifyStub|TestStubPin|TestTermSafe' .) ||
   { echo "  >>> TestStubKind/TestClassifyStub/TestStubPin*/TestTermSafe failed"; broken+=(gotest); }
 
-# The result-cache rows are their own lane (r7c) under audit/run-rounds.sh (JANUS_R7_NO_CACHE_ROWS=1).
+# The result-cache rows are their own lane (r7c) under test/redteam/run-rounds.sh (JANUS_R7_NO_CACHE_ROWS=1).
 if [ -z "${JANUS_R7_NO_CACHE_ROWS:-}" ]; then
-  echo "== result cache (audit/round7/run-cache.sh)"
-  tmark "== result cache (audit/round7/run-cache.sh)"
-  audit/round7/run-cache.sh | sed 's/^/  /'
+  echo "== result cache (test/redteam/rounds/round7/run-cache.sh)"
+  tmark "== result cache (test/redteam/rounds/round7/run-cache.sh)"
+  test/redteam/rounds/round7/run-cache.sh | sed 's/^/  /'
   [ "${PIPESTATUS[0]}" = 0 ] || broken+=(cache-rows)
 fi
 
 if [ -z "${JANUS_R7_NO_CACHE_ROWS:-}" ]; then
-  echo "== J1: dependency definitions (audit/round7/run-j1.sh)"
-  audit/round7/run-j1.sh | sed 's/^/  /'
+  echo "== J1: dependency definitions (test/redteam/rounds/round7/run-j1.sh)"
+  test/redteam/rounds/round7/run-j1.sh | sed 's/^/  /'
   [ "${PIPESTATUS[0]}" = 0 ] || broken+=(j1-rows)
 fi
 

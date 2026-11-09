@@ -7,7 +7,7 @@ This round reviews the scalar floating-point support (`Janus/Float`, `Janus/Arm6
 Guarantee under review: *a `Verified` result about floating-point code is true on real hardware,
 and does not read as more than what is proven.*
 
-The rows are in `audit/rt-fp/` (`run.sh`; the corpus generators `gen-a64/` and `gen-x64/`, the
+The rows are in `test/redteam/rounds/rt-fp/` (`run.sh`; the corpus generators `gen-a64/` and `gen-x64/`, the
 decoder sweep `decode/`, the specification check `SpecTestFloat.lean`/`spec-testfloat.sh`, and
 the hardware probe `probe/mxcsr/`). Severities are as in earlier rounds. **Critical** means a
 misleading account prints `Verified`. **High** means a false claim about the binary prints
@@ -40,7 +40,7 @@ operation sets `PE`. The three amd64 example theorems asked for the whole regist
 (fun s => … ∧ s.mxcsr = 0x1F80)
 ```
 
-**Probe** (`audit/rt-fp/probe/mxcsr`, `GOAMD64=v1`, go1.26.0, on the Xeon Gold 5412U host). The
+**Probe** (`test/redteam/rounds/rt-fp/probe/mxcsr`, `GOAMD64=v1`, go1.26.0, on the Xeon Gold 5412U host). The
 program reads `MXCSR` with `STMXCSR` at the start of `main` and after one addition:
 
 ```
@@ -232,7 +232,7 @@ one nothing FP. `FPSR` and the `MXCSR` flags are free in every call state.
   mention them, but Linux starts processes with `FPCR = 0` and nothing in Go writes it
   (A64-FPCR-REAL).
 
-## Result table (`audit/rt-fp/run.sh`)
+## Result table (`test/redteam/rounds/rt-fp/run.sh`)
 
 | row | expect | result |
 |---|---|---|

@@ -1,7 +1,7 @@
 import Janus
 open Janus.Amd64
 
-/-! Executor probes on concrete states. Run: `lake env lean audit/round2/amd64/ExecProbe.lean`.
+/-! Executor probes on concrete states. Run: `lake env lean test/redteam/rounds/round2/amd64/ExecProbe.lean`.
 Compare with `host/probe` (same cases on the host CPU). -/
 
 def mem0 : Memory := ⟨fun a => BitVec.ofNat 8 (a % 251), [⟨0x1000, 0x1000, true⟩]⟩

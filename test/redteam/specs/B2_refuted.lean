@@ -2,7 +2,7 @@ import Janus
 /-! B2 after fix F4: the `BR X0` program with `X0 = 0` does **not** satisfy `Ensures`. For the
 admissible return address `ret = 0x2000` (and any call state) the branch lands on `pc = 0`,
 where there is no code: the run faults with `noCode 0`, so it never returns.
-Run: cd /srv/janus && lake env lean audit/specs/B2_refuted.lean (prints the axioms). -/
+Run: cd /srv/janus && lake env lean test/redteam/specs/B2_refuted.lean (prints the axioms). -/
 open Janus Janus.Arm64 Janus.GoABI
 
 def brSeg : Segment := ⟨"f", 0x1000, [0xd61f0000]⟩

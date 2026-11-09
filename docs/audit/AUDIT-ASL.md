@@ -10,7 +10,7 @@ This round reviews two pieces that no earlier round examined.
   hypotheses and the audit.
 * **A known bug.** Concurrent `janus verify` runs on one machine interfered with each other.
 
-The rows are in `audit/rt-asl/`: `run.sh` (the runner), `RelMeaning.lean`, `AuditStrict.lean`
+The rows are in `test/redteam/rounds/rt-asl/`: `run.sh` (the runner), `RelMeaning.lean`, `AuditStrict.lean`
 with `asl-statements.golden`, and `sail/` (Sail backend probes). The Go tests are in
 `cmd/janus/concurrency_test.go`.
 
@@ -35,7 +35,7 @@ be stated.
 **One item was BROKEN: C1, the concurrent-verify race. It failed closed, so it was never
 unsound. It is fixed, with regression tests. The JanusASL theorems hold and mean what
 docs/design/ASL.md says. The open items are an audit gap (A6), a latent backend defect that is not
-reached (C2), and a prose overclaim (A4).** The runner passes: `audit/rt-asl/run.sh` prints "all
+reached (C2), and a prose overclaim (A4).** The runner passes: `test/redteam/rounds/rt-asl/run.sh` prints "all
 rows as expected".
 
 ---
@@ -122,7 +122,7 @@ exclusive lock. They fail closed as before.
   `Janus/Tools/Audit.olean` from `#eval`. The run must fail with "Stage: framework integrity …
   modified Janus/Tools/Audit.olean". The next verification must succeed, and it rebuilds the
   olean to its original bytes (the repair path).
-* `audit/rt-asl/run.sh` row C1 runs both tests.
+* `test/redteam/rounds/rt-asl/run.sh` row C1 runs both tests.
 
 ---
 
@@ -174,7 +174,7 @@ X0–X30/SP/PC/NZCV, or say so in the docstring and in docs/design/ASL.md.
 
 ## A5 (blocked): the Sail backend patches against Sail's C backend
 
-`audit/rt-asl/sail/patches.sail` exercises each JanusASL fix. The same functions are compiled by
+`test/redteam/rounds/rt-asl/sail/patches.sail` exercises each JanusASL fix. The same functions are compiled by
 Sail 0.20.3 with both patches, once with the C backend (gcc + gmp) and once with the Lean
 backend (built against the pinned lean-sail), and run on the same inputs:
 
@@ -195,7 +195,7 @@ backend (built against the pinned lean-sail), and run on the same inputs:
 since the scalar floating-point instructions are in the slice; `scripts/asl.sh gen` replaces the
 toolchain's `Float` version by a round-to-odd approximation at 2^-1100 (docs/design/ASL.md, fix 7).
 It is checked against Sail's C backend twice: the `rsq` probe above (the function itself), and row
-**A5 fsqrt**, which runs about 7,000 FSQRT cases (audit/rt-asl/sqrt/gen_cases.py: binary32 and
+**A5 fsqrt**, which runs about 7,000 FSQRT cases (test/redteam/rounds/rt-asl/sqrt/gen_cases.py: binary32 and
 binary64, all four rounding modes, FPCR.FZ and FPCR.DN on and off; exact squares, normals,
 denormals, roots next to a rounding midpoint, ±0, ±∞, negative operands (default NaN and IOC),
 quiet and signalling NaNs with payloads) on JanusASL's Lean model (`janus-asl-check --dump-asl`)
@@ -252,10 +252,10 @@ statement identity, no sandbox and no olean pins. Gaps:
 None of this is exploited today. All 44 theorems are present, are theorems, use only `propext`,
 `Classical.choice` and `Quot.sound`, and their statements (reviewed for this round, and the
 branch hypotheses checked for satisfiability via A2) are the ones docs/design/ASL.md describes.
-`audit/rt-asl/AuditStrict.lean` closes the gap as a row. It takes an explicit list of the 39
+`test/redteam/rounds/rt-asl/AuditStrict.lean` closes the gap as a row. It takes an explicit list of the 39
 names, each must be a `theorem` with standard axioms, any unlisted `JanusASL.*` declaration with
 those suffixes fails, and every statement is printed. `run.sh` compares the statements with the
-reviewed copy `audit/rt-asl/asl-statements.golden`, so any change to a statement must be
+reviewed copy `test/redteam/rounds/rt-asl/asl-statements.golden`, so any change to a statement must be
 reviewed again. Suggested to the ASL agent: adopt it as `JanusASL/Audit.lean`.
 
 ## A7 (blocked): kernel replay
@@ -314,7 +314,7 @@ The findings were sent to the ASL agent. It reports the following:
 
 **When agent/asl is merged**, `LinuxEL0Config` has the fields this round's witness already
 sets (`mpam3`, `mpam2`, `tstate`), and the load/store theorems add `MemRel`/`UserMapped`
-hypotheses. Extend `expected` in `audit/rt-asl/AuditStrict.lean` with the two new theorems,
+hypotheses. Extend `expected` in `test/redteam/rounds/rt-asl/AuditStrict.lean` with the two new theorems,
 review their statements (in particular that `MemRel ∧ UserMapped` is satisfiable, as A2 does for
 `Rel ∧ LinuxEL0Config`) and regenerate `asl-statements.golden`. The A6 row fails until then,
 on purpose.
@@ -330,8 +330,8 @@ is tested", not as on a par with the 31 classes above, whose hypotheses A2 disch
 ## Running
 
 ```
-audit/rt-asl/run.sh            # every row (~10 min; the Go concurrency tests take ~6)
-RT_ASL_SKIP_GO=1 audit/rt-asl/run.sh
+test/redteam/rounds/rt-asl/run.sh            # every row (~10 min; the Go concurrency tests take ~6)
+RT_ASL_SKIP_GO=1 test/redteam/rounds/rt-asl/run.sh
 ```
 
 The Sail rows need the pinned toolchain (`scripts/asl.sh deps`, `DEPS`). Without it they are

@@ -12,7 +12,7 @@ from GNU `as`) proved by symbolic execution to meet each contract, the readiness
 `MapModel0.HAssign` / `MapModel0.HMake`, and a call state (`mstate64`, memory
 `MapModel0.mmem64`, the return address `wret` at `[RSP]`) satisfying the whole precondition,
 with the non-nil map `MP` wherever the contract is about a map (`<contract>_satisfiable`;
-`audit/round9/sat_check.py`, row SAT). The call state, `zsCode` and `retCode` are in
+`test/redteam/rounds/round9/sat_check.py`, row SAT). The call state, `zsCode` and `retCode` are in
 `Janus.Contracts.MapStrSatAmd64`, which the string witnesses share.
 -/
 

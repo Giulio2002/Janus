@@ -5,12 +5,12 @@
 # (PLift, ULift, Subtype, Sigma, structure, a proof-local `def … : Type`) whose type mentions a
 # runtime variable of a contract hypothesis is rejected. Exits 1 if a blocked attack verifies or a
 # control stops verifying. Every verification uses --fresh and a private temporary cache. Writes
-# only under audit/round13/work/, audit/round13/bin/ and a mktemp directory (removed at the end).
+# only under test/redteam/rounds/round13/work/, test/redteam/rounds/round13/bin/ and a mktemp directory (removed at the end).
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-R=audit/round13
+R=test/redteam/rounds/round13
 J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
 if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; go build -o "$J" ./cmd/janus || exit 1; fi
 if [ "${JANUS_AUDIT_PREBUILT:-}" != 1 ]; then
@@ -26,7 +26,7 @@ mapfile -t tg < <(scripts/example-targets.sh NewPair)
 "$J" extract artifacts/examples-arm64 "$(example_symbol NewPair)" "$W/NewPair" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
 broken=()
 A=$R/attacks
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 row() {
   local name=$1 expect=$2 verdict status="" pat
   shift 2
@@ -37,8 +37,8 @@ row() {
     Verified) case $verdict in Verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
-  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check round13/run-round13.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  # blocked rows: pinned reason, and no Lean elaboration failure (test/redteam/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check rounds/round13/run-round13.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-40s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0

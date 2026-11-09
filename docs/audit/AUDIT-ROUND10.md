@@ -8,16 +8,16 @@ contracts and example theorems that nothing shows satisfiable.
 
 The method is round 9's: for every hypothesis, ask whether a real call in a real process meets it,
 and also whether the statement or the contract can be **chained or instantiated** into something no
-implementation meets. Each finding is a row of `audit/round10/run-round10.sh`. The probes are
-`audit/round10/probe` (go1.26.0, both ISAs, arm64 under qemu-aarch64), kernel-checked models in
-`audit/round10/model`, attack proofs in `audit/round10/attacks`, and differential runs against
+implementation meets. Each finding is a row of `test/redteam/rounds/round10/run-round10.sh`. The probes are
+`test/redteam/rounds/round10/probe` (go1.26.0, both ISAs, arm64 under qemu-aarch64), kernel-checked models in
+`test/redteam/rounds/round10/model`, attack proofs in `test/redteam/rounds/round10/attacks`, and differential runs against
 this host's CPU (amd64 oracle) and the sail-arm v9.4 decode clauses (arm64).
 
 ## Summary
 
 | ID | Severity | Finding | Status | Rows |
 |---|---|---|---|---|
-| V2 | **critical** (vacuity, kernel-checked) | **The map contracts `Assign` and `MakeSmall` contradicted `MapModel.Laws`.** Their precondition is `M.Env` and their postcondition hands `M.Env` back, so from one call state the contract chains: `2^64` inserts of distinct keys (or `2^48 + 1` distinct new maps), all kept in the fixed private memory. The law `len` says the header's first word (below `2^64`) is the key count. `audit/round10/model/MapUnsat.lean` proves `M.Laws ∧ Assign … ∧ (one call state) → False` and the same for `MakeSmall`. So **Insert, InsertGet and NewMap, on both ISAs, were vacuous**: `V2a` "verified" with Insert's exact hypotheses that `m[k] = v` stores `v + 1`. Round 9 had listed the map contracts as "not unsatisfiable the way C1's were". | **BROKEN → fixed** | V2_model…, V2a, V2_ctl, SAT |
+| V2 | **critical** (vacuity, kernel-checked) | **The map contracts `Assign` and `MakeSmall` contradicted `MapModel.Laws`.** Their precondition is `M.Env` and their postcondition hands `M.Env` back, so from one call state the contract chains: `2^64` inserts of distinct keys (or `2^48 + 1` distinct new maps), all kept in the fixed private memory. The law `len` says the header's first word (below `2^64`) is the key count. `test/redteam/rounds/round10/model/MapUnsat.lean` proves `M.Laws ∧ Assign … ∧ (one call state) → False` and the same for `MakeSmall`. So **Insert, InsertGet and NewMap, on both ISAs, were vacuous**: `V2a` "verified" with Insert's exact hypotheses that `m[k] = v` stores `v + 1`. Round 9 had listed the map contracts as "not unsatisfiable the way C1's were". | **BROKEN → fixed** | V2_model…, V2a, V2_ctl, SAT |
 | V1 | **critical** (vacuity by the statement) | **A theorem could instantiate a satisfiable contract into an unsatisfiable one.** Nothing required the readiness predicate, the runtime ranges, the model or the code of a contract hypothesis to be quantified. `H := fun _ _ _ _ => True` ("the runtime is always ready") is round 9's false contract again: `V1a` "verified" that NewPair returns 42, with a statement that reads as a stronger, unconditional claim. Likewise `rt := []`, `rt` pinned by a premise `rt = []`, a contract about `Extracted.program` itself (no code there), or the toy model `R0`. | **BROKEN → fixed** (auditor rule) | V1a–f, V1_ctl |
 | V3 | high (vacuous for the real binary) | **The allocating interface contracts could not be met by the real runtime.** `convT*` allocate a box per call (`convT64(v)`, `v ≥ 256`: 100000 calls, 100000 distinct boxes, both ISAs) and `typeAssert`/`interfaceSwitch` allocate when they rebuild a cache; each contract hands `R.Env` back. So a contract demanded an unbounded chain of allocations from any `R.Env` state; in the model (fixed regions, no system calls, so no `mmap` and no collector) the real runtime meets no such `R.Env`, and Box, AsHasher, Classify said nothing about the real binary. A toy model meets them, so unlike V2 this is not refutable in the kernel. | **fixed** | V3a, V2_V3_…take_H, V3_ctl |
 | I1 | high (contract promises more than the runtime) | **`TypeAssert` admitted a nil type.** With `CanFail` the runtime returns `nil`, but about once in 1000 calls it then rebuilds the cache with `buildTypeAssertCache(oldC, nil, nil)`, which reads `nil.Hash` and faults: 202 faults in 200000 calls (amd64), 203 (arm64). Compiled code tests for nil first, so no example was affected. | **BROKEN → fixed** | I1a, I1b |
@@ -49,7 +49,7 @@ every 64-bit key. `MapModel.Laws.len` says the header's first word is the number
 distinct from every represented one and keeps the others (`OthersKept`), and each header is
 below `2^48` (`Laws.len`), so `2^48 + 1` calls are impossible.
 
-`audit/round10/model/MapUnsat.lean` proves both in the kernel (`assign_unsat`,
+`test/redteam/rounds/round10/model/MapUnsat.lean` proves both in the kernel (`assign_unsat`,
 `makeSmall_unsat`) with the merge/b23 definitions copied verbatim. The only extra assumption is
 that the stack-guard word is outside what the call may write, which `CallerOK` (the examples'
 precondition) gives. `V2a` turns it into a verified false theorem about the real binary:
@@ -68,7 +68,7 @@ compile.
 
 Still open (owner agent/maps): `_satisfiable` witnesses for the 14 non-allocating map contracts
 (`Access1/2`, `Delete`, `Clear`, `IterStart`, `IterNext`, `Access2Ptr`, both ISAs), listed in
-`audit/round9/sat-pending.txt`. They do not chain into growth (no contract among them adds keys
+`test/redteam/rounds/round9/sat-pending.txt`. They do not chain into growth (no contract among them adds keys
 or maps), and `MapAccess1Small` proves `Access1` from the real runtime code for small maps.
 
 ## V1 (CRITICAL, BROKEN → fixed): a statement could choose the runtime
@@ -134,7 +134,7 @@ The contract admitted `t = 0` when `desc.CanFail` (returning itab 0). `runtime.t
 returns `nil` there, then goes on to the cache update: `cheaprand()&1023 == 0` and
 `cheaprand()&Mask == 0` (always, for the empty cache) lead to
 `buildTypeAssertCache(oldC, nil, nil)`, whose `addEntry` reads `typ.Hash`, a nil dereference.
-`audit/round10/probe tanil`: 202 of 200000 calls fault on amd64, 203 under qemu-aarch64. The
+`test/redteam/rounds/round10/probe tanil`: 202 of 200000 calls fault on amd64, 203 under qemu-aarch64. The
 compiler emits the nil test before the call, so the contract now requires `t ≠ 0`
 (`model/TypeAssertNil.lean`). The AsHasher proofs already called it only with a non-nil type.
 
@@ -252,11 +252,11 @@ On `agent/redteam10` (merge/b23 + this round), one heavy job at a time (`LEAN_NU
 
 | Suite | Result |
 |---|---|
-| `audit/round10/run-round10.sh` | all rows as expected (V1a–f, V1_ctl×2, V2×5, V3_ctl, SAT×4, I1a–b, V3a, A1, F1, G1–G2, X1, C1, ASL1), 74 min |
+| `test/redteam/rounds/round10/run-round10.sh` | all rows as expected (V1a–f, V1_ctl×2, V2×5, V3_ctl, SAT×4, I1a–b, V3a, A1, F1, G1–G2, X1, C1, ASL1), 74 min |
 | `scripts/verify-all-examples.sh -j 1` | all ok: 78 arm64 items, 80 amd64 functions, 10 assembly items (6264 s) |
 | `go test -count=1 -parallel 2 -timeout 7000s ./cmd/...` | ok (1269 s) |
-| `audit/run-all.sh -j 1` | ok (670 s) |
-| `audit/round{2,…,9}` runners, `audit/rt-model/run.sh` | all rows as expected |
+| `test/redteam/run-all.sh -j 1` | ok (670 s) |
+| `test/redteam/rounds/round{2,…,9}` runners, `test/redteam/rounds/rt-model/run.sh` | all rows as expected |
 
-The double-precision `sqrt_real` sample (`audit/round10/asl/sqrt_model.py`) takes hours and is not
+The double-precision `sqrt_real` sample (`test/redteam/rounds/round10/asl/sqrt_model.py`) takes hours and is not
 a row; its result is the one quoted above.

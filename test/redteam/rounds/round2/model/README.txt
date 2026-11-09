@@ -8,14 +8,14 @@ DCZID.BS values), and none of them affects a shipped example theorem. Details: M
 
 How to run (never inside /srv/...; use a copy):
   cp -a /srv/janus-arm64cov2 $SCRATCH/a64 && cd $SCRATCH/a64
-  mkdir -p audit/round2 && cp -a /srv/janus-rt2/audit/round2/model audit/round2/
+  mkdir -p test/redteam/rounds/round2 && cp -a /srv/janus-rt2/audit/round2/model test/redteam/rounds/round2/
   lake build Janus janus-decode
-  lake env lean audit/round2/model/M0_feature_scan.lean    # features used by every shipped example
-  lake env lean audit/round2/model/M1_decode_reserved.lean # 48 kernel-checked decode facts
-  lake env lean audit/round2/model/M2_values.lean          # 27 #guard value checks (atomics, SIMD)
-  lake env lean audit/round2/model/M3_assumptions.lean     # DC ZVA BS 10..15, DZP, features, conservative faults
-  audit/round2/model/sweep_vs_objdump.sh 1500000 11        # decoder vs GNU objdump, new classes
-  audit/round2/model/feat_qemu.sh                          # qemu cortex-a53/a72/neoverse-n1/max
+  lake env lean test/redteam/rounds/round2/model/M0_feature_scan.lean    # features used by every shipped example
+  lake env lean test/redteam/rounds/round2/model/M1_decode_reserved.lean # 48 kernel-checked decode facts
+  lake env lean test/redteam/rounds/round2/model/M2_values.lean          # 27 #guard value checks (atomics, SIMD)
+  lake env lean test/redteam/rounds/round2/model/M3_assumptions.lean     # DC ZVA BS 10..15, DZP, features, conservative faults
+  test/redteam/rounds/round2/model/sweep_vs_objdump.sh 1500000 11        # decoder vs GNU objdump, new classes
+  test/redteam/rounds/round2/model/feat_qemu.sh                          # qemu cortex-a53/a72/neoverse-n1/max
 A file that compiles without errors means every check in it holds. M1-M3 need the
 arm64cov2 tree (SIMD decoder); on agent/redteam2 only the non-SIMD lines of M1/M3 apply.
 

@@ -1,11 +1,11 @@
 // Command probertstr exercises the string and slice examples (examples/basic/zstr.go) on the real
-// Go 1.26 runtime, so that audit/rtstr/run.sh can check the contracts against it:
+// Go 1.26 runtime, so that test/redteam/rounds/rtstr/run.sh can check the contracts against it:
 //
 //	probertstr vectors   capacities the runtime chooses, printed as Lean facts for the specs'
 //	                     formulas (growCap for AppendPoint's 24-byte Point, roundupsize for []byte(s))
 //	probertstr wb N      N rounds of CopyNodes and AppendPoint-free pointer stores (basic.SetNext)
 //	                     with a GC cycle running most of the time, for the gdb probe of HRoom
-//	                     (audit/rtstr/wb_amd64.py) at the real gcWriteBarrier calls
+//	                     (test/redteam/rounds/rtstr/wb_amd64.py) at the real gcWriteBarrier calls
 //	probertstr strings N N rounds of every string example on random UTF-8-ish inputs, each result
 //	                     compared with Go's own builtin (a + b, []byte(s), string(b), for range,
 //	                     utf8 rune count, copy)

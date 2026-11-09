@@ -2,7 +2,7 @@ import Janus
 /-! M2: values of the atomics / ordered / SIMD writes the audit brief asked about, on concrete
 states (`#guard` = evaluated with the compiled model). Every check here PASSES, i.e. the model
 matches the ARM ARM pseudocode (cited per case). Encodings checked with aarch64-linux-gnu-objdump.
-Run: lake env lean audit/round2/model/M2_values.lean   (needs Common.lean next to it: it is
+Run: lake env lean test/redteam/rounds/round2/model/M2_values.lean   (needs Common.lean next to it: it is
 inlined below to keep the file standalone). -/
 open Janus.Arm64
 

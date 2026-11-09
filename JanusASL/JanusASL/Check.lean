@@ -623,7 +623,7 @@ def main (args : List String) : IO UInt32 := do
     return 0
   if path == "--dump-asl" then
     -- The ASL side only, one JSON line per case (V0-V31, FPSR, outcome), for comparing the Lean
-    -- model with Sail's C backend (audit/rt-asl/sqrt: FSQRT and the `sqrt_real` replacement).
+    -- model with Sail's C backend (test/redteam/rounds/rt-asl/sqrt: FSQRT and the `sqrt_real` replacement).
     let cases ← IO.FS.lines out
     for l in cases do
       let l := l.trimAscii.toString

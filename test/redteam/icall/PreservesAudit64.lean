@@ -4,7 +4,7 @@ import Janus.Contracts.Live
 import Janus.Contracts.LiveToy
 
 /-!
-# (standalone: `Extracted.program` of the amd64 type cannot share an environment with the arm64 test; run `audit/icall/run-preserves64.sh`)
+# (standalone: `Extracted.program` of the amd64 type cannot share an environment with the arm64 test; run `test/redteam/icall/run-preserves64.sh`)
 # The auditor's rule for the `preserves` argument of an abstract-callee contract (U-ICALL-PRESERVES, amd64)
 
 `preserves` may be exactly `fun _ _ => True` (the default) or `RtPreserves64 R2` for a VARIABLE `R2 : RtInv` of the statement. Everything

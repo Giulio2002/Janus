@@ -5,7 +5,7 @@ import Extracted
 
 Controls: `examples/proofs/WriteTo.lean` verifies. Each theorem below is the same statement with ONE change, and the
 tactic must REFUSE it (`fail_if_success`); the `sorry` after it is never reached in a passing run, and this file is
-not part of the verified set. Run: `audit/icall/run.sh` (it fails if a variant is accepted).
+not part of the verified set. Run: `test/redteam/icall/run.sh` (it fails if a variant is accepted).
 
 * **Row 3, wrong argument bytes:** the contract hypothesis assumes the callee is entered with a slice of length
   `len + 1`, the call passes `len`. `janus_run` must fail to prove the call-site property `P` (the precondition of the

@@ -350,7 +350,7 @@ func TestASLUncovered(t *testing.T) {
 	}
 }
 
-// TestASLForgeryRejected (audit/asl): proofs that try to forge the ASL corollary. Each main
+// TestASLForgeryRejected (test/redteam/asl): proofs that try to forge the ASL corollary. Each main
 // theorem verifies; the ASL stage must reject the forgery.
 func TestASLForgeryRejected(t *testing.T) {
 	needASL(t)
@@ -368,7 +368,7 @@ func TestASLForgeryRejected(t *testing.T) {
 			if c.theorem != "" {
 				extra = append(extra, "--theorem", c.theorem)
 			}
-			code, stdout, stderr, r, _ := aslVerify(t, "example.com/basic.Add", filepath.Join(repoRoot, "audit", "asl", "attacks", c.file+".lean"), extra...)
+			code, stdout, stderr, r, _ := aslVerify(t, "example.com/basic.Add", filepath.Join(repoRoot, "test", "redteam", "asl", "attacks", c.file+".lean"), extra...)
 			if code != 1 || r == nil || r.ASL == nil || r.ASL.Status != "invalid" || strings.Contains(stdout, "ASL corollary: Verified") {
 				t.Fatalf("%s not rejected: %d\n%s\n%s", c.file, code, stdout, stderr)
 			}

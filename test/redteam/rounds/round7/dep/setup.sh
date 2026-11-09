@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lay out the MisLib git dependency and the R7Proofs consumer package under $1 (a fresh dir).
-# Usage: audit/round7/dep/setup.sh DIR JANUS_ROOT
+# Usage: test/redteam/rounds/round7/dep/setup.sh DIR JANUS_ROOT
 set -eu
 out="$1"; jr="$2"; here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tc="$(cat "$jr/lean-toolchain")"

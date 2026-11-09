@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# audit/icall/attacks.sh JANUS_BIN EXTRACTED_ADD_DIR EXAMPLE_BINARY [JANUS_ROOT]
-# Runs the U-ICALL allowance rows (audit/icall/attacks/*.lean) with `janus verify` against an extraction of
+# test/redteam/icall/attacks.sh JANUS_BIN EXTRACTED_ADD_DIR EXAMPLE_BINARY [JANUS_ROOT]
+# Runs the U-ICALL allowance rows (test/redteam/icall/attacks/*.lean) with `janus verify` against an extraction of
 # example.com/basic.Add: C0 (control) must verify, every A row marked "rejected" must be rejected by the audit,
 # A8 must verify (P is an obligation only).
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 J="${1:?janus binary}"; EX="${2:?extracted Add dir}"; BIN="${3:?example binary}"; JR="${4:-$root}"
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 bad=0
-for f in "$root"/audit/icall/attacks/*.lean; do
+for f in "$root"/test/redteam/icall/attacks/*.lean; do
   n="$(basename "$f" .lean)"
   want="$(grep -o 'Expected: [A-Za-z ()]*' "$f" | head -1 | sed 's/Expected: //')"
   out="$("$J" verify "$EX" --proof "$f" --theorem Proof.correctness --janus-root "$JR" --binary "$BIN" --audit-only --no-result-cache 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"

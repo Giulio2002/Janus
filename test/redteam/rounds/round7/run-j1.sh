@@ -3,25 +3,25 @@
 # A consumer verification with --fresh (the cold path, exactly as when it was part of run-round7.sh: the
 # framework is built from scratch in a temporary workspace, no replay, trusted or verdict cache), as its own
 # lane (r7j) so it overlaps the others. It also asserts that the verdict was computed in this run.
-# Writes only under audit/round7/work-j1/.
+# Writes only under test/redteam/rounds/round7/work-j1/.
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../scripts/lib/tmark.sh
+# shellcheck source=../../../../scripts/lib/tmark.sh
 . "$root/scripts/lib/tmark.sh"
-J="$root/audit/round7/bin/janus"; mkdir -p "$(dirname "$J")"
+J="$root/test/redteam/rounds/round7/bin/janus"; mkdir -p "$(dirname "$J")"
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
-W=audit/round7/work-j1; rm -rf "$W"; mkdir -p "$W"
+W=test/redteam/rounds/round7/work-j1; rm -rf "$W"; mkdir -p "$W"
 "$J" extract artifacts/examples-arm64 example.com/basic.Add "$W/Add" >/dev/null || exit 1
 broken=()
 
 # row NAME EXPECT [PATTERN...]: verdict of $out. EXPECT "blocked" (must not print Verified; if a
 # PATTERN is given the output must contain it) or "Verified" (must print Verified and contain
 # every PATTERN).
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 row() {
   local name=$1 expect=$2 verdict status="" pat
   shift 2
@@ -32,15 +32,15 @@ row() {
     Verified) case $verdict in Verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
-  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check round7/run-j1.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  # blocked rows: pinned reason, and no Lean elaboration failure (test/redteam/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check rounds/round7/run-j1.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-36s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0
 }
 
 tmark "J1 start"
-dep="$(audit/round7/dep/setup.sh "$root/$W/dep" "$root")" || { echo "  dependency fixture failed"; broken+=(dep-setup); }
+dep="$(test/redteam/rounds/round7/dep/setup.sh "$root/$W/dep" "$root")" || { echo "  dependency fixture failed"; broken+=(dep-setup); }
 j1t0=$(date +%s)
 out="$("$J" verify --fresh "$W/Add" --janus-root "$root" --proof "$dep/R7Proofs/Proofs.lean" --proof-root "$dep" --allow-unchecked-provenance --theorem R7Proofs.misnamed --theorem R7Proofs.Witness.misnamed 2>&1)"
 row J1a_misnamed_dependency_def Verified "Dependency definitions used by the statement" "MisLib.mul : BitVec (64 : Nat) → BitVec (64 : Nat) → BitVec (64 : Nat) := fun (a b : BitVec (64 : Nat)) => a + b"

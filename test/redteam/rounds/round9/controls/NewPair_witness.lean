@@ -13,7 +13,7 @@ whole hypothesis set of `examples/proofs/NewPair.lean`.
 * `fires` instantiates `Proof.correctness`: its conclusion is reached for this call.
 
 Before round 9 no such witness existed: the contract had no readiness hypothesis and was false
-for every program, address and `rt` (`audit/round9/model/Unsat.lean`). -/
+for every program, address and `rt` (`test/redteam/rounds/round9/model/Unsat.lean`). -/
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
 
 namespace NewPairWitness

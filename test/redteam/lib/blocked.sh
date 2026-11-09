@@ -3,7 +3,7 @@
 #
 # A row that expects `blocked` used to pass on ANY non-Verified verdict, including "Lean rejected the proof" (the attack
 # file no longer compiles) or a rejection by an unrelated check, so a broken attack file silently kept passing. Now:
-#   * every blocked row has PINS in audit/lib/blocked-pins.tsv: lines  SCRIPT<TAB>ROW<TAB>SUBSTRING  (several lines per
+#   * every blocked row has PINS in test/redteam/lib/blocked-pins.tsv: lines  SCRIPT<TAB>ROW<TAB>SUBSTRING  (several lines per
 #     row: ALL substrings must occur, as fixed strings, in the row's output). The substring is a stable part of the exact
 #     rejection reason of the check the attack targets (never a bare "Invalid"). A blocked row without a pin is BROKEN.
 #   * "Lean rejected the proof" / "Lean rejected the extracted program" (an elaboration / compile failure of the proof file,
@@ -35,7 +35,7 @@ blocked_check() {
     fi
     case $p in *"Lean rejected the"*) explicit=1 ;; esac
   done < "$BLOCKED_PINS"
-  [ "$npins" -gt 0 ] || why="no pin for this blocked row in audit/lib/blocked-pins.tsv;"
+  [ "$npins" -gt 0 ] || why="no pin for this blocked row in test/redteam/lib/blocked-pins.tsv;"
   if [ "$explicit" = 0 ] && grep -qE "Lean rejected the (proof|extracted program)" <<<"$out"; then
     why="$why Lean rejected the proof/extraction (elaboration/compile failure), not the check this row targets;"
   fi

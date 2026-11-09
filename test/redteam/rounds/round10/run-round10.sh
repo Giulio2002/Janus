@@ -3,20 +3,20 @@
 # control stops verifying, a kernel-checked model row changes verdict, or a real-runtime probe
 # contradicts what the fixed statements assume.
 # Every janus verification uses --fresh and a private temporary cache. Writes only under
-# audit/round10/work/, audit/round10/bin/ and a mktemp directory (removed at the end).
+# test/redteam/rounds/round10/work/, test/redteam/rounds/round10/bin/ and a mktemp directory (removed at the end).
 # Needs: go1.26.0 (GOTOOLCHAIN), qemu-aarch64 (arm64 probe rows); the amd64 oracle rows run on an
 # x86-64 host only.
-# Usage: audit/round10/run-round10.sh
+# Usage: test/redteam/rounds/round10/run-round10.sh
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 . "$root/scripts/lib/parallel.sh"
 par_init "$@"
 export PATH=/usr/local/go/bin:$PATH
-R=audit/round10
+R=test/redteam/rounds/round10
 J="$root/$R/bin/janus"; mkdir -p "$(dirname "$J")"
 CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
-# JANUS_AUDIT_PREBUILT=1 (audit/run-rounds.sh built everything once, janus-oracle-amd64 included): no build here.
+# JANUS_AUDIT_PREBUILT=1 (test/redteam/run-rounds.sh built everything once, janus-oracle-amd64 included): no build here.
 if [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ]; then
   [ -x .lake/build/bin/janus-oracle-amd64 ] || { echo "JANUS_AUDIT_PREBUILT=1 but .lake/build/bin/janus-oracle-amd64 is missing"; exit 1; }
 else
@@ -42,7 +42,7 @@ A=$R/attacks
 
 # row NAME EXPECT [PATTERN...] on $out: EXPECT "blocked" (no Verified; patterns must appear) or
 # "Verified" (Verified and every pattern).
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 row() {
   local name=$1 expect=$2 verdict status="" pat
   shift 2
@@ -53,8 +53,8 @@ row() {
     Verified) case $verdict in Verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
-  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check round10/run-round10.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  # blocked rows: pinned reason, and no Lean elaboration failure (test/redteam/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check rounds/round10/run-round10.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-40s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0
@@ -99,35 +99,35 @@ v examples/proofs/Box.lean "$W/Box";            row V3_ctl_Box Verified 'RtReady
 blk_sat() {
 echo "== SAT: witnesses (round 9 row, with the round-10 check that the witness names its contract)"
 type tmark >/dev/null 2>&1 && tmark "== SAT: witnesses (round 9 row, with the round-10 "
-o="$(python3 -I audit/round9/sat_check.py "$root")"; rc=$?
+o="$(python3 -I test/redteam/rounds/round9/sat_check.py "$root")"; rc=$?
 for c in "Assign                 Map.lean" "MakeSmall              Map.lean" "Assign                 MapAmd64.lean" "MakeSmall              MapAmd64.lean"; do
   grep -qF "SAT ok      $c" <<<"$o" || rc=1
 done
 check SAT_contract_witnesses $rc "$(tail -n 1 <<<"$o"); Assign/MakeSmall witnessed on both ISAs"
-S9="$T/satcopy"; mkdir -p "$S9/audit/round9"; cp -r Janus Janus.lean "$S9/"; cp audit/round9/sat-pending.txt "$S9/audit/round9/"
+S9="$T/satcopy"; mkdir -p "$S9/test/redteam/rounds/round9"; cp -r Janus Janus.lean "$S9/"; cp test/redteam/rounds/round9/sat-pending.txt "$S9/test/redteam/rounds/round9/"
 python3 - "$S9/Janus/Contracts/MapSat.lean" <<'EOF'
 import re, sys
 p = sys.argv[1]; s = open(p).read()
 s = re.sub(r"theorem assign_satisfiable :.*?:=\n", "theorem assign_satisfiable : True :=\n", s, count=1, flags=re.S)
 open(p, "w").write(s)
 EOF
-python3 -I audit/round9/sat_check.py "$S9" >/dev/null 2>&1; rc=$?
+python3 -I test/redteam/rounds/round9/sat_check.py "$S9" >/dev/null 2>&1; rc=$?
 [ $rc -ne 0 ]; check SAT_selftest_witness_must_name_contract $? "a theorem assign_satisfiable : True does not count as a witness"
 # the check reads only the tree under test: a contract file linked in from elsewhere is an error
-S10="$T/satlink"; mkdir -p "$S10/audit/round9" "$T/elsewhere"; cp -r Janus Janus.lean "$S10/"; cp audit/round9/sat-pending.txt "$S10/audit/round9/"
+S10="$T/satlink"; mkdir -p "$S10/test/redteam/rounds/round9" "$T/elsewhere"; cp -r Janus Janus.lean "$S10/"; cp test/redteam/rounds/round9/sat-pending.txt "$S10/test/redteam/rounds/round9/"
 printf 'def EvilContract (p : Nat) : Prop :=\n  Summary p 0 (fun _ => True) (fun _ _ => True)\n' > "$T/elsewhere/Evil.lean"
 ln -s "$T/elsewhere/Evil.lean" "$S10/Janus/Contracts/Evil.lean"
-o="$(python3 -I audit/round9/sat_check.py "$S10" 2>&1)"; rc=$?
+o="$(python3 -I test/redteam/rounds/round9/sat_check.py "$S10" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && grep -q 'SAT ERROR.*Janus/Contracts/Evil.lean is not a regular file of the tree under test' <<<"$o"
 check SAT_reads_only_the_tree_under_test $? "a Janus/Contracts file linked from outside the tree is refused: $(grep -m1 -o 'SAT ERROR.\{0,60\}' <<<"$o")"
-o="$(python3 -I audit/round9/sat_check.py "$root" | head -1)"
+o="$(python3 -I test/redteam/rounds/round9/sat_check.py "$root" | head -1)"
 [ "$o" = "SAT tree    $(cd "$root" && pwd -P) ($(git -C "$root" ls-files --cached --others --exclude-standard -- Janus Janus.lean | while read -r f; do [ -e "$f" ] && echo; done | wc -l) files)" ]
 check SAT_scans_tracked_tree $? "$o"
 
 }
 blk_probes() {
-echo "== real-runtime probes (audit/round10/probe; go1.26.0)"
-type tmark >/dev/null 2>&1 && tmark "== real-runtime probes (audit/round10/probe; go1.2"
+echo "== real-runtime probes (test/redteam/rounds/round10/probe; go1.26.0)"
+type tmark >/dev/null 2>&1 && tmark "== real-runtime probes (test/redteam/rounds/round10/probe; go1.2"
 P="$T/probe"; mkdir -p "$P"
 ( cd $R/probe && export GOTOOLCHAIN=go1.26.0 CGO_ENABLED=0 &&
   GOARCH=amd64 GOAMD64=v1 go build -ldflags=-checklinkname=0 -trimpath -o "$P/p10-amd64" . &&
@@ -203,7 +203,7 @@ echo "== holds: the ASL sqrt_real substitution (agent/asl, JanusASL/sail/fakerea
 type tmark >/dev/null 2>&1 && tmark "== holds: the ASL sqrt_real substitution (agent/as"
 o="$(python3 -I $R/asl/half_only.py $R/asl 2>&1 | head -1)"
 grep -q 'MISMATCHES 0 ' <<<"$o"; check ASL1_sqrt_real_half_exhaustive $? "$(cut -c1-60 <<<"$o")"
-# single and double precision: python3 -I audit/round10/asl/sqrt_model.py 4000 (hours; see the doc)
+# single and double precision: python3 -I test/redteam/rounds/round10/asl/sqrt_model.py 4000 (hours; see the doc)
 
 }
 

@@ -1,31 +1,31 @@
 #!/usr/bin/env bash
 # Reproduce the round-2 attacks (docs/audit/AUDIT-ROUND2.md) and check the fixes: exits 1 if a fixed
-# finding (CRITICAL-1, U1) regresses. Writes only under audit/round2/work/ (and temporary cache
+# finding (CRITICAL-1, U1) regresses. Writes only under test/redteam/rounds/round2/work/ (and temporary cache
 # dirs / marker files under /tmp, removed again).
-# Usage: audit/round2/run-round2.sh [-j N]   (-j: rows at once, default the core count capped by
+# Usage: test/redteam/rounds/round2/run-round2.sh [-j N]   (-j: rows at once, default the core count capped by
 #        memory, see scripts/lib/parallel.sh; -j 1 runs them one by one; output order is unchanged)
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../scripts/lib/parallel.sh
+# shellcheck source=../../../../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
-# shellcheck source=../../scripts/lib/memguard.sh
+# shellcheck source=../../../../scripts/lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
-# shellcheck source=../../scripts/lib/verdict.sh
+# shellcheck source=../../../../scripts/lib/verdict.sh
 . "$root/scripts/lib/verdict.sh"
-# shellcheck source=../lib/blocked.sh
-. "$root/audit/lib/blocked.sh"
+# shellcheck source=../../lib/blocked.sh
+. "$root/test/redteam/lib/blocked.sh"
 memguard_self "$@"
 par_init "$@"
-J="$root/audit/round2/bin/janus"
+J="$root/test/redteam/rounds/round2/bin/janus"
 mkdir -p "$(dirname "$J")"
-# audit/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
+# test/redteam/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
-W=audit/round2/work; mkdir -p $W
+W=test/redteam/rounds/round2/work; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1
 
 v() { "$J" verify --janus-root "$root" "$@" 2>&1; }
@@ -40,27 +40,27 @@ echo "Expected now: Invalid at Stage: statement identity (inline instance / does
 }
 s1_row() {
   local a=$1 out r st
-  out="$(v --proof audit/round2/attacks/$a.lean $W/Add)"
+  out="$(v --proof test/redteam/rounds/round2/attacks/$a.lean $W/Add)"
   r="$(verdict_line <<<"$out" | cut -c1-110)"
   st="$(grep -m1 'Stage:' <<<"$out" | sed 's/.*Stage: //')"
   printf '  %-20s %s [%s]\n' "$a" "$r" "$st"
   case "$r" in Verified*) echo "      >>> BROKEN: binary adds, statement says otherwise, yet Verified."; broken+=("$a") ;;
     NOVERDICT*|AMBIGUOUS*) echo "      >>> BROKEN: no single verdict."; broken+=("$a") ;; esac
-  # blocked row: the pinned reason (audit/lib/blocked-pins.tsv), never an elaboration failure of the attack file
-  why="$(blocked_check round2/run-round2.sh "$a" "$out")"
+  # blocked row: the pinned reason (test/redteam/lib/blocked-pins.tsv), never an elaboration failure of the attack file
+  why="$(blocked_check rounds/round2/run-round2.sh "$a" "$out")"
   [ -n "$why" ] && { echo "      >>> BROKEN: $why"; broken+=("$a"); }
 }
 m1_block() {
 echo
 echo "== M1: Lean module-system proof (blocked on the single-file path) =="
-out="$(v --proof audit/round2/attacks/M1_module_system.lean $W/Add)"; r="$(verdict_line <<<"$out")"; echo "  $r [$(grep -m1 'Stage:' <<<"$out" | sed 's/.*Stage: //')]"
+out="$(v --proof test/redteam/rounds/round2/attacks/M1_module_system.lean $W/Add)"; r="$(verdict_line <<<"$out")"; echo "  $r [$(grep -m1 'Stage:' <<<"$out" | sed 's/.*Stage: //')]"
 case "$r" in Verified*|NOVERDICT*|AMBIGUOUS*) broken+=(M1) ;; esac
-why="$(blocked_check round2/run-round2.sh M1 "$out")"
+why="$(blocked_check rounds/round2/run-round2.sh M1 "$out")"
 [ -n "$why" ] && { echo "      >>> BROKEN: $why"; broken+=(M1); }
 
 echo
 echo "== Positive controls (must elaborate with only propext/Quot.sound/Classical.choice) =="
-echo "  AtomicAdd_witness.lean: see audit/round2/controls/ (run under lake env lean)."
+echo "  AtomicAdd_witness.lean: see test/redteam/rounds/round2/controls/ (run under lake env lean)."
 }
 # U1 and U1b share the host marker paths: one block, in order.
 u1_block() {
@@ -74,7 +74,7 @@ echo "Verified (unless the fallback refused on this host) or a marker reached th
 markers=(/tmp/janus-u1b-marker /dev/shm/janus-u1b-marker /boot/janus-u1b-marker /run/user/0/janus-u1b-marker /run/janus-u1b-marker)
 for a in U1_unshare_cache_write U1b_unshare_mounts; do
   c=$(mktemp -d /tmp/janus-u1-cache.XXXXXX); rm -f "${markers[@]}"
-  out="$(JANUS_SANDBOX=unshare JANUS_CACHE_DIR="$c" "$J" verify --janus-root "$root" --proof audit/round2/attacks/$a.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous $W/Add 2>&1)"
+  out="$(JANUS_SANDBOX=unshare JANUS_CACHE_DIR="$c" "$J" verify --janus-root "$root" --proof test/redteam/rounds/round2/attacks/$a.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous $W/Add 2>&1)"
   leaked=""; for m in "${markers[@]}" "$c/v1/replay/00/planted-by-sandboxed-proof"; do [ -e "$m" ] && leaked="$leaked $m"; done
   rm -f "${markers[@]}"; rm -rf "$c"
   printf '  %-24s %s\n' "$a" "$(grep -m1 -E '^(Verified|Invalid)' <<<"$out" | cut -c1-100)"
@@ -85,17 +85,17 @@ done
 }
 medium1_block() {
 echo
-echo "== MEDIUM-1 (amd64 DF): see audit/round2/amd64/README.txt; with artifacts/examples-amd64 built:"
+echo "== MEDIUM-1 (amd64 DF): see test/redteam/rounds/round2/amd64/README.txt; with artifacts/examples-amd64 built:"
 if [ -f artifacts/examples-amd64 ]; then
   "$J" extract artifacts/examples-amd64 example.com/basic.CopyBlock $W/amd64-CopyBlock >/dev/null &&
-  df_out=$(v --proof audit/round2/amd64/controls/DFMemmove.lean --theorem DFRepro.memmove_backward_rep_copies_forward $W/amd64-CopyBlock | verdict_line)
+  df_out=$(v --proof test/redteam/rounds/round2/amd64/controls/DFMemmove.lean --theorem DFRepro.memmove_backward_rep_copies_forward $W/amd64-CopyBlock | verdict_line)
   echo "$df_out"; case "$df_out" in NOVERDICT*|AMBIGUOUS*) broken+=(DF-noverdict) ;; esac
 fi
 echo "(MEDIUM-1 is fixed: amd64 models DF. This repro's concrete state t leaves df at its default"
 echo " false, and with DF = 0 a forward copy is correct, so the theorem is now true and honest about"
 echo " a state real executions never reach; Verified is expected. The fix itself is checked by"
 echo " JanusTests.Amd64.df_backward_not_forward: with DF = 1 (after STD) the model copies backward.)"
-echo "Model repros: audit/round2/model/README.txt (arm64, run from a copy of agent/arm64cov2), audit/round2/amd64/README.txt."
+echo "Model repros: test/redteam/rounds/round2/model/README.txt (arm64, run from a copy of agent/arm64cov2), test/redteam/rounds/round2/amd64/README.txt."
 }
 
 par_run s1_header

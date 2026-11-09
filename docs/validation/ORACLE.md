@@ -351,7 +351,7 @@ The crypto corpus (`OUT=artifacts/oracle-crypto JOBS=8 scripts/oracle.sh crypto`
   `seq/harvest`: windows of 2–16 consecutive non-branch, non-memory words of the real crypto
   kernels (symbols matching `crypto/`, `hash/crc32`, `vendor/golang.org/x/crypto/`), each under
   4 states. Case field `words` (`oracle/layout/layout.go`); the format is the one of
-  `audit/rt-model`'s sequence oracle. `scripts/oracle.sh full` now also runs a smaller sequence
+  `test/redteam/rounds/rt-model`'s sequence oracle. `scripts/oracle.sh full` now also runs a smaller sequence
   corpus (`SEQ_N=500`, `SEQ_WINDOWS=2000`).
 
 389,440 cases: **0 MISMATCH**, 385,790 agree (40,278 of them both faulting), 3,650 model-gap, 0

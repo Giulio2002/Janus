@@ -6,7 +6,7 @@ import Janus.Contracts.Syscall
 `SchedContract` (`runtime.entersyscall`/`exitsyscall`) and `ConvT64Contract` (`runtime.convT64`)
 are `Summary` contracts. For each this file gives machine code that meets it (`RET`; a store of the
 argument below `SP` and a pointer to it), proved by symbolic execution, and a call state that
-satisfies its precondition: `<name>_satisfiable` (`audit/round9/run-round9.sh`, row SAT). The
+satisfies its precondition: `<name>_satisfiable` (`test/redteam/rounds/round9/run-round9.sh`, row SAT). The
 kernel contracts are relations, satisfiable by `Kernel.Effect.total` and `Kernel.SiteNext.total`.
 -/
 

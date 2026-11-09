@@ -9,7 +9,7 @@ state. `scripts/testfloat.sh` checks the *machine models* against SoftFloat; thi
 independent IEEE implementation and not only through the bridge lemmas:
 
 ```
-testfloat_gen -rnear_even f64_add | lake env lean --run audit/rt-fp/SpecTestFloat.lean f64_add near_even
+testfloat_gen -rnear_even f64_add | lake env lean --run test/redteam/rounds/rt-fp/SpecTestFloat.lean f64_add near_even
 ```
 
 A vector agrees when the specification is `some r` with `r` the expected bits and the expected

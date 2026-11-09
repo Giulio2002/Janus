@@ -176,7 +176,7 @@ performs exactly that store right after the call.
 `mapassign` allocates (the first group of a small map, a bigger table when the map grows), so
 without `H` no code could meet the contract: from one non-nil map, repeated assignments of new
 keys would have to produce a map with `2^64` keys, whose count no header word holds
-(`audit/maps/model/Unsat.lean`, finding R3-C1); the real runtime throws `out of memory` long
+(`test/redteam/maps/model/Unsat.lean`, finding R3-C1); the real runtime throws `out of memory` long
 before. -/
 def Assign (p : Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64)) (H : RtReady) : Prop :=
   ∀ f, Summary p addr
@@ -207,7 +207,7 @@ def Clear {K V : Type} (p : Program) (addr : Nat) (M : MapModel K V) : Prop :=
 /-- `runtime.makemap_small()`, **when the runtime is ready for the call** (`H` with no arguments,
 `Contracts.Ready`): returns a new, non-nil, empty map, distinct from every map that existed before.
 It allocates the header, so without `H` no code could meet it: every map lies below `2^48`
-(`MapModel.Laws.len`), so `2^48` calls cannot all return new maps (`audit/maps/model/Unsat.lean`,
+(`MapModel.Laws.len`), so `2^48` calls cannot all return new maps (`test/redteam/maps/model/Unsat.lean`,
 finding R3-C1). -/
 def MakeSmall {K V : Type} (p : Program) (addr : Nat) (M : MapModel K V) (H : RtReady) : Prop :=
   Summary p addr (fun s => RTPre M 0 s ∧ Ready H M.priv [] s)

@@ -9,13 +9,13 @@
 #       nonvacuous witness must exhibit every hypothesis and premise (call state, precondition) of the module's
 #       `correctness` theorem, and a returns witness must be that theorem's guarantee at a start state (WeakA..H);
 #       other `Witness.*` lemmas are not verifiable results.
-# One file (audit/round14/attacks/NewPairAttacks.lean), one verification of all its theorems (`--theorem` repeated).
+# One file (test/redteam/rounds/round14/attacks/NewPairAttacks.lean), one verification of all its theorems (`--theorem` repeated).
 # Exits 1 if an attack verifies or a control stops verifying. Uses --fresh and a private temporary cache.
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-R=audit/round14
+R=test/redteam/rounds/round14
 J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
 if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; go build -o "$J" ./cmd/janus || exit 1; fi
 if [ "${JANUS_AUDIT_PREBUILT:-}" != 1 ]; then
@@ -38,7 +38,7 @@ targs=(); for t in "${thms[@]}"; do targs+=(--theorem "$P.$t"); done
 all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/NewPairAttacks.lean "$W/NewPair" "${targs[@]}" 2>&1)"
 # the block of one theorem: from its "=== NAME:" line to the next one
 blk() { awk -v n="=== $P.$1:" 'index($0,n)==1{p=1;print;next} /^=== /{p=0} p' <<<"$all"; }
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 row() { # NAME expect(blocked|Verified) pattern...
   local name=$1 expect=$2 out verdict status="" pat; shift 2
   out="$(blk "$name")"
@@ -49,8 +49,8 @@ row() { # NAME expect(blocked|Verified) pattern...
     Verified) case $verdict in *verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
-  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check round14/run-round14.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  # blocked rows: pinned reason, and no Lean elaboration failure (test/redteam/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check rounds/round14/run-round14.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-34s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0

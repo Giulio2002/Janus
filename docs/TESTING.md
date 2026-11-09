@@ -12,7 +12,7 @@ instance check and kernel replay still runs with the same strength.
 | arm64 examples | `scripts/verify-examples.sh [-j N] [Name …]` | the 20 arm64 example proofs and the WrongAdd demo, through `janus verify` |
 | amd64 examples | `scripts/verify-amd64-examples.sh [-j N]` | the 25 amd64 theorems |
 | all examples | `scripts/verify-all-examples.sh [-j N] [--changed]` | the arm64, amd64 and assembly examples in one pool, longest first by measured time (`--changed`: development only, unchanged items skipped) |
-| soundness audit | `audit/run-rounds.sh [-j LANES]` (all of them as parallel lanes), or each: `audit/run-all.sh [-j N]`, `audit/round{2,3,4,5,7,8}/run-round*.sh [-j N]`, `audit/round6/run-round6.sh` | every documented attack is rejected, every control verifies (round 7: the result cache) |
+| soundness audit | `test/redteam/run-rounds.sh [-j LANES]` (all of them as parallel lanes), or each: `test/redteam/run-all.sh [-j N]`, `test/redteam/rounds/round{2,3,4,5,7,8}/run-round*.sh [-j N]`, `test/redteam/rounds/round6/run-round6.sh` | every documented attack is rejected, every control verifies (round 7: the result cache) |
 | Go tests | `go test -timeout 60m ./cmd/...` (`-short`: no Lake builds) | the CLI, the extractor, the verifier end to end, the cache collector |
 | JanusASL | `scripts/asl.sh prove` | the Arm-ASL equivalence theorems (39) and their axiom audit |
 | ASL build cache | `JanusASL/tools/test_asl_cache.sh [--e2e CACHE]` | the `ASL_CACHE` key ignores lakefile edits that cannot reach the ArmASL build and changes on every input that can (31 cases, seconds); with `--e2e`, a restore into a copy with an edited JanusASL lakefile leaves `lake build ArmASL` nothing to do (docs/design/ASL.md "Build cache") |
@@ -41,7 +41,7 @@ Tools for measuring:
 One command runs every check of the gate: `scripts/gate.sh [-j N] [--lanes N]` (under `memcap`). It
 prebuilds once, then runs every stage as a parallel lane that reads the prebuilt outputs.
 
-**Phase 1, prebuild (once).** `go build bin/janus` (and `audit/bin/janus-rounds`, the audit lanes'
+**Phase 1, prebuild (once).** `go build bin/janus` (and `test/redteam/bin/janus-rounds`, the audit lanes'
 copy), `lake build` plus `lake build Janus Janus.Tools.Audit janus-audit`, the example binaries of every
 suite (`scripts/build-examples{,-amd64,-asm,-sys,-rtmisc,-print,-cgo}.sh`, in parallel), and the
 framework build and replay verdict (a first verification of the Add example). The later stages run with
@@ -55,11 +55,11 @@ and `-j` others):
 |---|---|
 | `verify` | `scripts/verify-all-examples.sh --cgo`: ONE queue (`scripts/lib/pool.sh`) of every arm64, amd64, asm, rtmisc, sys, print and cgo item, longest first by the recorded `.times` (unknown items first) |
 | `gotest` | `scripts/gotest-shards.sh`: `go test -count=1 -timeout 7000s ./cmd/...` in duration-balanced shards |
-| `rounds` | `audit/run-rounds.sh` (all audit rounds) |
+| `rounds` | `test/redteam/run-rounds.sh` (all audit rounds) |
 | `axiom` | `scripts/ci-axiom-guard.sh` |
 | `x86` | `scripts/x86formal.sh prove` |
 | `asl-build`, `sail-build` | `scripts/asl.sh build` (set `ASL_CACHE`), `scripts/oracle-sail.sh build` |
-| `rtasl-prove`, `-rel`, `-strict`, `-replay`, `-btf`, `-probes`, `-fsqrt`, `-go` | `audit/rt-asl/run.sh GROUP`: the red-team round ASL, one lane per group (`run.sh` without arguments still runs them all, in order) |
+| `rtasl-prove`, `-rel`, `-strict`, `-replay`, `-btf`, `-probes`, `-fsqrt`, `-go` | `test/redteam/rounds/rt-asl/run.sh GROUP`: the red-team round ASL, one lane per group (`run.sh` without arguments still runs them all, in order) |
 
 **Dependency-driven prebuild.** The prebuild stages (`pre-gobin`, `pre-lake`, `pre-ex-*`, `pre-rounds-bin`, `pre-warm`,
 `pre-fixture`, `pre-pin`) and the private tree copies (`tree-*`) are items of the same pool as the lanes, with the graph of
@@ -81,7 +81,7 @@ largest recorded per-item peak of `scripts/speed-baseline.tsv` (6.1 without one)
 min(jobs + 3, 15)`. (Before the joint budget an idle 48-core / 170 GiB box got `-j 10`.) Fewer than 8 free cores or a 1-minute
 load of 60 or more (RULES.md) falls back to `-j 2`. `JANUS_GATE_MAX_JOBS` (default 12), `JANUS_GATE_MEM_FLOOR_GIB`,
 `JANUS_GATE_LANE_CORES`, `JANUS_GATE_LANE_GIB`, `JANUS_GATE_CORES_PER_ITEM` tune it. The choice and its reason are
-printed and recorded in the timeline's `gate` line (`auto`, `why`, `roundsLanes`). The audit-round lane count (`JANUS_ROUNDS_LANES`, read by `audit/run-rounds.sh` where it supports it, exported to the rounds lane only) is min(6, free cores / 8), at least 2, and 2 on a busy host. The memory is a budget, not a charge per slot: the verify pool gets MemAvailable - floor (30) - other lanes (25) - round lanes x 15 GiB, shared by its running items through per-item admission (`pool.sh`): a running item reserves its own recorded peak x 1.3 (baseline or `.times`-side peaks; 9.15 GiB when unknown), a new item starts only if the reservations plus its own fit (the first always starts), so small items run `-j` wide and heavy ones limit themselves (`POOL_DEBUG=1` logs each deferral; the timeline's pool line has `peakConcurrency` and `peakReservedGiB`; `scripts/lib/test-poolmem.sh`). Round lanes are cut only to keep room for two worst-case items. The split is logged (`mem budget: verify X GiB (per-item admission, N slots) + rounds Y GiB + lanes Z GiB + floor F GiB of M`, timeline `memBudget`). An idle 48-core / 170 GiB box gets `-j 12` with a 40 GiB verify budget and 5 round lanes. Admission: every pool (`pool.sh`) starts no new
+printed and recorded in the timeline's `gate` line (`auto`, `why`, `roundsLanes`). The audit-round lane count (`JANUS_ROUNDS_LANES`, read by `test/redteam/run-rounds.sh` where it supports it, exported to the rounds lane only) is min(6, free cores / 8), at least 2, and 2 on a busy host. The memory is a budget, not a charge per slot: the verify pool gets MemAvailable - floor (30) - other lanes (25) - round lanes x 15 GiB, shared by its running items through per-item admission (`pool.sh`): a running item reserves its own recorded peak x 1.3 (baseline or `.times`-side peaks; 9.15 GiB when unknown), a new item starts only if the reservations plus its own fit (the first always starts), so small items run `-j` wide and heavy ones limit themselves (`POOL_DEBUG=1` logs each deferral; the timeline's pool line has `peakConcurrency` and `peakReservedGiB`; `scripts/lib/test-poolmem.sh`). Round lanes are cut only to keep room for two worst-case items. The split is logged (`mem budget: verify X GiB (per-item admission, N slots) + rounds Y GiB + lanes Z GiB + floor F GiB of M`, timeline `memBudget`). An idle 48-core / 170 GiB box gets `-j 12` with a 40 GiB verify budget and 5 round lanes. Admission: every pool (`pool.sh`) starts no new
 item while MemAvailable is below the floor plus one item's estimate. An explicit `-j` or `JANUS_JOBS` (the shared-box
 rule of RULES.md) is used as given; memguard's per-job limits are unchanged.
 
@@ -241,8 +241,8 @@ re-record on a green full gate and say why in the commit message.
 | `scripts/verify-cgo-examples.sh` (64 rows, correctness and Witness) | lane `verify`, `--cgo` items |
 | `scripts/verify-sys-examples.sh` (10 rows) | lane `verify`, sys items (the full default list, 2 more rows than the old verify-all had) |
 | `scripts/verify-print-examples.sh` | lane `verify`, print items |
-| `audit/run-rounds.sh` | lane `rounds` |
-| `audit/rt-asl/run.sh` (asl prove, A1-A3, A6, A7, A8, A5/C2, fsqrt, C1) | lanes `asl-build` + `rtasl-*` (one per group; same rows, same expectations) |
+| `test/redteam/run-rounds.sh` | lane `rounds` |
+| `test/redteam/rounds/rt-asl/run.sh` (asl prove, A1-A3, A6, A7, A8, A5/C2, fsqrt, C1) | lanes `asl-build` + `rtasl-*` (one per group; same rows, same expectations) |
 | `scripts/x86formal.sh prove` | lane `x86` |
 | item timeouts (`JANUS_ITEM_TIMEOUT`), audit, kernel replay, pins, sandbox, Witness theorems | unchanged: the same scripts and `janus verify` run them |
 | `x86formal.sh prove` "twice" (profile A.1) | pgate.sh and pg3.sh contain ONE `x86formal.sh prove` step (the profile's two entries are two runs of it, not two targets; there is no x86b step in either script) |
@@ -255,7 +255,7 @@ re-record on a green full gate and say why in the commit message.
 | CI decoder coverage of the arm64 examples (`janus blockers`) | lane `decoder` (`scripts/decoder-coverage.sh`, also called by ci.yml) |
 | CI `scripts/oracle.sh quick` (qemu) and `scripts/oracle-amd64.sh quick` (native), MISMATCH check | lane `oracle` (in the lake tree, after `rtasl-prove`) |
 | asl.yml `scripts/asl.sh verify` (4 ASL corollaries) | lane `asl-verify` (after `rtasl-prove`) |
-| CI `audit/run-all.sh`, `verify-examples.sh`, `verify-amd64-examples.sh`, `ci-axiom-guard.sh`, `x86formal.sh` build/prove, `asl.sh build/prove` | already covered: lanes `rounds`, `verify`, `axiom`, `x86`, `asl-build`, `rtasl-prove` |
+| CI `test/redteam/run-all.sh`, `verify-examples.sh`, `verify-amd64-examples.sh`, `ci-axiom-guard.sh`, `x86formal.sh` build/prove, `asl.sh build/prove` | already covered: lanes `rounds`, `verify`, `axiom`, `x86`, `asl-build`, `rtasl-prove` |
 
 **Peak memory in the baseline.** Column 3 of `scripts/speed-baseline.tsv` is read from janus's own records, not from a per-item cgroup: the largest `memoryGuard.peakBytes` in the item's `verified.json` and `verified/*.json` written during the run (a stale report from an earlier run is ignored; the log's `memguard[...]: peak` lines are the fallback). An item without a report (a failed one) records 0, which the pool's admission treats as unknown (the conservative estimate). Checked on the vbatch gate's artifacts: 461 of 463 pool items have a nonzero peak (arm64 MallocFast 5.63 GiB, amd64 RuneLen 3.53, arm64 Add 0.03).
 
@@ -357,7 +357,7 @@ of cfca64d8 and the lakeguard/autojobs of the speed batch), so a record written 
 (`scripts/lib/incr-keyed-exports.txt`, one `NAME<TAB>reason` per line), so the bug cannot return unnoticed.
 
 **The export scan** (`scanExports` in `cmd/janus/incr2_test.go`) reads `scripts/gate.sh`, `scripts/verify-*.sh`, `build-examples*.sh`, `example-*.sh`, `scripts/lib/*.sh` and every
-`audit/**/*.sh` (to depth four) and finds an export in each of these forms: `export NAME[=v]`, `declare|typeset|local ... -x NAME` (any flag cluster with an `x`: `-x`, `-gx`, `-xg`, `-rx`),
+`test/redteam/**/*.sh` (to depth five: the same files as `audit/**/*.sh` to depth four before the v0.2 layout) and finds an export in each of these forms: `export NAME[=v]`, `declare|typeset|local ... -x NAME` (any flag cluster with an `x`: `-x`, `-gx`, `-xg`, `-rx`),
 every plain assignment while allexport is on (`set -a` / `set -o allexport` ... `set +a`, also in one line: `set -a; JANUS_X=5; set +a`), after `then`, `||`, `&&`, `;` or a function opening, and an `export` inside a
 quoted string (gate.sh's `laneenv` echoes `export JANUS_LANE_TREE=...` into lane code). `TestIncr2ExportScanCatchesEveryForm` is the mutation test: it copies the scripts into a temp
 root, adds a fake script exporting a run-specific `JANUS_` variable in each form in each directory the scan covers, and requires the scan to find it and the classification to fail; its
@@ -435,8 +435,8 @@ so every verdict depends on all of it) and its compiled data, `lakefile.toml`/`l
 (`scripts/gate.sh`, `verify-all-examples.sh`, the pool/memguard/theorems libraries, the kind's scripts), the pins, the shared example binary of its suite
 (every `examples/basic` Go change moves all arm64/amd64 addresses), its own proof file and extraction. A leaf proof edit re-runs exactly that item
 (`TestIncr2LeafChangeInvalidatesOnlyThatItem`), a shared module every dependent (`TestIncr2SharedModuleChangeInvalidatesEveryDependent`).
-Docs, `audit/`, `JanusASL/`, `oracle*`, the other suites' sources and unrelated scripts never touch an item. Lanes (`gotest`, `rounds`, `x86`, `rtasl-*`) key the whole
-non-documentation tree on purpose: their read sets are not known (the go tests read `examples/`, `audit/`, `scripts/`, `JanusASL/`, `docs/SOUNDNESS.md`, ...);
+Docs, `test/redteam/`, `JanusASL/`, `oracle*`, the other suites' sources and unrelated scripts never touch an item. Lanes (`gotest`, `rounds`, `x86`, `rtasl-*`) key the whole
+non-documentation tree on purpose: their read sets are not known (the go tests read `examples/`, `test/redteam/`, `scripts/`, `JanusASL/`, `docs/SOUNDNESS.md`, ...);
 `axiom`, `govet`, `cachekeys`, `decoder`, `oracle`, `asl-*`, `sail-build` always run.
 
 **Measured** (`scripts/incr-sample.py`: for each first-parent commit of main, the files it changes against its first parent, run through the key rules of this tree; 461 items;
@@ -513,7 +513,7 @@ The 30 before them (wave-2 period): 0/13830 before, 4987/13830 (36%) after.
 | a316ece9 | docs/SOUNDNESS.md: x86 classes cross-checked against hardwar | 0/461 | 461/461 | no item input changed |
 
 Remaining misses in these samples: `scripts/gate.sh` / `verify-all-examples.sh` / pool libraries (gate infrastructure), `cmd/janus` Go (verifier identity),
-`Janus/**` (shared framework), and leaf proofs. A commit that changes only proofs, docs, `audit/`, `JanusASL/` or unrelated scripts skips everything else.
+`Janus/**` (shared framework), and leaf proofs. A commit that changes only proofs, docs, `test/redteam/`, `JanusASL/` or unrelated scripts skips everything else.
 Not done (the keys stay conservative): narrowing the Go identity below the whole `cmd/janus` package (one package `main`: needs the verify path moved to an internal package so
 `go list -deps` can scope it), per-lane read sets (needs a traced read set per lane), the shared example binary hash.
 
@@ -730,7 +730,7 @@ and its first replay; after that the critical path is the longest proof under an
 
 ### Audit rounds
 
-Profile (before; each script after the other, warm caches): `audit/run-all.sh` 270 s, round 2
+Profile (before; each script after the other, warm caches): `test/redteam/run-all.sh` 270 s, round 2
 133 s, round 3 9 s, round 4 9 s, round 5 467 s, round 6 60 s, round 7 1233 s, round 8 781 s:
 **2962 s** (rounds 7 and 8 overlapped some of the measurements above, so they are high). Rounds 7
 and 8 are long because every attack row runs `janus verify --fresh` (deliberately the cold path:
@@ -738,19 +738,19 @@ no result, trusted-compile or replay cache, so each row replays the whole framew
 the other; round 7 also runs its cache attacks (`run-cache.sh`, a `--janus-root` copy with an
 edited framework that must be rebuilt). Every script also built janus and ran `lake build` again.
 
-Changes: `audit/run-rounds.sh [-j LANES] [round …]` builds janus, the checkout's framework and
+Changes: `test/redteam/run-rounds.sh [-j LANES] [round …]` builds janus, the checkout's framework and
 the example binaries once (`JANUS_AUDIT_BIN`, `JANUS_AUDIT_PREBUILT=1`, which the round scripts
 honour instead of building again) and runs `run-all.sh` and rounds 2–8 as parallel lanes,
 longest first (default `min(cores/12, (MemAvailable − 40 GiB)/20 GiB, 4)` lanes of `-j 2` rows);
 each lane's output is printed whole, and a lane that fails fails the run. The rounds are
-independent (each writes only its own `audit/<round>/work` and temporary caches). Inside rounds 7
+independent (each writes only its own `test/redteam/<round>/work` and temporary caches). Inside rounds 7
 and 8, the `--fresh` rows run as parallel blocks after the fixtures are built (each on its own
 copy of the extraction it verifies when it writes a `verified.json`); the lists of rows are
 unchanged (compared mechanically). The `--fresh` rows still replay the framework every time.
 
 | | before | after |
 |---|---:|---:|
-| all audits (serial / `audit/run-rounds.sh`) | 2962 s | **983 s** (load average 70–77) |
+| all audits (serial / `test/redteam/run-rounds.sh`) | 2962 s | **983 s** (load average 70–77) |
 | longest lane (round 7, including `run-cache.sh`) | 1233 s | 981 s |
 
 ### Fault injection (after the changes)
@@ -905,8 +905,8 @@ Measured with `scripts/peak-mem.sh` around the whole suite. The host was shared 
 | `scripts/verify-all-examples.sh` (both, one pool), cold | 2408 s (the two above, in sequence) | 357 s, 8.5 / 16.1 GB |
 | the same, warm, result cache off | | **282 s**, 5.2 / 7.6 GB |
 | the same, nothing changed | | **12 s**, 0.3 / 1.8 GB |
-| `audit/run-all.sh` | 602 s, 43.2 / 42.7 GB | 190 s, 7.5 / 11.3 GB |
-| `audit/round2…6`, `round7` (new) | (serial; minutes each) | 92, 31, 31, 209, 158, 64 s; peak ≤ 7.6 / 14.8 GB |
+| `test/redteam/run-all.sh` | 602 s, 43.2 / 42.7 GB | 190 s, 7.5 / 11.3 GB |
+| `test/redteam/rounds/round2…6`, `round7` (new) | (serial; minutes each) | 92, 31, 31, 209, 158, 64 s; peak ≤ 7.6 / 14.8 GB |
 | `go test -timeout 50m ./cmd/...` | 1251 s (34.8 min under heavier load), 43.4 / 42.0 GB | **360 s**, 14.3 / 19.4 GB |
 
 **Maximum total for a whole suite at the default -j: 14.3 GB** (cgroup peak of `go test`; 19.4 GB
@@ -1005,7 +1005,7 @@ ratios above, which are dominated by per-verify work that is the same on any mac
 | Job | before | after (estimate) |
 |---|---|---|
 | go-test (Lean build, vet, `go test`) | ~30–40 min (45 min timeout) | ~10–15 min |
-| arm64 (examples, decoder coverage, qemu oracle, `audit/run-all.sh`) | ~35–45 min | ~12–18 min |
+| arm64 (examples, decoder coverage, qemu oracle, `test/redteam/run-all.sh`) | ~35–45 min | ~12–18 min |
 | amd64 (examples, native oracle) | ~25–35 min | ~10–15 min |
 | ASL equivalence (cache miss / hit) | ~60 min / ~10 min | unchanged on GitHub (its .lake cache already reuses ArmASL); locally `ASL_CACHE` gives ~4 min |
 
@@ -1126,7 +1126,7 @@ worktree held 69 GB). Three changes bound them:
   after every publish with `ASL_CACHE_MAX`, default 15G; docs/design/ASL.md "Build cache", "Eviction").
 * **Oracle dumps are pruned** when a driver ends (`scripts/lib/artifacts.sh`, used by
   `scripts/oracle.sh`, `oracle-amd64.sh`, `oracle-sail.sh`, `asl.sh check`, `x86formal.sh check`
-  and `audit/round5/model/run-model.sh`): summaries, reproductions and `mismatches.jsonl` stay,
+  and `test/redteam/rounds/round5/model/run-model.sh`): summaries, reproductions and `mismatches.jsonl` stay,
   the corpus, results and verdicts are zstd-compressed (about 5x, verdicts 15x), duplicates and
   cheaply derived dumps are removed. `KEEP=zst` compresses everything, `KEEP=1` keeps it all raw.
   `scripts/lib/test-artifacts.sh` (run by `go test`, `TestArtifactsLib`) tests the pruning.
@@ -1214,7 +1214,7 @@ with the verdict. `JANUS_MEMGUARD_LOG=1` also prints each job's label and peak.
 ### Scripts
 
 `scripts/lib/memguard.sh`, sourced by verify-examples, verify-amd64-examples, the build
-scripts, the oracle scripts, asl.sh, bench.sh, break-demo.sh, audit/run-all.sh and every
+scripts, the oracle scripts, asl.sh, bench.sh, break-demo.sh, test/redteam/run-all.sh and every
 audit round runner.
 
 * `memguard_self "$@"` (right after sourcing) re-runs the script once under a script-wide

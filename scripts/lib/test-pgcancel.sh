@@ -42,7 +42,7 @@ for i in $(seq 100); do [ -f "$t/a.rc" ] && break; sleep 0.3; done
 [ "$(cat "$t/a.rc" 2>/dev/null)" = 0 ] && ok "other run finished with status 0" || bad "run a rc=$(cat "$t/a.rc" 2>/dev/null)"
 grep -q '2 passed' "$t/a.log" && ok "other run's lanes passed" || bad "run a log: $(tail -3 "$t/a.log")"
 # gate.sh itself: no kill-by-name anywhere in the driver, its libraries or the lanes it starts
-if grep -nE '\b(pkill|killall|pgrep)\b|ps +-e.*\|.*kill' "$here"/scripts/gate.sh "$here"/scripts/lib/pool.sh "$here"/scripts/gotest-shards.sh "$here"/audit/rt-asl/run.sh "$here"/scripts/verify-all-examples.sh >/dev/null; then
+if grep -nE '\b(pkill|killall|pgrep)\b|ps +-e.*\|.*kill' "$here"/scripts/gate.sh "$here"/scripts/lib/pool.sh "$here"/scripts/gotest-shards.sh "$here"/test/redteam/rounds/rt-asl/run.sh "$here"/scripts/verify-all-examples.sh >/dev/null; then
   bad "kill-by-name found in the gate scripts"; else ok "no pkill/pgrep/killall in the gate scripts"; fi
 grep -q 'kill -- -' "$here/scripts/gate.sh" && ok "gate.sh cancels through its own process group" || bad "gate.sh group cancel"
 [ "$fail" = 0 ] && echo "all checks passed"

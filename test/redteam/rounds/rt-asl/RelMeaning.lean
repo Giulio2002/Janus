@@ -5,7 +5,7 @@ import Lean
 /-! # Red-team round ASL (docs/audit/AUDIT-ASL.md): what `Rel`, `LinuxEL0Config` and the example
 transfers mean
 
-Checked by `audit/rt-asl/run.sh` (`lake env lean` in JanusASL/, then an axiom audit).
+Checked by `test/redteam/rounds/rt-asl/run.sh` (`lake env lean` in JanusASL/, then an axiom audit).
 
 * A1 `Rel` is a function from Sail states to the Janus state's X0-X30, SP, PC and NZCV
   (`Rel.unique`): no Sail state relates two Janus states that differ in one of them

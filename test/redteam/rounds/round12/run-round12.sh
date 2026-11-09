@@ -3,12 +3,12 @@
 # A crafted ELF must be rejected at extraction (never Verified); the unmodified binary must still
 # verify; the synthetic-ELF defence tests (dynamic relocations, DT_TEXTREL, writable code,
 # RELRO, symbol ranges, init_array) must pass. Exits 1 on any BROKEN row.
-# Writes only under audit/round12/work/ and a mktemp directory (removed at the end).
+# Writes only under test/redteam/rounds/round12/work/ and a mktemp directory (removed at the end).
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-R=audit/round12
+R=test/redteam/rounds/round12
 J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
 if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 if [ "${JANUS_AUDIT_PREBUILT:-}" != 1 ]; then

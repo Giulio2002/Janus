@@ -1,7 +1,7 @@
 import Extracted
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
 
-/-! Round 6 F3a: `main.Add` (audit/round6/stubmod) calls `runtime.panicky/lib.Zero`, an ordinary
+/-! Round 6 F3a: `main.Add` (test/redteam/rounds/round6/stubmod) calls `runtime.panicky/lib.Zero`, an ordinary
 function in a package whose import path starts with `runtime.panic`. Before round 6 the
 extractor classified it as a panic stub by symbol-name prefix, so this theorem ("every call of
 Add panics") verified, while the real Add returns `x + y`. Round 6 classifies stubs only in

@@ -281,7 +281,7 @@ on an ASL-derived check).
 | `oracle/` | arm64 differential oracle vs qemu or native hardware ([ORACLE.md](../validation/ORACLE.md)) |
 | `oracle-sail/` | the same corpus on the Sail arm-v9.4-a model of Arm's ASL ([ORACLE-SAIL.md](../validation/ORACLE-SAIL.md)) |
 | `oracle-amd64/`, `oracle-amd64-formal/` | amd64 oracle on the host CPU, and the Sail/ACL2 X86isa flag cross-check ([ORACLE-AMD64.md](../validation/ORACLE-AMD64.md)) |
-| `audit/` | the attack files behind [AUDIT.md](../audit/AUDIT.md) and `run-all.sh` |
+| `test/redteam/` | the attack files behind [AUDIT.md](../audit/AUDIT.md) and `run-all.sh` |
 
 ## Where the trust boundary runs inside `janus verify`
 

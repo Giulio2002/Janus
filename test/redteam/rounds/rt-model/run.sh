@@ -12,11 +12,11 @@
 # the untampered one. Env: N (amd64 seq per seed, default 5000), AN (arm64 seq, default 5000),
 # CN (corner per class, default 5000), SEEDS (default "1 2"). A full sweep: N=40000 AN=40000.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root"
 export PATH="$PATH:/usr/local/go/bin"
 export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
-here="$root/audit/rt-model"
+here="$root/test/redteam/rounds/rt-model"
 N="${N:-5000}"; AN="${AN:-5000}"; CN="${CN:-5000}"; SEEDS="${SEEDS:-1 2}"
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 fail=0

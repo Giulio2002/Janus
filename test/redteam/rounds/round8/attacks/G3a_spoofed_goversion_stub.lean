@@ -1,7 +1,7 @@
 import Extracted
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
 
-/-! ATTACK G3a (expected BLOCKED): `main.Add` of audit/round8/govers returns `x + y` (qemu prints
+/-! ATTACK G3a (expected BLOCKED): `main.Add` of test/redteam/rounds/round8/govers returns `x + y` (qemu prints
 3). The binary was linked by go1.25.5, whose runtime has no `panicSimdImm`, so the package-lib
 assembly function `runtime·panicSimdImm` (it returns 0) is the only symbol of that name, and
 `-ldflags=-X runtime.buildVersion=go1.26.0` labels the binary go1.26. Round 7's gate read the

@@ -20,8 +20,8 @@ the shipped model and says that from `0x47d6e9` with `RCX = 2` the copy runs **f
 `0x47d6e9` has `DF = 1` (it follows `STD`), and the instruction copies backward
 (`RSI -= 16`, words at `RSI`, `RSI-8` to `RDI`, `RDI-8`); see `host/probe.c` case 5.
 
-Run: `audit/round2/amd64/build-controls.sh` builds `work/CopyBlock`; then
-`LEAN_PATH=$PWD/audit/round2/amd64/work/CopyBlock:$(lake env printenv LEAN_PATH) lake env lean audit/round2/amd64/controls/DFMemmove.lean`. -/
+Run: `test/redteam/rounds/round2/amd64/build-controls.sh` builds `work/CopyBlock`; then
+`LEAN_PATH=$PWD/test/redteam/rounds/round2/amd64/work/CopyBlock:$(lake env printenv LEAN_PATH) lake env lean test/redteam/rounds/round2/amd64/controls/DFMemmove.lean`. -/
 
 open Janus Janus.Amd64
 

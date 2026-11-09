@@ -1,4 +1,4 @@
-// Command rtprint is the Go side of the rt-print differential test (audit/rt-print/run.sh).
+// Command rtprint is the Go side of the rt-print differential test (test/redteam/rounds/rt-print/run.sh).
 //
 // It generates a deterministic list of test cases from a seed and, for each case, prints ONE
 // line with the builtin println (runtime/print.go, written to stderr by the runtime itself):
@@ -6,7 +6,7 @@
 //	println(id, value)    ->  "<id> <value>\n"
 //
 // (plus a few multi-operand / print-without-ln shapes, see below). On stdout it writes the
-// case list, one case per line, which audit/rt-print/Diff.lean reads to produce the expected
+// case list, one case per line, which test/redteam/rounds/rt-print/Diff.lean reads to produce the expected
 // stderr bytes from the Lean spec Janus.Spec.Print. Case kinds and their fields (hex):
 //
 //	u V        println(id, uint64(V))

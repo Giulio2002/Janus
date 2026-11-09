@@ -218,7 +218,7 @@ var incrEnvSkip = map[string]bool{
 	//                          and a restore is re-hashed, then stamped, pin-checked and kernel-replayed exactly like a compiled
 	//                          build, so a hit can never turn a failing check into a passing one; any doubt is a full compile. Its
 	//                          value is a per-host/per-user path ($XDG_CACHE_HOME or $HOME), not a property of what is checked
-	//   JANUS_GATE_RUN_ID      names this gate run (scripts/lib/gate-decoder.sh binds audit/bin/janus-decode-gate to it): it differs per run
+	//   JANUS_GATE_RUN_ID      names this gate run (scripts/lib/gate-decoder.sh binds test/redteam/bin/janus-decode-gate to it): it differs per run
 	//                          and selects nothing that is checked
 	"JANUS_FRAMEWORK_STORE": true, "JANUS_GATE_RUN_ID": true, "JANUS_GATE_TREE0": true, "JANUS_GATE_AUTO_WHY": true, "JANUS_GATE_ROUNDS_LANES": true, "JANUS_GATE_AUTO_BUDGET": true,
 	"JANUS_VERIFY_MEM_BUDGET_GIB": true, "JANUS_ROUNDS_LANES": true, "JANUS_LAKEGUARD_PIN": true, "JANUS_LAKEGUARD_ROOT": true,

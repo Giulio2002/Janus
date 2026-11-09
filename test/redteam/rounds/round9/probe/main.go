@@ -1,5 +1,5 @@
 // Command probe9 calls the heap-allocation examples (examples/basic/zalloc.go) the way real
-// Go code does, so that audit/round9/probe/*.py can stop at the calls under gdb (amd64) or
+// Go code does, so that test/redteam/rounds/round9/probe/*.py can stop at the calls under gdb (amd64) or
 // qemu's gdb stub (arm64) and check the theorems' hypotheses against the real runtime state.
 //
 //	probe9 loop N   N rounds of NewPair/MakeSlice/AppendOne/SetNext
@@ -55,7 +55,7 @@ func main() {
 		}
 	case "maps":
 		// small maps looked up from the main goroutine and from fresh goroutines
-		// (audit/round9/probe/maps_amd64.py checks smallModel's heap interval at each call)
+		// (test/redteam/rounds/round9/probe/maps_amd64.py checks smallModel's heap interval at each call)
 		done := make(chan bool)
 		for j := 0; j < 8; j++ {
 			go func(j int) {

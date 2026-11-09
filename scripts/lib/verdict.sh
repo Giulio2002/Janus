@@ -8,7 +8,7 @@
 #                  "NOVERDICT (...)"  if there is no such line;
 #                  "AMBIGUOUS (...)"  if a Verified line coexists with an Invalid/Error line (a diagnostic that echoes
 #                                     text, or a verdict hidden behind an earlier line): a row can then trust neither.
-#                  Rows treat NOVERDICT and AMBIGUOUS as BROKEN for every expectation (audit/run-all.sh row()).
+#                  Rows treat NOVERDICT and AMBIGUOUS as BROKEN for every expectation (test/redteam/run-all.sh row()).
 #   lean_first   : stdin -> the first line that is not a memory-guard banner.
 verdict_line() {
   local out; out="$(awk '
@@ -22,7 +22,7 @@ lean_first() { grep -v -E '^(janus: memory guard|janus-memguard:|memguard[:[])' 
 
 # verdict_reason : stdin -> verdict_line, plus " [Stage: S]" (the first "Stage:" line of the stream) and, when Lean rejected a file, " [Lean: E ; G]"
 # (E = the first Lean error message without its file:line:col prefix, G = the first goal line `⊢ …` after it, if any). The reason a
-# row's `blocked` pin (audit/lib/blocked.sh, audit/lib/blocked-pins.tsv) is matched against when the row only carries a verdict line.
+# row's `blocked` pin (test/redteam/lib/blocked.sh, test/redteam/lib/blocked-pins.tsv) is matched against when the row only carries a verdict line.
 verdict_reason() {
   local all; all="$(cat)"
   local v; v="$(verdict_line <<<"$all")"

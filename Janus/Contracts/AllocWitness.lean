@@ -26,7 +26,7 @@ constant), `addr` and `hnew`. The caller then only writes the function-specific 
 The helper lemmas below (`heapZero_of_bytes`, `allocH_intro`) prove the heap part of `H` for a
 state whose bytes are zero on the heap. Examples: `examples/proofs/NewPair.lean`,
 `examples/proofs-amd64/NewPair/Proof.lean`; the pattern's source is
-`audit/round9/controls/NewPair_witness.lean`.
+`test/redteam/rounds/round9/controls/NewPair_witness.lean`.
 -/
 
 namespace Janus.Contracts.AllocWitness

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare the Lean model's FSQRT results with Sail's C backend (audit/rt-asl/run.sh, A5 fsqrt).
+"""Compare the Lean model's FSQRT results with Sail's C backend (test/redteam/rounds/rt-asl/run.sh, A5 fsqrt).
 
     compare.py CASES LEAN_JSONL C_JSONL
 

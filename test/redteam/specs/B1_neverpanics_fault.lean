@@ -1,6 +1,6 @@
 import Extracted
 /-! ATTACK B1 (blocked by fix F3: this proof must now FAIL; see B1_refuted.lean): `NeverPanics` was satisfied by a run that *faults*. For Add256 (artifact
-audit/work/Add256) with `x = nil` the first instruction `LDR X3, [X1]` reads address 0. On real
+test/redteam/work/Add256) with `x = nil` the first instruction `LDR X3, [X1]` reads address 0. On real
 hardware Go turns that SIGSEGV into `panic: runtime error: invalid memory address or nil pointer
 dereference`; in the model it is the fault `outsideAllocation 0 8`, so `NeverPanics` is provable.
 The printed claim "Add256(z, nil, y) never panics" is false of the Go program. -/

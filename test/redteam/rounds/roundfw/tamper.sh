@@ -6,7 +6,7 @@
 # stack-guard displacement `CMPQ SP, 0x10(R14)`, or gcWriteBarrierN's `MOVL $0x10, R11`) XOR 8.
 set -euo pipefail
 bin=$1 out=$2 sym=$3
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 J="${JANUS_AUDIT_BIN:-$root/bin/janus}"
 addr=$("$J" list "$bin" --filter "$sym" | awk -v s="$sym" '$3 == s {print $1}')
 [ -n "$addr" ] || { echo "tamper: no function $sym in $bin" >&2; exit 1; }

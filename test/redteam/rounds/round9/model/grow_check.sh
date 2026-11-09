@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# audit/round9/model/grow_check.sh GROWFILE: compare the capacities a real binary chose
+# test/redteam/rounds/round9/model/grow_check.sh GROWFILE: compare the capacities a real binary chose
 # ("newLen oldCap newCap" lines from `probe9 grow K`) with the contract's growCap8.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
 f="$(mktemp --suffix=.lean)"; trap 'rm -f "$f"' EXIT
 { echo 'import Janus'
   echo 'open Janus.Contracts'

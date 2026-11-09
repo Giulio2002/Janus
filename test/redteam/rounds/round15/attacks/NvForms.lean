@@ -230,7 +230,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtR
 
 `correctness` assumes the allocation contract, so `janus verify` demands a witness for it
 (docs/SOUNDNESS.md, "Non-vacuity is required for contract-assuming main theorems"). The rows
-(audit/round15/run-round15.sh): a witness of any name whose statement is `∃ …` is read by the
+(test/redteam/rounds/round15/run-round15.sh): a witness of any name whose statement is `∃ …` is read by the
 auditor like `nonvacuous` (`alt`), also when the precondition is an applied lambda (`lam`); a witness
 that leaves a conjunct of the precondition out (`weak`, `lamWeak`) does not instantiate the theorem;
 `otherMain` has one more hypothesis (`hz : a ≠ b`) that no witness here exhibits. -/

@@ -182,7 +182,7 @@ end Witness
 
 
 
-/-! ## Witness attack (audit/roundofimpl/run-roundofimpl.sh): the witness omits the placement premise
+/-! ## Witness attack (test/redteam/rounds/roundofimpl/run-roundofimpl.sh): the witness omits the placement premise
 
 `ImplApart Extracted.program impl` is a hypothesis of `correctness`, so a witness that exhibits the
 rest but not the premise does not show the theorem non-vacuous (the runtime might have to overlap

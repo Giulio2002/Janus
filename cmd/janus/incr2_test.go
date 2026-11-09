@@ -374,7 +374,7 @@ func scanExportsRaw(src string, out []string) []string {
 
 // gateScriptPatterns are the scripts whose exports reach the gate's items and lanes (test scripts excluded).
 var gateScriptPatterns = []string{"scripts/gate.sh", "scripts/verify-*.sh", "scripts/build-examples*.sh", "scripts/example-*.sh", "scripts/lib/*.sh",
-	"audit/*.sh", "audit/*/*.sh", "audit/*/*/*.sh", "audit/*/*/*/*.sh"}
+	"test/redteam/*.sh", "test/redteam/*/*.sh", "test/redteam/*/*/*.sh", "test/redteam/*/*/*/*.sh", "test/redteam/*/*/*/*/*.sh"}
 
 func gateScriptFiles(root string) []string {
 	var files []string
@@ -450,7 +450,7 @@ func TestIncr2AuditScriptsComputeNoKeys(t *testing.T) {
 	n := 0
 	for _, f := range gateScriptFiles(repoRoot) {
 		rel, _ := filepath.Rel(repoRoot, f)
-		if !strings.HasPrefix(rel, "audit/") {
+		if !strings.HasPrefix(rel, "test/redteam/") {
 			continue
 		}
 		n++
@@ -524,7 +524,7 @@ func TestIncr2ExportScanCatchesEveryForm(t *testing.T) {
 		"prefixed":       "FOO=1 export JANUS_FAKE_RUN=1\n",
 		"allexport-pref": "set -a\nFOO=1 JANUS_FAKE_RUN=5 true\n",
 	}
-	dirs := []string{"scripts/lib", "scripts", "audit", "audit/round99", "audit/rt-x/deep", "audit/a/b/c"}
+	dirs := []string{"scripts/lib", "scripts", "test/redteam", "test/redteam/rounds/round99", "test/redteam/rounds/rt-x/deep", "test/redteam/a/b/c", "test/redteam/rounds/a/b/c"}
 	for name, body := range forms {
 		for _, d := range dirs {
 			t.Run(name+"@"+d, func(t *testing.T) {

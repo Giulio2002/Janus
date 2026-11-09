@@ -5,7 +5,7 @@ import Lean
 R1 proof-overwrite: run unconfined (`--unsafe-no-sandbox`), a proof's `#eval` finds the framework
 build on `LEAN_PATH` and corrupts `Janus/GoABI.olean` while it compiles. Under the sandbox the
 framework build is read-only and the write fails; without one, the framework pins catch it.
-Run it only against a throwaway copy of the framework (audit/run-all.sh uses one).
+Run it only against a throwaway copy of the framework (test/redteam/run-all.sh uses one).
 -/
 
 open System in

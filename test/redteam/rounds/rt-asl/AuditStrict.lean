@@ -7,14 +7,14 @@ import Lean
 `JanusASL/Audit.lean` selects theorems by name suffix (`_agree`, `_asl`, `toASL`) and checks
 only their axioms. It does not fail when a documented theorem is missing or renamed, and it
 does not look at what the theorems state, so a weakened statement (an extra hypothesis, a
-`True` conclusion) passes. This audit, run by `audit/rt-asl/run.sh`:
+`True` conclusion) passes. This audit, run by `test/redteam/rounds/rt-asl/run.sh`:
 
 * requires every theorem of docs/design/ASL.md's table by name, as a `theorem` (not an axiom, `opaque`
   or a definition), with only `propext`, `Classical.choice`, `Quot.sound`;
 * fails if a further `JanusASL.*` declaration matches the old audit's suffixes without being in
   the list (so the list and the documentation stay in step);
 * prints every statement (`STMT name : type`, with full names) for run.sh to compare with the
-  reviewed copy `audit/rt-asl/asl-statements.golden`; any change to a statement must be
+  reviewed copy `test/redteam/rounds/rt-asl/asl-statements.golden`; any change to a statement must be
   re-reviewed. -/
 
 open Lean Elab Command Meta

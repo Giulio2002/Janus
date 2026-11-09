@@ -12,7 +12,7 @@
 #   --changed   development only (scripts/verify-all-examples.sh --changed): not a gate run.
 #   --filter ERE   verify lane: only the items whose id matches (scripts/verify-all-examples.sh --filter)
 #   --gotest-run ERE   go test lane: only the tests whose name matches
-#   --rounds LIST  audit lane: only these rounds (audit/run-rounds.sh, e.g. "r2 r3")
+#   --rounds LIST  audit lane: only these rounds (test/redteam/run-rounds.sh, e.g. "r2 r3")
 #   --incremental  (or JANUS_GATE_INCREMENTAL=1) skip every item and lane for which the record of a PASS exists
 #               whose key is identical: a content hash of every input of the item (cmd/janus/incr.go,
 #               scripts/lib/incr.sh, docs/TESTING.md "Incremental gate"). Anything else runs, in full. The DEFAULT is
@@ -54,7 +54,7 @@
 #   --out DIR   logs and the timeline (default artifacts/gate/<UTC timestamp>, linked as artifacts/gate/latest)
 #
 # PHASE 1, prebuild (once; every later stage reads these read-only):
-#   go build bin/janus (+ audit/bin/janus-rounds, the audit lanes' copy), `lake build` and
+#   go build bin/janus (+ test/redteam/bin/janus-rounds, the audit lanes' copy), `lake build` and
 #   `lake build Janus Janus.Tools.Audit janus-audit`, the example binaries of every suite
 #   (scripts/build-examples{,-amd64,-asm,-sys,-rtmisc,-print,-cgo}.sh), and the framework build and
 #   replay verdict (a first verification of the Add example).
@@ -62,13 +62,13 @@
 #   verify      scripts/verify-all-examples.sh --cgo: ONE queue of every arm64, amd64, asm, rtmisc, sys, print
 #               and cgo item, longest first (scripts/lib/pool.sh), results streamed as they finish
 #   gotest      scripts/gotest-shards.sh: `go test -timeout 7000s ./cmd/...` in balanced shards, every test once
-#   rounds      audit/run-rounds.sh (all audit rounds, themselves parallel lanes)
+#   rounds      test/redteam/run-rounds.sh (all audit rounds, themselves parallel lanes)
 #   axiom       scripts/ci-axiom-guard.sh, then scripts/lint-example-addresses.sh (no hard-coded binary addresses in the example proofs)
 #   x86         scripts/x86formal.sh prove
 #   asl-build   scripts/asl.sh build (JanusASL, ArmASL and janus-asl-check, once: lakes that build in one package race)
 #   sail-build  scripts/oracle-sail.sh build (the Sail C oracle used by rtasl-fsqrt)
 #   rtasl-prove (builds JanusASL first: set $ASL_CACHE; the others wait for it) rtasl-rel rtasl-strict rtasl-replay rtasl-btf rtasl-probes rtasl-fsqrt rtasl-go
-#               audit/rt-asl/run.sh GROUP: the red-team round ASL, one lane per group
+#               test/redteam/rounds/rt-asl/run.sh GROUP: the red-team round ASL, one lane per group
 # The verdict is strict: a failed, timed-out or missing item or lane fails the gate (exit 1). Item timeouts
 # (JANUS_ITEM_TIMEOUT), the audit, the kernel replay, the pins and every other check are those of the
 # scripts the lanes run; this driver only schedules them.
@@ -223,7 +223,7 @@ elif [ -z "$jobs_n" ] || [ "$jobs_n" = auto ]; then
   read -r jobs_n auto_lanes auto_why < <(if [ -n "$_pk0" ]; then AUTOJOBS_PEAK_GIB="$_pk0" autojobs_size; else autojobs_size; fi)
   [ -n "$lanes_n" ] || lanes_n=$auto_lanes
   autosized=1
-  # the audit rounds' own lane count (audit/run-rounds.sh reads JANUS_ROUNDS_LANES; an older one ignores it)
+  # the audit rounds' own lane count (test/redteam/run-rounds.sh reads JANUS_ROUNDS_LANES; an older one ignores it)
   rounds_lanes_n="${JANUS_ROUNDS_LANES:-$(autojobs_rounds_lanes)}"; auto_budget="$(autojobs_budget)"
   # the verify pool memory budget (GiB): per-item admission in scripts/verify-all-examples.sh
   export JANUS_VERIFY_MEM_BUDGET_GIB="${JANUS_VERIFY_MEM_BUDGET_GIB:-$(autojobs_verify_budget_gib)}"
@@ -374,7 +374,7 @@ step() { # NAME CMD...: a prebuild step, logged and timed; returns its status
 # JanusTests and janus-oracle-amd64 are built by CI (.github/workflows/ci.yml) and are not default Lake targets
 pre_lake() { memguard_lake build && memguard_lake build Janus Janus.Tools.Audit janus-audit && memguard_lake build JanusTests janus-oracle janus-oracle-amd64 janus-decode janus-testfloat && gate_save_decoder "$root"; }
 pre_gobin() { CGO_ENABLED=0 go build -o bin/janus ./cmd/janus; }
-pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.new && mv -f audit/bin/janus-rounds.new audit/bin/janus-rounds; }
+pre_rounds_bin() { mkdir -p test/redteam/bin && cp -f bin/janus test/redteam/bin/janus-rounds.new && mv -f test/redteam/bin/janus-rounds.new test/redteam/bin/janus-rounds; }
 # The go tests' prebuilt framework fixture (cmd/janus/fixture_test.go, docs/TESTING.md "Go tests"): built here, once, by
 # the tests' TestMain (a run that selects no test), so the gotest lane does not pay for it; it runs beside the verify pool.
 # Two stages (scripts/lib/dag.sh): the embedded framework's build and replay, in the fixture only (no user cache, no checkout
@@ -398,7 +398,7 @@ rm -f "$out/.pinned" "$out/fw_hash0"
 JANUS_REAL_LAKE="$(command -v lake)"; export JANUS_REAL_LAKE JANUS_LAKEGUARD_ROOT="$root" JANUS_LAKEGUARD_PIN="$out/.pinned"
 export PATH="$root/scripts/lib/lakeguard:$PATH"
 export JANUS_EXAMPLES_PREBUILT=1 JANUS_GATE_PREBUILT=1
-JANUS_GATE_RUN_ID="$$.$(date +%s%N)"; export JANUS_GATE_RUN_ID   # binds audit/bin/janus-decode-gate to this run (scripts/lib/gate-decoder.sh)
+JANUS_GATE_RUN_ID="$$.$(date +%s%N)"; export JANUS_GATE_RUN_ID   # binds test/redteam/bin/janus-decode-gate to this run (scripts/lib/gate-decoder.sh)
 . "$root/scripts/lib/dag.sh"
 dag_check || { echo "gate: internal error: the stage graph is inconsistent"; exit 1; }
 
@@ -413,7 +413,7 @@ dag_check || { echo "gate: internal error: the stage graph is inconsistent"; exi
 mktree() { # DIR [private]: a private copy of the sources and of the finished framework build (kept when present: same hash)
   # "private": JanusASL/.lake is a real directory of the tree's own (filled from the verified ASL cache by asl.sh), not
   # the symlink to the checkout's build that the other lake trees share; a lane in such a tree can never write the checkout
-  local -a rs=(--exclude=/.git --exclude=/artifacts --exclude=/audit/bin --exclude=/JanusASL/.lake --exclude=/JanusX86/.lake
+  local -a rs=(--exclude=/.git --exclude=/artifacts --exclude=/test/redteam/bin --exclude=/JanusASL/.lake --exclude=/JanusX86/.lake
     --exclude=/oracle-sail/target --exclude=/bin --exclude=/.gate-tree-ready)
   if [ -f "$1/.gate-tree-ready" ]; then
     # a kept tree is reused only if its CONTENT still equals the sources (rsync -c compares checksums, not times): a tree edited after it was
@@ -484,7 +484,7 @@ needs() { local r="" n; for n in "$@"; do ! selected "$n" || r="${r:+$r }$n"; do
 add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed} ${incremental:+--incremental} ${vfilter:+--filter '$vfilter'}"
 JANUS_POOL_DIR="$out/verify"; export JANUS_POOL_DIR
 addc gotest "JANUS_REQUIRE_FIXTURE=1 JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
-addc rounds "${rounds_lanes_n:+export JANUS_ROUNDS_LANES=$rounds_lanes_n; }audit/run-rounds.sh $rounds"
+addc rounds "${rounds_lanes_n:+export JANUS_ROUNDS_LANES=$rounds_lanes_n; }test/redteam/run-rounds.sh $rounds"
 add axiom "scripts/ci-axiom-guard.sh && scripts/lint-example-addresses.sh"
 # (self-test hook, scripts/lib/test-gatelanes.sh: one extra lane running JANUS_GATE_TEST_LANE in the lake tree)
 [ -z "${JANUS_GATE_TEST_LANE:-}" ] || add testlane "$(laneenv "$tree") cd '$tree' && $JANUS_GATE_TEST_LANE"
@@ -505,10 +505,10 @@ add sail-build "$(laneenv "$tree") cd '$tree' && scripts/oracle-sail.sh build"
 for g in prove rel strict replay btf probes fsqrt go; do
   nd=""
   # rtasl-prove (scripts/asl.sh prove) builds JanusASL; two lakes in one package race, so every other lake-using
-  # group runs after it (as in audit/rt-asl/run.sh, where prove is the first group)
+  # group runs after it (as in test/redteam/rounds/rt-asl/run.sh, where prove is the first group)
   case "$g" in prove) nd="$(needs asl-build)" ;; btf|go) ;; fsqrt) nd="$(needs rtasl-prove sail-build)" ;; *) nd="$(needs rtasl-prove)" ;; esac
   gt="$tree"; [ "$g" != go ] || gt="$tree_go"
-  addc "rtasl-$g" "$(laneenv "$gt") export RT_ASL_KEEP_DIR='$out/lanes/rtasl-$g.keep'; cd '$gt' && audit/rt-asl/run.sh $g" "$nd"
+  addc "rtasl-$g" "$(laneenv "$gt") export RT_ASL_KEEP_DIR='$out/lanes/rtasl-$g.keep'; cd '$gt' && test/redteam/rounds/rt-asl/run.sh $g" "$nd"
 done
 # The stages the selected lanes need (and only those: a run with --only builds only what it reads), queued with their
 # dependencies. Prebuild stages and trees are not subject to --only/--skip.

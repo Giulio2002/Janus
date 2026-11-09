@@ -8,10 +8,10 @@
 # (`OfImplAttacksAmd64.lean`).
 # Exits 1 if an attack verifies or a control stops verifying. Uses --fresh and a private temporary cache.
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-R=audit/roundofimpl
+R=test/redteam/rounds/roundofimpl
 J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
 if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; go build -o "$J" ./cmd/janus || exit 1; fi
 if [ "${JANUS_AUDIT_PREBUILT:-}" != 1 ]; then
@@ -30,7 +30,7 @@ mapfile -t tg < <(scripts/example-targets.sh NewPair)
 broken=()
 P=Proof
 blk() { awk -v n="=== $P.$1:" 'index($0,n)==1{p=1;print;next} /^=== /{p=0} p' <<<"$all"; }
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 row() { # NAME expect(blocked|Verified) pattern...
   local name=$1 expect=$2 out verdict status="" pat; shift 2
   out="$(blk "$name")"
@@ -43,8 +43,8 @@ row() { # NAME expect(blocked|Verified) pattern...
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
   # every attack must be stopped by its rule, never by an incomplete proof
   if grep -q sorryAx <<<"$out"; then status=BROKEN; verdict="$verdict (rejected by sorryAx, not by the audit rule)"; fi
-  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check roundofimpl/run-roundofimpl.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  # blocked rows: pinned reason, and no Lean elaboration failure (test/redteam/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check rounds/roundofimpl/run-roundofimpl.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-34s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   if [ -n "$status" ] && [ "$expect" = Verified ]; then sed -n 2,14p <<<"$out" | cut -c1-240 | sed 's/^/      /'; fi
@@ -73,7 +73,7 @@ ctl ctl9
 row ctl10 blocked 'about the runtime implementation `impl2`' 'but the statement runs `Extracted.program.link impl`'
 ctl Shadow.ctl7
 # ctl11 states the growslice spec at the address of runtime.newobject (the only contract NewPair has): the spec of another function, rejected;
-# the growslice live contract is a control in audit/roundspecbind (g2)
+# the growslice live contract is a control in test/redteam/rounds/roundspecbind (g2)
 row ctl11 blocked 'with the spec `growsliceSpec`' 'which describes runtime.growslice'
 echo "== arm64: attacks"
 row r1 blocked 'ofImpl impl'

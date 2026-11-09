@@ -1,4 +1,4 @@
-# Contracts without a kernel-checked non-vacuity witness yet (audit/round9/sat_check.py reports
+# Contracts without a kernel-checked non-vacuity witness yet (test/redteam/rounds/round9/sat_check.py reports
 # them as OPEN; any contract missing from this list and from the witnesses fails the SAT row).
 # Entries are FILE:CONTRACT. Remove a line when Janus/Contracts/<File>Sat*.lean proves <name>_satisfiable.
 # The map contracts take an abstract model M : MapModel (Env, Rep, priv), so they are not

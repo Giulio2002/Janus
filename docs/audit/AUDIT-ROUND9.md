@@ -9,7 +9,7 @@ lookalike table).
 
 The lesson from AUDIT-FP.md (X64-MXCSR-STICKY) was the method: for every hypothesis, ask whether
 a real call in a real process meets it, and check it on a running binary. Each check is a row of
-`audit/round9/run-round9.sh`. The probes are `audit/round9/probe` (a Go program calling the
+`test/redteam/rounds/round9/run-round9.sh`. The probes are `test/redteam/rounds/round9/probe` (a Go program calling the
 examples, built with go1.26.0), a gdb script for amd64 and an in-process reader for arm64 run
 under qemu-aarch64. The host has no aarch64 gdb.
 
@@ -18,7 +18,7 @@ under qemu-aarch64. The host has no aarch64 gdb.
 | ID | Severity | Finding | Status | Rows |
 |---|---|---|---|---|
 | C1 | **critical** (vacuity) | **No code could meet the allocation contracts.** `NewobjectContract`, `MakesliceContract`, `GrowsliceContract` and `MallocgcContract`, on both ISAs, are `Summary`s over every state satisfying a precondition that said nothing about the runtime's own state. One such state has a 2^47-byte request (`≤ maxAlloc`) and no heap mapped. Regions never change, so no object can be returned there. The hypothesis was false for every implementation, address and `rt`, so the six NewPair/MakeSlice/AppendOne theorems were vacuous. The real runtime throws `out of memory` on such a request. | **BROKEN → fixed** | C1a–C1d, C1_ctl |
-| SAT | high (process) | **No contract had to show it was satisfiable.** C1 went unnoticed because nothing required a witness. Row SAT (`audit/round9/sat_check.py`) now finds every runtime contract under `Janus/Contracts` (a `def … : Prop` whose body is a `Summary`) and requires `theorem <name>_satisfiable` in `Janus.Contracts.<File>Sat` (`…SatAmd64`), imported by `Janus.lean` so that `lake build` kernel-checks it: an implementation, its parameters, and a state satisfying the whole precondition. The 8 allocation contracts have one (`Janus/Contracts/AllocSat.lean`, `AllocSatAmd64.lean`). The 18 map contracts (arm64 + amd64) are listed as OPEN in `audit/round9/sat-pending.txt` (owner: agent/maps); any other contract without a witness fails the row, and a self-test row checks that removing a witness does. | **fixed** (maps open) | SAT, SAT_selftest |
+| SAT | high (process) | **No contract had to show it was satisfiable.** C1 went unnoticed because nothing required a witness. Row SAT (`test/redteam/rounds/round9/sat_check.py`) now finds every runtime contract under `Janus/Contracts` (a `def … : Prop` whose body is a `Summary`) and requires `theorem <name>_satisfiable` in `Janus.Contracts.<File>Sat` (`…SatAmd64`), imported by `Janus.lean` so that `lake build` kernel-checks it: an implementation, its parameters, and a state satisfying the whole precondition. The 8 allocation contracts have one (`Janus/Contracts/AllocSat.lean`, `AllocSatAmd64.lean`). The 18 map contracts (arm64 + amd64) are listed as OPEN in `test/redteam/rounds/round9/sat-pending.txt` (owner: agent/maps); any other contract without a witness fails the row, and a self-test row checks that removing a witness does. | **fixed** (maps open) | SAT, SAT_selftest |
 | C2 | high (contract promises too much) | **16-alignment for header objects.** `Fresh` promised `ptr % 16 = 0` for every request whose size is a multiple of 16. A pointerful object of 513 to 32760 bytes follows an 8-byte malloc header (`mallocgcSmallScanHeader` returns `slot + 8`), so the real runtime returns `8 mod 16` for every one of them. | **BROKEN → fixed** | C2a, C2b |
 | M1 | high (vacuity) | **MallocFast held for no call on `m0`.** `MCacheOK` required the six runtime globals, as one range `[globLo, globHi)`, to be separate from the `m`. `runtime.m0` lies in `.bss` inside that range, so the theorem said nothing about any allocation made on the main thread's `m`. Probe (requests on m0, made during package init, where Go locks the main goroutine to m0): 0 of 20000 met it; with each global on its own, 19682 do. After init, the main goroutine runs on m0 for 30 to 70% of its calls, varying from run to run. | **BROKEN → fixed** | M1a, M1b |
 | S1 | medium (gratuitous exclusion) | **SetNext's `BarrierOK` excluded most real calls.** It required one interval `[lo, hi)` holding `g.m`, `m.p`, `p.wbBuf` and the buffer slots, and missing `n.Next` and the stack. In the arena these interleave. Probe (amd64, barrier on): 82 of 300 real calls could meet it, against 300 of 300 with per-object separation. | **fixed** | S1 |
@@ -47,7 +47,7 @@ keeps every region's accessibility, and the docs rightly note that no instructio
 **Why nothing meets it.** Take the state whose only regions are the 4112-byte stack window and
 the 16-byte descriptor, with `Size_ = 2^47`. It satisfies the precondition. A post state would
 need `2^47` writable bytes that exist in no region. So the contract is false whatever `impl`,
-`addr` and `rt` are. `audit/round9/model/Unsat.lean` proves this in the kernel
+`addr` and `rt` are. `test/redteam/rounds/round9/model/Unsat.lean` proves this in the kernel
 (`newobject_unsat : ¬ OldNewobjectContract p addr rt 4096`), with the pre-round-9 definition
 copied verbatim. The other three contracts fall the same way: each admits sizes up to `maxAlloc`
 and says nothing about the heap.
@@ -89,7 +89,7 @@ lets the discharger close more goals.
   `AllocSatAmd64.lean`: `newobject_satisfiable`, `mallocgc_satisfiable`, `makeslice_satisfiable`,
   `growslice_satisfiable` and their `…64` versions; toy code that returns a zeroed heap, an `H`,
   and a call state meeting the whole precondition for a non-zero size). The theorem built on the
-  contract fires too: `audit/round9/controls/NewPair_witness.lean`
+  contract fires too: `test/redteam/rounds/round9/controls/NewPair_witness.lean`
   places a two-instruction allocator (`MOVZ X0, #0x10000; RET`) at `runtime.newobject`. It
   chooses `rt` = a 64 KiB heap plus `Pair`'s descriptor, and `H` = "the argument is a
   descriptor inside `rt` of at most 32 KiB and the heap is writable and zero", and proves
@@ -97,7 +97,7 @@ lets the discharger close more goals.
   state that satisfies the whole precondition, `H` included, and instantiates
   `Proof.correctness`, so the theorem fires (row C1c).
 * Row C1b: the pre-fix argument, restated against the fixed contract
-  (`audit/round9/model/UnsatFixed.lean`), does not compile. The fixed contract holds for
+  (`test/redteam/rounds/round9/model/UnsatFixed.lean`), does not compile. The fixed contract holds for
   `H := fun _ _ _ _ => False`, so its negation is false.
 
 Remaining scope, now stated in SOUNDNESS.md: one allocation per theorem; stack moves (growth,
@@ -212,11 +212,11 @@ On the tree merged with main `a3626db` (HEAD of agent/redteam9), one heavy job a
 
 | Suite | Result |
 |---|---|
-| `audit/round9/run-round9.sh` | all rows as expected (C1a–d, C2a–b, M1a–b, S1, MP, G1, SAT, SAT_selftest, H2a–c, I1g, D1, MG), 526 s |
+| `test/redteam/rounds/round9/run-round9.sh` | all rows as expected (C1a–d, C2a–b, M1a–b, S1, MP, G1, SAT, SAT_selftest, H2a–c, I1g, D1, MG), 526 s |
 | `scripts/verify-all-examples.sh -j 1` | all ok: 74 arm64 items, 74 amd64 functions, 10 assembly items (MallocFast, MakeAdder included) |
 | `go test -count=1 -timeout 50m ./cmd/...` | ok, 584 s |
-| `audit/run-all.sh -j 1` | ok, 367 s |
-| `audit/round{2,3,4,5,6,7,8}` runners, `audit/rt-model/run.sh` | all rows as expected |
+| `test/redteam/run-all.sh -j 1` | ok, 367 s |
+| `test/redteam/rounds/round{2,3,4,5,6,7,8}` runners, `test/redteam/rounds/rt-model/run.sh` | all rows as expected |
 
 The first post-merge run caught two things, both fixed: main's new example `MakeAdder` still used
 the old contract shape, and the M1 probe was nondeterministic (whether the main goroutine runs on

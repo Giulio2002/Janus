@@ -7,7 +7,7 @@ Each `example` evaluates `Janus.Arm64.step` / `Janus.Amd64.step` on a concrete s
 expected value on the right is computed by hand from the Arm ARM (DDI 0487) ASL or the Intel
 SDM pseudocode (the derivation is in the comment above it), not taken from the model or from
 hardware. The same encodings are also run against hardware by `run-model.sh` (`gen.py`).
-Compile with `lake env lean audit/round5/model/HandDerived.lean`.
+Compile with `lake env lean test/redteam/rounds/round5/model/HandDerived.lean`.
 -/
 
 namespace Round5.A64

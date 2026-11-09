@@ -2,8 +2,8 @@
 # Red-team round ASL (docs/audit/AUDIT-ASL.md): JanusASL's meaning, the Sail backend patches, and
 # concurrent `janus verify`. Writes only to a mktemp directory (and the Go/Lake build caches).
 #
-#   audit/rt-asl/run.sh            every row, one group after the other
-#   audit/rt-asl/run.sh GROUP...   only these groups (independent: scripts/gate.sh runs each as its own
+#   test/redteam/rounds/rt-asl/run.sh            every row, one group after the other
+#   test/redteam/rounds/rt-asl/run.sh GROUP...   only these groups (independent: scripts/gate.sh runs each as its own
 #                                  lane): prove (asl.sh prove) rel (A1-A3) strict (A6) replay (A7)
 #                                  btf (A8) probes (A5/C2) fsqrt (A5 fsqrt) go (C1)
 #   RT_ASL_SKIP_GO=1 ...           skip the concurrency tests (about 6 min)
@@ -15,11 +15,11 @@
 # Every row prints its result; a row whose result contradicts its expectation is marked
 # BROKEN and the script exits 1.
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# shellcheck source=../../scripts/lib/memguard.sh
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+# shellcheck source=../../../../scripts/lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
 memguard_self "$@"
-here="$root/audit/rt-asl"
+here="$root/test/redteam/rounds/rt-asl"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 DEPS="${DEPS:-/srv/janus-asl-deps}"
@@ -56,7 +56,7 @@ grp_prove() {
 }
 
 grp_rel() {
-  echo "== A1-A3: what Rel / LinuxEL0Config / the transfers mean (audit/rt-asl/RelMeaning.lean)"
+  echo "== A1-A3: what Rel / LinuxEL0Config / the transfers mean (test/redteam/rounds/rt-asl/RelMeaning.lean)"
   lean_in_pkg "$here/RelMeaning.lean" > "$W/rel.log" 2>&1
   n_ok=$(grep -c 'rt-asl ok' "$W/rel.log")
   if grep -q 'error' "$W/rel.log" || [ "$n_ok" -ne 8 ]; then
@@ -178,7 +178,7 @@ fsqrt_dump_parallel() { # CASES OUT ERR (cwd: JanusASL)
 
 grp_fsqrt() {
   echo "== A5 fsqrt: FSQRT on the Lean model (sqrt_real replacement) against Sail's C backend"
-  # audit/rt-asl/sqrt: ~7,000 FSQRT cases (binary32/64, every rounding mode, FZ, DN; exact squares,
+  # test/redteam/rounds/rt-asl/sqrt: ~7,000 FSQRT cases (binary32/64, every rounding mode, FZ, DN; exact squares,
   # denormals, near-midpoint roots, +-0, +-inf, negatives, NaN payloads), run by JanusASL's Lean model
   # (`janus-asl-check --dump-asl`) and by oracle-sail's driver (sail-arm through Sail's C backend);
   # V0-V31 and FPSR must be equal on every case.

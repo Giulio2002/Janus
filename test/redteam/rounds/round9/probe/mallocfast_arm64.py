@@ -1,4 +1,4 @@
-# python3 -I mallocfast_arm64.py BINARY  (BINARY = probe9-arm64, built from audit/round9/probe)
+# python3 -I mallocfast_arm64.py BINARY  (BINARY = probe9-arm64, built from test/redteam/rounds/round9/probe)
 # Stops at runtime.mallocgc calls with typ = nil and 16 <= size <= 1016 (the requests
 # examples/proofs/MallocFast.lean covers; growslice of []uint64 makes them) and evaluates every
 # conjunct of MCacheOK that is a property of the runtime state (Go 1.26 linux/arm64 layout, the

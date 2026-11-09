@@ -9,7 +9,7 @@ semantics.*
 Rounds 1–3 closed the statement *type* (round-trip and `checkInstArgs`) and, in round 3, inline
 instances in the *bodies* of disclosed proof-local defs. This round looks at **the report
 channels**: what the user actually reads, and whether each item is confirmed by a trusted check.
-Rows are in `audit/round4/` (`attacks/`, `run-round4.sh`) and `cmd/janus/round4_test.go`.
+Rows are in `test/redteam/rounds/round4/` (`attacks/`, `run-round4.sh`) and `cmd/janus/round4_test.go`.
 
 Severity, as in earlier rounds: **critical** = a misleading account prints `Verified`;
 **high** = a reported item the user relies on is missing or unconfirmed; **low** = hygiene.
@@ -101,7 +101,7 @@ was disclosed as `Proof.wide : Prop := 256 ≠ 0 ∨ True`, which reads at `Nat`
 is `0`. A disclosed definition used as a *hypothesis* can therefore read as trivially true while
 being false, and the reader gets no warning. That is the same class as round-3 R1: the
 disclosure is the reader's only definition of a name in the statement. (The row
-`audit/round4/attacks/D1_def_numeral_type.lean` keeps the hypothesis harmless with `∨ True` and
+`test/redteam/rounds/round4/attacks/D1_def_numeral_type.lean` keeps the hypothesis harmless with `∨ True` and
 checks only how it is printed.)
 
 **Fix** (`Janus/Tools/Audit.lean`, `termRoundTrips` + `discloseDef`): every disclosure is
@@ -147,10 +147,10 @@ statements and can be round-tripped like the theorem type.
 ## Regression status
 
 With this branch's changes: `scripts/verify-examples.sh` ✓, `scripts/verify-amd64-examples.sh` ✓,
-`audit/run-all.sh` ✓, `audit/round3/run-round3.sh` ✓, `audit/round4/run-round4.sh` ✓,
+`test/redteam/run-all.sh` ✓, `test/redteam/rounds/round3/run-round3.sh` ✓, `test/redteam/rounds/round4/run-round4.sh` ✓,
 `go test ./cmd/janus` ✓ (about 18 min; it needs `-timeout` above the 10-minute default).
 
-`audit/round2/run-round2.sh` exits 1 on its MEDIUM-1 row **with and without** these changes
+`test/redteam/rounds/round2/run-round2.sh` exits 1 on its MEDIUM-1 row **with and without** these changes
 (checked by rebuilding the auditor and `janus` from unmodified HEAD `ee8887e`). That is P1, and it
 is not a regression. The repro's start state leaves `df` at its default `false`, and with DF clear
 the model correctly copies forward. The theorem is a true claim about one concrete DF = 0 state at
@@ -160,5 +160,5 @@ wrong rather than the verifier, but the owner of that row should decide; I left 
 ## Reproduce
 
 ```
-audit/round4/run-round4.sh
+test/redteam/rounds/round4/run-round4.sh
 ```

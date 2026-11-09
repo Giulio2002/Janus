@@ -1,7 +1,7 @@
 import Extracted
 
 /-! Round 10 V2a: the map contract `Assign` with `M.Laws` is unsatisfiable together with
-Insert's own precondition (`audit/round10/model/MapUnsat.lean`, copied below), so Insert's
+Insert's own precondition (`test/redteam/rounds/round10/model/MapUnsat.lean`, copied below), so Insert's
 theorem is vacuous: here it "proves" that `m[k] = v` stores `v + 1`. -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map

@@ -3,16 +3,16 @@
 # ftoa/Dragonbox/ctoa) against the Lean spec Janus.Spec.Print, byte for byte, on linux/amd64
 # (native) and linux/arm64 (qemu-aarch64).
 #
-#   audit/rt-print/run.sh                   default: RTPRINT_N=200000 random float64 bit patterns
-#   RTPRINT_N=50000 audit/rt-print/run.sh   (and as many float32; the other counts scale with it)
+#   test/redteam/rounds/rt-print/run.sh                   default: RTPRINT_N=200000 random float64 bit patterns
+#   RTPRINT_N=50000 test/redteam/rounds/rt-print/run.sh   (and as many float32; the other counts scale with it)
 #   RTPRINT_SEED=7 ...                      another deterministic corpus
 #
 # Writes only to a mktemp directory (and the Go build cache). Exits 1 on any mismatch.
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# shellcheck source=../../scripts/lib/memguard.sh
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+# shellcheck source=../../../../scripts/lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
-here="$root/audit/rt-print"
+here="$root/test/redteam/rounds/rt-print"
 cd "$root" || exit 1
 export PATH="$HOME/.elan/bin:/usr/local/go/bin:$PATH"
 export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
@@ -30,7 +30,7 @@ mkdir -p "$W/olean/Janus/Spec" "$W/c"
 memguard_run -n rt-print-lean -- lean -R . -o "$W/olean/Janus/Spec/Print.olean" \
   -c "$W/c/Print.c" Janus/Spec/Print.lean || exit 1
 LEAN_PATH="$W/olean" memguard_run -n rt-print-lean -- lean -R . -c "$W/c/Diff.c" \
-  audit/rt-print/Diff.lean || exit 1
+  test/redteam/rounds/rt-print/Diff.lean || exit 1
 leanc -O2 -o "$W/diff" "$W/c/Print.c" "$W/c/Diff.c" || exit 1
 
 # GOGC is off inside the generator; invalidptr=0 because pointer cases carry fabricated words.

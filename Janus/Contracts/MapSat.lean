@@ -10,7 +10,7 @@ the read-only entry points; `MapModel0.MC`, one map of at most one entry, for `m
 execution to meet the contract for the model, the readiness predicate `H` where the contract
 takes one (`MapModel0.HAssign`: the map is empty; `MapModel0.HMake`: no map is alive yet), and
 a call state satisfying the contract's whole precondition, with a **non-nil** map where the
-contract is about one (`<contract>_satisfiable`; `audit/round9/sat_check.py`, row SAT).
+contract is about one (`<contract>_satisfiable`; `test/redteam/rounds/round9/sat_check.py`, row SAT).
 -/
 
 namespace Janus.Contracts.MapSat

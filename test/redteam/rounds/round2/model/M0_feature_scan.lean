@@ -5,7 +5,7 @@ instructions whose acceptance assumes an optional feature (FEAT_LSE, FEAT_LRCPC,
 the (formally optional) FP/AdvSIMD unit, plus DC ZVA / MRS DCZID (base Armv8.0, IMPLEMENTATION
 DEFINED block size).
 Run (from a copy of the arm64cov2 tree, after `lake build Janus`):
-  lake env lean audit/round2/model/M0_feature_scan.lean -/
+  lake env lean test/redteam/rounds/round2/model/M0_feature_scan.lean -/
 open Janus.Arm64
 
 def feat : Instr → Option String

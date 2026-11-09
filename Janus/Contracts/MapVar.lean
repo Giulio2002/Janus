@@ -45,7 +45,7 @@ memory (`rtView M.priv`), where type descriptors live.
 
 **Allocation.** `makemap` and every `mapassign*` allocate, so they take the readiness predicate
 `H : RtReady` of round 9 (`Contracts.Ready H M.priv args s`): without it no code could meet
-them (`audit/maps/model/Unsat.lean`).
+them (`test/redteam/maps/model/Unsat.lean`).
 
 **Not covered.** A nil map passed to `mapassign*` panics; the contracts require a non-nil map.
 `makemap` with a non-nil `m` (a header the compiler placed on the caller's stack, for a map that

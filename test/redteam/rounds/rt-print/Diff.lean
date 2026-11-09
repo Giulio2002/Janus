@@ -1,11 +1,11 @@
 /-
-Lean side of the rt-print differential test (audit/rt-print/run.sh).
+Lean side of the rt-print differential test (test/redteam/rounds/rt-print/run.sh).
 
-Reads the case list written by audit/rt-print/gen (one case per line, see gen/main.go) and
+Reads the case list written by test/redteam/rounds/rt-print/gen (one case per line, see gen/main.go) and
 writes to stdout the bytes the Go runtime's builtin print must have written to stderr, computed
 with the spec functions of Janus.Spec.Print only.
 
-  lean --run audit/rt-print/Diff.lean CASES     (or compiled, as run.sh does)
+  lean --run test/redteam/rounds/rt-print/Diff.lean CASES     (or compiled, as run.sh does)
 -/
 import Janus.Spec.Print
 

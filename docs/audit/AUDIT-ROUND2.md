@@ -14,7 +14,7 @@ tricks, sandbox and replay holes, framework-olean rebuilding, and model issues u
 atomics/DC-ZVA coverage. This round attacks the auditor's constant/instance rules, the new
 dependency/replay/sandbox machinery, and the newest model semantics.
 
-Attacks live in `audit/round2/` (`attacks/`, `controls/`, `model/`, `amd64/`) with
+Attacks live in `test/redteam/rounds/round2/` (`attacks/`, `controls/`, `model/`, `amd64/`) with
 `run-round2.sh`. Severity: **critical** = a false/misleading theorem prints `Verified`;
 **high** = a wrong value for a valid instruction in the trusted model; **medium** = an accepted
 encoding hardware rejects (matters only if a fixed binary could rely on it); **low** = hygiene.
@@ -24,7 +24,7 @@ encoding hardware rejects (matters only if a fixed binary could rely on it); **l
 ## CRITICAL-1 (BROKEN): a non-canonical instance written *inline in the statement* makes the printed theorem lie
 
 **Status: BROKEN.** Reproduced against the shipped `example.com/basic.Add` (which computes
-`x + y`). Files: `audit/round2/attacks/S1_inline_instance.lean`, `S1c_mul.lean`.
+`x + y`). Files: `test/redteam/rounds/round2/attacks/S1_inline_instance.lean`, `S1c_mul.lean`.
 
 ### What happens
 
@@ -108,7 +108,7 @@ ugly but makes the lie detectable.
 
 ## Blocked / correct (verifier & auditor)
 
-* **M1 — Lean module-system proof (`module` / `public import`).** `audit/round2/attacks/M1_module_system.lean`.
+* **M1 — Lean module-system proof (`module` / `public import`).** `test/redteam/rounds/round2/attacks/M1_module_system.lean`.
   A `module`-mode proof whose theorem body lives in the `.olean.private` part could, in
   principle, hide the proof term from the auditor's `importModules (loadExts := false)`. Blocked
   earlier than that: `Extracted` is a plain (non-`module`) module, so Lean refuses
@@ -134,7 +134,7 @@ ugly but makes the lie detectable.
   after every untrusted step, the audit and the replay. No break found.
 
 * **U1 — `unshare` fallback writability (blocked; residual low).**
-  `audit/round2/attacks/U1_unshare_cache_write.lean` (run with `bwrap` hidden from `PATH`). The
+  `test/redteam/rounds/round2/attacks/U1_unshare_cache_write.lean` (run with `bwrap` hidden from `PATH`). The
   fallback remounts only `/` read-only; I confirmed that other mounts (`/tmp`, `/dev/shm`,
   `/boot`, `/run/user/0` on this host) stay writable inside it and the writes land on the host.
   Escalation to the trusted cache is blocked both ways: with the cache on `/`, the proof's write
@@ -175,25 +175,25 @@ satisfiable (so the theorems are not vacuous), each instantiating the shipped `c
 concrete `Returns`, elaborated with only `propext`/`Quot.sound`/`Classical.choice` (no
 `native_decide`):
 
-* `audit/round2/controls/AtomicAdd_witness.lean` — LSE flag byte set, 8-aligned writable `p`
+* `test/redteam/rounds/round2/controls/AtomicAdd_witness.lean` — LSE flag byte set, 8-aligned writable `p`
   disjoint from `runtime.arm64HasATOMICS`; `Proof.correctness` fires. ✓
-* `audit/round2/controls/CopyBlock_witness.lean` — readable `g.stackguard0` below `SP`, 56-byte
+* `test/redteam/rounds/round2/controls/CopyBlock_witness.lean` — readable `g.stackguard0` below `SP`, 56-byte
   writable stack window, 128-byte writable `dst`, 128-byte readable `src`, all disjoint;
   `Proof.correctness` fires. ✓
 
-(These complement round-1 `audit/controls/` for Add/Add256/Get.)
+(These complement round-1 `test/redteam/controls/` for Add/Add256/Get.)
 
 ---
 
 ## Model-level findings
 
-arm64: `audit/round2/model/` (audited on `agent/arm64cov2` at accb078, which adds
-`Janus/Arm64/Vector.lean`; see its `README.txt`). amd64: `audit/round2/amd64/` (committed tree
+arm64: `test/redteam/rounds/round2/model/` (audited on `agent/arm64cov2` at accb078, which adds
+`Janus/Arm64/Vector.lean`; see its `README.txt`). amd64: `test/redteam/rounds/round2/amd64/` (committed tree
 8bf7610). No case was found where either model computes a wrong value for a valid instruction.
 
 ### MEDIUM-1 (BROKEN under a literal reading): amd64 direction flag not in the state
 
-`audit/round2/amd64/controls/DFMemmove.lean`, theorem
+`test/redteam/rounds/round2/amd64/controls/DFMemmove.lean`, theorem
 `DFRepro.memmove_backward_rep_copies_forward`, against the amd64 `CopyBlock` extraction
 (`runtime.memmove`). I re-ran it: `janus verify … --theorem DFRepro.memmove_backward_rep_copies_forward`
 prints **Verified** (axioms `Quot.sound`, `propext`). The theorem says that running from the

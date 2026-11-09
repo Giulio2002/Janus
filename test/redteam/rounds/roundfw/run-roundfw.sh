@@ -3,31 +3,31 @@
 # write-barrier contracts). Exits 1 if a tampered runtime function is accepted as a contract, a
 # statement naming a global the extraction does not record verifies, or a control stops working.
 # Every janus verification uses --fresh and a private temporary cache. Writes only under
-# audit/roundfw/work/ and a mktemp directory (removed at the end).
-# Usage: audit/roundfw/run-roundfw.sh [-j N]
+# test/redteam/rounds/roundfw/work/ and a mktemp directory (removed at the end).
+# Usage: test/redteam/rounds/roundfw/run-roundfw.sh [-j N]
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../scripts/lib/parallel.sh
+# shellcheck source=../../../../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
 par_init "$@"
-J="$root/audit/roundfw/work/janus"; mkdir -p "$(dirname "$J")"
-# audit/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
+J="$root/test/redteam/rounds/roundfw/work/janus"; mkdir -p "$(dirname "$J")"
+# test/redteam/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 export JANUS_AUDIT_BIN="$J"
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 [ -f artifacts/examples-amd64 ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
-W=audit/roundfw/work/rows; rm -rf "$W"; mkdir -p "$W"
+W=test/redteam/rounds/roundfw/work/rows; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-roundfw.XXXXXX")" || exit 1   # 0700: the cache's parent
 trap 'rm -rf "$T"' EXIT
 mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"
 broken=()
-A=audit/roundfw/attacks
+A=test/redteam/rounds/roundfw/attacks
 
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 row() {
   local name=$1 expect=$2 verdict status="" pat
   shift 2
@@ -38,8 +38,8 @@ row() {
     Verified) case $verdict in Verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
-  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check roundfw/run-roundfw.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  # blocked rows: pinned reason, and no Lean elaboration failure (test/redteam/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check rounds/roundfw/run-roundfw.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-44s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0
@@ -59,7 +59,7 @@ pin() {
     printf '  %-44s %-8s %s   <-- BROKEN\n' "P_${arch}_${fn}_control" pinned "$(head -2 <<<"$out" | tr '\n' ' ' | cut -c1-120)"
     broken+=("P_${arch}_${fn}_control")
   fi
-  audit/roundfw/tamper.sh "$bin" "$T/$arch-$fn.bin" "runtime.$fn" || { broken+=("P_${arch}_${fn}_tamper"); return 0; }
+  test/redteam/rounds/roundfw/tamper.sh "$bin" "$T/$arch-$fn.bin" "runtime.$fn" || { broken+=("P_${arch}_${fn}_tamper"); return 0; }
   out="$("$J" extract "$T/$arch-$fn.bin" "$entry" "$d/tampered" --contract "runtime.$fn" "$@" 2>&1)" || true
   row "P_${arch}_${fn}_tampered" blocked "is not the code of the runtime's runtime.$fn" "--contract names runtime.$fn"
 }

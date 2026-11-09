@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Audit-only sweep (UP3b): run the statement + witness audit (JANUS_STOP_AFTER_AUDIT=1, no verification) over every example proof
 # of the arm64 (examples/proofs) and amd64 (examples/proofs-amd64) sweeps and list the theorems the audit rejects.
-# Usage: audit/roundup3/audit-sweep.sh OUTDIR [arm64|amd64] [Name ...]    (default: every example, both ISAs)
+# Usage: test/redteam/rounds/roundup3/audit-sweep.sh OUTDIR [arm64|amd64] [Name ...]    (default: every example, both ISAs)
 # OUTDIR/results.tsv: ISA<TAB>Name<TAB>ok|REJECT|NOPROOF<TAB>first reason; OUTDIR/logs/ISA-Name.log; extractions in OUTDIR/art.
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "$root" || exit 1
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"; cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 out="${1:?outdir}"; shift; isa="${1:-both}"; [ $# -gt 0 ] && shift
 mkdir -p "$out/logs" "$out/art" "$out/cache"; export JANUS_CACHE_DIR="$out/cache"

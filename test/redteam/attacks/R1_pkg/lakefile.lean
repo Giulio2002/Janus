@@ -123,7 +123,7 @@ def plant : IO Unit := do
 
 package r1
 
--- audit/run-all.sh and the Go tests substitute the framework checkout and, for inject-dep, the
+-- test/redteam/run-all.sh and the Go tests substitute the framework checkout and, for inject-dep, the
 -- dependency (they also write lake-manifest.json).
 require janus from "@JANUS@"
 -- @EXTRA_REQUIRE@

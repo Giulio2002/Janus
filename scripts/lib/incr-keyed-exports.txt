@@ -22,7 +22,7 @@ CGO_CFLAGS	keyed on purpose
 GOTOOLCHAIN	set by the example build scripts, which run before the keys are computed; keyed on purpose
 JANUS_GO_TOOLCHAIN	keyed on purpose
 JANUS_CACHE_DIR	audit rounds: a private mktemp cache set inside the lane after its key; run-specific by design, never read by a key
-JANUS_VERDICT_CACHE	audit/run-rounds.sh: the rounds lane's own verdict store, set inside the lane after its key
-JANUS_R7_NO_CACHE_ROWS	audit/run-rounds.sh: a constant of the rounds lane (1), set inside the lane after its key
-GODEBUG	audit/rt-print/run.sh: a constant (invalidptr=0) set inside the lane after its key
-LEAN_PATH	audit/round2/amd64/build-controls.sh: set inside a lane's script after its key; the lane key names the whole tree
+JANUS_VERDICT_CACHE	test/redteam/run-rounds.sh: the rounds lane's own verdict store, set inside the lane after its key
+JANUS_R7_NO_CACHE_ROWS	test/redteam/run-rounds.sh: a constant of the rounds lane (1), set inside the lane after its key
+GODEBUG	test/redteam/rounds/rt-print/run.sh: a constant (invalidptr=0) set inside the lane after its key
+LEAN_PATH	test/redteam/rounds/round2/amd64/build-controls.sh: set inside a lane's script after its key; the lane key names the whole tree

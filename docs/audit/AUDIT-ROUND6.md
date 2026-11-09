@@ -12,7 +12,7 @@ Guarantee under review: *a reader who reads the printed statement and the printe
 with Lean's standard meaning of core, Janus and dependency notation understands exactly the
 proposition that was proved, and that proposition is about the bytes of this binary.*
 
-Rows are in `audit/round6/` (`attacks/`, `stubmod/`, `run-round6.sh`), `cmd/janus/round6_test.go`
+Rows are in `test/redteam/rounds/round6/` (`attacks/`, `stubmod/`, `run-round6.sh`), `cmd/janus/round6_test.go`
 and `TestStubKind`. Severity is as in earlier rounds: **critical** means a misleading account
 prints `Verified`; **high** means a false claim about the binary prints `Verified`; **low** means
 hygiene.
@@ -138,7 +138,7 @@ and value. Message: "out-of-range numeral". Wrapping produced by *operations* (`
 
 ### F3 (HIGH, BROKEN → fixed): stub classification by symbol prefix
 
-`audit/round6/stubmod` is the module `runtime.panicky`. Its `lib.Zero` returns 0, and its
+`test/redteam/rounds/round6/stubmod` is the module `runtime.panicky`. Its `lib.Zero` returns 0, and its
 `main.Add(x, y)` returns `x + y + lib.Zero()`. The Go linker names the callee
 `runtime.panicky/lib.Zero` (only a dot in the *last* path element is escaped). Before the fix,
 `janus extract` printed `stub 0xa6010 panic runtime.panicky/lib.Zero`, and **F3a**,
@@ -202,18 +202,18 @@ equation-lemma disclosure is still recommended hardening, not a fix. It was not 
   annotating the type. Round 6 F2 now rejects it outright, and `run-round4.sh` checks that
   rejection. The property round 4 tested, that a disclosure carries a numeral's type when the
   plain print would read back at `Nat`, is checked on a new in-range fixture,
-  `audit/round4/attacks/D1b_def_numeral_type_inrange.lean`
+  `test/redteam/rounds/round4/attacks/D1b_def_numeral_type_inrange.lean`
   (`(255 : BitVec 8) + 1 = 0 ∨ True`, true at `BitVec 8` and false at `Nat`). The D2 checks,
   that `verify` and `explain` show the definitions, move to that fixture too.
 
 ## Regression status
 
-With this branch, all of these pass: `audit/round6/run-round6.sh`, `scripts/verify-examples.sh`,
-`scripts/verify-amd64-examples.sh`, `audit/run-all.sh`, `audit/round2/run-round2.sh` through
-`audit/round5/run-round5.sh`, and `go test -timeout 50m ./cmd/...`.
+With this branch, all of these pass: `test/redteam/rounds/round6/run-round6.sh`, `scripts/verify-examples.sh`,
+`scripts/verify-amd64-examples.sh`, `test/redteam/run-all.sh`, `test/redteam/rounds/round2/run-round2.sh` through
+`test/redteam/rounds/round5/run-round5.sh`, and `go test -timeout 50m ./cmd/...`.
 
 ## Reproduce
 
 ```
-audit/round6/run-round6.sh
+test/redteam/rounds/round6/run-round6.sh
 ```

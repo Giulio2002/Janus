@@ -3,16 +3,16 @@
 # (arm64 ADD/SUB extended register, Advanced SIMD shift by immediate, across lanes; amd64
 # BT/BTS/BTR/BTC, SHLD/SHRD, BSF/BSR/TZCNT/LZCNT/POPCNT), model vs hardware (qemu-aarch64,
 # the host CPU), plus the hand-derived kernel checks in HandDerived.lean.
-# Writes only under audit/round5/model/{bin,cases,out-a64,out-x64}. Exits 1 on any MISMATCH,
+# Writes only under test/redteam/rounds/round5/model/{bin,cases,out-a64,out-x64}. Exits 1 on any MISMATCH,
 # on a failing hand-derived check, or if a family that must agree stopped agreeing. Afterwards the
 # per-case dumps are pruned (summaries and compressed verdicts kept; the generated cases/ removed;
 # KEEP=1 keeps everything, scripts/lib/artifacts.sh).
-# Usage: audit/round5/model/run-model.sh   (about a minute on 48 cores)
+# Usage: test/redteam/rounds/round5/model/run-model.sh   (about a minute on 48 cores)
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-here="$root/audit/round5/model"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
+here="$root/test/redteam/rounds/round5/model"
 export PATH="$PATH:/usr/local/go/bin"
-# shellcheck source=../../../scripts/lib/artifacts.sh
+# shellcheck source=../../../../../scripts/lib/artifacts.sh
 . "$root/scripts/lib/artifacts.sh"
 B="$here/bin"; mkdir -p "$B/a64" "$B/x64"
 QEMU="${QEMU-/usr/bin/qemu-aarch64}"

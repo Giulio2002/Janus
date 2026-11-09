@@ -7,7 +7,7 @@ import Janus.Contracts.SyscallSat
 `Lock2Contract`, `Unlock2Contract` (`runtime.lock2`/`unlock2` on `debuglock`) and
 `MemmoveContract` (`runtime.memmove`) are `Summary` contracts. For each this file gives machine
 code that meets it, proved by symbolic execution, and a call state that satisfies its
-precondition (`<name>_satisfiable`, `audit/round9/run-round9.sh`, row SAT):
+precondition (`<name>_satisfiable`, `test/redteam/rounds/round9/run-round9.sh`, row SAT):
 
 * `lock2`: `MOV W1, #1; STRB W1, [X0]; LDR X2, [X28, #48]; LDR W3, [X2, #264]; ADD W3, W3, #1;
   STR W3, [X2, #264]; RET` (the uncontended fast path: the key's low byte set, `m.locks++`);

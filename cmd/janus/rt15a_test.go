@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Round 15a (audit/round15a): Lake configurations whose sources or settings the result-cache key
+// Round 15a (test/redteam/rounds/round15a): Lake configurations whose sources or settings the result-cache key
 // does not cover must not be cacheable. Every row below must be non-cacheable.
 func TestRound15aLakefileNotCacheable(t *testing.T) {
 	ok := func(toml string) bool {

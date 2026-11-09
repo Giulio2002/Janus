@@ -11,7 +11,7 @@ prints `Verified`, everything it reports (the statement, the definitions, `janus
 verified.json) is an exact and honest account of a theorem that holds for the actual bytes of
 the binary under the documented semantics.*
 
-The rows are in `audit/round7/` (`attacks/`, `asmstub/`, `dep/`, `run-round7.sh`), plus
+The rows are in `test/redteam/rounds/round7/` (`attacks/`, `asmstub/`, `dep/`, `run-round7.sh`), plus
 `TestStubKind`, `TestClassifyStub` and `TestTermSafe` in `cmd/janus`. Severities are as in
 earlier rounds. **Critical** means a misleading account prints `Verified`. **High** means a false
 claim about the binary prints `Verified`. **Low** means hygiene.
@@ -33,7 +33,7 @@ have regression rows. J1 and K1 are hazards under the stated guarantee and are m
 
 ## G1 (HIGH, BROKEN → fixed): runtime stubs named by any package
 
-Fixture: `audit/round7/asmstub`, a module built with plain `go build -trimpath` (go1.26.0,
+Fixture: `test/redteam/rounds/round7/asmstub`, a module built with plain `go build -trimpath` (go1.26.0,
 linux/arm64). Its package `lib` has an assembly file `zero_arm64.s` with:
 
 * `TEXT runtime·panicJanusR7(SB)`: `MOVD $0, R0; RET`. `lib.Zero` calls it, and `main.Add(x, y)`
@@ -94,7 +94,7 @@ are rejected at extraction.
 
 **Residual (closed in round 8, G3).** Check 2 read the Go version from build info, and
 `-X runtime.buildVersion=go1.26.0` rewrites it (G2). The round-8 red team exploited it with
-exactly the binary this note described: `audit/round8/govers`, linked by go1.25.5 (whose
+exactly the binary this note described: `test/redteam/rounds/round8/govers`, linked by go1.25.5 (whose
 runtime has no `panicSimdImm`), labelled go1.26.0, with a package-lib assembly
 `runtime·panicSimdImm` that returns 0; "every call of Add panics" verified (row G3a). Check 2
 is gone. In its place a listed name is a stub only if its code and pclntab entry are pinned
@@ -106,7 +106,7 @@ pinned helpers (docs/SOUNDNESS.md, stub classification, has the normalization an
 stability measurements). G3a now fails at extraction ("the pclntab places
 runtime.panicSimdImm … in file "example.com/govers/lib/zero_arm64.s", not in the toolchain's
 runtime/panic.go"; its code hash is not pinned either), and `janus verify` of the extraction
-round 7 accepted fails the same way. `audit/round7/run-round7.sh` runs both rows. What
+round 7 accepted fails the same way. `test/redteam/rounds/round7/run-round7.sh` runs both rows. What
 remains is a byte-for-byte copy of pinned runtime code with a forged pclntab file, which then
 behaves as the runtime's code except through what the pin leaves to names and to
 string/static data (docs/SOUNDNESS.md).
@@ -145,7 +145,7 @@ zero-width character inside a literal prints as `\u{…}`.
 
 ## J1 (hazard → fixed): dependency definition bodies
 
-Fixture: `audit/round7/dep`, a pinned local git dependency `MisLib` with
+Fixture: `test/redteam/rounds/round7/dep`, a pinned local git dependency `MisLib` with
 `/-- The product a * b … -/ def mul (a b : BitVec 64) : BitVec 64 := a + b`, and a consumer
 theorem `s'.regs 0 = MisLib.mul x y` about Add. Before the fix, the report said only
 `Dependency constants in the statement: MisLib.mul (def, MisLib)`. A reader trusting the name
@@ -160,7 +160,7 @@ meaning)", and verified.json carries `dependencyDefinitions`. The bodies are sho
 round-tripped. Round 5's instance rules for dependency constants are unchanged, and a dependency
 body may use instances. Row **J1a** keeps `--fresh` (the cold consumer path: the framework is built from scratch in a temporary
 workspace, no replay, trusted or verdict cache). To keep it from bounding the audit lanes it runs as its
-own lane, `r7j` (`audit/round7/run-j1.sh`, selected together with `r7`), in parallel with `r7c`. Dropping
+own lane, `r7j` (`test/redteam/rounds/round7/run-j1.sh`, selected together with `r7`), in parallel with `r7c`. Dropping
 `--fresh` was considered and rejected: the row exists for the report's content, but without `--fresh` the
 replay markers, the replay verdict and a sibling workspace enter the path, which narrows what the verdict
 rests on. The row also asserts that its verdict was computed in this run (no `Cached:` line, no
@@ -274,8 +274,8 @@ stale framework, `--fresh`, `--unsafe-no-sandbox`). This review does not repeat 
   diagnostic, even if a later step passed. `Verified` is printed only after `memOutcome`.
   The prlimit text heuristic can at most relabel a failure as a resource failure.
 * **Merge note.** agent/memguard also brought a `docs/audit/AUDIT-ROUND7.md` and
-  `audit/round7/run-round7.sh` (the cache rows). After merging main 1d0b147, those rows are
-  §7 below, and their runner is `audit/round7/run-cache.sh`, which `run-round7.sh` runs last.
+  `test/redteam/rounds/round7/run-round7.sh` (the cache rows). After merging main 1d0b147, those rows are
+  §7 below, and their runner is `test/redteam/rounds/round7/run-cache.sh`, which `run-round7.sh` runs last.
   Every other round-7 row passes `--fresh`, so it takes the cold path.
 * **Interim main bug (now moot).** Between the two merges, consumer (`--proof-root`) runs with
   a `--janus-root` checkout failed with "no default toolchain configured". The cached base got
@@ -286,9 +286,9 @@ stale framework, `--fresh`, `--unsafe-no-sandbox`). This review does not repeat 
 `janus verify` records the result of a successful sandboxed verification and prints it again,
 marked `Cached:`, when every input is the same (docs/SOUNDNESS.md, "Verification-result cache").
 That makes the cache a trusted component: a forged or stale entry would print `Verified` for a
-proof that was never checked. This round attacks it. Runner: `audit/round7/run-cache.sh`, run by `audit/round7/run-round7.sh`
-(attack files in `audit/round7/attacks/`, the lakefile attack is the `resultcache` mode of
-`audit/attacks/R1_pkg`).
+proof that was never checked. This round attacks it. Runner: `test/redteam/rounds/round7/run-cache.sh`, run by `test/redteam/rounds/round7/run-round7.sh`
+(attack files in `test/redteam/rounds/round7/attacks/`, the lakefile attack is the `resultcache` mode of
+`test/redteam/attacks/R1_pkg`).
 
 | Row | Attack | Expected | Result |
 |---|---|---|---|
@@ -322,13 +322,13 @@ There is no verification daemon, so there is no row for one (docs/TESTING.md exp
 
 ## Regression status
 
-On this branch, merged with main 1d0b147, all of these pass: `audit/round7/run-round7.sh` (with
+On this branch, merged with main 1d0b147, all of these pass: `test/redteam/rounds/round7/run-round7.sh` (with
 the cache rows of `run-cache.sh`), `scripts/verify-all-examples.sh` (21 arm64 items and 27 amd64
-functions), `audit/run-all.sh`, `audit/round2/run-round2.sh` through
-`audit/round6/run-round6.sh`, and `go test -timeout 50m ./cmd/...`.
+functions), `test/redteam/run-all.sh`, `test/redteam/rounds/round2/run-round2.sh` through
+`test/redteam/rounds/round6/run-round6.sh`, and `go test -timeout 50m ./cmd/...`.
 
 ## Reproduce
 
 ```
-audit/round7/run-round7.sh
+test/redteam/rounds/round7/run-round7.sh
 ```

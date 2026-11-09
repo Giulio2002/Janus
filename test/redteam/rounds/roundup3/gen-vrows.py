@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate audit/roundup3/vrows/*.lean, the verify-level rows of run-verify-rows.sh (all statements about `Add`):
+"""Generate test/redteam/rounds/roundup3/vrows/*.lean, the verify-level rows of run-verify-rows.sh (all statements about `Add`):
   PINn_*  the six pins UP3 removed from test/lean/JanusTests/ICallAudit.lean (statement only; rejected at verify level for want of a witness)
   ATT_*   attacker witnesses: the contract holds vacuously (size pinned unsatisfiable by the pre), the witness omits the call-site state
           (the frozen U-WITNESS-CALLSITE must reject it with 'does not exhibit a call-site state')

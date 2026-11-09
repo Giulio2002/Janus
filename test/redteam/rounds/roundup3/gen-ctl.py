@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Generate the witness-bearing control rows (audit/roundup3/ctl/*.lean) from the Add-based control rows of
-audit/roundup3/rows (N01-N06, N12) and V15 (/srv/janus-rt-n11/audit/roundn11/icall2): each row's main theorem plus a Witness namespace of the
+"""Generate the witness-bearing control rows (test/redteam/rounds/roundup3/ctl/*.lean) from the Add-based control rows of
+test/redteam/rounds/roundup3/rows (N01-N06, N12) and V15 (/srv/janus-rt-n11/audit/roundn11/icall2): each row's main theorem plus a Witness namespace of the
 frozen shape (hypotheses, pre, call-site state, Returns run) instantiated at the stock writer of Janus.Contracts.ICallSat.
 Usage: gen-ctl.py ROWS_DIR OUT_DIR."""
 import re, sys, os

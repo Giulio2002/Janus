@@ -4,25 +4,25 @@
 # regresses. G3a (fixed by stub code pins) must be rejected at extraction.
 # Every attack verification passes --fresh (the cold path) and uses a private temporary cache;
 # the M1/C1 rows use their own temporary caches. All are removed at the end.
-# Writes only under audit/round8/work/rows/, audit/round8/bin/ and those temporary caches.
-# Usage: audit/round8/run-round8.sh [-j N]   (the --fresh rows N at once: scripts/lib/parallel.sh)
+# Writes only under test/redteam/rounds/round8/work/rows/, test/redteam/rounds/round8/bin/ and those temporary caches.
+# Usage: test/redteam/rounds/round8/run-round8.sh [-j N]   (the --fresh rows N at once: scripts/lib/parallel.sh)
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../scripts/lib/parallel.sh
+# shellcheck source=../../../../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
 par_init "$@"
-# R8_ROWS="fresh ctl rest": only these row groups (default all); audit/run-rounds.sh runs them as the lanes r8a, r8b, r8c.
+# R8_ROWS="fresh ctl rest": only these row groups (default all); test/redteam/run-rounds.sh runs them as the lanes r8a, r8b, r8c.
 want() { [ -z "${R8_ROWS:-}" ] || [[ " $R8_ROWS " == *" $1 "* ]]; }
-J="$root/audit/round8/bin/janus"; mkdir -p "$(dirname "$J")"
-# audit/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
+J="$root/test/redteam/rounds/round8/bin/janus"; mkdir -p "$(dirname "$J")"
+# test/redteam/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 [ -d artifacts/amd64/HexDigit ] && [ -d artifacts/amd64/Add ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
-W=audit/round8/work/rows${R8_ROWS:+-$R8_ROWS}; rm -rf "$W"; mkdir -p $W
+W=test/redteam/rounds/round8/work/rows${R8_ROWS:+-$R8_ROWS}; rm -rf "$W"; mkdir -p $W
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-round8.XXXXXX")" || exit 1   # 0700: the caches' parent
 trap 'rm -rf "$T"' EXIT
 mkdir -m 700 "$T/fresh"; export JANUS_CACHE_DIR="$T/fresh"
@@ -31,12 +31,12 @@ for f in Add HashWith AddThree; do
   "$J" extract artifacts/examples-arm64 "example.com/basic.$f" "$W/$f" ${tg[@]+"${tg[@]}"} >/dev/null || exit 1
 done
 broken=()
-A=audit/round8/attacks
+A=test/redteam/rounds/round8/attacks
 
 # row NAME EXPECT [PATTERN...]: verdict of $out. EXPECT "blocked" (must not print Verified; if a
 # PATTERN is given the output must contain it) or "Verified" (must print Verified and contain
 # every PATTERN).
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 row() {
   local name=$1 expect=$2 verdict status="" pat
   shift 2
@@ -47,8 +47,8 @@ row() {
     Verified) case $verdict in Verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
-  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check round8/run-round8.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  # blocked rows: pinned reason, and no Lean elaboration failure (test/redteam/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check rounds/round8/run-round8.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-36s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0
@@ -79,9 +79,9 @@ v $A/N1a_reducebool_implemented_by.lean $W/Add;  row N1a_reducebool_implemented_
 par_wait
 
 if want rest; then
-echo "== G3: a go1.25 binary labelled go1.26 (audit/round8/govers; fixed: stubs pinned by code, cmd/janus/stubpin.go)"
-type tmark >/dev/null 2>&1 && tmark "== G3: a go1.25 binary labelled go1.26 (audit/roun"
-if ( cd audit/round8/govers && GOTOOLCHAIN=go1.25.5 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+echo "== G3: a go1.25 binary labelled go1.26 (test/redteam/rounds/round8/govers; fixed: stubs pinned by code, cmd/janus/stubpin.go)"
+type tmark >/dev/null 2>&1 && tmark "== G3: a go1.25 binary labelled go1.26 (test/redteam/roun"
+if ( cd test/redteam/rounds/round8/govers && GOTOOLCHAIN=go1.25.5 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
      go build -trimpath -buildvcs=false -ldflags=-X=runtime.buildVersion=go1.26.0 -o "$root/$W/govers" ./cmd ) 2>/dev/null; then
   if out="$("$J" extract $W/govers main.Add $W/GvAdd 2>&1)"; then
     printf '  %-36s %-8s %s   <-- BROKEN\n' G3a_spoofed_goversion_stub blocked "extraction ACCEPTED the spoofed stub"; broken+=(G3a)
@@ -89,7 +89,7 @@ if ( cd audit/round8/govers && GOTOOLCHAIN=go1.25.5 CGO_ENABLED=0 GOOS=linux GOA
     printf '  %-36s %-8s %s\n' G3a_spoofed_goversion_stub blocked "$(grep -m1 -iE 'stub|pin|pclntab' <<<"$out" | cut -c1-110)"
   fi
 else
-  printf '  %-36s %-8s %s\n' G3a_spoofed_goversion_stub skipped "fixture not built here (go1.25.5 unavailable); audit/round7 G3a rows cover the committed extraction"
+  printf '  %-36s %-8s %s\n' G3a_spoofed_goversion_stub skipped "fixture not built here (go1.25.5 unavailable); test/redteam/rounds/round7 G3a rows cover the committed extraction"
 fi
 
 # The rest run janus without --fresh (with the sandbox), each with its own cache.

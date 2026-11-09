@@ -2,7 +2,7 @@ import Janus
 /-! M3: modelling assumptions that qemu `-cpu max` and Sail cannot see (they implement every
 feature and one fixed DCZID_EL0). Each `#guard` shows what the model does; the comment says
 what real hardware does. None of these is a wrong value for a valid instruction.
-Run: lake env lean audit/round2/model/M3_assumptions.lean
+Run: lake env lean test/redteam/rounds/round2/model/M3_assumptions.lean
 Companion: feat.S (qemu `-cpu cortex-a53` vs `-cpu max`, see README.txt). -/
 open Janus.Arm64
 

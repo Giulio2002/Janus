@@ -75,6 +75,6 @@ autojobs_peak_gib() {
   awk -F'\t' '!/^#/ && $1 !~ /^lane:/ && $3 + 0 > m { m = $3 + 0 } END { if (m > 0) printf "%.2f", m }' "$1"
 }
 
-# autojobs_rounds_lanes: the number of audit-round lanes (audit/run-rounds.sh JANUS_ROUNDS_LANES): min(6,
+# autojobs_rounds_lanes: the number of audit-round lanes (test/redteam/run-rounds.sh JANUS_ROUNDS_LANES): min(6,
 # free cores / 8), at least 2, reduced with the verify pool by the joint memory budget; 2 when the host is busy.
 autojobs_rounds_lanes() { local p r; p=$(autojobs_plan); r=${p%%|*}; echo "${r##* }"; }

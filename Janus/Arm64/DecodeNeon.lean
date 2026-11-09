@@ -10,7 +10,7 @@ encoding within it. `Janus.Arm64.decodeAll` consults it only for words `Janus.Ar
 the original decoder's results never change. The two decoders are also disjoint: the opcodes the
 original Advanced SIMD subset of `decode` owns (`vThreeSame`, `vScalarThreeSame`, `vAcross`,
 `vTwoMisc`, `vShiftImm`; the `base*` predicates below mirror its opcode lists) are rejected here,
-so no word has two decoders (`audit/rt-fp`, row DEC-A64, checks this on its sweep).
+so no word has two decoders (`test/redteam/rounds/rt-fp`, row DEC-A64, checks this on its sweep).
 
 Every check transcribes the `decode` pseudocode of the instruction (sail-arm `instrs64.sail`,
 Armv9.4-A): the `size`/`Q`/`sz`/`immh` combinations that are `UNDEFINED`, the opcodes that are

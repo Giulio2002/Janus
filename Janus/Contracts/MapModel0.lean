@@ -9,7 +9,7 @@ Every map contract (`Janus.Contracts.Map`, `MapVar`, `MapStr` and their amd64 fi
 hypothesis of the theorems that use it, so each comes with a proof that it **is** satisfiable
 (`Janus.Contracts.MapSat`, `MapVarSat`, `MapStrSat` and their `…SatAmd64` files): a model
 satisfying `MapModel.Laws`, machine code proved to meet the contract for it, and a call state
-satisfying the contract's whole precondition (`audit/round9/sat_check.py`, row SAT). This file
+satisfying the contract's whole precondition (`test/redteam/rounds/round9/sat_check.py`, row SAT). This file
 gives the models and the witness memory; the code and the proofs are per ISA.
 
 The models are small worlds, not descriptions of the Go runtime. All their memory is the range

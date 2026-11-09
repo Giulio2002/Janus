@@ -8,7 +8,7 @@ After fix F4, `Ensures` quantifies over every admissible return address `ret` (`
 runs `brProg.withExit ret`. The old proof no longer works: this file must FAIL to compile
 (the branch reaches `pc = 0`, which is not `ret` for `ret ≠ 0`). `B2_refuted.lean` proves the
 negation.
-Run: cd /srv/janus && lake env lean audit/specs/B2_exit_sentinel.lean -/
+Run: cd /srv/janus && lake env lean test/redteam/specs/B2_exit_sentinel.lean -/
 open Janus Janus.Arm64 Janus.GoABI
 
 def brSeg : Segment := ⟨"f", 0x1000, [0xd61f0000]⟩

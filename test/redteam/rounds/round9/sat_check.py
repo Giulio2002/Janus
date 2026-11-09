@@ -10,9 +10,9 @@ contract's name with `Contract` removed and the first letter lower-cased
 (`NewobjectContract64` → `newobject64_satisfiable`, `Access1` → `access1_satisfiable`).
 Round 10: the witness's statement must name the contract and give a state, and only the tree
 under test is read.
-Contracts listed in audit/round9/sat-pending.txt are reported as OPEN (with their owner) instead
+Contracts listed in test/redteam/rounds/round9/sat-pending.txt are reported as OPEN (with their owner) instead
 of failing; any other missing witness fails the row.
-Usage: python3 -I audit/round9/sat_check.py ROOT"""
+Usage: python3 -I test/redteam/rounds/round9/sat_check.py ROOT"""
 import os, re, subprocess, sys
 root = os.path.realpath(sys.argv[1])
 
@@ -121,7 +121,7 @@ def about(c, stmt):
             return True
     return False
 pending = {}
-pf = os.path.join(root, "audit", "round9", "sat-pending.txt")
+pf = os.path.join(root, "test", "redteam", "rounds", "round9", "sat-pending.txt")
 if os.path.isfile(pf) and not os.path.islink(pf):
     for l in open(pf, encoding="utf-8"):
         l = l.split("#", 1)[0].strip()

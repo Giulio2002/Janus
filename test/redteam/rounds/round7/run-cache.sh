@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 # Round 7 cache rows (docs/audit/AUDIT-ROUND7.md §7, docs/SOUNDNESS.md, "Verification-result cache"): attempts to poison or misuse the
 # trusted verification-result cache. Exits 1 if a row regresses (BROKEN).
-# Usage: audit/round7/run-cache.sh [-j N]   (-j: rows at once, scripts/lib/parallel.sh)
-# Writes only under audit/round7/work/ and a temporary janus cache (removed at the end).
-# R7C_ROWS="priming rc1 rc2 rc3 rc4 rc56": only these row groups (default all). audit/run-rounds.sh runs three lanes,
+# Usage: test/redteam/rounds/round7/run-cache.sh [-j N]   (-j: rows at once, scripts/lib/parallel.sh)
+# Writes only under test/redteam/rounds/round7/work/ and a temporary janus cache (removed at the end).
+# R7C_ROWS="priming rc1 rc2 rc3 rc4 rc56": only these row groups (default all). test/redteam/run-rounds.sh runs three lanes,
 # r7c1..r7c3 (run-cache-{1,2,3}.sh), so the lane is no longer the longest one of the rounds.
 set -u
 want() { [ -z "${R7C_ROWS:-}" ] || [[ " $R7C_ROWS " == *" $1 "* ]]; }
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../scripts/lib/parallel.sh
+# shellcheck source=../../../../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
 par_init "$@"
 tmark "cache start"
-J="$root/audit/round7/bin/janus"; mkdir -p "$(dirname "$J")"
-# audit/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
+J="$root/test/redteam/rounds/round7/bin/janus"; mkdir -p "$(dirname "$J")"
+# test/redteam/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
-W=audit/round7/work-cache${R7C_WORK:+-$R7C_WORK}; rm -rf "$W"; mkdir -p $W
+W=test/redteam/rounds/round7/work-cache${R7C_WORK:+-$R7C_WORK}; rm -rf "$W"; mkdir -p $W
 C="$(mktemp -d "${TMPDIR:-/tmp}/janus-round7-cache.XXXXXX")"
 trap 'rm -rf "$C"' EXIT
 export JANUS_CACHE_DIR="$C"
@@ -49,7 +49,7 @@ else echo "  >>> priming failed (first: $(verdict "$out"), second cached: $(cach
 # directory (the proof then compiles and verifies) and nothing may reach the host.
 rc1() { # rc1 NAME DIR [env…]
   local name=$1 dir=$2; shift 2
-  local out; out="$(env "$@" "$J" verify --janus-root "$root" "$dir" --proof audit/round7/attacks/RC1_proof_probe.lean 2>&1)"
+  local out; out="$(env "$@" "$J" verify --janus-root "$root" "$dir" --proof test/redteam/rounds/round7/attacks/RC1_proof_probe.lean 2>&1)"
   local ok=yes
   [ -e "$C/v1/result/planted-by-proof" ] && ok=no
   grep -q 'RC1: the result cache' <<<"$out" && ok=no
@@ -62,7 +62,7 @@ want rc1 && par_run 'rc1 RC1_proof_probe_unshare $W/Add5 JANUS_SANDBOX=unshare'
 # RC2: a consumer lakefile (elaborated by the sandboxed Lake) probes and plants the same way.
 want rc2 && par_run '
 echo "== RC2: a lakefile cannot read or plant into the cache"
-P=$W/R1; rm -rf "$P"; cp -r audit/attacks/R1_pkg "$P"
+P=$W/R1; rm -rf "$P"; cp -r test/redteam/attacks/R1_pkg "$P"
 sed -i "s|@JANUS@|$root|; s|-- @EXTRA_REQUIRE@||" "$P/lakefile.lean"
 echo "-- run $(date +%s%N)" >> "$P/lakefile.lean"
 printf "{\"version\":\"1.2.0\",\"packagesDir\":\".lake/packages\",\"name\":\"r1\",\"lakeDir\":\".lake\",\"fixedToolchain\":false,\"packages\":[{\"type\":\"path\",\"scope\":\"\",\"name\":\"janus\",\"manifestFile\":\"lake-manifest.json\",\"inherited\":false,\"dir\":\"%s\",\"configFile\":\"lakefile.toml\"}]}\n" "$root" > "$P/lake-manifest.json"

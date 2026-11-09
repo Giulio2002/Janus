@@ -264,7 +264,7 @@ its precondition. Before round 9 the precondition said nothing about the runtime
 writable object from states whose heap is not mapped at all, or whose request (up to `maxAlloc`,
 `2^48` bytes) no memory could hold. No code meets that (the object must be writable in the
 memory before the call, since instructions cannot add regions), so every theorem assuming such a
-contract was vacuous (`audit/round9/model/Unsat.lean`); and the real runtime, which throws
+contract was vacuous (`test/redteam/rounds/round9/model/Unsat.lean`); and the real runtime, which throws
 `out of memory` for large requests and reads its own data structures, met it least of all.
 
 Now every contract takes a **readiness predicate** `H : RtReady`, and its precondition also
@@ -274,7 +274,7 @@ it** (`rtView`: the bytes inside `rt` and the regions; every other byte reads as
 quantifies over `H` and assumes it at its entry for the call it makes. So:
 
 * the contract is satisfiable: a witness (an implementation, `rt` and `H`) is kernel-checked in
-  `audit/round9/controls/`;
+  `test/redteam/rounds/round9/controls/`;
 * the real runtime meets it with `H` := "from every call state with these arguments, this `g`,
   this `SP` and this runtime memory (whatever the memory outside `rt` holds), the runtime's code
   returns as the contract says" — by construction a function of what `H` sees, and true at the

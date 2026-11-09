@@ -7,7 +7,7 @@ The helpers below are those of `Unsat.lean`, copied so this file stands alone; t
 is `old_assign_unsat` with the fixed contract (its precondition now also requires
 `Ready H M.priv args s`). The repeated call cannot be made: nothing gives `H` at the state the
 previous call returned in, and the fixed contract holds for `H := fun _ _ _ _ => False`, so the
-statement is false and no proof exists. `audit/maps/run-maps.sh` expects a compile error.
+statement is false and no proof exists. `test/redteam/maps/run-maps.sh` expects a compile error.
 
 Original module documentation of `Unsat.lean`:
 

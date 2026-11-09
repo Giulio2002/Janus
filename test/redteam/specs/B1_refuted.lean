@@ -1,5 +1,5 @@
 import Extracted
-/-! B1 after fix F3 (verify against audit/work/Add256): the claim of the attack is now
+/-! B1 after fix F3 (verify against test/redteam/work/Add256): the claim of the attack is now
 **refuted**. With `x = nil` and no memory, the first instruction `LDR X3, [X1]` faults
 (`outsideAllocation 0 8`), which `NeverPanics` counts (a nil dereference is a Go panic on real
 hardware). Stated for every admissible return address, as specifications now are. -/

@@ -1,77 +1,77 @@
-# SCRIPT<TAB>ROW<TAB>SUBSTRING: the pinned reason of every `blocked` row (audit/lib/blocked.sh). All pins of a row must occur in its output.
+# SCRIPT<TAB>ROW<TAB>SUBSTRING: the pinned reason of every `blocked` row (test/redteam/lib/blocked.sh). All pins of a row must occur in its output.
 # Written from the n12 survey (BLOCKED_SURVEY) and checked by hand against each attack's intent; see NOTES-N12.md "Task 2".
-round7/run-round7.sh	G1d_linkname_duplicate_stub_name	the code calls runtime.morestack_noctxt.abi0, but audit/round7/work/asmdup
-round7/run-round7.sh	G1d_linkname_duplicate_stub_name	can push a second symbol with a runtime stub's name)
-round7/run-round7.sh	G1e_stripped_binary_stub	the code calls runtime.morestack_noctxt, but audit/round7/work/asmstrip has no
-round7/run-round7.sh	G1e_stripped_binary_stub	of another package that only has that name (round 7 G1)
-round7/run-round7.sh	G1a_asm_runtime_stub_panics	Lean rejected the proof
-round7/run-round7.sh	G1a_asm_runtime_stub_panics	unsolved goals
-round7/run-round7.sh	G1a_asm_runtime_stub_panics	⊢ False
-round7/run-round7.sh	G1b_asm_runtime_stub_neverpanics	Lean rejected the proof
-round7/run-round7.sh	G1b_asm_runtime_stub_neverpanics	unsolved goals
-round7/run-round7.sh	G1b_asm_runtime_stub_neverpanics	⊢ False
-round7/run-round7.sh	G3a_spoofed_goversion_extract	but that function is not the Go runtime's runtime.panicSimdImm
-round7/run-round7.sh	G3a_spoofed_goversion_stub	but that function is not the Go runtime's runtime.panicSimdImm
-round7/run-round7.sh	H1a_binder_lookalike_vacuous	the statement binds two variables whose names look alike, "o" and "ο" (they
-round7/run-round7.sh	H1a_binder_lookalike_vacuous	statement cannot be read reliably; rename one (round 7 H1)
-round7/run-round7.sh	H1c_binder_cyrillic_guillemets	the statement binds a variable whose name has characters other than identifier
-round7/run-round7.sh	H1c_binder_cyrillic_guillemets	characters): "о"; rename it (round 7 H1, round 9 H2)
-round7/run-round7.sh	H1d_binder_zero_width	the statement binds a variable whose name has characters other than identifier
-round8/run-round8.sh	I1b_itab_name_absent	the statement uses Janus.Spec.ItabIs with the name
-round8/run-round8.sh	I1b_itab_name_absent	that object (a misspelt or lookalike name, round 8 I1)
-round8/run-round8.sh	I1a_itab_name_lookalike	the statement uses Janus.Spec.ItabIs with the name
-round8/run-round8.sh	I1a_itab_name_lookalike	that object (a misspelt or lookalike name, round 8 I1)
-round8/run-round8.sh	I1c_segaddr_absent	the statement uses Janus.Tactic.segAddr with the name "example.com/basic.Mul", but the extracted program has no
-round8/run-round8.sh	I1f_amd64_database_absent	the statement uses Janus.Amd64.Tactic.dataBase with index 3, but the extracted
-round8/run-round8.sh	I1f_amd64_database_absent	objects (the lookup would silently return 0; round 8 I1)
-round8/run-round8.sh	I1e_itab_name_via_def	the statement uses Janus.Spec.ItabIs with the name
-round8/run-round8.sh	I1e_itab_name_via_def	that object (a misspelt or lookalike name, round 8 I1)
-round8/run-round8.sh	N1a_reducebool_implemented_by	Proof.correctness depends on disallowed axioms: Lean.ofReduceBool,
-round5/run-round5.sh	E1b_decide_local_instance_hyp	the statement uses the proof-local instance Proof.evilDec (a disguised instance)
-round5/run-round5.sh	E1a_decide_custom_def	the statement uses the proof-local Proof.myDec, whose type is the class
-round5/run-round5.sh	E1c_if_custom_hyp	the statement uses the proof-local Proof.cdec, whose type is the class
-round5/run-round5.sh	E1d_decide_classical	the printed statement, read back with the canonical instances, is `∀ (x y :
-round5/run-round5.sh	E1d_decide_classical	instance or notation hides what the statement really says)
-round5/run-round5.sh	E1e_decide_in_def_body	the statement uses the proof-local Proof.myDec, whose type is the class
-round5/run-round5.sh	E1g_decide_projected	the statement passes the inline instance `(Proof.pair x).fst` as the instance
-round5/run-round5.sh	E1g_decide_projected	with its canonical instance, or name the function)
-round5/run-round5.sh	E2a_reducible_inst	the statement uses the proof-local Proof.addMul, whose type is the class HMul
-round5/run-round5.sh	E2b_abbrev_inst	the statement uses the proof-local Proof.addMul, whose type is the class Mul (a
-round5/run-round5.sh	E2c_let_inst	the statement passes the inline instance `i` as the instance argument 4 of
-round5/run-round5.sh	E2c_let_inst	with its canonical instance, or name the function)
-round5/run-round5.sh	E2d_beta_instbinder	the statement passes the inline instance `{ hMul := fun a b => a + b }` as the
-round5/run-round5.sh	E2d_beta_instbinder	with its canonical instance, or name the function)
-round5/run-round5.sh	E2e_inferInstanceAs	the statement passes the inline instance `{ hMul := fun a b => a + b }` as the
-round5/run-round5.sh	E2e_inferInstanceAs	with its canonical instance, or name the function)
-round5/run-round5.sh	E2f_attribute_instance_later	the statement uses the proof-local instance Proof.addMul (a disguised instance)
-round5/run-round5.sh	E2g_local_instance	the statement uses the proof-local Proof.addMul, whose type is the class Mul (a
-round5/run-round5.sh	E2h_priority_override	the statement uses the proof-local instance Proof.addMul (a disguised instance)
-round5/run-round5.sh	E2i_scoped_instance	the statement uses the proof-local instance Evil.addMul (a disguised instance)
-round5/run-round5.sh	E2j_fun_bound_inst	the statement binds the instance `[i : HMul (BitVec 64) (BitVec 64) (BitVec
-round5/run-round5.sh	E2j_fun_bound_inst	as parameters of the theorem or of a proof-local definition
-round5/run-round5.sh	E2k_haveI	the statement passes the inline instance `{ hMul := fun a b => a + b }` as the
-round5/run-round5.sh	E2k_haveI	with its canonical instance, or name the function)
-round5/run-round5.sh	E3a_local_structure_regs	the statement uses Proof.View, which is not a plain def or theorem
-round5/run-round5.sh	E3b_extends_state	the statement uses Proof.MyState, which is not a plain def or theorem
-round5/run-round5.sh	E3c_local_inductive_in_def	the statement uses Proof.Op, which is not a plain def or theorem
-round5/run-round5.sh	E4a_macro_rules_plus	Lean rejected the proof
-round5/run-round5.sh	E4a_macro_rules_plus	unsolved goals
-round5/run-round5.sh	E4a_macro_rules_plus	⊢ x + y = x * y
-round5/run-round5.sh	E5a_exists_instbinder_def	the proof-local definition Proof.isProd used in the statement the statement
-round5/run-round5.sh	E5a_exists_instbinder_def	as parameters of the theorem or of a proof-local definition
-round5/run-round5.sh	E5b_exists_instbinder_stmt	the statement binds the instance `[_i : HMul (BitVec 64) (BitVec 64) (BitVec
-round5/run-round5.sh	E5b_exists_instbinder_stmt	as parameters of the theorem or of a proof-local definition
-round5/run-round5.sh	E5c_exists_default_classbinder	the statement binds the instance `[i : HMul (BitVec 64) (BitVec 64) (BitVec
-round5/run-round5.sh	E5c_exists_default_classbinder	as parameters of the theorem or of a proof-local definition
-round5/run-round5.sh	E5d_hyp_forall_instbinder	the statement binds the instance `[_i : HMul (BitVec 64) (BitVec 64) (BitVec
-round5/run-round5.sh	E5d_hyp_forall_instbinder	as parameters of the theorem or of a proof-local definition
-round5/run-round5.sh	E5e_unapplied_inst_param	the statement binds the instance of `@Proof.isProd x y (s'.regs 0)` (of type
-round5/run-round5.sh	E5e_unapplied_inst_param	operation. Apply it to its instance, or name the operation
-round5/run-round5.sh	E5f_unapplied_via_alias	the statement binds the instance of `Proof.isProd x y (s'.regs 0)` (of type
-round5/run-round5.sh	E5f_unapplied_via_alias	operation. Apply it to its instance, or name the operation
-round5/run-round5.sh	E1h_dep_instance_in_decide	the statement uses DecLib.evilDec, an instance declared in dependency module
-round5/run-round5.sh	E1h_dep_instance_in_decide	are not allowed in statements (state the operation by name)
-round5/run-round5.sh	E1i_dep_classvalued_def	the statement uses DecLib.myDec, declared in dependency module DecLib, whose
+rounds/round7/run-round7.sh	G1d_linkname_duplicate_stub_name	the code calls runtime.morestack_noctxt.abi0, but test/redteam/rounds/round7/work/asmdup
+rounds/round7/run-round7.sh	G1d_linkname_duplicate_stub_name	can push a second symbol with a runtime stub's name)
+rounds/round7/run-round7.sh	G1e_stripped_binary_stub	the code calls runtime.morestack_noctxt, but test/redteam/rounds/round7/work/asmstrip has no
+rounds/round7/run-round7.sh	G1e_stripped_binary_stub	of another package that only has that name (round 7 G1)
+rounds/round7/run-round7.sh	G1a_asm_runtime_stub_panics	Lean rejected the proof
+rounds/round7/run-round7.sh	G1a_asm_runtime_stub_panics	unsolved goals
+rounds/round7/run-round7.sh	G1a_asm_runtime_stub_panics	⊢ False
+rounds/round7/run-round7.sh	G1b_asm_runtime_stub_neverpanics	Lean rejected the proof
+rounds/round7/run-round7.sh	G1b_asm_runtime_stub_neverpanics	unsolved goals
+rounds/round7/run-round7.sh	G1b_asm_runtime_stub_neverpanics	⊢ False
+rounds/round7/run-round7.sh	G3a_spoofed_goversion_extract	but that function is not the Go runtime's runtime.panicSimdImm
+rounds/round7/run-round7.sh	G3a_spoofed_goversion_stub	but that function is not the Go runtime's runtime.panicSimdImm
+rounds/round7/run-round7.sh	H1a_binder_lookalike_vacuous	the statement binds two variables whose names look alike, "o" and "ο" (they
+rounds/round7/run-round7.sh	H1a_binder_lookalike_vacuous	statement cannot be read reliably; rename one (round 7 H1)
+rounds/round7/run-round7.sh	H1c_binder_cyrillic_guillemets	the statement binds a variable whose name has characters other than identifier
+rounds/round7/run-round7.sh	H1c_binder_cyrillic_guillemets	characters): "о"; rename it (round 7 H1, round 9 H2)
+rounds/round7/run-round7.sh	H1d_binder_zero_width	the statement binds a variable whose name has characters other than identifier
+rounds/round8/run-round8.sh	I1b_itab_name_absent	the statement uses Janus.Spec.ItabIs with the name
+rounds/round8/run-round8.sh	I1b_itab_name_absent	that object (a misspelt or lookalike name, round 8 I1)
+rounds/round8/run-round8.sh	I1a_itab_name_lookalike	the statement uses Janus.Spec.ItabIs with the name
+rounds/round8/run-round8.sh	I1a_itab_name_lookalike	that object (a misspelt or lookalike name, round 8 I1)
+rounds/round8/run-round8.sh	I1c_segaddr_absent	the statement uses Janus.Tactic.segAddr with the name "example.com/basic.Mul", but the extracted program has no
+rounds/round8/run-round8.sh	I1f_amd64_database_absent	the statement uses Janus.Amd64.Tactic.dataBase with index 3, but the extracted
+rounds/round8/run-round8.sh	I1f_amd64_database_absent	objects (the lookup would silently return 0; round 8 I1)
+rounds/round8/run-round8.sh	I1e_itab_name_via_def	the statement uses Janus.Spec.ItabIs with the name
+rounds/round8/run-round8.sh	I1e_itab_name_via_def	that object (a misspelt or lookalike name, round 8 I1)
+rounds/round8/run-round8.sh	N1a_reducebool_implemented_by	Proof.correctness depends on disallowed axioms: Lean.ofReduceBool,
+rounds/round5/run-round5.sh	E1b_decide_local_instance_hyp	the statement uses the proof-local instance Proof.evilDec (a disguised instance)
+rounds/round5/run-round5.sh	E1a_decide_custom_def	the statement uses the proof-local Proof.myDec, whose type is the class
+rounds/round5/run-round5.sh	E1c_if_custom_hyp	the statement uses the proof-local Proof.cdec, whose type is the class
+rounds/round5/run-round5.sh	E1d_decide_classical	the printed statement, read back with the canonical instances, is `∀ (x y :
+rounds/round5/run-round5.sh	E1d_decide_classical	instance or notation hides what the statement really says)
+rounds/round5/run-round5.sh	E1e_decide_in_def_body	the statement uses the proof-local Proof.myDec, whose type is the class
+rounds/round5/run-round5.sh	E1g_decide_projected	the statement passes the inline instance `(Proof.pair x).fst` as the instance
+rounds/round5/run-round5.sh	E1g_decide_projected	with its canonical instance, or name the function)
+rounds/round5/run-round5.sh	E2a_reducible_inst	the statement uses the proof-local Proof.addMul, whose type is the class HMul
+rounds/round5/run-round5.sh	E2b_abbrev_inst	the statement uses the proof-local Proof.addMul, whose type is the class Mul (a
+rounds/round5/run-round5.sh	E2c_let_inst	the statement passes the inline instance `i` as the instance argument 4 of
+rounds/round5/run-round5.sh	E2c_let_inst	with its canonical instance, or name the function)
+rounds/round5/run-round5.sh	E2d_beta_instbinder	the statement passes the inline instance `{ hMul := fun a b => a + b }` as the
+rounds/round5/run-round5.sh	E2d_beta_instbinder	with its canonical instance, or name the function)
+rounds/round5/run-round5.sh	E2e_inferInstanceAs	the statement passes the inline instance `{ hMul := fun a b => a + b }` as the
+rounds/round5/run-round5.sh	E2e_inferInstanceAs	with its canonical instance, or name the function)
+rounds/round5/run-round5.sh	E2f_attribute_instance_later	the statement uses the proof-local instance Proof.addMul (a disguised instance)
+rounds/round5/run-round5.sh	E2g_local_instance	the statement uses the proof-local Proof.addMul, whose type is the class Mul (a
+rounds/round5/run-round5.sh	E2h_priority_override	the statement uses the proof-local instance Proof.addMul (a disguised instance)
+rounds/round5/run-round5.sh	E2i_scoped_instance	the statement uses the proof-local instance Evil.addMul (a disguised instance)
+rounds/round5/run-round5.sh	E2j_fun_bound_inst	the statement binds the instance `[i : HMul (BitVec 64) (BitVec 64) (BitVec
+rounds/round5/run-round5.sh	E2j_fun_bound_inst	as parameters of the theorem or of a proof-local definition
+rounds/round5/run-round5.sh	E2k_haveI	the statement passes the inline instance `{ hMul := fun a b => a + b }` as the
+rounds/round5/run-round5.sh	E2k_haveI	with its canonical instance, or name the function)
+rounds/round5/run-round5.sh	E3a_local_structure_regs	the statement uses Proof.View, which is not a plain def or theorem
+rounds/round5/run-round5.sh	E3b_extends_state	the statement uses Proof.MyState, which is not a plain def or theorem
+rounds/round5/run-round5.sh	E3c_local_inductive_in_def	the statement uses Proof.Op, which is not a plain def or theorem
+rounds/round5/run-round5.sh	E4a_macro_rules_plus	Lean rejected the proof
+rounds/round5/run-round5.sh	E4a_macro_rules_plus	unsolved goals
+rounds/round5/run-round5.sh	E4a_macro_rules_plus	⊢ x + y = x * y
+rounds/round5/run-round5.sh	E5a_exists_instbinder_def	the proof-local definition Proof.isProd used in the statement the statement
+rounds/round5/run-round5.sh	E5a_exists_instbinder_def	as parameters of the theorem or of a proof-local definition
+rounds/round5/run-round5.sh	E5b_exists_instbinder_stmt	the statement binds the instance `[_i : HMul (BitVec 64) (BitVec 64) (BitVec
+rounds/round5/run-round5.sh	E5b_exists_instbinder_stmt	as parameters of the theorem or of a proof-local definition
+rounds/round5/run-round5.sh	E5c_exists_default_classbinder	the statement binds the instance `[i : HMul (BitVec 64) (BitVec 64) (BitVec
+rounds/round5/run-round5.sh	E5c_exists_default_classbinder	as parameters of the theorem or of a proof-local definition
+rounds/round5/run-round5.sh	E5d_hyp_forall_instbinder	the statement binds the instance `[_i : HMul (BitVec 64) (BitVec 64) (BitVec
+rounds/round5/run-round5.sh	E5d_hyp_forall_instbinder	as parameters of the theorem or of a proof-local definition
+rounds/round5/run-round5.sh	E5e_unapplied_inst_param	the statement binds the instance of `@Proof.isProd x y (s'.regs 0)` (of type
+rounds/round5/run-round5.sh	E5e_unapplied_inst_param	operation. Apply it to its instance, or name the operation
+rounds/round5/run-round5.sh	E5f_unapplied_via_alias	the statement binds the instance of `Proof.isProd x y (s'.regs 0)` (of type
+rounds/round5/run-round5.sh	E5f_unapplied_via_alias	operation. Apply it to its instance, or name the operation
+rounds/round5/run-round5.sh	E1h_dep_instance_in_decide	the statement uses DecLib.evilDec, an instance declared in dependency module
+rounds/round5/run-round5.sh	E1h_dep_instance_in_decide	are not allowed in statements (state the operation by name)
+rounds/round5/run-round5.sh	E1i_dep_classvalued_def	the statement uses DecLib.myDec, declared in dependency module DecLib, whose
 run-all.sh	A1_instance	the statement uses the proof-local instance evilMul (a disguised instance)
 run-all.sh	A3_initialize	depends on disallowed axioms: sorryAx
 run-all.sh	A3_initialize	[Stage: axiom audit]
@@ -121,558 +121,558 @@ run-all.sh	R1c_inject_nosandbox	unexpected Janus/Backdoor.olean
 run-all.sh	R1c_inject_dep_nosandbox	[framework integrity]
 run-all.sh	R1c_inject_dep_nosandbox	unexpected Janus/Backdoor.olean
 run-all.sh	C1_shadow_library	a second Extracted.olean is on the search path
-round2/run-round2.sh	S1_inline_instance	the statement passes the inline instance `{ hSub := fun a b => a + b }`
-round2/run-round2.sh	S1c_mul	the statement passes the inline instance `{ hMul := fun a b => a + b }` as the
-round2/run-round2.sh	S1c_mul	with its canonical instance, or name the function)
-round2/run-round2.sh	S1d_ofnat	the statement passes the inline instance `{ ofNat := x + y }` as the instance
-round2/run-round2.sh	S1d_ofnat	with its canonical instance, or name the function)
-round2/run-round2.sh	S1e_decidable_if	the statement passes the inline instance `if h : x = y then Decidable.isTrue h
-round2/run-round2.sh	S1e_decidable_if	with its canonical instance, or name the function)
-round2/run-round2.sh	S1f_lt	the statement passes the inline instance `{ lt := fun a b => a ≤ b }` as the
-round2/run-round2.sh	S1f_lt	with its canonical instance, or name the function)
-round2/run-round2.sh	S1g_coe	the statement passes the inline instance `{ natCast := fun n => BitVec.ofNat 64
-round2/run-round2.sh	S1g_coe	with its canonical instance, or name the function)
-round2/run-round2.sh	S1h_coe_inline	the statement passes the inline instance `{ coe := fun a => a + y }` as the
-round2/run-round2.sh	S1h_coe_inline	with its canonical instance, or name the function)
-round2/run-round2.sh	S1i_beta	the statement passes the inline instance `(fun x => { hMul := fun a b => a + b
-round2/run-round2.sh	S1i_beta	with its canonical instance, or name the function)
-round2/run-round2.sh	M1	Lean rejected the proof
-round2/run-round2.sh	M1	cannot import non-`module` Extracted from `module`
+rounds/round2/run-round2.sh	S1_inline_instance	the statement passes the inline instance `{ hSub := fun a b => a + b }`
+rounds/round2/run-round2.sh	S1c_mul	the statement passes the inline instance `{ hMul := fun a b => a + b }` as the
+rounds/round2/run-round2.sh	S1c_mul	with its canonical instance, or name the function)
+rounds/round2/run-round2.sh	S1d_ofnat	the statement passes the inline instance `{ ofNat := x + y }` as the instance
+rounds/round2/run-round2.sh	S1d_ofnat	with its canonical instance, or name the function)
+rounds/round2/run-round2.sh	S1e_decidable_if	the statement passes the inline instance `if h : x = y then Decidable.isTrue h
+rounds/round2/run-round2.sh	S1e_decidable_if	with its canonical instance, or name the function)
+rounds/round2/run-round2.sh	S1f_lt	the statement passes the inline instance `{ lt := fun a b => a ≤ b }` as the
+rounds/round2/run-round2.sh	S1f_lt	with its canonical instance, or name the function)
+rounds/round2/run-round2.sh	S1g_coe	the statement passes the inline instance `{ natCast := fun n => BitVec.ofNat 64
+rounds/round2/run-round2.sh	S1g_coe	with its canonical instance, or name the function)
+rounds/round2/run-round2.sh	S1h_coe_inline	the statement passes the inline instance `{ coe := fun a => a + y }` as the
+rounds/round2/run-round2.sh	S1h_coe_inline	with its canonical instance, or name the function)
+rounds/round2/run-round2.sh	S1i_beta	the statement passes the inline instance `(fun x => { hMul := fun a b => a + b
+rounds/round2/run-round2.sh	S1i_beta	with its canonical instance, or name the function)
+rounds/round2/run-round2.sh	M1	Lean rejected the proof
+rounds/round2/run-round2.sh	M1	cannot import non-`module` Extracted from `module`
 run-all.sh	A8_classic.t1	depends on disallowed axioms: Proof.helperLemma
 run-all.sh	A8_classic.t3	the statement uses Proof.loop, which is not a plain def or theorem
 run-all.sh	B1_neverpanics_fault	Lean rejected the proof
 run-all.sh	B1_neverpanics_fault	[Lean: unsolved goals ; ⊢ False]
 run-all.sh	A8_classic.t4	the statement uses Proof.secret, which is not a plain def or theorem
 run-all.sh	B2_exit_sentinel	rejected: the only Lean error is the final rfl
-round6/run-round6.sh	F1a_homoglyph_extracted_program	a non-trusted module declares Εxtracted.program._closed_5, whose name shadows
-round6/run-round6.sh	F1a_homoglyph_extracted_program	(round 6 F1: lookalike letters and «…» components count)
-round6/run-round6.sh	F1b_guillemet_extracted	a non-trusted module declares «Extracted.program»._closed_0, whose name shadows
-round6/run-round6.sh	F1b_guillemet_extracted	(round 6 F1: lookalike letters and «…» components count)
-round6/run-round6.sh	F1c_homoglyph_ensures	the statement uses Janus.GoABI.Εnsures, whose name has characters other than
-round6/run-round6.sh	F1c_homoglyph_ensures	prints like a different, trusted constant); rename it
-round6/run-round6.sh	F2a_wrapped_numeral_hyp	the statement writes the out-of-range numeral 18446744073709551616 at type
-round6/run-round6.sh	F2a_wrapped_numeral_hyp	mean what it reads (round 6 F2). Write the value in range
-round6/run-round6.sh	F2b_wrapped_numeral_def	the proof-local definition Proof.bias used in the statement writes the
-round6/run-round6.sh	F2b_wrapped_numeral_def	mean what it reads (round 6 F2). Write the value in range
-round6/run-round6.sh	F3a_stub_by_module_path	Lean rejected the proof
-round6/run-round6.sh	F3a_stub_by_module_path	unsolved goals
-round6/run-round6.sh	F3a_stub_by_module_path	⊢ False
-round3/run-round3.sh	R1	the proof-local definition Proof.mul used in the statement the statement passes
-round3/run-round3.sh	R1	with its canonical instance, or name the function)
-round9/run-round9.sh	H2a_binder_tonos_oxia	the statement binds a variable whose name has characters other than identifier
-round9/run-round9.sh	H2a_binder_tonos_oxia	characters): "ό"; rename it (round 7 H1, round 9 H2)
-round9/run-round9.sh	H2b_binder_kelvin	the statement binds a variable whose name has characters other than identifier
-round9/run-round9.sh	H2b_binder_kelvin	characters): "K"; rename it (round 7 H1, round 9 H2)
-round9/run-round9.sh	H2c_binder_prosgegrammeni	the statement binds a variable whose name has characters other than identifier
-round9/run-round9.sh	H2c_binder_prosgegrammeni	characters): "ι"; rename it (round 7 H1, round 9 H2)
-round9/run-round9.sh	H1a_still_blocked	the statement binds two variables whose names look alike, "o" and "ο" (they
-round9/run-round9.sh	H1a_still_blocked	statement cannot be read reliably; rename one (round 7 H1)
-round9/run-round9.sh	I1g_contract_name_lookalike	the statement uses Janus.Program.contractAddr with the name
-round9/run-round9.sh	I1g_contract_name_lookalike	that object (a misspelt or lookalike name, round 8 I1)
-round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=prlimit	the statement binds two variables whose names look alike, "o" and "ο" ||| exceeded the memory limit and was killed
-round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=systemd-user	the statement binds two variables whose names look alike, "o" and "ο" ||| exceeded the memory limit and was killed
-round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=none	the statement binds two variables whose names look alike, "o" and "ο" ||| exceeded the memory limit and was killed
-round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=bogus	the statement binds two variables whose names look alike, "o" and "ο" ||| exceeded the memory limit and was killed
-round10/run-round10.sh	V1a_readiness_fun_true	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
-round10/run-round10.sh	V1a_readiness_fun_true	or a number is a runtime parameter, whatever its type)
-round10/run-round10.sh	V2a_insert_stores_v_plus_1	Lean rejected the proof
-round10/run-round10.sh	V2a_insert_stores_v_plus_1	Application type mismatch
-round10/run-round10.sh	V2a_insert_stores_v_plus_1	Ready H M.priv
-round10/run-round10.sh	V1b_runtime_ranges_nil	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
-round10/run-round10.sh	V1b_runtime_ranges_nil	or a number is a runtime parameter, whatever its type)
-round11/run-round11.sh	H1a_hash_model_closed	the statement assumes the runtime contract Janus.Contracts.Hash.Memhash for the
-round11/run-round11.sh	H1a_hash_model_closed	or a number is a runtime parameter, whatever its type)
+rounds/round6/run-round6.sh	F1a_homoglyph_extracted_program	a non-trusted module declares Εxtracted.program._closed_5, whose name shadows
+rounds/round6/run-round6.sh	F1a_homoglyph_extracted_program	(round 6 F1: lookalike letters and «…» components count)
+rounds/round6/run-round6.sh	F1b_guillemet_extracted	a non-trusted module declares «Extracted.program»._closed_0, whose name shadows
+rounds/round6/run-round6.sh	F1b_guillemet_extracted	(round 6 F1: lookalike letters and «…» components count)
+rounds/round6/run-round6.sh	F1c_homoglyph_ensures	the statement uses Janus.GoABI.Εnsures, whose name has characters other than
+rounds/round6/run-round6.sh	F1c_homoglyph_ensures	prints like a different, trusted constant); rename it
+rounds/round6/run-round6.sh	F2a_wrapped_numeral_hyp	the statement writes the out-of-range numeral 18446744073709551616 at type
+rounds/round6/run-round6.sh	F2a_wrapped_numeral_hyp	mean what it reads (round 6 F2). Write the value in range
+rounds/round6/run-round6.sh	F2b_wrapped_numeral_def	the proof-local definition Proof.bias used in the statement writes the
+rounds/round6/run-round6.sh	F2b_wrapped_numeral_def	mean what it reads (round 6 F2). Write the value in range
+rounds/round6/run-round6.sh	F3a_stub_by_module_path	Lean rejected the proof
+rounds/round6/run-round6.sh	F3a_stub_by_module_path	unsolved goals
+rounds/round6/run-round6.sh	F3a_stub_by_module_path	⊢ False
+rounds/round3/run-round3.sh	R1	the proof-local definition Proof.mul used in the statement the statement passes
+rounds/round3/run-round3.sh	R1	with its canonical instance, or name the function)
+rounds/round9/run-round9.sh	H2a_binder_tonos_oxia	the statement binds a variable whose name has characters other than identifier
+rounds/round9/run-round9.sh	H2a_binder_tonos_oxia	characters): "ό"; rename it (round 7 H1, round 9 H2)
+rounds/round9/run-round9.sh	H2b_binder_kelvin	the statement binds a variable whose name has characters other than identifier
+rounds/round9/run-round9.sh	H2b_binder_kelvin	characters): "K"; rename it (round 7 H1, round 9 H2)
+rounds/round9/run-round9.sh	H2c_binder_prosgegrammeni	the statement binds a variable whose name has characters other than identifier
+rounds/round9/run-round9.sh	H2c_binder_prosgegrammeni	characters): "ι"; rename it (round 7 H1, round 9 H2)
+rounds/round9/run-round9.sh	H1a_still_blocked	the statement binds two variables whose names look alike, "o" and "ο" (they
+rounds/round9/run-round9.sh	H1a_still_blocked	statement cannot be read reliably; rename one (round 7 H1)
+rounds/round9/run-round9.sh	I1g_contract_name_lookalike	the statement uses Janus.Program.contractAddr with the name
+rounds/round9/run-round9.sh	I1g_contract_name_lookalike	that object (a misspelt or lookalike name, round 8 I1)
+rounds/round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=prlimit	the statement binds two variables whose names look alike, "o" and "ο" ||| exceeded the memory limit and was killed
+rounds/round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=systemd-user	the statement binds two variables whose names look alike, "o" and "ο" ||| exceeded the memory limit and was killed
+rounds/round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=none	the statement binds two variables whose names look alike, "o" and "ο" ||| exceeded the memory limit and was killed
+rounds/round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=bogus	the statement binds two variables whose names look alike, "o" and "ο" ||| exceeded the memory limit and was killed
+rounds/round10/run-round10.sh	V1a_readiness_fun_true	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
+rounds/round10/run-round10.sh	V1a_readiness_fun_true	or a number is a runtime parameter, whatever its type)
+rounds/round10/run-round10.sh	V2a_insert_stores_v_plus_1	Lean rejected the proof
+rounds/round10/run-round10.sh	V2a_insert_stores_v_plus_1	Application type mismatch
+rounds/round10/run-round10.sh	V2a_insert_stores_v_plus_1	Ready H M.priv
+rounds/round10/run-round10.sh	V1b_runtime_ranges_nil	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
+rounds/round10/run-round10.sh	V1b_runtime_ranges_nil	or a number is a runtime parameter, whatever its type)
+rounds/round11/run-round11.sh	H1a_hash_model_closed	the statement assumes the runtime contract Janus.Contracts.Hash.Memhash for the
+rounds/round11/run-round11.sh	H1a_hash_model_closed	or a number is a runtime parameter, whatever its type)
 run-all.sh	R1b_forged_lemma	Kernel replay rejected the environment
 run-all.sh	R1b_forged_lemma	[Stage: kernel replay]
-round10/run-round10.sh	V1c_ranges_pinned_by_premise	the statement has the premise `rt = []` (hrt), which constrains a runtime
-round10/run-round10.sh	V1c_ranges_pinned_by_premise	and the model laws may mention them (round 10 V1, round 11)
-round11/run-round11.sh	H1b_hash_model_pinned_by_eq	the statement has the premise `H = { mem := fun x x_1 x_2 => 2 ^ 64, mem32 :=
-round11/run-round11.sh	H1b_hash_model_pinned_by_eq	and the model laws may mention them (round 10 V1, round 11)
-round10/run-round10.sh	V1d_contract_on_unlinked_prog	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
-round10/run-round10.sh	V1d_contract_on_unlinked_prog	a variable `impl` of the statement (round 10 V1, round 15)
-round11/run-round11.sh	P1a_panic_runtime_closed	the statement assumes the runtime contract
-round11/run-round11.sh	P1a_panic_runtime_closed	or a number is a runtime parameter, whatever its type)
-round10/run-round10.sh	V1e_iface_model_R0	the statement assumes the runtime contract Janus.Contracts.Iface.ConvT64 for
-round10/run-round10.sh	V1e_iface_model_R0	or a number is a runtime parameter, whatever its type)
-round10/run-round10.sh	V1f_contract_in_precondition	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
-round10/run-round10.sh	V1f_contract_in_precondition	or a number is a runtime parameter, whatever its type)
-round11/run-round11.sh	K1a_checkptr_model_pinned_by_premise	the statement has the premise `∀ (m : Janus.Arm64.Memory) (g : Janus.Arm64.W64)
-round11/run-round11.sh	K1a_checkptr_model_pinned_by_premise	and the model laws may mention them (round 10 V1, round 11)
-round13/run-round13.sh	P1a_plift_pin_H	the statement has the non-Prop binder `hpin : PLift (H = fun x x_1 x_2 x_3 =>
-round13/run-round13.sh	P1a_plift_pin_H	put such a condition in the precondition instead (round 13)
-round13/run-round13.sh	P1b_subtype_pin_H	the statement has the non-Prop binder `hpin : { u // H = fun x x_1 x_2 x_3 =>
-round13/run-round13.sh	P1b_subtype_pin_H	put such a condition in the precondition instead (round 13)
-round10/run-round10.sh	G2_attack_under_gc_hammer	the statement assumes the runtime contract Janus.Contracts.NewobjectContract ||| Lean rejected the extracted program
-round13/run-round13.sh	P1c_ulift_pin_rt	the statement has the non-Prop binder `hpin : ULift (PLift (H = fun x x_1 x_2
-round13/run-round13.sh	P1c_ulift_pin_rt	put such a condition in the precondition instead (round 13)
-round13/run-round13.sh	P1d_sigma_pin_H	the statement has the non-Prop binder `hpin : (_ : Unit) × PLift (H = fun x x_1
-round13/run-round13.sh	P1d_sigma_pin_H	put such a condition in the precondition instead (round 13)
-round13/run-round13.sh	P6b_local_def_in_type_universe	the statement has the non-Prop binder `hpin : PLift (H = fun x x_1 x_2 x_3 =>
-round13/run-round13.sh	P6b_local_def_in_type_universe	put such a condition in the precondition instead (round 13)
-round13/run-round13.sh	F1a_funcs_empty	the statement assumes the runtime contract
-round13/run-round13.sh	F1a_funcs_empty	or a number is a runtime parameter, whatever its type)
-round13/run-round13.sh	F1b_funcs_proof_defined	the statement assumes the runtime contract
-round13/run-round13.sh	F1b_funcs_proof_defined	or a number is a runtime parameter, whatever its type)
-round13/run-round13.sh	F1c_funcs_tail	the statement assumes the runtime contract
-round13/run-round13.sh	F1c_funcs_tail	or a number is a runtime parameter, whatever its type)
-round13/run-round13.sh	F1d_funcs_take	the statement assumes the runtime contract
-round13/run-round13.sh	F1d_funcs_take	or a number is a runtime parameter, whatever its type)
-round13/run-round13.sh	F1e_funcs_let_alias	the statement assumes the runtime contract
-round13/run-round13.sh	F1e_funcs_let_alias	or a number is a runtime parameter, whatever its type)
-round13/run-round13.sh	F1f_funcs_append_nil	the statement assumes the runtime contract
-round13/run-round13.sh	F1f_funcs_append_nil	or a number is a runtime parameter, whatever its type)
-round13/run-round13.sh	F1g_ctl_abbrev_alias_is_the_constant	Proof.correctness depends on disallowed axioms: sorryAx.
-round11/run-round11.sh	A1a_proof_defined_spec	the statement assumes the runtime contract Janus.Contracts.RtContract for the
-round11/run-round11.sh	A1a_proof_defined_spec	not even from imported parts such as `default` (round 11)
-round11/run-round11.sh	A1b_inline_spec_lambda	the statement assumes the runtime contract Janus.Contracts.RtContract for the
-round11/run-round11.sh	A1b_inline_spec_lambda	not even from imported parts such as `default` (round 11)
-round11/run-round11.sh	A1b2_structure_update_of_listed_spec	the statement assumes the runtime contract Janus.Contracts.RtContract for the
-round11/run-round11.sh	A1b2_structure_update_of_listed_spec	argument `have __src := Janus.Contracts.concatstringSpec 2;
-round14/run-round14.sh	bad1	the statement mentions `Extracted.program.link [{ name := "witness.newobject",
-round14/run-round14.sh	bad1	}]`: a main theorem may link only a variable of the stateme
-round14/run-round14.sh	bad2	the statement mentions `Extracted.program.link [{ name := "witness.newobject",
-round14/run-round14.sh	bad2	}]`: a main theorem may link only a variable of the stateme
-round14/run-round14.sh	bad3	the statement mentions `Extracted.program.link impl`: a main theorem may link
-round14/run-round14.sh	bad3	`impl` a binder of the theorem constrained by the runtime
-round14/run-round14.sh	bad4	the statement mentions the runtime implementation variable `impl` other than as
-round14/run-round14.sh	bad4	implementation only through the pinned contracts and mode
-round14/run-round14.sh	bad5	the statement mentions `Extracted.program.link []`: a main theorem may link
-round14/run-round14.sh	bad5	a binder of the theorem constrained by the runtime co
-round14/run-round14.sh	bad6	the statement builds a program by hand (`{ segments := impl, stubs :=
-round14/run-round14.sh	bad6	Extracted.program.data, contracts := Extracted.program.con
-round14/run-round14.sh	bad7	the statement mentions `Extracted.program.link impl`: a main theorem may link
-round14/run-round14.sh	bad7	`impl` a binder of the theorem constrained by the runtime
-round14/run-round14.sh	bad8	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
-round14/run-round14.sh	bad8	base := 175920, words := Janus.Contracts.AllocWitn
-round14/run-round14.sh	bad9	the statement has the premise `Janus.GoABI.RetAddr (Extracted.program.link
-round14/run-round14.sh	bad9	only the contracts and the model laws may mentio
-round14/run-round14.sh	bad10	the statement has the premise `(Extracted.program.link impl).exitAddr = 0` (h),
-round14/run-round14.sh	bad10	only the contracts and the model laws may mention them (rou
-round14/run-round14.sh	bad11	the statement mentions `Extracted.program.link [{ name := "witness.newobject",
-round14/run-round14.sh	bad11	}]`: a main theorem may link only a variable of the stateme
-round14/run-round14.sh	WeakA.Witness.nonvacuous	Proof.WeakA.Witness.nonvacuous does not instantiate any main theorem of the
-round14/run-round14.sh	WeakA.Witness.nonvacuous	(Extracted.program.link ?impl) (Extracted.pro
-round14/run-round14.sh	WeakB.Witness.nonvacuous	Proof.WeakB.Witness.nonvacuous does not instantiate any main theorem of the
-round14/run-round14.sh	WeakB.Witness.nonvacuous	List.nil) (BitVec.toNat (s.regs 28)) (instHSub.hSub
-round14/run-round14.sh	WeakC.Witness.nonvacuous	Proof.WeakC.Witness.nonvacuous does not instantiate any main theorem of the
-round14/run-round14.sh	WeakC.Witness.nonvacuous	(Extracted.program.link ?impl) (Extracted.pro
-round14/run-round14.sh	WeakD.Witness.nonvacuous	Proof.WeakD.Witness.nonvacuous does not instantiate any main theorem of the
-round14/run-round14.sh	WeakD.Witness.nonvacuous	((Extracted.program.link impl).withExit ret) Extracted.en
-round14/run-round14.sh	WeakE.Witness.nonvacuous	Proof.WeakE.Witness.nonvacuous is not of the form `∃ …, …` (a state and runtime
-round14/run-round14.sh	WeakE.Witness.nonvacuous	exhibiting the main theorem's hypotheses) (round 14, W2)
-round14/run-round14.sh	WeakF.Witness.returns	Proof.WeakF.Witness.returns is not the guarantee of any main theorem of the
-round14/run-round14.sh	WeakF.Witness.returns	not its guarantee `Janus.GoABI.Returns ((Extracted.program
-round14/run-round14.sh	WeakG.Witness.returns	Proof.WeakG.Witness.returns is not the guarantee of any main theorem of the
-round14/run-round14.sh	WeakG.Witness.returns	not its guarantee `Janus.GoABI.Returns ((Extracted.program
-round14/run-round14.sh	WeakI.Witness.returns	Proof.WeakI.Witness.returns is not the guarantee of any main theorem of the
-round14/run-round14.sh	WeakI.Witness.returns	not its guarantee `Janus.GoABI.Returns ((Extracted.program
-round14/run-round14.sh	WeakH.Witness.returns	Proof.WeakH.Witness.returns is not a `Returns`-style statement (`Returns`,
-round14/run-round14.sh	WeakH.Witness.returns	`ReturnsK`, `GrownReturns`, `ReachesRet`) (round 14, W2)
-round14/run-round14.sh	HideA.Witness.guarantee	Proof.HideA.Witness.guarantee is a lemma of a Witness namespace, not a
-round14/run-round14.sh	HideA.Witness.guarantee	by convention) and `Witness.returns` are (roun
-round14/run-round14.sh	HideB.Witness.returns	Proof.HideB.Witness.returns is not a `Returns`-style statement (`Returns`,
-round14/run-round14.sh	HideB.Witness.returns	`ReturnsK`, `GrownReturns`, `ReachesRet`) (round 14, W2)
-round14/run-round14.sh	Witness.pre	Proof.Witness.pre is a lemma of a Witness namespace, not a verifiable result:
-round14/run-round14.sh	Witness.pre	by convention) and `Witness.returns` are (round 14, W2)
-round11/run-round11.sh	A1c_imported_default_fmt	the statement assumes the runtime contract Janus.Contracts.Hash.Fhash for the
-round11/run-round11.sh	A1c_imported_default_fmt	not even from imported parts such as `default` (round 11)
-round14/run-round14.sh	fake1	the statement has the premise `Extracted.program.link impl =
-round14/run-round14.sh	fake1	hypothesis; only the contracts and the model laws may me
-round14/run-round14.sh	fake2	the statement has the premise `Janus.Tactic.Summary (Extracted.program.link
-round14/run-round14.sh	fake2	runtime variable of a contract hypothesis; only the contra
-round14/run-round14.sh	fake3	the statement has the premise `Extracted.program.link impl =
-round14/run-round14.sh	fake3	hypothesis; only the contracts and the model laws may me
-round11/run-round11.sh	A1d2_abbrev_of_bad_spec	the statement assumes the runtime contract Janus.Contracts.RtContract for the
-round11/run-round11.sh	A1d2_abbrev_of_bad_spec	not even from imported parts such as `default` (round 11)
-round14/run-round14.sh	OneMember.Witness.nonvacuous	Proof.OneMember.Witness.nonvacuous does not instantiate any main theorem of the
-round14/run-round14.sh	OneMember.Witness.nonvacuous	(Extracted.program.withExit ret) (Janus.Tactic.segAdd
-round13/run-round13.sh	F2_tampered_funcs_verify	audit/round13/work/DeferOrder-tampered/Extracted.lean was modified after
-round13/run-round13.sh	F2_tampered_funcs_verify	2025d293fd55bc24d69380343becec293be3f8a5649a58e3569a414c785.
-round14/run-round14.sh	correctness	Proof.correctness assumes runtime contracts
-round14/run-round14.sh	correctness	nothing shows that its precondition, those contracts and t
-round14/run-round14.sh	Witness.nonvacuous	Proof.Witness.nonvacuous does not instantiate any main theorem of the proof module (Proof.correctness: the
-round14/run-round14.sh	pinpre1	the statement mentions the runtime implementation variable `impl` other than as
-round14/run-round14.sh	pinpre1	implementation only through the pinned contracts and mode
-round14/run-round14.sh	exc1	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
-round14/run-round14.sh	exc1	a contract is an assumption about the runtime only
-round14/run-round14.sh	W1.Witness.returns	Proof.W1.Witness.returns is not the guarantee of any main theorem of the proof
-round14/run-round14.sh	W1.Witness.returns	its guarantee `Janus.GoABI.Returns ((Extracted.program.li
-round14/run-round14.sh	W2.Witness.returns	Proof.W2.Witness.returns is not the guarantee of any main theorem of the proof
-round14/run-round14.sh	W2.Witness.returns	its guarantee `Janus.GoABI.Returns ((Extracted.program.li
-round15/run-round15.sh	weak	Proof.weak assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
-round15/run-round15.sh	weak	shows that its precondition, those contracts and this pro
-round15/run-round15.sh	Witness.weak	Proof.Witness.weak does not instantiate any main theorem of the proof module
-round15/run-round15.sh	Witness.weak	not among the conjuncts of the witness (conjuncts are match
-roundbig/run-roundbig.sh	ChunkNew	a non-trusted module declares Extracted.seg0_chunk_9999, whose name shadows the
-roundbig/run-roundbig.sh	ChunkNew	(round 6 F1: lookalike letters and «…» components count)
-round15/run-round15.sh	lamWeak	Proof.lamWeak assumes runtime contracts (Janus.Contracts.NewobjectContract@runti
-round15/run-round15.sh	lamWeak	shows that its precondition, those contracts and this
-round15/run-round15.sh	Witness.lamWeak	Proof.Witness.lamWeak does not instantiate any main theorem of the proof module
-round15/run-round15.sh	Witness.lamWeak	is not among the conjuncts of the witness (conjuncts are
-roundbig/run-roundbig.sh	ChunkDup	Lean rejected the proof
-roundbig/run-roundbig.sh	ChunkDup	has already been declared
-roundbig/run-roundbig.sh	ChunkEqn	s_nothere.eq_1, whose name shadows the Extracted namespace (round 6 F1: lookalike letters and «…» components
-roundbig/run-roundbig.sh	ChunkLookalike	s_9999, whose name shadows the Extracted namespace (round 6 F1: lookalike letters and «…» components count)
-roundbig/run-roundbig.sh	forgeByte.verify	64-forgeByte/Extracted.lean differs from the regenerated extraction
-roundbig/run-roundbig.sh	forgeSwap.verify	64-forgeSwap/Extracted.lean differs from the regenerated extraction
-roundbig/run-roundbig.sh	forgeName.verify	64-forgeName/Extracted.lean differs from the regenerated extraction
-roundds/run-roundds.sh	shadow	a non-trusted module declares Extracted.dataAddr.«example.com/basic.other»,
-roundds/run-roundds.sh	shadow	(round 6 F1: lookalike letters and «…» components count)
-roundds/run-roundds.sh	nocode	the statement does not mention Extracted.program or Extracted.entry, so it says
-roundds/run-roundds.sh	EqnDef	Lean rejected the proof
-roundds/run-roundds.sh	EqnDef	is a reserved name
-roundds/run-roundds.sh	EqnAxiom	Lean rejected the proof
-roundds/run-roundds.sh	EqnAxiom	is a reserved name
-roundds/run-roundds.sh	EqnOtherLhs	Lean rejected the proof
-roundds/run-roundds.sh	EqnOtherLhs	is a reserved name
-roundds/run-roundds.sh	EqnOtherConst	a non-trusted module declares Extracted.dataSize.«example.com/basic.nothere».eq_
-roundds/run-roundds.sh	EqnOtherConst	(round 6 F1: lookalike letters and «…» components count)
-roundds/run-roundds.sh	EqnLookalike	a non-trusted module declares Εxtracted.dataSize.«example.com/basic.symPows».eq_
-roundds/run-roundds.sh	EqnLookalike	(round 6 F1: lookalike letters and «…» components count)
-roundds/run-roundds.sh	EqnNotEq	Lean rejected the proof
-roundds/run-roundds.sh	EqnNotEq	is a reserved name
-roundfw/run-roundfw.sh	P_arm64_newobject_tampered	but that function is not the Go runtime's runtime.newobject
-roundfw/run-roundfw.sh	P_arm64_makeslice_tampered	but that function is not the Go runtime's runtime.makeslice
-roundfw/run-roundfw.sh	P_arm64_growslice_tampered	but that function is not the Go runtime's runtime.growslice
-roundfw/run-roundfw.sh	P_arm64_mallocgc_tampered	but that function is not the Go runtime's runtime.mallocgc
-roundfw/run-roundfw.sh	P_arm64_gcWriteBarrier2_tampered	but that function is not the Go runtime's runtime.gcWriteBarrier2
-roundfw/run-roundfw.sh	P_amd64_newobject_tampered	but that function is not the Go runtime's runtime.newobject
-roundfw/run-roundfw.sh	P_amd64_makeslice_tampered	but that function is not the Go runtime's runtime.makeslice
-roundfw/run-roundfw.sh	P_amd64_growslice_tampered	but that function is not the Go runtime's runtime.growslice
-roundfw/run-roundfw.sh	P_amd64_mallocgc_tampered	but that function is not the Go runtime's runtime.mallocgc
-roundfw/run-roundfw.sh	P_amd64_gcWriteBarrier2_tampered	but that function is not the Go runtime's runtime.gcWriteBarrier2
-roundfw/run-roundfw.sh	G1_misspelt_global	the statement uses Janus.Spec.GlobalsInit with the name
-roundfw/run-roundfw.sh	G1_misspelt_global	vacuous (a misspelt or lookalike name, round 8 I1)
-roundfw/run-roundfw.sh	G2_lookalike_global	the statement uses Janus.Spec.GlobalsInit with the name
-roundfw/run-roundfw.sh	G2_lookalike_global	vacuous (a misspelt or lookalike name, round 8 I1)
-roundfw/run-roundfw.sh	G3_other_global_list	the statement passes `[{ name := "example.com/basic.karatsubaCut", base := 0,
-roundfw/run-roundfw.sh	G3_other_global_list	are looked up in the extracted program only (round 8 I1)
-round15/run-round15.sh	otherMain	Proof.otherMain assumes runtime contracts
-round15/run-round15.sh	otherMain	shows that its precondition, those contracts and thi
-roundofimpl/run-roundofimpl.sh	ctl1	@runtime.newobject) but no kernel-checked non-vacuity witness for it was verified in this run: nothing shows
-roundofimpl/run-roundofimpl.sh	ctl2	@runtime.newobject) but no kernel-checked non-vacuity witness for it was verified in this run: nothing shows
-roundofimpl/run-roundofimpl.sh	ctl3	Proof.ctl3 assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
-roundofimpl/run-roundofimpl.sh	ctl3	shows that its precondition, those contracts and this pro
-roundofimpl/run-roundofimpl.sh	ctl4	Proof.ctl4 assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
-roundofimpl/run-roundofimpl.sh	ctl4	shows that its precondition, those contracts and this pro
-roundofimpl/run-roundofimpl.sh	ctl5	Proof.ctl5 assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
-roundofimpl/run-roundofimpl.sh	ctl5	shows that its precondition, those contracts and this pro
-roundofimpl/run-roundofimpl.sh	ctl8	Proof.ctl8 assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
-roundofimpl/run-roundofimpl.sh	ctl8	shows that its precondition, those contracts and this pro
-roundofimpl/run-roundofimpl.sh	ctl9	Proof.ctl9 assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
-roundofimpl/run-roundofimpl.sh	ctl9	shows that its precondition, those contracts and this pro
-roundofimpl/run-roundofimpl.sh	ctl10	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
-roundofimpl/run-roundofimpl.sh	ctl10	`Extracted.program.link impl`: a contract about another imp
-roundofimpl/run-roundofimpl.sh	Shadow.ctl7	Proof.Shadow.ctl7 assumes runtime contracts
-roundofimpl/run-roundofimpl.sh	Shadow.ctl7	nothing shows that its precondition, those contracts and t
-roundofimpl/run-roundofimpl.sh	ctl11	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
-roundofimpl/run-roundofimpl.sh	ctl11	which describes runtime.growslice / runtime.growsliceNoAli
-roundofimpl/run-roundofimpl.sh	r1	about the program `Extracted.program.ofImpl []`, which is not `Extracted.program.link impl` (or
-roundofimpl/run-roundofimpl.sh	r2	the statement mentions the runtime implementation variable `impl` other than as
-roundofimpl/run-roundofimpl.sh	r2	implementation only through the pinned contracts and mode
-roundofimpl/run-roundofimpl.sh	r3	the statement mentions `Extracted.program.ofImpl impl`: `Program.ofImpl` (the
-roundofimpl/run-roundofimpl.sh	r3	hypothesis (`… (Extracted.program.ofImpl impl) …`), never o
-roundofimpl/run-roundofimpl.sh	r4	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
-roundofimpl/run-roundofimpl.sh	r4	is not `Extracted.program.link impl` (or `Extracted.pr
-roundofimpl/run-roundofimpl.sh	r5	the statement mentions `Extracted.program.ofImpl impl`: `Program.ofImpl` (the
-roundofimpl/run-roundofimpl.sh	r5	hypothesis (`… (Extracted.program.ofImpl impl) …`), never o
-roundofimpl/run-roundofimpl.sh	r6	the statement mentions the runtime implementation variable `impl` other than as
-roundofimpl/run-roundofimpl.sh	r6	implementation only through the pinned contracts and mode
-roundofimpl/run-roundofimpl.sh	r7	the statement mentions a concrete runtime implementation
-roundofimpl/run-roundofimpl.sh	r7	statement: a main theorem quantifies the implementation (
-roundofimpl/run-roundofimpl.sh	r8	the statement mentions the runtime implementation variable `impl` other than as
-roundofimpl/run-roundofimpl.sh	r8	implementation only through the pinned contracts and mode
-roundofimpl/run-roundofimpl.sh	r9	the statement mentions the runtime implementation variable `impl` other than as
-roundofimpl/run-roundofimpl.sh	r9	implementation only through the pinned contracts and mode
-roundofimpl/run-roundofimpl.sh	r10	the statement mentions the runtime implementation variable `impl` other than as
-roundofimpl/run-roundofimpl.sh	r10	implementation only through the pinned contracts and mode
-roundofimpl/run-roundofimpl.sh	r11	the statement mentions a concrete runtime implementation (`[]`, a `List
-roundofimpl/run-roundofimpl.sh	r11	the implementation (a variable `impl` constrained on
-roundofimpl/run-roundofimpl.sh	Shadow2.r12	the statement mentions the runtime implementation variable `impl` other than as
-roundofimpl/run-roundofimpl.sh	Shadow2.r12	implementation only through the pinned contracts and mode
-roundofimpl/run-roundofimpl.sh	r13	the statement mentions a concrete runtime implementation (`impl ++ []`, a `List
-roundofimpl/run-roundofimpl.sh	r13	quantifies the implementation (a variable `impl` constr
-roundofimpl/run-roundofimpl.sh	r16	the statement mentions the runtime implementation variable `impl` other than as
-roundofimpl/run-roundofimpl.sh	r16	implementation only through the pinned contracts and mode
-roundofimpl/run-roundofimpl.sh	r17	the statement mentions the runtime implementation variable `impl` other than as
-roundofimpl/run-roundofimpl.sh	r17	implementation only through the pinned contracts and mode
-roundofimpl/run-roundofimpl.sh	r18	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
-roundofimpl/run-roundofimpl.sh	r18	is not `Extracted.program.link impl` (or `Extracted.program
-roundofimpl/run-roundofimpl.sh	r20	the statement mentions `Extracted.program.ofImpl impl`: `Program.ofImpl` (the
-roundofimpl/run-roundofimpl.sh	r20	hypothesis (`… (Extracted.program.ofImpl impl) …`), never o
-roundofimpl/run-roundofimpl.sh	r21	the statement builds a program by hand (`{ segments :=
-roundofimpl/run-roundofimpl.sh	r21	acted.program.exitAddr, data := Extracted.program.data, cont
-roundofimpl/run-roundofimpl.sh	r22	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
-roundofimpl/run-roundofimpl.sh	r22	which describes runtime.growslice / runtime.growsliceNoAli
-roundofimpl/run-roundofimpl.sh	r23	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
-roundofimpl/run-roundofimpl.sh	r23	which describes runtime.growslice / runtime.growsliceNoAli
-roundofimpl/run-roundofimpl.sh	NoApart.Witness.nonvacuous	Proof.NoApart.Witness.nonvacuous does not instantiate any main theorem of the proof module
-rounderrorf/run-rounderrorf.sh	a1	.ErrorfLive for the argument `4096` where it takes `Extracted.dataAddr.«type:*errors.errorString»` (the
-rounderrorf/run-rounderrorf.sh	a2	.ErrorfLive for the argument `4096` where it takes `Extracted.dataAddr.«go:itab.*errors.errorString,error»`
-rounderrorf/run-rounderrorf.sh	a3	.ErrorfLive for the argument `4096` where it takes `Extracted.dataAddr.«type:int»` (the address of that type
-rounderrorf/run-rounderrorf.sh	a4	.ErrorfLive for the argument `4096` where it takes `Extracted.dataAddr.«go:itab.*fmt.wrapError,error»` (the
-rounderrorf/run-rounderrorf.sh	a5	.ErrorfLive for the argument `Extracted.dataAddr.«go:itab.*fmt.wrapError,error»` where it takes
-rounderrorf/run-rounderrorf.sh	a6	.ErrorfLive for the argument `tv` where it takes `Extracted.dataAddr.«type:*errors.errorString»` (the address
-rounderrorf/run-rounderrorf.sh	a7	the statement uses Janus.Spec.dataAddr with the name
-rounderrorf/run-rounderrorf.sh	a7	the lookup silently defaults (`False` or `0`) and the stat
-rounderrorf/run-rounderrorf.sh	a8	.ErrorfLive, the contract of `fmt.errorf`, at the address of `runtime.newobject` (spec binding)
-roundn9/run-roundn9.sh	b1	the statement the precondition constrains the memory word at the entry `RSP`
-roundn9/run-roundn9.sh	b1	any form: alias, arithmetic, existential): a theorem must n
-roundn9/run-roundn9.sh	b2	the statement the precondition constrains the memory word at the entry `RSP`
-roundn9/run-roundn9.sh	b2	any form: alias, arithmetic, existential): a theorem must n
-roundn9/run-roundn9.sh	b3	the statement the precondition constrains the memory word at the entry `RSP`
-roundn9/run-roundn9.sh	b3	any form: alias, arithmetic, existential): a theorem must n
-roundn9/run-roundn9.sh	b4	the statement the precondition constrains the memory word at the entry `RSP`
-roundn9/run-roundn9.sh	b4	any form: alias, arithmetic, existential): a theorem must n
-roundn9/run-roundn9.sh	b5	the statement the precondition constrains the memory word at the entry `RSP`
-roundn9/run-roundn9.sh	b5	any form: alias, arithmetic, existential): a theorem must n
-roundn9/run-roundn9.sh	b6	the statement the precondition constrains the memory word at the entry `RSP`
-roundn9/run-roundn9.sh	b6	any form: alias, arithmetic, existential): a theorem must n
-roundn9/run-roundn9.sh	b7	the statement the precondition constrains the memory word at the entry `RSP`
-roundn9/run-roundn9.sh	b7	any form: alias, arithmetic, existential): a theorem must n
-roundn9/run-roundn9.sh	b9	the statement the precondition constrains the memory word at the entry `RSP`
-roundn9/run-roundn9.sh	b9	any form: alias, arithmetic, existential): a theorem must n
-roundn9/run-roundn9.sh	b10	the statement the precondition constrains the memory word at the entry `RSP`
-roundn9/run-roundn9.sh	b10	any form: alias, arithmetic, existential): a theorem must n
-roundn9/run-roundn9.sh	b11	the statement the precondition constrains the memory word at the entry `RSP`
-roundn9/run-roundn9.sh	b11	any form: alias, arithmetic, existential): a theorem must n
-roundspecbind/run-roundspecbind.sh	q1	the statement assumes the runtime contract Janus.Contracts.RtContract at the
-roundspecbind/run-roundspecbind.sh	q1	describes runtime.growslice / runtime.growsliceNoAlias:
-roundspecbind/run-roundspecbind.sh	q2	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
-roundspecbind/run-roundspecbind.sh	q2	which describes runtime.growslice / runtime.growsliceNoAli
-roundspecbind/run-roundspecbind.sh	q3	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
-roundspecbind/run-roundspecbind.sh	q3	describes runtime.wbZero: the spec of another runtime f
-roundspecbind/run-roundspecbind.sh	q4	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
-roundspecbind/run-roundspecbind.sh	q4	which describes runtime.growslice / runtime.growsliceNoAli
-roundspecbind/run-roundspecbind.sh	p1	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
-roundspecbind/run-roundspecbind.sh	p1	`Extracted.program.link impl`: a contract about another imp
-roundspecbind/run-roundspecbind.sh	s15	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
-roundspecbind/run-roundspecbind.sh	s15	`Extracted.program.link impl`: a contract about another imp
-roundspecbind/run-roundspecbind.sh	g3	the statement assumes the runtime contract Janus.Contracts.RtContract at the
-roundspecbind/run-roundspecbind.sh	g3	which describes runtime.growsliceBuf / runtime.growsliceBuf
-roundspecbind/run-roundspecbind.sh	g4	the statement assumes the runtime contract Janus.Contracts.RtContract at the
-roundspecbind/run-roundspecbind.sh	g4	which describes runtime.concatstring3: the spec of anothe
-roundspecbind/run-roundspecbind.sh	g5	the statement assumes the runtime contract Janus.Contracts.RtLiveContract with
-roundspecbind/run-roundspecbind.sh	g5	not to the spec of this contract: a spec an
-roundspecbind/run-roundspecbind.sh	g6	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
-roundspecbind/run-roundspecbind.sh	g6	which describes runtime.growsliceBuf / runtime.growslic
-roundspecbind/run-roundspecbind.sh	g8	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
-roundspecbind/run-roundspecbind.sh	g8	which describes runtime.convTstring: the spec of another
-roundspecbind/run-roundspecbind.sh	g9	the statement assumes the runtime contract Janus.Contracts.RtLiveContract with
-roundspecbind/run-roundspecbind.sh	g9	not to the spec of this contract: a spec and live dat
-roundspecbind/run-roundspecbind.sh	n1	the statement assumes the runtime contract Janus.Contracts.NewobjectContract,
-roundspecbind/run-roundspecbind.sh	n1	at the address of `runtime.growslice` (spec binding)
-roundspecbind/run-roundspecbind.sh	d1	the statement passes `Extracted.program.onlySegments []` to
-roundspecbind/run-roundspecbind.sh	d1	are looked up in the extracted program only (round 8 I1)
-roundspecbind/run-roundspecbind.sh	i1	the statement assumes the runtime contract Janus.Contracts.RtContract about the
-roundspecbind/run-roundspecbind.sh	i1	impl`: a contract about another implementa
-roundspecbind/run-roundspecbind.sh	a1	the statement assumes the runtime contract Janus.Contracts.RtContract for the
-roundspecbind/run-roundspecbind.sh	a1	not one of the framework's named runtime-function specs (`c
-roundspecbind/run-roundspecbind.sh	a2	the statement assumes the runtime contract Janus.Contracts.RtContract for the
-roundspecbind/run-roundspecbind.sh	a2	one of the framework's named runtime-function specs (`con
-roundspecbind/run-roundspecbind.sh	a3	the statement assumes the runtime contract Janus.Contracts.RtContract for the
-roundspecbind/run-roundspecbind.sh	a3	aAddr.«runtime.staticuint64s» + 8)`, which is not one of the
-roundspecbind/run-roundspecbind.sh	a4	the statement uses Janus.Spec.dataAddr with the name "runtime.staticuint64s",
-roundspecbind/run-roundspecbind.sh	a4	lookup silently defaults (`False` or `0`) and the stateme
-roundspecbind/run-roundspecbind.sh	a5	the statement assumes the runtime contract Janus.Contracts.RtLiveContract for
-roundspecbind/run-roundspecbind.sh	a5	is not one of the framework's named runtime-function specs
-roundspecbind/run-roundspecbind.sh	a6	the statement assumes the runtime contract Janus.Contracts.RtLiveContract for
-roundspecbind/run-roundspecbind.sh	a6	not one of the framework's named runtime-function specs (
-roundspecbind/run-roundspecbind.sh	a7	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
-roundspecbind/run-roundspecbind.sh	a7	which describes runtime.growslice / runtime.growsl
-roundspecbind/run-roundspecbind.sh	a8	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
-roundspecbind/run-roundspecbind.sh	a8	which describes runtime.convTstring: the spec of
-roundspecbind/run-roundspecbind.sh	a9	the statement assumes the runtime contract Janus.Contracts.RtLiveContract with
-roundspecbind/run-roundspecbind.sh	a9	not to the spec of this contract: a spec and live
-roundspecbind/run-roundspecbind.sh	a10	the statement assumes the runtime contract Janus.Contracts.RtLiveContract for
-roundspecbind/run-roundspecbind.sh	a10	is not one of the framework's named runtime-function spec
-roundspecbind/run-roundspecbind.sh	a11	the statement assumes the runtime contract Janus.Contracts.RtLiveContract with
-roundspecbind/run-roundspecbind.sh	a11	not to the spec of this contract: a spec and live
-roundspecbind/run-roundspecbind.sh	h2	the statement assumes the runtime contract Janus.Contracts.RtContract64 at the
-roundspecbind/run-roundspecbind.sh	h2	which describes runtime.growsliceBuf / runtime.growsliceB
-roundspecbind/run-roundspecbind.sh	h3	the statement assumes the runtime contract Janus.Contracts.NewobjectContract64,
-roundspecbind/run-roundspecbind.sh	h3	at the address of `runtime.growslice` (spec binding)
-roundspecbind/run-roundspecbind.sh	h4	the statement assumes the runtime contract Janus.Contracts.RtContract64 about
-roundspecbind/run-roundspecbind.sh	h4	impl`: a contract about another implemen
-roundup3/run-roundup3.sh	N01_ctl_stack_plus_w/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N01_ctl_stack_plus_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-roundup3/run-roundup3.sh	N02_ctl_stack_lt_w/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N02_ctl_stack_lt_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-roundup3/run-roundup3.sh	N03_ctl_above_w/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N03_ctl_above_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-roundup3/run-roundup3.sh	N04_ctl_shared_w/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N04_ctl_shared_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-roundup3/run-roundup3.sh	N05_ctl_c_max/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N05_ctl_c_max/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-roundup3/run-roundup3.sh	N06_ctl_nargs_w/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N06_ctl_nargs_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-roundup3/run-roundup3.sh	N10_pre_pins_w/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N10_pre_pins_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-roundup3/run-roundup3.sh	N11_pre_pins_k/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N11_pre_pins_k/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-roundup3/run-roundup3.sh	N12_post_w/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N12_post_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-roundup3/run-roundup3.sh	N13_plift_binder	the statement has the non-Prop binder `p : PLift (w < 8)` whose type mentions
-roundup3/run-roundup3.sh	N13_plift_binder	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N13_plift_binder/allow-no-witness	the statement has the non-Prop binder `p : PLift (w < 8)` whose type mentions
-roundup3/run-roundup3.sh	N13_plift_binder/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N14_subtype_binder	the statement has the non-Prop binder `p : { u // w < 8 }` whose type mentions
-roundup3/run-roundup3.sh	N14_subtype_binder	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N14_subtype_binder/allow-no-witness	the statement has the non-Prop binder `p : { u // w < 8 }` whose type mentions
-roundup3/run-roundup3.sh	N14_subtype_binder/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N15_struct_binder	the statement uses Proof.PinW, which is not a plain def or theorem
-roundup3/run-roundup3.sh	N15_struct_binder/allow-no-witness	the statement uses Proof.PinW, which is not a plain def or theorem
-roundup3/run-roundup3.sh	N16_fin_binder	the statement has the non-Prop binder `f : Fin w → Fin 0` whose type mentions
-roundup3/run-roundup3.sh	N16_fin_binder	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N16_fin_binder/allow-no-witness	the statement has the non-Prop binder `f : Fin w → Fin 0` whose type mentions
-roundup3/run-roundup3.sh	N16_fin_binder/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N17_pprod_binder	the statement has the non-Prop binder `p : w < 8 ×' k ≤ w` whose type mentions
-roundup3/run-roundup3.sh	N17_pprod_binder	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N17_pprod_binder/allow-no-witness	the statement has the non-Prop binder `p : w < 8 ×' k ≤ w` whose type mentions
-roundup3/run-roundup3.sh	N17_pprod_binder/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N18_let_conclusion/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N18_let_conclusion/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-roundup3/run-roundup3.sh	N19_defwrapped_pin	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N19_defwrapped_pin	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N19_defwrapped_pin/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N19_defwrapped_pin/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N20_ite_premise	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N20_ite_premise	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N20_ite_premise/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N20_ite_premise/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N21_ite_in_bound	the statement has the premise `k ≤ if w < 8 then w else w` (hw) about the stack
-roundup3/run-roundup3.sh	N21_ite_in_bound	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N21_ite_in_bound/allow-no-witness	the statement has the premise `k ≤ if w < 8 then w else w` (hw) about the stack
-roundup3/run-roundup3.sh	N21_ite_in_bound/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N22_decide_premise	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N22_decide_premise	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N22_decide_premise/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N22_decide_premise/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N23_int_coercion	the statement has the premise `(↑k : Int) ≤ (↑w : Int)` (hw) about the stack
-roundup3/run-roundup3.sh	N23_int_coercion	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N23_int_coercion/allow-no-witness	the statement has the premise `(↑k : Int) ≤ (↑w : Int)` (hw) about the stack
-roundup3/run-roundup3.sh	N23_int_coercion/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N24_bitvec_premise	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N24_bitvec_premise	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N24_bitvec_premise/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N24_bitvec_premise/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N25_conj_premise	the statement has the premise `k ≤ w ∧ w < 8` (hw) about the stack `k` of a
-roundup3/run-roundup3.sh	N25_conj_premise	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N25_conj_premise/allow-no-witness	the statement has the premise `k ≤ w ∧ w < 8` (hw) about the stack `k` of a
-roundup3/run-roundup3.sh	N25_conj_premise/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N26_forall_premise	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N26_forall_premise	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N26_forall_premise/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N26_forall_premise/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N27_fact_instance	the statement has the premise `Nonempty (k < 8)`
-roundup3/run-roundup3.sh	N27_fact_instance	U-ICALL-STACK
-roundup3/run-roundup3.sh	N27_fact_instance/allow-no-witness	the statement has the premise `Nonempty (k < 8)`
-roundup3/run-roundup3.sh	N27_fact_instance/allow-no-witness	U-ICALL-STACK
-roundup3/run-roundup3.sh	N28_huge_c	the statement has the premise `k + 140737488355328 ≤ w` (hw) about the stack
-roundup3/run-roundup3.sh	N28_huge_c	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N28_huge_c/allow-no-witness	the statement has the premise `k + 140737488355328 ≤ w` (hw) about the stack
-roundup3/run-roundup3.sh	N28_huge_c/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N29_chain_w	the statement has the premise `k + 16 ≤ w` (h1) about the stack `k` of a
-roundup3/run-roundup3.sh	N29_chain_w	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N29_chain_w/allow-no-witness	the statement has the premise `k + 16 ≤ w` (h1) about the stack `k` of a
-roundup3/run-roundup3.sh	N29_chain_w/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N30_w_is_fn	the statement has the premise `k + 16 ≤ fn` (hw) about the stack `k` of a
-roundup3/run-roundup3.sh	N30_w_is_fn	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N30_w_is_fn/allow-no-witness	the statement has the premise `k + 16 ≤ fn` (hw) about the stack `k` of a
-roundup3/run-roundup3.sh	N30_w_is_fn/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N31_w_is_size	the statement has the premise `k + 16 ≤ w` (hw) about the stack `w` of a
-roundup3/run-roundup3.sh	N31_w_is_size	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N31_w_is_size/allow-no-witness	the statement has the premise `k + 16 ≤ w` (hw) about the stack `w` of a
-roundup3/run-roundup3.sh	N31_w_is_size/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N32_w_in_P	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N32_w_in_P	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N32_w_in_P/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N32_w_in_P/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N33_P_false_by_design	the statement assumes the abstract-callee contract
-roundup3/run-roundup3.sh	N33_P_false_by_design	and the hypothesis holds vacuously (U-ICALL-INHABITED)
-roundup3/run-roundup3.sh	N33_P_false_by_design/allow-no-witness	the statement assumes the abstract-callee contract
-roundup3/run-roundup3.sh	N33_P_false_by_design/allow-no-witness	and the hypothesis holds vacuously (U-ICALL-INHABITED)
-roundup3/run-roundup3.sh	N34_w_in_keep	the statement has the premise `k + 140737488355327 ≤ w` (hw) about the stack
-roundup3/run-roundup3.sh	N34_w_in_keep	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N34_w_in_keep/allow-no-witness	the statement has the premise `k + 140737488355327 ≤ w` (hw) about the stack
-roundup3/run-roundup3.sh	N34_w_in_keep/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N40_custom_LE_w	the statement uses the proof-local Proof.myLE, whose type is the class LE (a
-roundup3/run-roundup3.sh	N40_custom_LE_w/allow-no-witness	the statement uses the proof-local Proof.myLE, whose type is the class LE (a
-roundup3/run-roundup3.sh	N41_custom_LE_lower	the statement uses the proof-local Proof.myLE2, whose type is the class LE (a
-roundup3/run-roundup3.sh	N41_custom_LE_lower/allow-no-witness	the statement uses the proof-local Proof.myLE2, whose type is the class LE (a
-roundup3/run-roundup3.sh	N42_custom_LT_lower	the statement uses the proof-local Proof.myLT, whose type is the class LT (a
-roundup3/run-roundup3.sh	N42_custom_LT_lower/allow-no-witness	the statement uses the proof-local Proof.myLT, whose type is the class LT (a
-roundup3/run-roundup3.sh	N43_custom_LT_w	the statement uses the proof-local Proof.myLT0, whose type is the class LT (a
-roundup3/run-roundup3.sh	N43_custom_LT_w/allow-no-witness	the statement uses the proof-local Proof.myLT0, whose type is the class LT (a
-roundup3/run-roundup3.sh	N44_custom_OfNat	the statement uses the proof-local Proof.bigOf, whose type is the class OfNat
-roundup3/run-roundup3.sh	N44_custom_OfNat/allow-no-witness	the statement uses the proof-local Proof.bigOf, whose type is the class OfNat
-roundup3/run-roundup3.sh	N45_custom_HAdd	the statement uses the proof-local Proof.myAdd, whose type is the class HAdd (a
-roundup3/run-roundup3.sh	N45_custom_HAdd/allow-no-witness	the statement uses the proof-local Proof.myAdd, whose type is the class HAdd (a
-roundup3/run-roundup3.sh	N46_nat_alias_type/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N46_nat_alias_type/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-roundup3/run-roundup3.sh	N47_ge_form	the statement has the premise `w ≥ k + 16` (hw) about the stack `k` of a
-roundup3/run-roundup3.sh	N47_ge_form	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N47_ge_form/allow-no-witness	the statement has the premise `w ≥ k + 16` (hw) about the stack `k` of a
-roundup3/run-roundup3.sh	N47_ge_form/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N50_nargs_eq_above	the statement assumes runtime contracts whose sizes are jointly unsatisfiable:
-roundup3/run-roundup3.sh	N50_nargs_eq_above	the contract would hold vacuously (U-ICALL-STACK, joint)
-roundup3/run-roundup3.sh	N50_nargs_eq_above/allow-no-witness	the statement assumes runtime contracts whose sizes are jointly unsatisfiable:
-roundup3/run-roundup3.sh	N50_nargs_eq_above/allow-no-witness	the contract would hold vacuously (U-ICALL-STACK, joint)
-roundup3/run-roundup3.sh	N51_nargs_lower_above_lit	the statement assumes a runtime contract whose `above` = 8 is below 8 + 8·nargs
-roundup3/run-roundup3.sh	N51_nargs_lower_above_lit	the contract would hold vacuously (U-ICALL-STACK, joint)
-roundup3/run-roundup3.sh	N51_nargs_lower_above_lit/allow-no-witness	the statement assumes a runtime contract whose `above` = 8 is below 8 + 8·nargs
-roundup3/run-roundup3.sh	N51_nargs_lower_above_lit/allow-no-witness	the contract would hold vacuously (U-ICALL-STACK, joint)
-roundup3/run-roundup3.sh	N52_nargs_lower_above_48	the statement assumes a runtime contract whose `above` = 48 is below 8 +
-roundup3/run-roundup3.sh	N52_nargs_lower_above_48	the contract would hold vacuously (U-ICALL-STACK, joint)
-roundup3/run-roundup3.sh	N52_nargs_lower_above_48/allow-no-witness	the statement assumes a runtime contract whose `above` = 48 is below 8 +
-roundup3/run-roundup3.sh	N52_nargs_lower_above_48/allow-no-witness	the contract would hold vacuously (U-ICALL-STACK, joint)
-roundup3/run-roundup3.sh	N53_nargs_above_w	the statement has the premise `a + n ≤ w` (hw) about the nargs `n` of a runtime
-roundup3/run-roundup3.sh	N53_nargs_above_w	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N53_nargs_above_w/allow-no-witness	the statement has the premise `a + n ≤ w` (hw) about the nargs `n` of a runtime
-roundup3/run-roundup3.sh	N53_nargs_above_w/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N54_nargs_plus_above_link	the statement has the premise `n ≤ a` (ha) about the nargs `n` of a runtime
-roundup3/run-roundup3.sh	N54_nargs_plus_above_link	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N54_nargs_plus_above_link/allow-no-witness	the statement has the premise `n ≤ a` (ha) about the nargs `n` of a runtime
-roundup3/run-roundup3.sh	N54_nargs_plus_above_link/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N55_stack_above_link	the statement has the premise `a ≤ k` (ha) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N55_stack_above_link	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N55_stack_above_link/allow-no-witness	the statement has the premise `a ≤ k` (ha) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N55_stack_above_link/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N56_two_lower_pinned_w	the statement has the premise `k + 16 ≤ w` (hw) about the stack `k` of a
-roundup3/run-roundup3.sh	N56_two_lower_pinned_w	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N56_two_lower_pinned_w/allow-no-witness	the statement has the premise `k + 16 ≤ w` (hw) about the stack `k` of a
-roundup3/run-roundup3.sh	N56_two_lower_pinned_w/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N57_w_two_sided_through_size	the statement has the premise `k + 16 ≤ w` (hw) about the stack `k` of a
-roundup3/run-roundup3.sh	N57_w_two_sided_through_size	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N57_w_two_sided_through_size/allow-no-witness	the statement has the premise `k + 16 ≤ w` (hw) about the stack `k` of a
-roundup3/run-roundup3.sh	N57_w_two_sided_through_size/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N58_self_bound	the statement has the premise `k + 1 ≤ k` (hk) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N58_self_bound	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N58_self_bound/allow-no-witness	the statement has the premise `k + 1 ≤ k` (hk) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N58_self_bound/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N59_x_le_w_with_w_from_x	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N59_x_le_w_with_w_from_x	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N59_x_le_w_with_w_from_x/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
-roundup3/run-roundup3.sh	N59_x_le_w_with_w_from_x/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N60_k_plift_pin	the statement has the non-Prop binder `p : PLift (k = 7)` whose type mentions
-roundup3/run-roundup3.sh	N60_k_plift_pin	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N60_k_plift_pin/allow-no-witness	the statement has the non-Prop binder `p : PLift (k = 7)` whose type mentions
-roundup3/run-roundup3.sh	N60_k_plift_pin/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N61_k_struct_pin	the statement uses Proof.PinK, which is not a plain def or theorem
-roundup3/run-roundup3.sh	N61_k_struct_pin/allow-no-witness	the statement uses Proof.PinK, which is not a plain def or theorem
-roundup3/run-roundup3.sh	N62_k_in_pre_only/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N62_k_in_pre_only/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-roundup3/run-roundup3.sh	N63_k_subtype_pin	the statement has the non-Prop binder `p : { u // k = 7 }` whose type mentions
-roundup3/run-roundup3.sh	N63_k_subtype_pin	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N63_k_subtype_pin/allow-no-witness	the statement has the non-Prop binder `p : { u // k = 7 }` whose type mentions
-roundup3/run-roundup3.sh	N63_k_subtype_pin/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N64_w_plift_free_k	the statement has the non-Prop binder `p : PLift (w ≤ 3)` whose type mentions
-roundup3/run-roundup3.sh	N64_w_plift_free_k	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N64_w_plift_free_k/allow-no-witness	the statement has the non-Prop binder `p : PLift (w ≤ 3)` whose type mentions
-roundup3/run-roundup3.sh	N64_w_plift_free_k/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-roundup3.sh	N65_w_in_pre_only/allow-no-witness	Proof.correctness assumes runtime contracts
-roundup3/run-roundup3.sh	N65_w_in_pre_only/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
-round8/run-round8.sh	I1d_itab_other_data	the statement passes `[]` to Janus.Spec.ItabIs, which is not Extracted.program.data
+rounds/round10/run-round10.sh	V1c_ranges_pinned_by_premise	the statement has the premise `rt = []` (hrt), which constrains a runtime
+rounds/round10/run-round10.sh	V1c_ranges_pinned_by_premise	and the model laws may mention them (round 10 V1, round 11)
+rounds/round11/run-round11.sh	H1b_hash_model_pinned_by_eq	the statement has the premise `H = { mem := fun x x_1 x_2 => 2 ^ 64, mem32 :=
+rounds/round11/run-round11.sh	H1b_hash_model_pinned_by_eq	and the model laws may mention them (round 10 V1, round 11)
+rounds/round10/run-round10.sh	V1d_contract_on_unlinked_prog	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
+rounds/round10/run-round10.sh	V1d_contract_on_unlinked_prog	a variable `impl` of the statement (round 10 V1, round 15)
+rounds/round11/run-round11.sh	P1a_panic_runtime_closed	the statement assumes the runtime contract
+rounds/round11/run-round11.sh	P1a_panic_runtime_closed	or a number is a runtime parameter, whatever its type)
+rounds/round10/run-round10.sh	V1e_iface_model_R0	the statement assumes the runtime contract Janus.Contracts.Iface.ConvT64 for
+rounds/round10/run-round10.sh	V1e_iface_model_R0	or a number is a runtime parameter, whatever its type)
+rounds/round10/run-round10.sh	V1f_contract_in_precondition	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
+rounds/round10/run-round10.sh	V1f_contract_in_precondition	or a number is a runtime parameter, whatever its type)
+rounds/round11/run-round11.sh	K1a_checkptr_model_pinned_by_premise	the statement has the premise `∀ (m : Janus.Arm64.Memory) (g : Janus.Arm64.W64)
+rounds/round11/run-round11.sh	K1a_checkptr_model_pinned_by_premise	and the model laws may mention them (round 10 V1, round 11)
+rounds/round13/run-round13.sh	P1a_plift_pin_H	the statement has the non-Prop binder `hpin : PLift (H = fun x x_1 x_2 x_3 =>
+rounds/round13/run-round13.sh	P1a_plift_pin_H	put such a condition in the precondition instead (round 13)
+rounds/round13/run-round13.sh	P1b_subtype_pin_H	the statement has the non-Prop binder `hpin : { u // H = fun x x_1 x_2 x_3 =>
+rounds/round13/run-round13.sh	P1b_subtype_pin_H	put such a condition in the precondition instead (round 13)
+rounds/round10/run-round10.sh	G2_attack_under_gc_hammer	the statement assumes the runtime contract Janus.Contracts.NewobjectContract ||| Lean rejected the extracted program
+rounds/round13/run-round13.sh	P1c_ulift_pin_rt	the statement has the non-Prop binder `hpin : ULift (PLift (H = fun x x_1 x_2
+rounds/round13/run-round13.sh	P1c_ulift_pin_rt	put such a condition in the precondition instead (round 13)
+rounds/round13/run-round13.sh	P1d_sigma_pin_H	the statement has the non-Prop binder `hpin : (_ : Unit) × PLift (H = fun x x_1
+rounds/round13/run-round13.sh	P1d_sigma_pin_H	put such a condition in the precondition instead (round 13)
+rounds/round13/run-round13.sh	P6b_local_def_in_type_universe	the statement has the non-Prop binder `hpin : PLift (H = fun x x_1 x_2 x_3 =>
+rounds/round13/run-round13.sh	P6b_local_def_in_type_universe	put such a condition in the precondition instead (round 13)
+rounds/round13/run-round13.sh	F1a_funcs_empty	the statement assumes the runtime contract
+rounds/round13/run-round13.sh	F1a_funcs_empty	or a number is a runtime parameter, whatever its type)
+rounds/round13/run-round13.sh	F1b_funcs_proof_defined	the statement assumes the runtime contract
+rounds/round13/run-round13.sh	F1b_funcs_proof_defined	or a number is a runtime parameter, whatever its type)
+rounds/round13/run-round13.sh	F1c_funcs_tail	the statement assumes the runtime contract
+rounds/round13/run-round13.sh	F1c_funcs_tail	or a number is a runtime parameter, whatever its type)
+rounds/round13/run-round13.sh	F1d_funcs_take	the statement assumes the runtime contract
+rounds/round13/run-round13.sh	F1d_funcs_take	or a number is a runtime parameter, whatever its type)
+rounds/round13/run-round13.sh	F1e_funcs_let_alias	the statement assumes the runtime contract
+rounds/round13/run-round13.sh	F1e_funcs_let_alias	or a number is a runtime parameter, whatever its type)
+rounds/round13/run-round13.sh	F1f_funcs_append_nil	the statement assumes the runtime contract
+rounds/round13/run-round13.sh	F1f_funcs_append_nil	or a number is a runtime parameter, whatever its type)
+rounds/round13/run-round13.sh	F1g_ctl_abbrev_alias_is_the_constant	Proof.correctness depends on disallowed axioms: sorryAx.
+rounds/round11/run-round11.sh	A1a_proof_defined_spec	the statement assumes the runtime contract Janus.Contracts.RtContract for the
+rounds/round11/run-round11.sh	A1a_proof_defined_spec	not even from imported parts such as `default` (round 11)
+rounds/round11/run-round11.sh	A1b_inline_spec_lambda	the statement assumes the runtime contract Janus.Contracts.RtContract for the
+rounds/round11/run-round11.sh	A1b_inline_spec_lambda	not even from imported parts such as `default` (round 11)
+rounds/round11/run-round11.sh	A1b2_structure_update_of_listed_spec	the statement assumes the runtime contract Janus.Contracts.RtContract for the
+rounds/round11/run-round11.sh	A1b2_structure_update_of_listed_spec	argument `have __src := Janus.Contracts.concatstringSpec 2;
+rounds/round14/run-round14.sh	bad1	the statement mentions `Extracted.program.link [{ name := "witness.newobject",
+rounds/round14/run-round14.sh	bad1	}]`: a main theorem may link only a variable of the stateme
+rounds/round14/run-round14.sh	bad2	the statement mentions `Extracted.program.link [{ name := "witness.newobject",
+rounds/round14/run-round14.sh	bad2	}]`: a main theorem may link only a variable of the stateme
+rounds/round14/run-round14.sh	bad3	the statement mentions `Extracted.program.link impl`: a main theorem may link
+rounds/round14/run-round14.sh	bad3	`impl` a binder of the theorem constrained by the runtime
+rounds/round14/run-round14.sh	bad4	the statement mentions the runtime implementation variable `impl` other than as
+rounds/round14/run-round14.sh	bad4	implementation only through the pinned contracts and mode
+rounds/round14/run-round14.sh	bad5	the statement mentions `Extracted.program.link []`: a main theorem may link
+rounds/round14/run-round14.sh	bad5	a binder of the theorem constrained by the runtime co
+rounds/round14/run-round14.sh	bad6	the statement builds a program by hand (`{ segments := impl, stubs :=
+rounds/round14/run-round14.sh	bad6	Extracted.program.data, contracts := Extracted.program.con
+rounds/round14/run-round14.sh	bad7	the statement mentions `Extracted.program.link impl`: a main theorem may link
+rounds/round14/run-round14.sh	bad7	`impl` a binder of the theorem constrained by the runtime
+rounds/round14/run-round14.sh	bad8	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
+rounds/round14/run-round14.sh	bad8	base := 175920, words := Janus.Contracts.AllocWitn
+rounds/round14/run-round14.sh	bad9	the statement has the premise `Janus.GoABI.RetAddr (Extracted.program.link
+rounds/round14/run-round14.sh	bad9	only the contracts and the model laws may mentio
+rounds/round14/run-round14.sh	bad10	the statement has the premise `(Extracted.program.link impl).exitAddr = 0` (h),
+rounds/round14/run-round14.sh	bad10	only the contracts and the model laws may mention them (rou
+rounds/round14/run-round14.sh	bad11	the statement mentions `Extracted.program.link [{ name := "witness.newobject",
+rounds/round14/run-round14.sh	bad11	}]`: a main theorem may link only a variable of the stateme
+rounds/round14/run-round14.sh	WeakA.Witness.nonvacuous	Proof.WeakA.Witness.nonvacuous does not instantiate any main theorem of the
+rounds/round14/run-round14.sh	WeakA.Witness.nonvacuous	(Extracted.program.link ?impl) (Extracted.pro
+rounds/round14/run-round14.sh	WeakB.Witness.nonvacuous	Proof.WeakB.Witness.nonvacuous does not instantiate any main theorem of the
+rounds/round14/run-round14.sh	WeakB.Witness.nonvacuous	List.nil) (BitVec.toNat (s.regs 28)) (instHSub.hSub
+rounds/round14/run-round14.sh	WeakC.Witness.nonvacuous	Proof.WeakC.Witness.nonvacuous does not instantiate any main theorem of the
+rounds/round14/run-round14.sh	WeakC.Witness.nonvacuous	(Extracted.program.link ?impl) (Extracted.pro
+rounds/round14/run-round14.sh	WeakD.Witness.nonvacuous	Proof.WeakD.Witness.nonvacuous does not instantiate any main theorem of the
+rounds/round14/run-round14.sh	WeakD.Witness.nonvacuous	((Extracted.program.link impl).withExit ret) Extracted.en
+rounds/round14/run-round14.sh	WeakE.Witness.nonvacuous	Proof.WeakE.Witness.nonvacuous is not of the form `∃ …, …` (a state and runtime
+rounds/round14/run-round14.sh	WeakE.Witness.nonvacuous	exhibiting the main theorem's hypotheses) (round 14, W2)
+rounds/round14/run-round14.sh	WeakF.Witness.returns	Proof.WeakF.Witness.returns is not the guarantee of any main theorem of the
+rounds/round14/run-round14.sh	WeakF.Witness.returns	not its guarantee `Janus.GoABI.Returns ((Extracted.program
+rounds/round14/run-round14.sh	WeakG.Witness.returns	Proof.WeakG.Witness.returns is not the guarantee of any main theorem of the
+rounds/round14/run-round14.sh	WeakG.Witness.returns	not its guarantee `Janus.GoABI.Returns ((Extracted.program
+rounds/round14/run-round14.sh	WeakI.Witness.returns	Proof.WeakI.Witness.returns is not the guarantee of any main theorem of the
+rounds/round14/run-round14.sh	WeakI.Witness.returns	not its guarantee `Janus.GoABI.Returns ((Extracted.program
+rounds/round14/run-round14.sh	WeakH.Witness.returns	Proof.WeakH.Witness.returns is not a `Returns`-style statement (`Returns`,
+rounds/round14/run-round14.sh	WeakH.Witness.returns	`ReturnsK`, `GrownReturns`, `ReachesRet`) (round 14, W2)
+rounds/round14/run-round14.sh	HideA.Witness.guarantee	Proof.HideA.Witness.guarantee is a lemma of a Witness namespace, not a
+rounds/round14/run-round14.sh	HideA.Witness.guarantee	by convention) and `Witness.returns` are (roun
+rounds/round14/run-round14.sh	HideB.Witness.returns	Proof.HideB.Witness.returns is not a `Returns`-style statement (`Returns`,
+rounds/round14/run-round14.sh	HideB.Witness.returns	`ReturnsK`, `GrownReturns`, `ReachesRet`) (round 14, W2)
+rounds/round14/run-round14.sh	Witness.pre	Proof.Witness.pre is a lemma of a Witness namespace, not a verifiable result:
+rounds/round14/run-round14.sh	Witness.pre	by convention) and `Witness.returns` are (round 14, W2)
+rounds/round11/run-round11.sh	A1c_imported_default_fmt	the statement assumes the runtime contract Janus.Contracts.Hash.Fhash for the
+rounds/round11/run-round11.sh	A1c_imported_default_fmt	not even from imported parts such as `default` (round 11)
+rounds/round14/run-round14.sh	fake1	the statement has the premise `Extracted.program.link impl =
+rounds/round14/run-round14.sh	fake1	hypothesis; only the contracts and the model laws may me
+rounds/round14/run-round14.sh	fake2	the statement has the premise `Janus.Tactic.Summary (Extracted.program.link
+rounds/round14/run-round14.sh	fake2	runtime variable of a contract hypothesis; only the contra
+rounds/round14/run-round14.sh	fake3	the statement has the premise `Extracted.program.link impl =
+rounds/round14/run-round14.sh	fake3	hypothesis; only the contracts and the model laws may me
+rounds/round11/run-round11.sh	A1d2_abbrev_of_bad_spec	the statement assumes the runtime contract Janus.Contracts.RtContract for the
+rounds/round11/run-round11.sh	A1d2_abbrev_of_bad_spec	not even from imported parts such as `default` (round 11)
+rounds/round14/run-round14.sh	OneMember.Witness.nonvacuous	Proof.OneMember.Witness.nonvacuous does not instantiate any main theorem of the
+rounds/round14/run-round14.sh	OneMember.Witness.nonvacuous	(Extracted.program.withExit ret) (Janus.Tactic.segAdd
+rounds/round13/run-round13.sh	F2_tampered_funcs_verify	test/redteam/rounds/round13/work/DeferOrder-tampered/Extracted.lean was modified after
+rounds/round13/run-round13.sh	F2_tampered_funcs_verify	2025d293fd55bc24d69380343becec293be3f8a5649a58e3569a414c785.
+rounds/round14/run-round14.sh	correctness	Proof.correctness assumes runtime contracts
+rounds/round14/run-round14.sh	correctness	nothing shows that its precondition, those contracts and t
+rounds/round14/run-round14.sh	Witness.nonvacuous	Proof.Witness.nonvacuous does not instantiate any main theorem of the proof module (Proof.correctness: the
+rounds/round14/run-round14.sh	pinpre1	the statement mentions the runtime implementation variable `impl` other than as
+rounds/round14/run-round14.sh	pinpre1	implementation only through the pinned contracts and mode
+rounds/round14/run-round14.sh	exc1	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
+rounds/round14/run-round14.sh	exc1	a contract is an assumption about the runtime only
+rounds/round14/run-round14.sh	W1.Witness.returns	Proof.W1.Witness.returns is not the guarantee of any main theorem of the proof
+rounds/round14/run-round14.sh	W1.Witness.returns	its guarantee `Janus.GoABI.Returns ((Extracted.program.li
+rounds/round14/run-round14.sh	W2.Witness.returns	Proof.W2.Witness.returns is not the guarantee of any main theorem of the proof
+rounds/round14/run-round14.sh	W2.Witness.returns	its guarantee `Janus.GoABI.Returns ((Extracted.program.li
+rounds/round15/run-round15.sh	weak	Proof.weak assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
+rounds/round15/run-round15.sh	weak	shows that its precondition, those contracts and this pro
+rounds/round15/run-round15.sh	Witness.weak	Proof.Witness.weak does not instantiate any main theorem of the proof module
+rounds/round15/run-round15.sh	Witness.weak	not among the conjuncts of the witness (conjuncts are match
+rounds/roundbig/run-roundbig.sh	ChunkNew	a non-trusted module declares Extracted.seg0_chunk_9999, whose name shadows the
+rounds/roundbig/run-roundbig.sh	ChunkNew	(round 6 F1: lookalike letters and «…» components count)
+rounds/round15/run-round15.sh	lamWeak	Proof.lamWeak assumes runtime contracts (Janus.Contracts.NewobjectContract@runti
+rounds/round15/run-round15.sh	lamWeak	shows that its precondition, those contracts and this
+rounds/round15/run-round15.sh	Witness.lamWeak	Proof.Witness.lamWeak does not instantiate any main theorem of the proof module
+rounds/round15/run-round15.sh	Witness.lamWeak	is not among the conjuncts of the witness (conjuncts are
+rounds/roundbig/run-roundbig.sh	ChunkDup	Lean rejected the proof
+rounds/roundbig/run-roundbig.sh	ChunkDup	has already been declared
+rounds/roundbig/run-roundbig.sh	ChunkEqn	s_nothere.eq_1, whose name shadows the Extracted namespace (round 6 F1: lookalike letters and «…» components
+rounds/roundbig/run-roundbig.sh	ChunkLookalike	s_9999, whose name shadows the Extracted namespace (round 6 F1: lookalike letters and «…» components count)
+rounds/roundbig/run-roundbig.sh	forgeByte.verify	64-forgeByte/Extracted.lean differs from the regenerated extraction
+rounds/roundbig/run-roundbig.sh	forgeSwap.verify	64-forgeSwap/Extracted.lean differs from the regenerated extraction
+rounds/roundbig/run-roundbig.sh	forgeName.verify	64-forgeName/Extracted.lean differs from the regenerated extraction
+rounds/roundds/run-roundds.sh	shadow	a non-trusted module declares Extracted.dataAddr.«example.com/basic.other»,
+rounds/roundds/run-roundds.sh	shadow	(round 6 F1: lookalike letters and «…» components count)
+rounds/roundds/run-roundds.sh	nocode	the statement does not mention Extracted.program or Extracted.entry, so it says
+rounds/roundds/run-roundds.sh	EqnDef	Lean rejected the proof
+rounds/roundds/run-roundds.sh	EqnDef	is a reserved name
+rounds/roundds/run-roundds.sh	EqnAxiom	Lean rejected the proof
+rounds/roundds/run-roundds.sh	EqnAxiom	is a reserved name
+rounds/roundds/run-roundds.sh	EqnOtherLhs	Lean rejected the proof
+rounds/roundds/run-roundds.sh	EqnOtherLhs	is a reserved name
+rounds/roundds/run-roundds.sh	EqnOtherConst	a non-trusted module declares Extracted.dataSize.«example.com/basic.nothere».eq_
+rounds/roundds/run-roundds.sh	EqnOtherConst	(round 6 F1: lookalike letters and «…» components count)
+rounds/roundds/run-roundds.sh	EqnLookalike	a non-trusted module declares Εxtracted.dataSize.«example.com/basic.symPows».eq_
+rounds/roundds/run-roundds.sh	EqnLookalike	(round 6 F1: lookalike letters and «…» components count)
+rounds/roundds/run-roundds.sh	EqnNotEq	Lean rejected the proof
+rounds/roundds/run-roundds.sh	EqnNotEq	is a reserved name
+rounds/roundfw/run-roundfw.sh	P_arm64_newobject_tampered	but that function is not the Go runtime's runtime.newobject
+rounds/roundfw/run-roundfw.sh	P_arm64_makeslice_tampered	but that function is not the Go runtime's runtime.makeslice
+rounds/roundfw/run-roundfw.sh	P_arm64_growslice_tampered	but that function is not the Go runtime's runtime.growslice
+rounds/roundfw/run-roundfw.sh	P_arm64_mallocgc_tampered	but that function is not the Go runtime's runtime.mallocgc
+rounds/roundfw/run-roundfw.sh	P_arm64_gcWriteBarrier2_tampered	but that function is not the Go runtime's runtime.gcWriteBarrier2
+rounds/roundfw/run-roundfw.sh	P_amd64_newobject_tampered	but that function is not the Go runtime's runtime.newobject
+rounds/roundfw/run-roundfw.sh	P_amd64_makeslice_tampered	but that function is not the Go runtime's runtime.makeslice
+rounds/roundfw/run-roundfw.sh	P_amd64_growslice_tampered	but that function is not the Go runtime's runtime.growslice
+rounds/roundfw/run-roundfw.sh	P_amd64_mallocgc_tampered	but that function is not the Go runtime's runtime.mallocgc
+rounds/roundfw/run-roundfw.sh	P_amd64_gcWriteBarrier2_tampered	but that function is not the Go runtime's runtime.gcWriteBarrier2
+rounds/roundfw/run-roundfw.sh	G1_misspelt_global	the statement uses Janus.Spec.GlobalsInit with the name
+rounds/roundfw/run-roundfw.sh	G1_misspelt_global	vacuous (a misspelt or lookalike name, round 8 I1)
+rounds/roundfw/run-roundfw.sh	G2_lookalike_global	the statement uses Janus.Spec.GlobalsInit with the name
+rounds/roundfw/run-roundfw.sh	G2_lookalike_global	vacuous (a misspelt or lookalike name, round 8 I1)
+rounds/roundfw/run-roundfw.sh	G3_other_global_list	the statement passes `[{ name := "example.com/basic.karatsubaCut", base := 0,
+rounds/roundfw/run-roundfw.sh	G3_other_global_list	are looked up in the extracted program only (round 8 I1)
+rounds/round15/run-round15.sh	otherMain	Proof.otherMain assumes runtime contracts
+rounds/round15/run-round15.sh	otherMain	shows that its precondition, those contracts and thi
+rounds/roundofimpl/run-roundofimpl.sh	ctl1	@runtime.newobject) but no kernel-checked non-vacuity witness for it was verified in this run: nothing shows
+rounds/roundofimpl/run-roundofimpl.sh	ctl2	@runtime.newobject) but no kernel-checked non-vacuity witness for it was verified in this run: nothing shows
+rounds/roundofimpl/run-roundofimpl.sh	ctl3	Proof.ctl3 assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
+rounds/roundofimpl/run-roundofimpl.sh	ctl3	shows that its precondition, those contracts and this pro
+rounds/roundofimpl/run-roundofimpl.sh	ctl4	Proof.ctl4 assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
+rounds/roundofimpl/run-roundofimpl.sh	ctl4	shows that its precondition, those contracts and this pro
+rounds/roundofimpl/run-roundofimpl.sh	ctl5	Proof.ctl5 assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
+rounds/roundofimpl/run-roundofimpl.sh	ctl5	shows that its precondition, those contracts and this pro
+rounds/roundofimpl/run-roundofimpl.sh	ctl8	Proof.ctl8 assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
+rounds/roundofimpl/run-roundofimpl.sh	ctl8	shows that its precondition, those contracts and this pro
+rounds/roundofimpl/run-roundofimpl.sh	ctl9	Proof.ctl9 assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
+rounds/roundofimpl/run-roundofimpl.sh	ctl9	shows that its precondition, those contracts and this pro
+rounds/roundofimpl/run-roundofimpl.sh	ctl10	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
+rounds/roundofimpl/run-roundofimpl.sh	ctl10	`Extracted.program.link impl`: a contract about another imp
+rounds/roundofimpl/run-roundofimpl.sh	Shadow.ctl7	Proof.Shadow.ctl7 assumes runtime contracts
+rounds/roundofimpl/run-roundofimpl.sh	Shadow.ctl7	nothing shows that its precondition, those contracts and t
+rounds/roundofimpl/run-roundofimpl.sh	ctl11	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
+rounds/roundofimpl/run-roundofimpl.sh	ctl11	which describes runtime.growslice / runtime.growsliceNoAli
+rounds/roundofimpl/run-roundofimpl.sh	r1	about the program `Extracted.program.ofImpl []`, which is not `Extracted.program.link impl` (or
+rounds/roundofimpl/run-roundofimpl.sh	r2	the statement mentions the runtime implementation variable `impl` other than as
+rounds/roundofimpl/run-roundofimpl.sh	r2	implementation only through the pinned contracts and mode
+rounds/roundofimpl/run-roundofimpl.sh	r3	the statement mentions `Extracted.program.ofImpl impl`: `Program.ofImpl` (the
+rounds/roundofimpl/run-roundofimpl.sh	r3	hypothesis (`… (Extracted.program.ofImpl impl) …`), never o
+rounds/roundofimpl/run-roundofimpl.sh	r4	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
+rounds/roundofimpl/run-roundofimpl.sh	r4	is not `Extracted.program.link impl` (or `Extracted.pr
+rounds/roundofimpl/run-roundofimpl.sh	r5	the statement mentions `Extracted.program.ofImpl impl`: `Program.ofImpl` (the
+rounds/roundofimpl/run-roundofimpl.sh	r5	hypothesis (`… (Extracted.program.ofImpl impl) …`), never o
+rounds/roundofimpl/run-roundofimpl.sh	r6	the statement mentions the runtime implementation variable `impl` other than as
+rounds/roundofimpl/run-roundofimpl.sh	r6	implementation only through the pinned contracts and mode
+rounds/roundofimpl/run-roundofimpl.sh	r7	the statement mentions a concrete runtime implementation
+rounds/roundofimpl/run-roundofimpl.sh	r7	statement: a main theorem quantifies the implementation (
+rounds/roundofimpl/run-roundofimpl.sh	r8	the statement mentions the runtime implementation variable `impl` other than as
+rounds/roundofimpl/run-roundofimpl.sh	r8	implementation only through the pinned contracts and mode
+rounds/roundofimpl/run-roundofimpl.sh	r9	the statement mentions the runtime implementation variable `impl` other than as
+rounds/roundofimpl/run-roundofimpl.sh	r9	implementation only through the pinned contracts and mode
+rounds/roundofimpl/run-roundofimpl.sh	r10	the statement mentions the runtime implementation variable `impl` other than as
+rounds/roundofimpl/run-roundofimpl.sh	r10	implementation only through the pinned contracts and mode
+rounds/roundofimpl/run-roundofimpl.sh	r11	the statement mentions a concrete runtime implementation (`[]`, a `List
+rounds/roundofimpl/run-roundofimpl.sh	r11	the implementation (a variable `impl` constrained on
+rounds/roundofimpl/run-roundofimpl.sh	Shadow2.r12	the statement mentions the runtime implementation variable `impl` other than as
+rounds/roundofimpl/run-roundofimpl.sh	Shadow2.r12	implementation only through the pinned contracts and mode
+rounds/roundofimpl/run-roundofimpl.sh	r13	the statement mentions a concrete runtime implementation (`impl ++ []`, a `List
+rounds/roundofimpl/run-roundofimpl.sh	r13	quantifies the implementation (a variable `impl` constr
+rounds/roundofimpl/run-roundofimpl.sh	r16	the statement mentions the runtime implementation variable `impl` other than as
+rounds/roundofimpl/run-roundofimpl.sh	r16	implementation only through the pinned contracts and mode
+rounds/roundofimpl/run-roundofimpl.sh	r17	the statement mentions the runtime implementation variable `impl` other than as
+rounds/roundofimpl/run-roundofimpl.sh	r17	implementation only through the pinned contracts and mode
+rounds/roundofimpl/run-roundofimpl.sh	r18	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
+rounds/roundofimpl/run-roundofimpl.sh	r18	is not `Extracted.program.link impl` (or `Extracted.program
+rounds/roundofimpl/run-roundofimpl.sh	r20	the statement mentions `Extracted.program.ofImpl impl`: `Program.ofImpl` (the
+rounds/roundofimpl/run-roundofimpl.sh	r20	hypothesis (`… (Extracted.program.ofImpl impl) …`), never o
+rounds/roundofimpl/run-roundofimpl.sh	r21	the statement builds a program by hand (`{ segments :=
+rounds/roundofimpl/run-roundofimpl.sh	r21	acted.program.exitAddr, data := Extracted.program.data, cont
+rounds/roundofimpl/run-roundofimpl.sh	r22	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
+rounds/roundofimpl/run-roundofimpl.sh	r22	which describes runtime.growslice / runtime.growsliceNoAli
+rounds/roundofimpl/run-roundofimpl.sh	r23	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
+rounds/roundofimpl/run-roundofimpl.sh	r23	which describes runtime.growslice / runtime.growsliceNoAli
+rounds/roundofimpl/run-roundofimpl.sh	NoApart.Witness.nonvacuous	Proof.NoApart.Witness.nonvacuous does not instantiate any main theorem of the proof module
+rounds/rounderrorf/run-rounderrorf.sh	a1	.ErrorfLive for the argument `4096` where it takes `Extracted.dataAddr.«type:*errors.errorString»` (the
+rounds/rounderrorf/run-rounderrorf.sh	a2	.ErrorfLive for the argument `4096` where it takes `Extracted.dataAddr.«go:itab.*errors.errorString,error»`
+rounds/rounderrorf/run-rounderrorf.sh	a3	.ErrorfLive for the argument `4096` where it takes `Extracted.dataAddr.«type:int»` (the address of that type
+rounds/rounderrorf/run-rounderrorf.sh	a4	.ErrorfLive for the argument `4096` where it takes `Extracted.dataAddr.«go:itab.*fmt.wrapError,error»` (the
+rounds/rounderrorf/run-rounderrorf.sh	a5	.ErrorfLive for the argument `Extracted.dataAddr.«go:itab.*fmt.wrapError,error»` where it takes
+rounds/rounderrorf/run-rounderrorf.sh	a6	.ErrorfLive for the argument `tv` where it takes `Extracted.dataAddr.«type:*errors.errorString»` (the address
+rounds/rounderrorf/run-rounderrorf.sh	a7	the statement uses Janus.Spec.dataAddr with the name
+rounds/rounderrorf/run-rounderrorf.sh	a7	the lookup silently defaults (`False` or `0`) and the stat
+rounds/rounderrorf/run-rounderrorf.sh	a8	.ErrorfLive, the contract of `fmt.errorf`, at the address of `runtime.newobject` (spec binding)
+rounds/roundn9/run-roundn9.sh	b1	the statement the precondition constrains the memory word at the entry `RSP`
+rounds/roundn9/run-roundn9.sh	b1	any form: alias, arithmetic, existential): a theorem must n
+rounds/roundn9/run-roundn9.sh	b2	the statement the precondition constrains the memory word at the entry `RSP`
+rounds/roundn9/run-roundn9.sh	b2	any form: alias, arithmetic, existential): a theorem must n
+rounds/roundn9/run-roundn9.sh	b3	the statement the precondition constrains the memory word at the entry `RSP`
+rounds/roundn9/run-roundn9.sh	b3	any form: alias, arithmetic, existential): a theorem must n
+rounds/roundn9/run-roundn9.sh	b4	the statement the precondition constrains the memory word at the entry `RSP`
+rounds/roundn9/run-roundn9.sh	b4	any form: alias, arithmetic, existential): a theorem must n
+rounds/roundn9/run-roundn9.sh	b5	the statement the precondition constrains the memory word at the entry `RSP`
+rounds/roundn9/run-roundn9.sh	b5	any form: alias, arithmetic, existential): a theorem must n
+rounds/roundn9/run-roundn9.sh	b6	the statement the precondition constrains the memory word at the entry `RSP`
+rounds/roundn9/run-roundn9.sh	b6	any form: alias, arithmetic, existential): a theorem must n
+rounds/roundn9/run-roundn9.sh	b7	the statement the precondition constrains the memory word at the entry `RSP`
+rounds/roundn9/run-roundn9.sh	b7	any form: alias, arithmetic, existential): a theorem must n
+rounds/roundn9/run-roundn9.sh	b9	the statement the precondition constrains the memory word at the entry `RSP`
+rounds/roundn9/run-roundn9.sh	b9	any form: alias, arithmetic, existential): a theorem must n
+rounds/roundn9/run-roundn9.sh	b10	the statement the precondition constrains the memory word at the entry `RSP`
+rounds/roundn9/run-roundn9.sh	b10	any form: alias, arithmetic, existential): a theorem must n
+rounds/roundn9/run-roundn9.sh	b11	the statement the precondition constrains the memory word at the entry `RSP`
+rounds/roundn9/run-roundn9.sh	b11	any form: alias, arithmetic, existential): a theorem must n
+rounds/roundspecbind/run-roundspecbind.sh	q1	the statement assumes the runtime contract Janus.Contracts.RtContract at the
+rounds/roundspecbind/run-roundspecbind.sh	q1	describes runtime.growslice / runtime.growsliceNoAlias:
+rounds/roundspecbind/run-roundspecbind.sh	q2	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
+rounds/roundspecbind/run-roundspecbind.sh	q2	which describes runtime.growslice / runtime.growsliceNoAli
+rounds/roundspecbind/run-roundspecbind.sh	q3	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
+rounds/roundspecbind/run-roundspecbind.sh	q3	describes runtime.wbZero: the spec of another runtime f
+rounds/roundspecbind/run-roundspecbind.sh	q4	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
+rounds/roundspecbind/run-roundspecbind.sh	q4	which describes runtime.growslice / runtime.growsliceNoAli
+rounds/roundspecbind/run-roundspecbind.sh	p1	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
+rounds/roundspecbind/run-roundspecbind.sh	p1	`Extracted.program.link impl`: a contract about another imp
+rounds/roundspecbind/run-roundspecbind.sh	s15	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
+rounds/roundspecbind/run-roundspecbind.sh	s15	`Extracted.program.link impl`: a contract about another imp
+rounds/roundspecbind/run-roundspecbind.sh	g3	the statement assumes the runtime contract Janus.Contracts.RtContract at the
+rounds/roundspecbind/run-roundspecbind.sh	g3	which describes runtime.growsliceBuf / runtime.growsliceBuf
+rounds/roundspecbind/run-roundspecbind.sh	g4	the statement assumes the runtime contract Janus.Contracts.RtContract at the
+rounds/roundspecbind/run-roundspecbind.sh	g4	which describes runtime.concatstring3: the spec of anothe
+rounds/roundspecbind/run-roundspecbind.sh	g5	the statement assumes the runtime contract Janus.Contracts.RtLiveContract with
+rounds/roundspecbind/run-roundspecbind.sh	g5	not to the spec of this contract: a spec an
+rounds/roundspecbind/run-roundspecbind.sh	g6	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
+rounds/roundspecbind/run-roundspecbind.sh	g6	which describes runtime.growsliceBuf / runtime.growslic
+rounds/roundspecbind/run-roundspecbind.sh	g8	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
+rounds/roundspecbind/run-roundspecbind.sh	g8	which describes runtime.convTstring: the spec of another
+rounds/roundspecbind/run-roundspecbind.sh	g9	the statement assumes the runtime contract Janus.Contracts.RtLiveContract with
+rounds/roundspecbind/run-roundspecbind.sh	g9	not to the spec of this contract: a spec and live dat
+rounds/roundspecbind/run-roundspecbind.sh	n1	the statement assumes the runtime contract Janus.Contracts.NewobjectContract,
+rounds/roundspecbind/run-roundspecbind.sh	n1	at the address of `runtime.growslice` (spec binding)
+rounds/roundspecbind/run-roundspecbind.sh	d1	the statement passes `Extracted.program.onlySegments []` to
+rounds/roundspecbind/run-roundspecbind.sh	d1	are looked up in the extracted program only (round 8 I1)
+rounds/roundspecbind/run-roundspecbind.sh	i1	the statement assumes the runtime contract Janus.Contracts.RtContract about the
+rounds/roundspecbind/run-roundspecbind.sh	i1	impl`: a contract about another implementa
+rounds/roundspecbind/run-roundspecbind.sh	a1	the statement assumes the runtime contract Janus.Contracts.RtContract for the
+rounds/roundspecbind/run-roundspecbind.sh	a1	not one of the framework's named runtime-function specs (`c
+rounds/roundspecbind/run-roundspecbind.sh	a2	the statement assumes the runtime contract Janus.Contracts.RtContract for the
+rounds/roundspecbind/run-roundspecbind.sh	a2	one of the framework's named runtime-function specs (`con
+rounds/roundspecbind/run-roundspecbind.sh	a3	the statement assumes the runtime contract Janus.Contracts.RtContract for the
+rounds/roundspecbind/run-roundspecbind.sh	a3	aAddr.«runtime.staticuint64s» + 8)`, which is not one of the
+rounds/roundspecbind/run-roundspecbind.sh	a4	the statement uses Janus.Spec.dataAddr with the name "runtime.staticuint64s",
+rounds/roundspecbind/run-roundspecbind.sh	a4	lookup silently defaults (`False` or `0`) and the stateme
+rounds/roundspecbind/run-roundspecbind.sh	a5	the statement assumes the runtime contract Janus.Contracts.RtLiveContract for
+rounds/roundspecbind/run-roundspecbind.sh	a5	is not one of the framework's named runtime-function specs
+rounds/roundspecbind/run-roundspecbind.sh	a6	the statement assumes the runtime contract Janus.Contracts.RtLiveContract for
+rounds/roundspecbind/run-roundspecbind.sh	a6	not one of the framework's named runtime-function specs (
+rounds/roundspecbind/run-roundspecbind.sh	a7	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
+rounds/roundspecbind/run-roundspecbind.sh	a7	which describes runtime.growslice / runtime.growsl
+rounds/roundspecbind/run-roundspecbind.sh	a8	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
+rounds/roundspecbind/run-roundspecbind.sh	a8	which describes runtime.convTstring: the spec of
+rounds/roundspecbind/run-roundspecbind.sh	a9	the statement assumes the runtime contract Janus.Contracts.RtLiveContract with
+rounds/roundspecbind/run-roundspecbind.sh	a9	not to the spec of this contract: a spec and live
+rounds/roundspecbind/run-roundspecbind.sh	a10	the statement assumes the runtime contract Janus.Contracts.RtLiveContract for
+rounds/roundspecbind/run-roundspecbind.sh	a10	is not one of the framework's named runtime-function spec
+rounds/roundspecbind/run-roundspecbind.sh	a11	the statement assumes the runtime contract Janus.Contracts.RtLiveContract with
+rounds/roundspecbind/run-roundspecbind.sh	a11	not to the spec of this contract: a spec and live
+rounds/roundspecbind/run-roundspecbind.sh	h2	the statement assumes the runtime contract Janus.Contracts.RtContract64 at the
+rounds/roundspecbind/run-roundspecbind.sh	h2	which describes runtime.growsliceBuf / runtime.growsliceB
+rounds/roundspecbind/run-roundspecbind.sh	h3	the statement assumes the runtime contract Janus.Contracts.NewobjectContract64,
+rounds/roundspecbind/run-roundspecbind.sh	h3	at the address of `runtime.growslice` (spec binding)
+rounds/roundspecbind/run-roundspecbind.sh	h4	the statement assumes the runtime contract Janus.Contracts.RtContract64 about
+rounds/roundspecbind/run-roundspecbind.sh	h4	impl`: a contract about another implemen
+rounds/roundup3/run-roundup3.sh	N01_ctl_stack_plus_w/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N01_ctl_stack_plus_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/roundup3/run-roundup3.sh	N02_ctl_stack_lt_w/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N02_ctl_stack_lt_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/roundup3/run-roundup3.sh	N03_ctl_above_w/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N03_ctl_above_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/roundup3/run-roundup3.sh	N04_ctl_shared_w/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N04_ctl_shared_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/roundup3/run-roundup3.sh	N05_ctl_c_max/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N05_ctl_c_max/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/roundup3/run-roundup3.sh	N06_ctl_nargs_w/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N06_ctl_nargs_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/roundup3/run-roundup3.sh	N10_pre_pins_w/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N10_pre_pins_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/roundup3/run-roundup3.sh	N11_pre_pins_k/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N11_pre_pins_k/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/roundup3/run-roundup3.sh	N12_post_w/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N12_post_w/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/roundup3/run-roundup3.sh	N13_plift_binder	the statement has the non-Prop binder `p : PLift (w < 8)` whose type mentions
+rounds/roundup3/run-roundup3.sh	N13_plift_binder	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N13_plift_binder/allow-no-witness	the statement has the non-Prop binder `p : PLift (w < 8)` whose type mentions
+rounds/roundup3/run-roundup3.sh	N13_plift_binder/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N14_subtype_binder	the statement has the non-Prop binder `p : { u // w < 8 }` whose type mentions
+rounds/roundup3/run-roundup3.sh	N14_subtype_binder	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N14_subtype_binder/allow-no-witness	the statement has the non-Prop binder `p : { u // w < 8 }` whose type mentions
+rounds/roundup3/run-roundup3.sh	N14_subtype_binder/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N15_struct_binder	the statement uses Proof.PinW, which is not a plain def or theorem
+rounds/roundup3/run-roundup3.sh	N15_struct_binder/allow-no-witness	the statement uses Proof.PinW, which is not a plain def or theorem
+rounds/roundup3/run-roundup3.sh	N16_fin_binder	the statement has the non-Prop binder `f : Fin w → Fin 0` whose type mentions
+rounds/roundup3/run-roundup3.sh	N16_fin_binder	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N16_fin_binder/allow-no-witness	the statement has the non-Prop binder `f : Fin w → Fin 0` whose type mentions
+rounds/roundup3/run-roundup3.sh	N16_fin_binder/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N17_pprod_binder	the statement has the non-Prop binder `p : w < 8 ×' k ≤ w` whose type mentions
+rounds/roundup3/run-roundup3.sh	N17_pprod_binder	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N17_pprod_binder/allow-no-witness	the statement has the non-Prop binder `p : w < 8 ×' k ≤ w` whose type mentions
+rounds/roundup3/run-roundup3.sh	N17_pprod_binder/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N18_let_conclusion/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N18_let_conclusion/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/roundup3/run-roundup3.sh	N19_defwrapped_pin	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N19_defwrapped_pin	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N19_defwrapped_pin/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N19_defwrapped_pin/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N20_ite_premise	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N20_ite_premise	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N20_ite_premise/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N20_ite_premise/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N21_ite_in_bound	the statement has the premise `k ≤ if w < 8 then w else w` (hw) about the stack
+rounds/roundup3/run-roundup3.sh	N21_ite_in_bound	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N21_ite_in_bound/allow-no-witness	the statement has the premise `k ≤ if w < 8 then w else w` (hw) about the stack
+rounds/roundup3/run-roundup3.sh	N21_ite_in_bound/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N22_decide_premise	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N22_decide_premise	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N22_decide_premise/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N22_decide_premise/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N23_int_coercion	the statement has the premise `(↑k : Int) ≤ (↑w : Int)` (hw) about the stack
+rounds/roundup3/run-roundup3.sh	N23_int_coercion	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N23_int_coercion/allow-no-witness	the statement has the premise `(↑k : Int) ≤ (↑w : Int)` (hw) about the stack
+rounds/roundup3/run-roundup3.sh	N23_int_coercion/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N24_bitvec_premise	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N24_bitvec_premise	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N24_bitvec_premise/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N24_bitvec_premise/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N25_conj_premise	the statement has the premise `k ≤ w ∧ w < 8` (hw) about the stack `k` of a
+rounds/roundup3/run-roundup3.sh	N25_conj_premise	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N25_conj_premise/allow-no-witness	the statement has the premise `k ≤ w ∧ w < 8` (hw) about the stack `k` of a
+rounds/roundup3/run-roundup3.sh	N25_conj_premise/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N26_forall_premise	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N26_forall_premise	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N26_forall_premise/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N26_forall_premise/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N27_fact_instance	the statement has the premise `Nonempty (k < 8)`
+rounds/roundup3/run-roundup3.sh	N27_fact_instance	U-ICALL-STACK
+rounds/roundup3/run-roundup3.sh	N27_fact_instance/allow-no-witness	the statement has the premise `Nonempty (k < 8)`
+rounds/roundup3/run-roundup3.sh	N27_fact_instance/allow-no-witness	U-ICALL-STACK
+rounds/roundup3/run-roundup3.sh	N28_huge_c	the statement has the premise `k + 140737488355328 ≤ w` (hw) about the stack
+rounds/roundup3/run-roundup3.sh	N28_huge_c	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N28_huge_c/allow-no-witness	the statement has the premise `k + 140737488355328 ≤ w` (hw) about the stack
+rounds/roundup3/run-roundup3.sh	N28_huge_c/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N29_chain_w	the statement has the premise `k + 16 ≤ w` (h1) about the stack `k` of a
+rounds/roundup3/run-roundup3.sh	N29_chain_w	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N29_chain_w/allow-no-witness	the statement has the premise `k + 16 ≤ w` (h1) about the stack `k` of a
+rounds/roundup3/run-roundup3.sh	N29_chain_w/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N30_w_is_fn	the statement has the premise `k + 16 ≤ fn` (hw) about the stack `k` of a
+rounds/roundup3/run-roundup3.sh	N30_w_is_fn	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N30_w_is_fn/allow-no-witness	the statement has the premise `k + 16 ≤ fn` (hw) about the stack `k` of a
+rounds/roundup3/run-roundup3.sh	N30_w_is_fn/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N31_w_is_size	the statement has the premise `k + 16 ≤ w` (hw) about the stack `w` of a
+rounds/roundup3/run-roundup3.sh	N31_w_is_size	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N31_w_is_size/allow-no-witness	the statement has the premise `k + 16 ≤ w` (hw) about the stack `w` of a
+rounds/roundup3/run-roundup3.sh	N31_w_is_size/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N32_w_in_P	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N32_w_in_P	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N32_w_in_P/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N32_w_in_P/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N33_P_false_by_design	the statement assumes the abstract-callee contract
+rounds/roundup3/run-roundup3.sh	N33_P_false_by_design	and the hypothesis holds vacuously (U-ICALL-INHABITED)
+rounds/roundup3/run-roundup3.sh	N33_P_false_by_design/allow-no-witness	the statement assumes the abstract-callee contract
+rounds/roundup3/run-roundup3.sh	N33_P_false_by_design/allow-no-witness	and the hypothesis holds vacuously (U-ICALL-INHABITED)
+rounds/roundup3/run-roundup3.sh	N34_w_in_keep	the statement has the premise `k + 140737488355327 ≤ w` (hw) about the stack
+rounds/roundup3/run-roundup3.sh	N34_w_in_keep	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N34_w_in_keep/allow-no-witness	the statement has the premise `k + 140737488355327 ≤ w` (hw) about the stack
+rounds/roundup3/run-roundup3.sh	N34_w_in_keep/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N40_custom_LE_w	the statement uses the proof-local Proof.myLE, whose type is the class LE (a
+rounds/roundup3/run-roundup3.sh	N40_custom_LE_w/allow-no-witness	the statement uses the proof-local Proof.myLE, whose type is the class LE (a
+rounds/roundup3/run-roundup3.sh	N41_custom_LE_lower	the statement uses the proof-local Proof.myLE2, whose type is the class LE (a
+rounds/roundup3/run-roundup3.sh	N41_custom_LE_lower/allow-no-witness	the statement uses the proof-local Proof.myLE2, whose type is the class LE (a
+rounds/roundup3/run-roundup3.sh	N42_custom_LT_lower	the statement uses the proof-local Proof.myLT, whose type is the class LT (a
+rounds/roundup3/run-roundup3.sh	N42_custom_LT_lower/allow-no-witness	the statement uses the proof-local Proof.myLT, whose type is the class LT (a
+rounds/roundup3/run-roundup3.sh	N43_custom_LT_w	the statement uses the proof-local Proof.myLT0, whose type is the class LT (a
+rounds/roundup3/run-roundup3.sh	N43_custom_LT_w/allow-no-witness	the statement uses the proof-local Proof.myLT0, whose type is the class LT (a
+rounds/roundup3/run-roundup3.sh	N44_custom_OfNat	the statement uses the proof-local Proof.bigOf, whose type is the class OfNat
+rounds/roundup3/run-roundup3.sh	N44_custom_OfNat/allow-no-witness	the statement uses the proof-local Proof.bigOf, whose type is the class OfNat
+rounds/roundup3/run-roundup3.sh	N45_custom_HAdd	the statement uses the proof-local Proof.myAdd, whose type is the class HAdd (a
+rounds/roundup3/run-roundup3.sh	N45_custom_HAdd/allow-no-witness	the statement uses the proof-local Proof.myAdd, whose type is the class HAdd (a
+rounds/roundup3/run-roundup3.sh	N46_nat_alias_type/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N46_nat_alias_type/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/roundup3/run-roundup3.sh	N47_ge_form	the statement has the premise `w ≥ k + 16` (hw) about the stack `k` of a
+rounds/roundup3/run-roundup3.sh	N47_ge_form	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N47_ge_form/allow-no-witness	the statement has the premise `w ≥ k + 16` (hw) about the stack `k` of a
+rounds/roundup3/run-roundup3.sh	N47_ge_form/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N50_nargs_eq_above	the statement assumes runtime contracts whose sizes are jointly unsatisfiable:
+rounds/roundup3/run-roundup3.sh	N50_nargs_eq_above	the contract would hold vacuously (U-ICALL-STACK, joint)
+rounds/roundup3/run-roundup3.sh	N50_nargs_eq_above/allow-no-witness	the statement assumes runtime contracts whose sizes are jointly unsatisfiable:
+rounds/roundup3/run-roundup3.sh	N50_nargs_eq_above/allow-no-witness	the contract would hold vacuously (U-ICALL-STACK, joint)
+rounds/roundup3/run-roundup3.sh	N51_nargs_lower_above_lit	the statement assumes a runtime contract whose `above` = 8 is below 8 + 8·nargs
+rounds/roundup3/run-roundup3.sh	N51_nargs_lower_above_lit	the contract would hold vacuously (U-ICALL-STACK, joint)
+rounds/roundup3/run-roundup3.sh	N51_nargs_lower_above_lit/allow-no-witness	the statement assumes a runtime contract whose `above` = 8 is below 8 + 8·nargs
+rounds/roundup3/run-roundup3.sh	N51_nargs_lower_above_lit/allow-no-witness	the contract would hold vacuously (U-ICALL-STACK, joint)
+rounds/roundup3/run-roundup3.sh	N52_nargs_lower_above_48	the statement assumes a runtime contract whose `above` = 48 is below 8 +
+rounds/roundup3/run-roundup3.sh	N52_nargs_lower_above_48	the contract would hold vacuously (U-ICALL-STACK, joint)
+rounds/roundup3/run-roundup3.sh	N52_nargs_lower_above_48/allow-no-witness	the statement assumes a runtime contract whose `above` = 48 is below 8 +
+rounds/roundup3/run-roundup3.sh	N52_nargs_lower_above_48/allow-no-witness	the contract would hold vacuously (U-ICALL-STACK, joint)
+rounds/roundup3/run-roundup3.sh	N53_nargs_above_w	the statement has the premise `a + n ≤ w` (hw) about the nargs `n` of a runtime
+rounds/roundup3/run-roundup3.sh	N53_nargs_above_w	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N53_nargs_above_w/allow-no-witness	the statement has the premise `a + n ≤ w` (hw) about the nargs `n` of a runtime
+rounds/roundup3/run-roundup3.sh	N53_nargs_above_w/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N54_nargs_plus_above_link	the statement has the premise `n ≤ a` (ha) about the nargs `n` of a runtime
+rounds/roundup3/run-roundup3.sh	N54_nargs_plus_above_link	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N54_nargs_plus_above_link/allow-no-witness	the statement has the premise `n ≤ a` (ha) about the nargs `n` of a runtime
+rounds/roundup3/run-roundup3.sh	N54_nargs_plus_above_link/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N55_stack_above_link	the statement has the premise `a ≤ k` (ha) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N55_stack_above_link	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N55_stack_above_link/allow-no-witness	the statement has the premise `a ≤ k` (ha) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N55_stack_above_link/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N56_two_lower_pinned_w	the statement has the premise `k + 16 ≤ w` (hw) about the stack `k` of a
+rounds/roundup3/run-roundup3.sh	N56_two_lower_pinned_w	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N56_two_lower_pinned_w/allow-no-witness	the statement has the premise `k + 16 ≤ w` (hw) about the stack `k` of a
+rounds/roundup3/run-roundup3.sh	N56_two_lower_pinned_w/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N57_w_two_sided_through_size	the statement has the premise `k + 16 ≤ w` (hw) about the stack `k` of a
+rounds/roundup3/run-roundup3.sh	N57_w_two_sided_through_size	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N57_w_two_sided_through_size/allow-no-witness	the statement has the premise `k + 16 ≤ w` (hw) about the stack `k` of a
+rounds/roundup3/run-roundup3.sh	N57_w_two_sided_through_size/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N58_self_bound	the statement has the premise `k + 1 ≤ k` (hk) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N58_self_bound	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N58_self_bound/allow-no-witness	the statement has the premise `k + 1 ≤ k` (hk) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N58_self_bound/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N59_x_le_w_with_w_from_x	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N59_x_le_w_with_w_from_x	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N59_x_le_w_with_w_from_x/allow-no-witness	the statement has the premise `k ≤ w` (hw) about the stack `k` of a runtime
+rounds/roundup3/run-roundup3.sh	N59_x_le_w_with_w_from_x/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N60_k_plift_pin	the statement has the non-Prop binder `p : PLift (k = 7)` whose type mentions
+rounds/roundup3/run-roundup3.sh	N60_k_plift_pin	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N60_k_plift_pin/allow-no-witness	the statement has the non-Prop binder `p : PLift (k = 7)` whose type mentions
+rounds/roundup3/run-roundup3.sh	N60_k_plift_pin/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N61_k_struct_pin	the statement uses Proof.PinK, which is not a plain def or theorem
+rounds/roundup3/run-roundup3.sh	N61_k_struct_pin/allow-no-witness	the statement uses Proof.PinK, which is not a plain def or theorem
+rounds/roundup3/run-roundup3.sh	N62_k_in_pre_only/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N62_k_in_pre_only/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/roundup3/run-roundup3.sh	N63_k_subtype_pin	the statement has the non-Prop binder `p : { u // k = 7 }` whose type mentions
+rounds/roundup3/run-roundup3.sh	N63_k_subtype_pin	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N63_k_subtype_pin/allow-no-witness	the statement has the non-Prop binder `p : { u // k = 7 }` whose type mentions
+rounds/roundup3/run-roundup3.sh	N63_k_subtype_pin/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N64_w_plift_free_k	the statement has the non-Prop binder `p : PLift (w ≤ 3)` whose type mentions
+rounds/roundup3/run-roundup3.sh	N64_w_plift_free_k	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N64_w_plift_free_k/allow-no-witness	the statement has the non-Prop binder `p : PLift (w ≤ 3)` whose type mentions
+rounds/roundup3/run-roundup3.sh	N64_w_plift_free_k/allow-no-witness	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-roundup3.sh	N65_w_in_pre_only/allow-no-witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-roundup3.sh	N65_w_in_pre_only/allow-no-witness	--allow-no-witness does not bypass this and is ignored.
+rounds/round8/run-round8.sh	I1d_itab_other_data	the statement passes `[]` to Janus.Spec.ItabIs, which is not Extracted.program.data
 run-all.sh	R1_proof_overwrite_nosandbox	changed after the proof compile
 run-all.sh	R1_proof_overwrite_nosandbox	[Stage: framework integrity]
 icall/attacks.sh	A1_fn_numeral	the statement assumes the abstract-callee contract
@@ -709,130 +709,130 @@ icall/attacks.sh	P2_preserves_bytes	the statement assumes the abstract-callee co
 icall/attacks.sh	P2_preserves_bytes	constrain bytes, values or registers (U-ICALL-PRESERVES)
 icall/attacks.sh	P3_separate_premise	the statement has the premise `∀ (s : Janus.Arm64.State) (m :
 icall/attacks.sh	P3_separate_premise	and the model laws may mention them (round 10 V1, round 11)
-roundup3/run-verify-rows.sh	N10	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	N10	but no kernel-checked non-vacuity witness
-roundn9/icall/run-icall.sh	B10_keep_via_let	the statement has an abstract-callee contract whose call-site property or kept
-roundn9/icall/run-icall.sh	B11_R_let	the statement assumes the runtime contract Janus.Contracts.ICall.ICallContract
-roundn9/icall/run-icall.sh	B11_R_let	or a number is a runtime parameter, whatever its type)
-roundup3/run-verify-rows.sh	N11	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	N11	but no kernel-checked non-vacuity witness
-roundn9/icall/run-icall.sh	B12_unsat_stack	the statement assumes the runtime contract Janus.Contracts.ICall.ICallContract
-roundn9/icall/run-icall.sh	B12_unsat_stack	so the hypothesis would hold vacuously (U-ICALL-STACK)
-roundup3/run-verify-rows.sh	N13	the statement has the non-Prop binder `p : PLift (w < 8)` whose type mentions
-roundup3/run-verify-rows.sh	N13	and the contract would hold vacuously (U-ICALL-STACK)
-roundn9/icall/run-icall.sh	B13_stub_absent_name	the statement uses Janus.Program.contractAddr with the name "does.not.exist",
-roundn9/icall/run-icall.sh	B13_stub_absent_name	that object (a misspelt or lookalike name, round 8 I1)
-roundup3/run-verify-rows.sh	N16	the statement has the non-Prop binder `f : Fin w → Fin 0` whose type mentions
-roundup3/run-verify-rows.sh	N16	and the contract would hold vacuously (U-ICALL-STACK)
-roundn9/icall/run-icall.sh	B14_stub_computed_name	the statement uses Janus.Program.contractAddr with the name `"fmt." ++
-roundn9/icall/run-icall.sh	B14_stub_computed_name	so the report shows exactly which object is meant)
-roundn9/icall/run-icall.sh	B15_stub_plus_offset	the statement assumes the abstract-callee contract
-roundn9/icall/run-icall.sh	B15_stub_plus_offset	and a numeral are never accepted (U-ICALL)
-roundup3/run-verify-rows.sh	N17	the statement has the non-Prop binder `p : w < 8 ×' k ≤ w` whose type mentions
-roundup3/run-verify-rows.sh	N17	and the contract would hold vacuously (U-ICALL-STACK)
-roundn9/icall/run-icall.sh	B16_stub_other_program	the statement passes `Extracted.program.onlySegments []` to
-roundn9/icall/run-icall.sh	B16_stub_other_program	are looked up in the extracted program only (round 8 I1)
-roundup3/run-verify-rows.sh	N18	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	N18	but no kernel-checked non-vacuity witness
-roundn9/icall/run-icall.sh	B17_stub_with_pin	the statement has the premise `R = fun x x_1 x_2 x_3 x_4 x_5 x_6 => False`
-roundn9/icall/run-icall.sh	B17_stub_with_pin	and the model laws may mention them (round 10 V1, round 11)
-roundn9/icall/run-icall.sh	B1_fn_pinned_by_premise	the statement has the premise `fn = Extracted.entry` (hfn) about the callee address of an abstract-callee contract
-roundup3/run-verify-rows.sh	N46	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	N46	but no kernel-checked non-vacuity witness
-roundn9/icall/run-icall.sh	B2_fn_pinned_numeral	the statement has the premise `fn = 1048576` (hfn) about the callee address of
-roundn9/icall/run-icall.sh	B2_fn_pinned_numeral	a premise that pins it chooses the callee (U-ICALL)
-roundup3/run-verify-rows.sh	N50	the statement assumes runtime contracts whose sizes are jointly unsatisfiable:
-roundup3/run-verify-rows.sh	N50	the contract would hold vacuously (U-ICALL-STACK, joint)
-roundn9/icall/run-icall.sh	B3_outside_conj	the statement has the premise `Janus.Outside 0 8 rt ∧ Janus.Outside 16 8 rt`
-roundn9/icall/run-icall.sh	B3_outside_conj	and the model laws may mention them (round 10 V1, round 11)
-roundup3/run-verify-rows.sh	N51	the statement assumes a runtime contract whose `above` = 8 is below 8 + 8·nargs
-roundup3/run-verify-rows.sh	N51	the contract would hold vacuously (U-ICALL-STACK, joint)
-roundn9/icall/run-icall.sh	B4_outside_exists	the statement has the premise `∃ k, Janus.Outside k 8 rt` (ho), which
-roundn9/icall/run-icall.sh	B4_outside_exists	and the model laws may mention them (round 10 V1, round 11)
-roundn9/icall/run-icall.sh	B5_outside_everything	the statement has the premise `Janus.Outside 0 281474976710656 rt` (ho), which
-roundn9/icall/run-icall.sh	B5_outside_everything	and the model laws may mention them (round 10 V1, round 11)
-roundup3/run-verify-rows.sh	N52	the statement assumes a runtime contract whose `above` = 48 is below 8 +
-roundup3/run-verify-rows.sh	N52	the contract would hold vacuously (U-ICALL-STACK, joint)
-roundn9/icall/run-icall.sh	B6_outside_two	the statement has the premise `Janus.Outside 0 140737488355328 rt` (ho1), which
-roundn9/icall/run-icall.sh	B6_outside_two	and the model laws may mention them (round 10 V1, round 11)
-roundup3/run-verify-rows.sh	N60	the statement has the non-Prop binder `p : PLift (k = 7)` whose type mentions
-roundup3/run-verify-rows.sh	N60	and the contract would hold vacuously (U-ICALL-STACK)
-roundn9/icall/run-icall.sh	B7_P_via_premise_var	the statement has an abstract-callee contract whose call-site property or kept
-roundn9/icall/run-icall.sh	B7_P_via_premise_var	may mention only the statement's own variables (U-ICALL)
-roundup3/run-verify-rows.sh	N62	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	N62	but no kernel-checked non-vacuity witness
-roundn9/icall/run-icall.sh	B8_other_program	the statement assumes the runtime contract Janus.Contracts.ICall.ICallContract
-roundn9/icall/run-icall.sh	B8_other_program	a variable `impl` of the statement (round 10 V1, round 15)
-roundup3/run-verify-rows.sh	N64	the statement has the non-Prop binder `p : PLift (w ≤ 3)` whose type mentions
-roundup3/run-verify-rows.sh	N64	and the contract would hold vacuously (U-ICALL-STACK)
-roundup3/run-verify-rows.sh	N65	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	N65	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	PIN10_RF7_plift_hyp_runfree	Proof.correctness has no kernel-checked non-vacuity witness verified in this
-roundup3/run-verify-rows.sh	PIN10_RF8_fin0_runfree	Proof.correctness has no kernel-checked non-vacuity witness verified in this
-roundup3/run-verify-rows.sh	PIN10_RF9_subtype_runfree	Proof.correctness has no kernel-checked non-vacuity witness verified in this
-roundup3/run-verify-rows.sh	PIN1_k_eq_7	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	PIN1_k_eq_7	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	PIN2_7_eq_k	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	PIN2_7_eq_k	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	PIN3_w_lt_8	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	PIN3_w_lt_8	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	PIN4_w_lt_20	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	PIN4_w_lt_20	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	PIN5_let_w2_lt_8	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	PIN5_let_w2_lt_8	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	PIN6_a_eq_48	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	PIN6_a_eq_48	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	PIN7_runfree_false_hyp	Proof.correctness has no kernel-checked non-vacuity witness verified in this
-roundup3/run-verify-rows.sh	PIN8_runfree_custom_step	Proof.correctness has no kernel-checked non-vacuity witness verified in this
-roundup3/run-verify-rows.sh	PIN9_REF5_neg_forall_absurd_conjunct	Proof.correctness has no kernel-checked non-vacuity witness verified in this
-roundup3/run-verify-rows.sh	PIN9_REF6_neg_forall_unrelated_alt	Proof.correctness has no kernel-checked non-vacuity witness verified in this
-roundup3/run-verify-rows.sh	PIN9_REF7_neg_forall_true_claim_flipped	Proof.correctness has no kernel-checked non-vacuity witness verified in this
-roundup3/run-verify-rows.sh	ATT_N10_w_lt_8	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	ATT_N10_w_lt_8	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	ATT_N11_k_eq_7	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	ATT_N11_k_eq_7	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	ATT_N18_let_w2_lt_8	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	ATT_N18_let_w2_lt_8	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	ATT_NOCS_no_callsite	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	ATT_NOCS_no_callsite	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	ATT_NORUN_no_run	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	ATT_NORUN_no_run	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	WIT1_vacuous_contract_witness	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	WIT1_vacuous_contract_witness	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	WIT2_stack_via_def	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	WIT2_stack_via_def	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	WIT3_stack_via_let	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	WIT3_stack_via_let	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	WIT4_above_below_nargs	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	WIT4_above_below_nargs	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	WIT5_stack_pin_in_exists_only	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	WIT5_stack_pin_in_exists_only	but no kernel-checked non-vacuity witness
-roundup3/run-verify-rows.sh	WIT6_P_false_witness	the statement assumes the abstract-callee contract
-roundup3/run-verify-rows.sh	WIT6_P_false_witness	precondition is unsatisfiable and the hypothesis holds vacu
-roundup3/run-verify-rows.sh	PAIR1	Proof.extra has no kernel-checked non-vacuity witness verified in this run:
-roundup3/run-verify-rows.sh	PAIR1	state satisfying it, so the theorem could be vacuous. Every
-roundup3/run-verify-rows.sh	PAIR2	Proof.extra has no kernel-checked non-vacuity witness verified in this run:
-roundup3/run-verify-rows.sh	PAIR2	state satisfying it, so the theorem could be vacuous. Every
-roundup3/run-verify-rows.sh	PAIR3	Proof.correctness has no kernel-checked non-vacuity witness verified in this
-roundup3/run-verify-rows.sh	PAIR3	a state satisfying it, so the theorem could be vacuous.
-roundup3/run-verify-rows.sh	PAIR4	Proof.extra has no kernel-checked non-vacuity witness verified in this run:
-roundup3/run-verify-rows.sh	PAIR4	state satisfying it, so the theorem could be vacuous. Every
-roundup3/run-verify-rows.sh	FLT1_false_premise	Proof.faults has no kernel-checked non-vacuity witness verified in this run:
-roundup3/run-verify-rows.sh	FLT1_false_premise	state satisfying it, so the theorem could be vacuous. Ever
-roundup3/run-verify-rows.sh	FLT2_faults_untied_state	Proof.faults has no kernel-checked non-vacuity witness verified in this run:
-roundup3/run-verify-rows.sh	FLT2_faults_untied_state	state satisfying it, so the theorem could be vacuous. Ever
-roundup3/run-verify-rows.sh	FLT3_fact_other_state	Proof.faults has no kernel-checked non-vacuity witness verified in this run:
-roundup3/run-verify-rows.sh	FLT3_fact_other_state	state satisfying it, so the theorem could be vacuous. Ever
-roundup3/run-verify-rows.sh	R01	Proof.correctness assumes runtime contracts
-roundup3/run-verify-rows.sh	R01	but no kernel-checked non-vacuity witness
-round15/run-round15.sh	N1:correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no kernel-checked non-vacuity witness
-round15/run-round15.sh	N1:correctness	jointly satisfiable
-round15/run-round15.sh	N1:correctness	anonymous `example`
-round15/run-round15.sh	N3:correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no kernel-checked non-vacuity witness
-round15/run-round15.sh	N3:correctness	does not show non-vacuity
-round15/run-round15.sh	N5:correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no kernel-checked non-vacuity witness
-round15/run-round15.sh	N5:correctness	Stage: non-vacuity
-round15/run-round15.sh	N7:correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no kernel-checked non-vacuity witness
-round15/run-round15.sh	N7:correctness	does not bypass this and is ignored
-round15/run-round15.sh	N7b:correctness	Audit-only:
-round15/run-round15.sh	N7b:correctness	NOT A VERIFICATION
+rounds/roundup3/run-verify-rows.sh	N10	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	N10	but no kernel-checked non-vacuity witness
+rounds/roundn9/icall/run-icall.sh	B10_keep_via_let	the statement has an abstract-callee contract whose call-site property or kept
+rounds/roundn9/icall/run-icall.sh	B11_R_let	the statement assumes the runtime contract Janus.Contracts.ICall.ICallContract
+rounds/roundn9/icall/run-icall.sh	B11_R_let	or a number is a runtime parameter, whatever its type)
+rounds/roundup3/run-verify-rows.sh	N11	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	N11	but no kernel-checked non-vacuity witness
+rounds/roundn9/icall/run-icall.sh	B12_unsat_stack	the statement assumes the runtime contract Janus.Contracts.ICall.ICallContract
+rounds/roundn9/icall/run-icall.sh	B12_unsat_stack	so the hypothesis would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-verify-rows.sh	N13	the statement has the non-Prop binder `p : PLift (w < 8)` whose type mentions
+rounds/roundup3/run-verify-rows.sh	N13	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundn9/icall/run-icall.sh	B13_stub_absent_name	the statement uses Janus.Program.contractAddr with the name "does.not.exist",
+rounds/roundn9/icall/run-icall.sh	B13_stub_absent_name	that object (a misspelt or lookalike name, round 8 I1)
+rounds/roundup3/run-verify-rows.sh	N16	the statement has the non-Prop binder `f : Fin w → Fin 0` whose type mentions
+rounds/roundup3/run-verify-rows.sh	N16	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundn9/icall/run-icall.sh	B14_stub_computed_name	the statement uses Janus.Program.contractAddr with the name `"fmt." ++
+rounds/roundn9/icall/run-icall.sh	B14_stub_computed_name	so the report shows exactly which object is meant)
+rounds/roundn9/icall/run-icall.sh	B15_stub_plus_offset	the statement assumes the abstract-callee contract
+rounds/roundn9/icall/run-icall.sh	B15_stub_plus_offset	and a numeral are never accepted (U-ICALL)
+rounds/roundup3/run-verify-rows.sh	N17	the statement has the non-Prop binder `p : w < 8 ×' k ≤ w` whose type mentions
+rounds/roundup3/run-verify-rows.sh	N17	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundn9/icall/run-icall.sh	B16_stub_other_program	the statement passes `Extracted.program.onlySegments []` to
+rounds/roundn9/icall/run-icall.sh	B16_stub_other_program	are looked up in the extracted program only (round 8 I1)
+rounds/roundup3/run-verify-rows.sh	N18	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	N18	but no kernel-checked non-vacuity witness
+rounds/roundn9/icall/run-icall.sh	B17_stub_with_pin	the statement has the premise `R = fun x x_1 x_2 x_3 x_4 x_5 x_6 => False`
+rounds/roundn9/icall/run-icall.sh	B17_stub_with_pin	and the model laws may mention them (round 10 V1, round 11)
+rounds/roundn9/icall/run-icall.sh	B1_fn_pinned_by_premise	the statement has the premise `fn = Extracted.entry` (hfn) about the callee address of an abstract-callee contract
+rounds/roundup3/run-verify-rows.sh	N46	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	N46	but no kernel-checked non-vacuity witness
+rounds/roundn9/icall/run-icall.sh	B2_fn_pinned_numeral	the statement has the premise `fn = 1048576` (hfn) about the callee address of
+rounds/roundn9/icall/run-icall.sh	B2_fn_pinned_numeral	a premise that pins it chooses the callee (U-ICALL)
+rounds/roundup3/run-verify-rows.sh	N50	the statement assumes runtime contracts whose sizes are jointly unsatisfiable:
+rounds/roundup3/run-verify-rows.sh	N50	the contract would hold vacuously (U-ICALL-STACK, joint)
+rounds/roundn9/icall/run-icall.sh	B3_outside_conj	the statement has the premise `Janus.Outside 0 8 rt ∧ Janus.Outside 16 8 rt`
+rounds/roundn9/icall/run-icall.sh	B3_outside_conj	and the model laws may mention them (round 10 V1, round 11)
+rounds/roundup3/run-verify-rows.sh	N51	the statement assumes a runtime contract whose `above` = 8 is below 8 + 8·nargs
+rounds/roundup3/run-verify-rows.sh	N51	the contract would hold vacuously (U-ICALL-STACK, joint)
+rounds/roundn9/icall/run-icall.sh	B4_outside_exists	the statement has the premise `∃ k, Janus.Outside k 8 rt` (ho), which
+rounds/roundn9/icall/run-icall.sh	B4_outside_exists	and the model laws may mention them (round 10 V1, round 11)
+rounds/roundn9/icall/run-icall.sh	B5_outside_everything	the statement has the premise `Janus.Outside 0 281474976710656 rt` (ho), which
+rounds/roundn9/icall/run-icall.sh	B5_outside_everything	and the model laws may mention them (round 10 V1, round 11)
+rounds/roundup3/run-verify-rows.sh	N52	the statement assumes a runtime contract whose `above` = 48 is below 8 +
+rounds/roundup3/run-verify-rows.sh	N52	the contract would hold vacuously (U-ICALL-STACK, joint)
+rounds/roundn9/icall/run-icall.sh	B6_outside_two	the statement has the premise `Janus.Outside 0 140737488355328 rt` (ho1), which
+rounds/roundn9/icall/run-icall.sh	B6_outside_two	and the model laws may mention them (round 10 V1, round 11)
+rounds/roundup3/run-verify-rows.sh	N60	the statement has the non-Prop binder `p : PLift (k = 7)` whose type mentions
+rounds/roundup3/run-verify-rows.sh	N60	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundn9/icall/run-icall.sh	B7_P_via_premise_var	the statement has an abstract-callee contract whose call-site property or kept
+rounds/roundn9/icall/run-icall.sh	B7_P_via_premise_var	may mention only the statement's own variables (U-ICALL)
+rounds/roundup3/run-verify-rows.sh	N62	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	N62	but no kernel-checked non-vacuity witness
+rounds/roundn9/icall/run-icall.sh	B8_other_program	the statement assumes the runtime contract Janus.Contracts.ICall.ICallContract
+rounds/roundn9/icall/run-icall.sh	B8_other_program	a variable `impl` of the statement (round 10 V1, round 15)
+rounds/roundup3/run-verify-rows.sh	N64	the statement has the non-Prop binder `p : PLift (w ≤ 3)` whose type mentions
+rounds/roundup3/run-verify-rows.sh	N64	and the contract would hold vacuously (U-ICALL-STACK)
+rounds/roundup3/run-verify-rows.sh	N65	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	N65	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	PIN10_RF7_plift_hyp_runfree	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+rounds/roundup3/run-verify-rows.sh	PIN10_RF8_fin0_runfree	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+rounds/roundup3/run-verify-rows.sh	PIN10_RF9_subtype_runfree	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+rounds/roundup3/run-verify-rows.sh	PIN1_k_eq_7	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	PIN1_k_eq_7	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	PIN2_7_eq_k	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	PIN2_7_eq_k	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	PIN3_w_lt_8	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	PIN3_w_lt_8	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	PIN4_w_lt_20	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	PIN4_w_lt_20	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	PIN5_let_w2_lt_8	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	PIN5_let_w2_lt_8	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	PIN6_a_eq_48	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	PIN6_a_eq_48	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	PIN7_runfree_false_hyp	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+rounds/roundup3/run-verify-rows.sh	PIN8_runfree_custom_step	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+rounds/roundup3/run-verify-rows.sh	PIN9_REF5_neg_forall_absurd_conjunct	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+rounds/roundup3/run-verify-rows.sh	PIN9_REF6_neg_forall_unrelated_alt	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+rounds/roundup3/run-verify-rows.sh	PIN9_REF7_neg_forall_true_claim_flipped	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+rounds/roundup3/run-verify-rows.sh	ATT_N10_w_lt_8	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	ATT_N10_w_lt_8	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	ATT_N11_k_eq_7	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	ATT_N11_k_eq_7	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	ATT_N18_let_w2_lt_8	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	ATT_N18_let_w2_lt_8	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	ATT_NOCS_no_callsite	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	ATT_NOCS_no_callsite	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	ATT_NORUN_no_run	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	ATT_NORUN_no_run	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	WIT1_vacuous_contract_witness	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	WIT1_vacuous_contract_witness	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	WIT2_stack_via_def	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	WIT2_stack_via_def	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	WIT3_stack_via_let	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	WIT3_stack_via_let	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	WIT4_above_below_nargs	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	WIT4_above_below_nargs	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	WIT5_stack_pin_in_exists_only	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	WIT5_stack_pin_in_exists_only	but no kernel-checked non-vacuity witness
+rounds/roundup3/run-verify-rows.sh	WIT6_P_false_witness	the statement assumes the abstract-callee contract
+rounds/roundup3/run-verify-rows.sh	WIT6_P_false_witness	precondition is unsatisfiable and the hypothesis holds vacu
+rounds/roundup3/run-verify-rows.sh	PAIR1	Proof.extra has no kernel-checked non-vacuity witness verified in this run:
+rounds/roundup3/run-verify-rows.sh	PAIR1	state satisfying it, so the theorem could be vacuous. Every
+rounds/roundup3/run-verify-rows.sh	PAIR2	Proof.extra has no kernel-checked non-vacuity witness verified in this run:
+rounds/roundup3/run-verify-rows.sh	PAIR2	state satisfying it, so the theorem could be vacuous. Every
+rounds/roundup3/run-verify-rows.sh	PAIR3	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+rounds/roundup3/run-verify-rows.sh	PAIR3	a state satisfying it, so the theorem could be vacuous.
+rounds/roundup3/run-verify-rows.sh	PAIR4	Proof.extra has no kernel-checked non-vacuity witness verified in this run:
+rounds/roundup3/run-verify-rows.sh	PAIR4	state satisfying it, so the theorem could be vacuous. Every
+rounds/roundup3/run-verify-rows.sh	FLT1_false_premise	Proof.faults has no kernel-checked non-vacuity witness verified in this run:
+rounds/roundup3/run-verify-rows.sh	FLT1_false_premise	state satisfying it, so the theorem could be vacuous. Ever
+rounds/roundup3/run-verify-rows.sh	FLT2_faults_untied_state	Proof.faults has no kernel-checked non-vacuity witness verified in this run:
+rounds/roundup3/run-verify-rows.sh	FLT2_faults_untied_state	state satisfying it, so the theorem could be vacuous. Ever
+rounds/roundup3/run-verify-rows.sh	FLT3_fact_other_state	Proof.faults has no kernel-checked non-vacuity witness verified in this run:
+rounds/roundup3/run-verify-rows.sh	FLT3_fact_other_state	state satisfying it, so the theorem could be vacuous. Ever
+rounds/roundup3/run-verify-rows.sh	R01	Proof.correctness assumes runtime contracts
+rounds/roundup3/run-verify-rows.sh	R01	but no kernel-checked non-vacuity witness
+rounds/round15/run-round15.sh	N1:correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no kernel-checked non-vacuity witness
+rounds/round15/run-round15.sh	N1:correctness	jointly satisfiable
+rounds/round15/run-round15.sh	N1:correctness	anonymous `example`
+rounds/round15/run-round15.sh	N3:correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no kernel-checked non-vacuity witness
+rounds/round15/run-round15.sh	N3:correctness	does not show non-vacuity
+rounds/round15/run-round15.sh	N5:correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no kernel-checked non-vacuity witness
+rounds/round15/run-round15.sh	N5:correctness	Stage: non-vacuity
+rounds/round15/run-round15.sh	N7:correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no kernel-checked non-vacuity witness
+rounds/round15/run-round15.sh	N7:correctness	does not bypass this and is ignored
+rounds/round15/run-round15.sh	N7b:correctness	Audit-only:
+rounds/round15/run-round15.sh	N7b:correctness	NOT A VERIFICATION

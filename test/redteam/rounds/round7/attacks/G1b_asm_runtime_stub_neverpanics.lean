@@ -1,7 +1,7 @@
 import Extracted
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
 
-/-! Round 7 G1b: `main.Inc` (audit/round7/asmstub) calls `lib.Boom`, whose Go-assembly body
+/-! Round 7 G1b: `main.Inc` (test/redteam/rounds/round7/asmstub) calls `lib.Boom`, whose Go-assembly body
 calls `runtime·morestackJanusR7`, an assembly function **of package lib** that calls a Go
 function doing `panic("boom")`. Before round 7 the extractor took it for a `morestack` stub
 (its symbol starts with `runtime.morestack`, with no `/`), and `NeverPanics` allows reaching

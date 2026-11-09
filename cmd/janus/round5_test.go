@@ -22,7 +22,7 @@ func TestBoundInstanceRejected(t *testing.T) {
 	add := mustExtract(t, "example.com/basic.Add")
 	for _, a := range []string{"E5a_exists_instbinder_def", "E5b_exists_instbinder_stmt", "E5c_exists_default_classbinder",
 		"E5d_hyp_forall_instbinder", "E5e_unapplied_inst_param", "E5f_unapplied_via_alias"} {
-		p := filepath.Join(repoRoot, "audit", "round5", "attacks", a+".lean")
+		p := filepath.Join(repoRoot, "test", "redteam", "rounds", "round5", "attacks", a+".lean")
 		code, _, stderr := runJanus(t, "verify", add, "--proof", p, "--janus-root", repoRoot)
 		if code != 1 || !(strings.Contains(stderr, "binds the instance") || strings.Contains(stderr, "inline instance")) ||
 			!strings.Contains(stderr, "Stage: statement identity") {
@@ -32,7 +32,7 @@ func TestBoundInstanceRejected(t *testing.T) {
 	// The control: a theorem-level instance binder is accepted by the statement audit. It cannot be verified with a witness
 	// (a witness must exhibit the instance in an `∃`, which the audit rejects as a bound instance), so this checks the audit
 	// only (--audit-only: not a verification).
-	p := filepath.Join(repoRoot, "audit", "round3", "attacks", "R2_inst_binder.lean")
+	p := filepath.Join(repoRoot, "test", "redteam", "rounds", "round3", "attacks", "R2_inst_binder.lean")
 	if code, out, stderr := runJanus(t, "verify", add, "--proof", p, "--janus-root", repoRoot, "--audit-only"); code != 0 || !strings.Contains(out, "Audit-only") {
 		t.Errorf("R2 (theorem-level instance binder) no longer passes the audit: %d %s\n%s", code, out, stderr)
 	}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lay out the DecLib git dependency and the R5Proofs consumer package under $1 (a fresh dir).
-# Usage: audit/round5/dep/setup.sh DIR JANUS_ROOT
+# Usage: test/redteam/rounds/round5/dep/setup.sh DIR JANUS_ROOT
 set -eu
 out="$1"; jr="$2"; here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tc="$(cat "$jr/lean-toolchain")"

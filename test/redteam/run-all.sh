@@ -1,37 +1,37 @@
 #!/usr/bin/env bash
-# Reproduce every attack in docs/audit/AUDIT.md. Writes only under audit/work/.
-# Usage: audit/run-all.sh [-j N]     (builds audit/bin/janus from the current tree)
+# Reproduce every attack in docs/audit/AUDIT.md. Writes only under test/redteam/work/.
+# Usage: test/redteam/run-all.sh [-j N]     (builds test/redteam/bin/janus from the current tree)
 #   -j N   run up to N rows at once (default: $JANUS_JOBS, else the number of cores capped by
 #          memory, scripts/lib/parallel.sh); -j 1 runs them one by one. Output order is the same.
 # Expected after the F1-F6 fixes: every "blocked" row prints "Invalid" (or "rejected"); every
 # "Verified"/"Verified-honest"/"ok"/"mitigated" row prints "Verified" (or the axioms of a
 # refutation). No row should print "Verified" for a false or misleading claim.
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../scripts/lib/parallel.sh
+# shellcheck source=../../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
-# shellcheck source=../scripts/lib/memguard.sh
+# shellcheck source=../../scripts/lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
-# shellcheck source=../scripts/lib/verdict.sh
+# shellcheck source=../../scripts/lib/verdict.sh
 . "$root/scripts/lib/verdict.sh"
 # shellcheck source=lib/blocked.sh
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 memguard_self "$@"
 par_init "$@"
-# ALL_ROWS="base r1 root": only these row groups (default all); audit/run-rounds.sh runs them as the lanes alla, allb, allc.
+# ALL_ROWS="base r1 root": only these row groups (default all); test/redteam/run-rounds.sh runs them as the lanes alla, allb, allc.
 # base = the sandbox/statement/control rows, r1 = the ten R1 consumer-lakefile variants, root = the rows on a copy of the
 # framework build (C1, R1b forged lemma, R1 proof-overwrite).
 want() { [ -z "${ALL_ROWS:-}" ] || [[ " $ALL_ROWS " == *" $1 "* ]]; }
-J="$root/audit/bin/janus"
-# audit/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
+J="$root/test/redteam/bin/janus"
+# test/redteam/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build Janus failed (fix the Lean library first)"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 
-W=audit/work${ALL_ROWS:+-$ALL_ROWS}   # a row group has its own work dir (the lanes alla..allc run at once)
+W=test/redteam/work${ALL_ROWS:+-$ALL_ROWS}   # a row group has its own work dir (the lanes alla..allc run at once)
 mkdir -p $W
 cp artifacts/examples-arm64 $W/examples-arm64
 # Fresh extractions of the attacked functions (independent of scripts/verify-examples.sh).
@@ -50,7 +50,7 @@ row() {
   local status=""
   case "$2" in
     blocked) case "$3" in Verified*|accepted*) status=BROKEN ;; esac
-      # a pinned reason (audit/lib/blocked-pins.tsv); a Lean elaboration failure ("Lean rejected the proof") is BROKEN unless pinned as expected
+      # a pinned reason (test/redteam/lib/blocked-pins.tsv); a Lean elaboration failure ("Lean rejected the proof") is BROKEN unless pinned as expected
       why="$(blocked_check run-all.sh "$1" "$3")"; [ -n "$why" ] && { status=BROKEN; set -- "$1" "$2" "$3 [$why]"; } ;;
     Verified|Verified-honest|mitigated) case "$3" in Verified*) ;; *) status=BROKEN ;; esac ;;
     ok) case "$3" in *"depends on axioms"*) ;; *) status=BROKEN ;; esac ;;
@@ -69,12 +69,12 @@ echo "attack                       expect   result"
 # trusted-only / mentions-Extracted statement rules.
 if want base; then
 for a in A1_instance A3_initialize A9_namespace_shadow A5_skipkernel A7_private_shadow A10_exit; do
-  par_run 'row "$a" blocked "$(v --proof audit/attacks/$a.lean $W/Add)"'
+  par_run 'row "$a" blocked "$(v --proof test/redteam/attacks/$a.lean $W/Add)"'
 done
 # A6: the #eval writes a marker at an absolute path of an existing host directory (the work dir); the sandbox must hide it (the
 # hermetic empty root: ENOENT, pinned) and the marker must not exist on the host afterwards.
 a6m="$root/$W/A6-written-during-verify.txt"
-sed "s#@MARKER@#$a6m#" audit/attacks/A6_eval_io.lean > $W/A6_eval_io.lean
+sed "s#@MARKER@#$a6m#" test/redteam/attacks/A6_eval_io.lean > $W/A6_eval_io.lean
 par_run 'rm -f "$a6m"; a6=$(v --proof $W/A6_eval_io.lean $W/Add)
 if [ -e "$a6m" ]; then row A6_eval_io blocked "accepted: the proof wrote the marker on the host"; else row A6_eval_io blocked "$a6"; fi; rm -f "$a6m"'
 # A2/A4 still verify, but the printed statement is now honest (the proof's unexpanders are
@@ -84,7 +84,7 @@ if [ -e "$a6m" ]; then row A6_eval_io blocked "accepted: the proof wrote the mar
 # x.toNat * y.toNat) True` (with `Shown`'s body in the report's definitions) and A4 `… fun x
 # x_1 => True`; both round-trip, so both stay Verified-honest. Inspect with `janus explain`.
 for a in A2_unexpander A4_unexpand_janus; do
-  par_run 'row "$a" Verified-honest "$(v --proof audit/attacks/$a.lean $W/Add --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"'
+  par_run 'row "$a" Verified-honest "$(v --proof test/redteam/attacks/$a.lean $W/Add --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"'
 done
 # Round 2, CRITICAL-1 (docs/audit/AUDIT-ROUND2.md): an instance written inline in the statement
 # (`@HMul.hMul _ _ _ ⟨fun a b => a + b⟩ x y`, printed `x * y`) used to verify against Add. Now
@@ -93,7 +93,7 @@ done
 # Decidable `dite` in an `if`, LT meaning ≤, an inline NatCast coercion, an inline Coe, and a
 # literal behind a beta-redex.
 for a in S1_inline_instance S1c_mul S1d_ofnat S1e_decidable_if S1f_lt S1g_coe S1h_coe_inline S1i_beta; do
-  par_run 'row "R2.$a" blocked "$(v --proof audit/round2/attacks/$a.lean $W/Add)"'
+  par_run 'row "R2.$a" blocked "$(v --proof test/redteam/rounds/round2/attacks/$a.lean $W/Add)"'
 done
 # Round 2, U1: the unshare fallback (forced with JANUS_SANDBOX=unshare, cache on the separate
 # /tmp mount) now makes every mount read-only with private tmpfs /tmp and /dev/shm. With the tied Add witness both probes print
@@ -120,25 +120,25 @@ u1() { # u1 NAME EXPECT ATTACK MARKER…: no marker may reach the host; EXPECT i
 # (before UP4 the write threw and the row was `blocked`; with the witness it now verifies). The leak check is the row.
 # U1b: the proof catches its failed writes, so it verifies too (Verified, mitigated: no marker reaches the host).
 # (U1 and U1b use separate caches; only U1b plants the host markers, so they run in parallel.)
-par_run 'u1 R2.U1_unshare_cache_write mitigated audit/round2/attacks/U1_unshare_cache_write.lean'
-par_run 'u1 R2.U1b_unshare_mounts mitigated audit/round2/attacks/U1b_unshare_mounts.lean \
+par_run 'u1 R2.U1_unshare_cache_write mitigated test/redteam/rounds/round2/attacks/U1_unshare_cache_write.lean'
+par_run 'u1 R2.U1b_unshare_mounts mitigated test/redteam/rounds/round2/attacks/U1b_unshare_mounts.lean \
   /tmp/janus-u1b-marker /dev/shm/janus-u1b-marker /boot/janus-u1b-marker /run/user/0/janus-u1b-marker /run/janus-u1b-marker'
 for t in t1 t3 t4; do
-  par_run 'row "A8_classic.$t" blocked "$(v --theorem Proof.$t --proof audit/attacks/A8_classic.lean $W/Add)"'
+  par_run 'row "A8_classic.$t" blocked "$(v --theorem Proof.$t --proof test/redteam/attacks/A8_classic.lean $W/Add)"'
 done
 # B1/B2 are blocked by fixes F3/F4: the attacks no longer verify, and their negations do.
-par_run 'row B1_neverpanics_fault blocked "$(v --proof audit/specs/B1_neverpanics_fault.lean $W/Add256)"'
-par_run 'row B1_refuted Verified "$(v --proof audit/specs/B1_refuted.lean $W/Add256)"'
+par_run 'row B1_neverpanics_fault blocked "$(v --proof test/redteam/specs/B1_neverpanics_fault.lean $W/Add256)"'
+par_run 'row B1_refuted Verified "$(v --proof test/redteam/specs/B1_refuted.lean $W/Add256)"'
 # B2: the file must FAIL to compile, and only at its final `rfl` (brProg.withExit ret does not return at pc 0): exactly ONE Lean error,
 # and it is that one (any other error means the attack file no longer exercises its target).
-par_run 'b2o=$(lake env lean audit/specs/B2_exit_sentinel.lean 2>&1) && b2="accepted (compiles)" || {
+par_run 'b2o=$(lake env lean test/redteam/specs/B2_exit_sentinel.lean 2>&1) && b2="accepted (compiles)" || {
   if [ "$(grep -c ": error:" <<<"$b2o")" = 1 ] && grep -qE "error: Tactic .rfl. failed" <<<"$b2o" && grep -qF "(brProg.withExit ret).run 1" <<<"$b2o"; then
     b2="rejected: the only Lean error is the final rfl (brProg.withExit ret).run 1 does not return at pc := 0"
   else b2="rejected for another reason: $(grep -m2 ": error:" <<<"$b2o" | cut -c1-160 | tr "\n" " ")"; fi; }
 row B2_exit_sentinel blocked "$b2"'
-par_run 'row B2_refuted ok "$(lake env lean audit/specs/B2_refuted.lean 2>&1 | lean_first)"'
+par_run 'row B2_refuted ok "$(lake env lean test/redteam/specs/B2_refuted.lean 2>&1 | lean_first)"'
 for n in Add Add256 Get; do
-  par_run 'row "control:${n}_witness" Verified "$(v --proof audit/controls/${n}_witness.lean $W/$n --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"'
+  par_run 'row "control:${n}_witness" Verified "$(v --proof test/redteam/controls/${n}_witness.lean $W/$n --theorem Proof.correctness --theorem Proof.Witness.nonvacuous)"'
 done
 fi
 
@@ -148,10 +148,10 @@ fi
 if want root; then
 par_run 'C=$W/janus-root-copy
 rm -rf $C; mkdir -p $C
-cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean Janus JanusTests Oracle .lake $C/
-cp audit/attacks/C1_fake_Extracted.lean $C/Extracted.lean
+cp -a --parents lakefile.toml lake-manifest.json lean-toolchain Janus.lean Janus test/lean Oracle .lake $C/
+cp test/redteam/attacks/C1_fake_Extracted.lean $C/Extracted.lean
 (cd $C && lake env lean -o .lake/build/lib/lean/Extracted.olean Extracted.lean && rm Extracted.lean)
-row C1_shadow_library blocked "$("$J" verify --janus-root $C --proof audit/attacks/C1_proof.lean $W/Add 2>&1 | verdict_reason)"
+row C1_shadow_library blocked "$("$J" verify --janus-root $C --proof test/redteam/attacks/C1_proof.lean $W/Add 2>&1 | verdict_reason)"
 rm -rf $C'
 fi
 
@@ -171,11 +171,11 @@ want base && par_run 'row C2_toctou_swap mitigated "$(v --proof examples/proofs/
 R1=$W/R1
 rm -rf "$R1"; mkdir -p "$R1"
 nonce=$(date +%s%N)
-r1pkg() { # r1pkg DIR [dep]: a copy of audit/attacks/R1_pkg requiring janus from this checkout
+r1pkg() { # r1pkg DIR [dep]: a copy of test/redteam/attacks/R1_pkg requiring janus from this checkout
   local d=$1 req="" pk="" dep=${2:-}
-  cp -r audit/attacks/R1_pkg "$d"
+  cp -r test/redteam/attacks/R1_pkg "$d"
   if [ "${2:-}" = dep ]; then
-    cp -r audit/attacks/R1_dep "$d-dep"
+    cp -r test/redteam/attacks/R1_dep "$d-dep"
     req="require r1dep from \"$root/$d-dep\""
     pk=',{"type":"path","scope":"","name":"r1dep","manifestFile":"lake-manifest.json","inherited":false,"dir":"'"$root/$d-dep"'","configFile":"lakefile.lean"}'
   fi
@@ -214,11 +214,11 @@ fi
 if want root; then
 par_run 'F=$W/janus-root-forged
 rm -rf $F; mkdir -p $F/.lake $F/forge/Janus
-cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean Janus JanusTests Oracle $F/
+cp -a --parents lakefile.toml lake-manifest.json lean-toolchain Janus.lean Janus test/lean Oracle $F/
 cp -a .lake/build $F/.lake/
-{ echo "import Lean"; cat Janus/GoABI.lean audit/attacks/R1_forged_lemma.lean; } > $F/forge/Janus/GoABI.lean
+{ echo "import Lean"; cat Janus/GoABI.lean test/redteam/attacks/R1_forged_lemma.lean; } > $F/forge/Janus/GoABI.lean
 (cd $F && lake env lean --root=forge -o .lake/build/lib/lean/Janus/GoABI.olean forge/Janus/GoABI.lean >/dev/null && rm -rf forge)
-row R1b_forged_lemma blocked "$("$J" verify --janus-root $F --proof audit/attacks/R1_forged_proof.lean $W/Add 2>&1 | verdict_reason)"
+row R1b_forged_lemma blocked "$("$J" verify --janus-root $F --proof test/redteam/attacks/R1_forged_proof.lean $W/Add 2>&1 | verdict_reason)"
 rm -rf $F'
 # R1 proof-overwrite: a proof whose #eval corrupts the framework build on LEAN_PATH (a throwaway
 # --janus-root copy). Sandboxed the write fails and the honest theorem verifies; unsandboxed
@@ -227,15 +227,15 @@ rm -rf $F'
 for ns in "" --unsafe-no-sandbox; do
   par_run 'O=$W/janus-root-overwrite${ns:+-ns}
   rm -rf $O; mkdir -p $O/.lake
-  cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean Janus JanusTests Oracle $O/
+  cp -a --parents lakefile.toml lake-manifest.json lean-toolchain Janus.lean Janus test/lean Oracle $O/
   cp -a .lake/build $O/.lake/
-  res="$("$J" verify --janus-root $O --proof audit/attacks/R1_proof_overwrite.lean $W/Add $ns 2>&1 | verdict_reason)"
+  res="$("$J" verify --janus-root $O --proof test/redteam/attacks/R1_proof_overwrite.lean $W/Add $ns 2>&1 | verdict_reason)"
   if [ -z "$ns" ]; then row R1_proof_overwrite mitigated "$res"; else row R1_proof_overwrite_nosandbox blocked "$res"; fi
   rm -rf $O'
 done
 fi
 
-# ASL corollary forgeries (docs/design/ASL.md, audit/asl/attacks): proofs whose main theorem verifies
+# ASL corollary forgeries (docs/design/ASL.md, test/redteam/asl/attacks): proofs whose main theorem verifies
 # but which try to forge the --asl corollary. Each must print "Invalid: ASL corollary"; the honest
 # Add control must derive it. Needs the JanusASL build (about an hour once): JANUS_AUDIT_ASL=1.
 asl_v() { # asl_v PROOF [flags…]: the ASL verdict line and its stage
@@ -250,27 +250,27 @@ if ! want base; then :
 elif [ "${JANUS_AUDIT_ASL:-}" = 1 ]; then
   row ASL.control_Add Verified "$(asl_v --proof examples/proofs/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous $W/Add)"
   for a in X1_shadow_toASL X3_plant_words X4_plant_corollary X5_elab_override X6_other_program X7_reserved_name; do
-    row "ASL.$a" blocked "$(asl_v --proof audit/asl/attacks/$a.lean $W/Add)"
+    row "ASL.$a" blocked "$(asl_v --proof test/redteam/asl/attacks/$a.lean $W/Add)"
   done
-  row ASL.X2_own_toASL blocked "$(asl_v --proof audit/asl/attacks/X2_own_toASL.lean --theorem Proof.correctness_asl $W/Add)"
+  row ASL.X2_own_toASL blocked "$(asl_v --proof test/redteam/asl/attacks/X2_own_toASL.lean --theorem Proof.correctness_asl $W/Add)"
 else
   printf '%-28s %-8s %s\n' "ASL.*" skipped "set JANUS_AUDIT_ASL=1 (builds JanusASL once, about an hour)"
 fi
 
 # Row RT-PRINT (R8): the print/println format specification Janus.Spec.Print against the Go 1.26
-# runtime, byte for byte, on both ISAs (audit/rt-print/run.sh: every integer kind at the
+# runtime, byte for byte, on both ISAs (test/redteam/rounds/rt-print/run.sh: every integer kind at the
 # boundaries and at random, bools, strings, pointers, slices, interfaces, and RTPRINT_N random
 # float64 and float32 bit patterns, with complex numbers built from them).
-want base && par_run 'echo "RT-PRINT (audit/rt-print/run.sh: Janus.Spec.Print vs the Go 1.26 runtime):"
-if rtp=$(audit/rt-print/run.sh 2>&1); then
+want base && par_run 'echo "RT-PRINT (test/redteam/rounds/rt-print/run.sh: Janus.Spec.Print vs the Go 1.26 runtime):"
+if rtp=$(test/redteam/rounds/rt-print/run.sh 2>&1); then
   echo "  $(tail -1 <<<"$rtp")"
 else
   echo "  $(tail -1 <<<"$rtp")   <-- BROKEN"
   broken+=(rt-print)
 fi'
 
-want base && par_run 'echo "model controls (audit/model/Model.lean):"
-if lake env lean audit/model/Model.lean >/dev/null 2>&1; then
+want base && par_run 'echo "model controls (test/redteam/model/Model.lean):"
+if lake env lean test/redteam/model/Model.lean >/dev/null 2>&1; then
   echo "  Model.lean: all decide controls pass, including M1-M3 now faulting (blocked by F5)"
 else
   echo "  Model.lean: FAILED   <-- BROKEN"

@@ -84,7 +84,7 @@ structure Case where
   /-- FPCR and FPSR (absent: 0). -/
   fpcr : Nat
   fpsr : Nat
-  /-- audit/rt-model sequence mode: words laid out from `testPC` (`word` ignored when nonempty). -/
+  /-- test/redteam/rounds/rt-model sequence mode: words laid out from `testPC` (`word` ignored when nonempty). -/
   words : Array Nat
 
 def hexField (j : Json) (k : String) : Except String Nat := do

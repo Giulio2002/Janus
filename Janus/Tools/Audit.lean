@@ -965,7 +965,7 @@ partial def forallBinderNames : Expr → Array Name → Array Name
 runtime contract only if its head constant is DEFINED in the module listed here (looked up in the environment's
 constant-to-module map, so a proof or consumer module that declares `namespace Janus.Contracts` and its own
 `FakeContract`/`Summary` def, or shadows a real contract's name, is not a contract). Generated from the framework's
-contract definitions by `python3 audit/round9/sat_check.py ROOT --emit`; the SAT row of audit/round9 fails if this
+contract definitions by `python3 test/redteam/rounds/round9/sat_check.py ROOT --emit`; the SAT row of test/redteam/rounds/round9 fails if this
 list and the tree differ, so a new framework def does not become a contract by accident. -/
 def pinnedContracts : Array (String × String) := #[
 -- BEGIN pinnedContracts

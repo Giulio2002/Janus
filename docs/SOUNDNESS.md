@@ -468,7 +468,7 @@ mode 0700 owned by the user (an unsafe one stops the verification, it is not ign
 own 32-byte key (mode 0600), is mounted as an empty tmpfs inside the sandbox like the result
 cache, and is written only by a sandboxed run. A marker made under another key, planted or empty is
 a miss (`TestJ1cVerdictStoreAuthentic`). `--fresh-framework` ignores the store, for a row that tests
-the framework replay itself. `audit/run-rounds.sh` creates one store per run.
+the framework replay itself. `test/redteam/run-rounds.sh` creates one store per run.
 
 ### Verification-result cache
 
@@ -545,7 +545,7 @@ Red-team checklist for the consumer-package cache (each row must be a miss, neve
    `--allow-path-deps` toggled.
 6. Tampered entry: edit the report, the key, the MAC, truncate, copy another key's entry over it,
    symlink it, make the result directory group-writable (round 8 C1 refusals).
-   (`TestConsumerResultCache`, `audit/round7`, `audit/round8`.)
+   (`TestConsumerResultCache`, `test/redteam/rounds/round7`, `test/redteam/rounds/round8`.)
 7. Key collision: two different packages/theorems with the same textual fields; every field is
    written with `%q`/fixed separators and the large inputs are SHA-256 digests; the theorem name and
    proof place are in the key, so an entry for one theorem never answers for another.
@@ -557,10 +557,10 @@ Red-team checklist for the consumer-package cache (each row must be a miss, neve
 10. Hit content: the reported package location is this run's; the recorded report still lists the
     statement, axioms, replay and definitions of the run that proved it.
 
-`audit/round7/run-cache.sh` (run by `audit/round7/run-round7.sh`) attacks the cache: a proof and a lakefile that look for the key and
+`test/redteam/rounds/round7/run-cache.sh` (run by `test/redteam/rounds/round7/run-round7.sh`) attacks the cache: a proof and a lakefile that look for the key and
 the entries and try to plant one (bubblewrap and unshare), a tampered entry, an entry recorded
 with a different framework (a source change), `--fresh` and `--unsafe-no-sandbox`.
-`audit/round8/run-round8.sh` adds trusted-compile manifests with a missing or bad MAC, a
+`test/redteam/rounds/round8/run-round8.sh` adds trusted-compile manifests with a missing or bad MAC, a
 group-writable cache root, a symbolic link among the cache directories and a 0644 key, and runs
 the unit rows for the toolchain identity. Every row must be blocked. There is no long-lived verification daemon (`janus serve`): docs/TESTING.md
 explains why it would not pay for the trusted state it would add.
@@ -675,7 +675,7 @@ not accept with an empty cache:
 
 ## Build caches (the ASL model, the JanusASL modules, the Sail oracle driver)
 
-`scripts/asl.sh`, `scripts/oracle-sail.sh` and `audit/rt-asl/run.sh` reuse build outputs through a
+`scripts/asl.sh`, `scripts/oracle-sail.sh` and `test/redteam/rounds/rt-asl/run.sh` reuse build outputs through a
 content-addressed cache (`ASL_CACHE`, on by default: `/srv/janus-asl-cache` if it exists, else
 `~/.cache/janus/asl`; `ASL_CACHE=off` disables it, `SAIL_CACHE` overrides it for the driver). This
 section says what is cached and why a stale, forged or tampered entry cannot produce a pass.
@@ -702,7 +702,7 @@ No check result, no theorem, no audit output and no replay marker is cached by t
 check still runs on every invocation: `scripts/asl.sh prove` still has Lake check every JanusASL
 module against the restored `.olean`s and runs `JanusASL/Audit.lean` (the axiom audit);
 `scripts/asl.sh replay` still runs `leanchecker` over every module (the kernel re-checks every
-declaration); `audit/rt-asl/run.sh` still runs every group (A1-A8, the probes, FSQRT, the
+declaration); `test/redteam/rounds/rt-asl/run.sh` still runs every group (A1-A8, the probes, FSQRT, the
 concurrency tests), the FSQRT and probe rows now using a cached build of the *program under test*,
 not a cached outcome. A restored `.olean` is the same bytes that a build of the same inputs
 produces (the key below), and the kernel replay re-checks them anyway.
@@ -1500,7 +1500,7 @@ call state unless a precondition fixes them; no accepted instruction writes the 
 process with `FPCR = 0` and `MXCSR = 0x1F80`, and Go never changes the *control* bits (Go's
 `abi-internal.md` fixes them at every call). The *status* flags are another matter: they are
 sticky, and Go's own floating point raises them. `MXCSR` holds both, and in a running Go program
-it is already `0x1FA0` (`PE` set) when `main` starts (`audit/rt-fp/probe/mxcsr`). So the amd64
+it is already `0x1FA0` (`PE` set) when `main` starts (`test/redteam/rounds/rt-fp/probe/mxcsr`). So the amd64
 examples state `GoABI.GoMXCSR s` (the control bits of `0x1F80`, reserved bits zero, **any**
 flags), not `s.mxcsr = 0x1F80`, which no call from initialised Go code satisfies
 (`docs/audit/AUDIT-FP.md`, X64-MXCSR-STICKY). On arm64 the flags live in `FPSR`, which the examples
@@ -1545,13 +1545,13 @@ base:
   claim about every state that meets its precondition; before round 9 the allocation contracts'
   precondition said nothing about the runtime's own state, so they demanded a fresh writable
   object from states with no heap mapped and requests up to `maxAlloc` (2^48 bytes). No code
-  meets that (`audit/round9/model/Unsat.lean` proves it false for every program, address and
+  meets that (`test/redteam/rounds/round9/model/Unsat.lean` proves it false for every program, address and
   `rt`), so every theorem assuming one was vacuous. Every allocation contract now takes a
   readiness predicate `H : RtReady`, required at the call for the call's arguments, `g`, `SP`
   and the runtime's view of memory (`rtView rt`: the bytes inside `rt` and the regions); the
   theorem quantifies over `H` and assumes it at its entry. The real runtime meets the contract
   with `H` = "the runtime's code returns as described from every call state with these
-  arguments, `g`, `SP` and runtime memory", and `audit/round9/controls/NewPair_witness.lean`
+  arguments, `g`, `SP` and runtime memory", and `test/redteam/rounds/round9/controls/NewPair_witness.lean`
   kernel-checks an implementation, `rt`, `H` and a call state for which NewPair's theorem fires.
   A new contract needs such a witness too.
 * **The theorem must quantify the runtime** (round 10 V1). A satisfiable contract becomes an
@@ -1592,13 +1592,13 @@ base:
   (`A1a`, `A1b`, `A1b2`). An alias is judged by what the audit sees after unfolding, so an `abbrev`
   of a listed spec is accepted exactly because it is that spec (`A1d`), and of a bad one is not
   (`A1d2`). A new model type is therefore covered
-  with no change to the auditor. Regression rows: `audit/round11/` (closed `HashModel`, `HashModel` pinned by
+  with no change to the auditor. Regression rows: `test/redteam/rounds/round11/` (closed `HashModel`, `HashModel` pinned by
   `H = H0`, closed `PanicRuntime`, `CheckptrModel` pinned by a premise, with the honest theorems
   as controls and the unsatisfiability of the closed models kernel-checked).
 * **Readiness is per call** (round 10 V2, V3). A contract whose postcondition hands back all its
   precondition needs can be chained without bound from one state. For the map contracts that
   allocate and keep (`Assign`, `MakeSmall`), this contradicted `MapModel.Laws` outright
-  (`audit/round10/model/MapUnsat.lean`), so every theorem using them was vacuous; for the
+  (`test/redteam/rounds/round10/model/MapUnsat.lean`), so every theorem using them was vacuous; for the
   interface contracts that allocate (`convT*`, `typeAssert`, `interfaceSwitch`) it was
   unsatisfiable by the real runtime in the model (fixed regions, no collector). They now take a
   readiness predicate `H` like the allocation contracts, required at the call and not handed back.
@@ -1696,7 +1696,7 @@ no concurrent GC, no preemption):
   `M.Laws` (the representation lives in `M.priv`, the header's first word is `len`, finitely
   many keys); (3) **readiness of the allocating calls** (`makemap*`, `mapassign*`): they take
   `H : RtReady` like the allocation contracts (finding R3-C1: without it the old `Assign` and
-  `MakeSmall` were false for every implementation, `audit/maps/model/Unsat.lean`, so `Insert`,
+  `MakeSmall` were false for every implementation, `test/redteam/maps/model/Unsat.lean`, so `Insert`,
   `InsertGet` and `NewMap` were vacuous), one allocating map call per theorem; the read-only
   entry points keep the perpetual `M.Env`; (4) the key semantics of each entry point: 8- and
   4-byte words, string content (`strKey`; a key stored by `mapassign_faststr` must lie in the
@@ -1724,7 +1724,7 @@ no concurrent GC, no preemption):
   against the runtime's own output (`test/lean/JanusTests/String.lean`), and `decoderune` and `countrunes`
   are proved from their machine code on both ISAs (`examples/proofs/SumRunes.lean`,
   `RuneLen.lean` and their amd64 counterparts). Every spec has a satisfiability witness
-  (`Janus/Contracts/Sat.lean`, `SatAmd64.lean`, collected in `RtSat`); `audit/rtstr/run.sh`
+  (`Janus/Contracts/Sat.lean`, `SatAmd64.lean`, collected in `RtSat`); `test/redteam/rounds/rtstr/run.sh`
   checks the capacity formulas and the examples against the real runtime.
 * **Panics, defer, recover** (`Janus/Spec/Panic.lean`, `Janus/Contracts/Panic.lean`,
   `PanicAmd64.lean`; docs/RUNTIME-CONTRACTS.md, "Panics, defer, recover"). `gopanic`,
@@ -2231,7 +2231,7 @@ call. What is trusted beyond the model and the kernel contract (`Kernel.Effect .
   the theorems connect it to the machine code. The remaining formats (`fmtHex`, `fmtPointer`,
   `fmtSlice`, `fmtEface`, `fmtF64`, `fmtF32`, `fmtC128`, `fmtC64`) are **not connected to any
   machine-code theorem yet**. Their only evidence is the differential test row RT-PRINT
-  (`audit/rt-print`, in `audit/run-all.sh`): every format against the real Go 1.26 runtime on both
+  (`test/redteam/rounds/rt-print`, in `test/redteam/run-all.sh`): every format against the real Go 1.26 runtime on both
   ISAs, byte for byte (1,427,971 cases, 0 mismatches at the default corpus).
 * **The shared code.** The proofs about the print functions are about `PrintCode.program` (the
   functions of all four examples as one program); each example proves that its own extraction has
@@ -2282,7 +2282,7 @@ Janus extracts from the executable's **section headers**, but a theorem is about
 **execute**, which the kernel decides from the **program headers**. The two are different
 descriptions of the file and an adversary controls both. Janus therefore assumes exactly the
 following loader (`cmd/janus/elfview.go`, `validateSegments`, `checkDynamic`, `checkSymbolRange`,
-called from `loadBinary` before any byte is copied; regression rows `audit/round12/`).
+called from `loadBinary` before any byte is copied; regression rows `test/redteam/rounds/round12/`).
 
 **Assumed loader: Linux `binfmt_elf`, `ET_EXEC` (non-PIE), static or dynamically linked.**
 `PT_LOAD` entries are mapped in program-header-table order at their fixed `p_vaddr`, whole pages
@@ -2389,7 +2389,7 @@ disjunctions and a full-context `omega` splits on all of them (36 s per `S.sp % 
 
 ## Round 14: the runtime is quantified, and witnesses have a shape
 
-*Found by an authorized red-team review of the allocation-contract witness (`audit/round14/`).*
+*Found by an authorized red-team review of the allocation-contract witness (`test/redteam/rounds/round14/`).*
 
 **V2 (gap, pre-existing).** The V1 check inspected `link` only inside contract applications, so
 `theorem bad1 (a b) : Ensures (Extracted.program.link Witness.AllocW.impl) … := correctness AllocW.impl …`
@@ -2424,7 +2424,7 @@ main theorem (`matchedMain`) so the reader can see it.
 ## Round 15: `Extracted.program.ofImpl impl` and the placement premise (internal calls)
 
 *Requested for fv-uint256 `ToBig` (a function that calls another function of the same extraction); the audit
-change is small and confined to the contract-program check (`audit/roundofimpl/`).*
+change is small and confined to the contract-program check (`test/redteam/rounds/roundofimpl/`).*
 
 An internal callee is proved about its own code (`Program.onlySegments`) and moved to the whole program
 (`Ensures.toSummaryIn`, docs/RUNTIME-CONTRACTS.md, "Internal calls"). Its runtime contract hypotheses must
@@ -2454,12 +2454,12 @@ The auditor (`checkContractHyps`, Janus/Tools/Audit.lean) changes in four places
    predicate combined with another constraint (one premise `ImplApart … ∧ …`, or a second premise), or the
    predicate in the conclusion is rejected.
 
-Regression rows: `audit/roundofimpl/run-roundofimpl.sh` (arm64 and amd64; controls verify, the attacks are rejected).
+Regression rows: `test/redteam/rounds/roundofimpl/run-roundofimpl.sh` (arm64 and amd64; controls verify, the attacks are rejected).
 
 Round 15 addendum (live specs): `RtLiveContract`'s second description argument (`LiveSpec`: cost, fresh and kept objects) is
 checked like the `RtSpec`: only the named framework constants (`growsliceLive`, `growsliceNoAliasLive`, `growsliceBufLive`,
 `growsliceBufNoAliasLive`) are accepted. Rows `ctl11` (accepted), `r22` (modified cost) and `r23` (empty spec) in
-`audit/roundofimpl`. Consumer-defined `ImplApart` look-alikes: one that states nothing, a wrapper that unfolds to the trusted
+`test/redteam/rounds/roundofimpl`. Consumer-defined `ImplApart` look-alikes: one that states nothing, a wrapper that unfolds to the trusted
 predicate, and a predicate about an unrelated variable are accepted (they constrain nothing the statement is about; controls
 `Shadow.ctl7`, `ctl8`, `ctl9`, `ctl10`); a look-alike that constrains `impl` is rejected (`Shadow2.r12`).
 ## Non-vacuity is required for contract-assuming main theorems
@@ -2514,7 +2514,7 @@ Lake builds the consumer's modules in the sandbox, and a sandboxed process (the 
 module, an earlier run) can write the persistent workspace's `.lake/build`. Lake accepts any olean whose
 trace matches, so an olean of a different source (the variant's olean and output hashes, the genuine trace
 kept) was audited, replayed and pinned while the report attested the hashed source: the verdict block
-showed the variant's statement under the original source (audit/round15a; also on Janus main c7950624).
+showed the variant's statement under the original source (test/redteam/rounds/round15a; also on Janus main c7950624).
 The kernel and the auditor still checked the planted olean, so no false theorem was accepted, but the
 source attestation, and a result-cache entry keyed on it, were misleading.
 
@@ -2557,7 +2557,7 @@ hypothesis is rejected when
 
 The "Runtime contracts assumed" line (and `contractHyps`) prints the spec and live constants:
 `Janus.Contracts.RtContract@runtime.growslice[growsliceSpec]`,
-`Janus.Contracts.RtLiveContract@runtime.growslice[growsliceSpec/growsliceLive]`. Rows: `audit/roundspecbind`
+`Janus.Contracts.RtLiveContract@runtime.growslice[growsliceSpec/growsliceLive]`. Rows: `test/redteam/rounds/roundspecbind`
 (round 15b's q1-q4, p1, s15 plus `SpecBind.lean` / `SpecBind64.lean`).
 
 
@@ -2575,12 +2575,12 @@ Defense in depth, on top of the mandatory non-vacuity witness (above):
   the theorem.
 * Joint satisfiability: the least solution of `stack ≥ 8`, `above ≥ 8 + 8·nargs` over the premises' numeral lower bounds must
   meet `nargs ≤ 64` and every other size `< 2^47`, across all contracts of the statement (a variable shared between roles
-  included); a diverging system is rejected. Rows: audit/roundup3 (55, both modes).
+  included); a diverging system is rejected. Rows: test/redteam/rounds/roundup3 (55, both modes).
 
 **Known limitation (UP3, accepted for the release): path reachability is not required.** The witness exhibits, per contract hypothesis, a
 state `s_c` at the callee's entry with the contract's call precondition (tied variables), and a returning run of the whole theorem. It does not
 show that the caller's path reaches the call with those arguments. A contract that is vacuous ONLY at the arguments of a call no witness run
-takes (an `R` empty only at the caller's real argument values, pinned by the `Ensures` precondition) is accepted (audit/roundup3/known-accepted/KA1).
+takes (an `R` empty only at the caller's real argument values, pinned by the `Ensures` precondition) is accepted (test/redteam/rounds/roundup3/known-accepted/KA1).
 Universal pins, size pins, `P`/`keep` pins and an empty `R` are rejected. Post-release: optional `Steps`-prefix reachability witnesses.
 
 ## UP3b: what the witness rules guarantee (and total vs partial correctness)
@@ -2594,9 +2594,9 @@ Universal pins, size pins, `P`/`keep` pins and an empty `R` are rejected. Post-r
   one paired main alone, with every other rule unchanged (same binders and hypotheses, call-site conjuncts for that main's contract hypotheses, the returning run, or a tied `Panics`
   instance for a panic-only main). A witness never vouches for any other main (before: a contract-assuming sibling main was served by `Witness.nonvacuous` through `contractMains`,
   and contract-free extra mains such as `panics`/`exact`/corollaries could never be supported at all); a main with no paired witness is refused with the usual "no kernel-checked
-  non-vacuity witness" message. Refutation and run-free exemptions are unchanged. Rows `audit/roundup3/pair/PAIR*` (run-verify-rows.sh): a missing `Witness.X` is refused, a
+  non-vacuity witness" message. Refutation and run-free exemptions are unchanged. Rows `test/redteam/rounds/roundup3/pair/PAIR*` (run-verify-rows.sh): a missing `Witness.X` is refused, a
   `Witness.X` tied to `Y` is rejected, `Witness.nonvacuous` tied to another main does not satisfy `correctness` (and vice versa), a witness name pairing no main is rejected.
 * **Known limitations of the witness rules (UP3d).**
   (a) *Instance binders:* a main theorem with a theorem-level class-typed binder (`[inst : HMul (BitVec 64) (BitVec 64) (BitVec 64)]`, audit round 3 R2) passes the statement audit but cannot be witnessed: the auditor refuses a class-typed `∃` binder in a witness (a local instance would let `+` mean something else), so such a main can never be verified. The round rows R2 therefore run `--audit-only`.
-  (b) *Conservative statement-level rejections of two contrived controls* (rows N45, N53 of audit/roundup3): N45 states a premise with a proof-local `HAdd Nat Nat Nat` instance (`Proof.myAdd`; rejected: "the statement uses the proof-local …, whose type is the class HAdd (a disguised instance)": a proof-local instance in a statement is a reviewer hazard, `+` can mean anything); N53 has the upper bound `a + n ≤ w` against a free `w` on the `nargs` of a runtime contract (rejected: "the premise `a + n ≤ w` … about the nargs `n` of a runtime contract: such a size may be constrained only by a numeral lower bound … (U-ICALL-STACK)": a harmless over-approximation, since `w` is free). Both rules predate UP3 (edcc7b3b and 04b05c63, in the n11 base b8ac6cca); the rows now expect "rejected".
-  (c) *Statement-level expectations of N10, N11, N18, N46, N62, N65:* the pin rules were dropped in UP3, so the statement audit now accepts them (`--audit-only` prints Verified); the full verify rejects each (no tied witness can exist: the pin makes the call precondition uninhabited), checked by audit/roundup3/run-verify-rows.sh.
+  (b) *Conservative statement-level rejections of two contrived controls* (rows N45, N53 of test/redteam/rounds/roundup3): N45 states a premise with a proof-local `HAdd Nat Nat Nat` instance (`Proof.myAdd`; rejected: "the statement uses the proof-local …, whose type is the class HAdd (a disguised instance)": a proof-local instance in a statement is a reviewer hazard, `+` can mean anything); N53 has the upper bound `a + n ≤ w` against a free `w` on the `nargs` of a runtime contract (rejected: "the premise `a + n ≤ w` … about the nargs `n` of a runtime contract: such a size may be constrained only by a numeral lower bound … (U-ICALL-STACK)": a harmless over-approximation, since `w` is free). Both rules predate UP3 (edcc7b3b and 04b05c63, in the n11 base b8ac6cca); the rows now expect "rejected".
+  (c) *Statement-level expectations of N10, N11, N18, N46, N62, N65:* the pin rules were dropped in UP3, so the statement audit now accepts them (`--audit-only` prints Verified); the full verify rejects each (no tied witness can exist: the pin makes the call precondition uninhabited), checked by test/redteam/rounds/roundup3/run-verify-rows.sh.

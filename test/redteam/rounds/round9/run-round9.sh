@@ -3,22 +3,22 @@
 # control stops verifying, a kernel-checked model row changes verdict, or a real-binary probe
 # contradicts what the fixed statements assume.
 # Every janus verification uses --fresh and a private temporary cache. Writes only under
-# audit/round9/work/, audit/round9/bin/ and a mktemp directory (removed at the end).
+# test/redteam/rounds/round9/work/, test/redteam/rounds/round9/bin/ and a mktemp directory (removed at the end).
 # Needs: go1.26.0 (GOTOOLCHAIN), qemu-aarch64, gdb (amd64 probe rows).
-# Usage: audit/round9/run-round9.sh
+# Usage: test/redteam/rounds/round9/run-round9.sh
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 . "$root/scripts/lib/tmark.sh"
 export PATH=/usr/local/go/bin:$PATH
-J="$root/audit/round9/bin/janus"; mkdir -p "$(dirname "$J")"
+J="$root/test/redteam/rounds/round9/bin/janus"; mkdir -p "$(dirname "$J")"
 CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
-# JANUS_AUDIT_PREBUILT=1 (audit/run-rounds.sh built everything once): no build here, a concurrent lake build would rewrite the
+# JANUS_AUDIT_PREBUILT=1 (test/redteam/run-rounds.sh built everything once): no build here, a concurrent lake build would rewrite the
 # framework while other lanes verify against it.
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 [ -d artifacts/amd64/NewPair ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
-W=audit/round9/work/rows; rm -rf "$W"; mkdir -p "$W"
+W=test/redteam/rounds/round9/work/rows; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-round9.XXXXXX")" || exit 1
 trap 'rm -rf "$T"' EXIT
 mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"
@@ -28,11 +28,11 @@ for f in Add NewPair; do
 done
 LEAN="$(lake env which lean)"; LP="$root/.lake/build/lib/lean"
 broken=()
-A=audit/round9/attacks
+A=test/redteam/rounds/round9/attacks
 
 # row NAME EXPECT [PATTERN...] on $out: EXPECT "blocked" (no Verified; patterns must appear) or
 # "Verified" (Verified and every pattern).
-. "$root/audit/lib/blocked.sh"
+. "$root/test/redteam/lib/blocked.sh"
 row() {
   local name=$1 expect=$2 verdict status="" pat
   shift 2
@@ -43,8 +43,8 @@ row() {
     Verified) case $verdict in Verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
-  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check round9/run-round9.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  # blocked rows: pinned reason, and no Lean elaboration failure (test/redteam/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check rounds/round9/run-round9.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-40s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0
@@ -58,11 +58,11 @@ v() { out="$("$J" verify --audit-only --fresh --janus-root "$root" --proof "$1" 
 
 echo "== C1: allocation contracts must be satisfiable (kernel-checked)"
 type tmark >/dev/null 2>&1 && tmark "== C1: allocation contracts must be satisfiable (k"
-o="$(lake env lean audit/round9/model/Unsat.lean 2>&1)"; check C1a_pre_fix_contract_unsat $? "the pre-round-9 newobject contract is false for every program/addr/rt ${o:+($o)}"
-lake env lean audit/round9/model/UnsatFixed.lean >/dev/null 2>&1; rc=$?
+o="$(lake env lean test/redteam/rounds/round9/model/Unsat.lean 2>&1)"; check C1a_pre_fix_contract_unsat $? "the pre-round-9 newobject contract is false for every program/addr/rt ${o:+($o)}"
+lake env lean test/redteam/rounds/round9/model/UnsatFixed.lean >/dev/null 2>&1; rc=$?
 [ $rc -ne 0 ]; check C1b_fixed_contract_unsat_attempt $? "the same argument against the fixed contract does not compile"
 D="$T/ctl/NewPair"; mkdir -p "$D"; cp "$W/NewPair/Extracted.lean" "$D/"; cp examples/proofs/NewPair.lean "$D/Proof.lean"
-cp audit/round9/controls/NewPair_witness.lean "$D/W.lean"
+cp test/redteam/rounds/round9/controls/NewPair_witness.lean "$D/W.lean"
 ( cd "$D" && LEAN_PATH="$LP:." "$LEAN" --root=. -o Extracted.olean Extracted.lean &&
   LEAN_PATH="$LP:." "$LEAN" --root=. -o Proof.olean Proof.lean &&
   LEAN_PATH="$LP:." "$LEAN" --root=. W.lean ) > "$T/w.log" 2>&1
@@ -71,22 +71,22 @@ v examples/proofs/NewPair.lean "$W/NewPair"; row C1_ctl_NewPair Verified 'RtRead
 
 echo "== SAT: every runtime contract has a kernel-checked _satisfiable witness (lake build Janus checked them)"
 type tmark >/dev/null 2>&1 && tmark "== SAT: every runtime contract has a kernel-checke"
-o="$(python3 -I audit/round9/sat_check.py "$root")"; rc=$?
+o="$(python3 -I test/redteam/rounds/round9/sat_check.py "$root")"; rc=$?
 grep -E 'SAT (MISSING|OPEN)' <<<"$o" | sed 's/^/  /'
 check SAT_contract_witnesses $rc "$(tail -n 1 <<<"$o")"
-S9="$T/satcopy"; mkdir -p "$S9/audit/round9"; cp -r Janus Janus.lean "$S9/"; cp audit/round9/sat-pending.txt "$S9/audit/round9/"
+S9="$T/satcopy"; mkdir -p "$S9/test/redteam/rounds/round9"; cp -r Janus Janus.lean "$S9/"; cp test/redteam/rounds/round9/sat-pending.txt "$S9/test/redteam/rounds/round9/"
 sed -i 's/^theorem newobject_satisfiable/theorem newobject_satisfiable_gone/' "$S9/Janus/Contracts/AllocSat.lean"
-python3 -I audit/round9/sat_check.py "$S9" >/dev/null 2>&1; rc=$?
+python3 -I test/redteam/rounds/round9/sat_check.py "$S9" >/dev/null 2>&1; rc=$?
 [ $rc -ne 0 ]; check SAT_selftest_missing_witness_fails $? "removing newobject_satisfiable makes the SAT row fail"
 cp Janus/FFISat.lean "$S9/Janus/FFISat.lean"; cp Janus/Contracts/AllocSat.lean "$S9/Janus/Contracts/AllocSat.lean"
 sed -i 's/^theorem cgoCall_satisfiable/theorem cgoCall_satisfiable_gone/' "$S9/Janus/FFISat.lean"
-python3 -I audit/round9/sat_check.py "$S9" >/dev/null 2>&1; rc=$?
+python3 -I test/redteam/rounds/round9/sat_check.py "$S9" >/dev/null 2>&1; rc=$?
 [ $rc -ne 0 ]; check SAT_selftest_ffi_witness_fails $? "removing cgoCall_satisfiable (Janus/FFI.lean's trusted cgocall contract) makes the SAT row fail"
 
-echo "== real-binary probes (audit/round9/probe; go1.26.0)"
-type tmark >/dev/null 2>&1 && tmark "== real-binary probes (audit/round9/probe; go1.26."
+echo "== real-binary probes (test/redteam/rounds/round9/probe; go1.26.0)"
+type tmark >/dev/null 2>&1 && tmark "== real-binary probes (test/redteam/rounds/round9/probe; go1.26."
 P="$T/probe"; mkdir -p "$P"
-( cd audit/round9/probe && export GOTOOLCHAIN=go1.26.0 CGO_ENABLED=0 &&
+( cd test/redteam/rounds/round9/probe && export GOTOOLCHAIN=go1.26.0 CGO_ENABLED=0 &&
   GOARCH=amd64 GOAMD64=v1 go build -trimpath -o "$P/probe9-amd64" . &&
   GOARCH=arm64 go build -trimpath -o "$P/probe9-arm64" . ) || { echo "probe build failed"; exit 1; }
 o="$("$P/probe9-amd64" big 44 2>&1)"
@@ -117,18 +117,18 @@ sh="$(sed -n 's/.*MCacheOK(shipped)=\([0-9]*\).*/\1/p' <<<"$o")"; fx="$(sed -n '
 [ "${sh:-1}" = 0 ] && [ "${fx:-0}" -ge 18000 ]
 check M1b_mcacheok_real_calls $? "of 20000 real 64-byte requests on m0: old MCacheOK holds for ${sh:-?}, round-9 MCacheOK for ${fx:-?}"
 if command -v gdb >/dev/null; then
-  o="$(cd "$P" && timeout 1200 gdb -batch -x "$root/audit/round9/probe/setnext_amd64.py" --args ./probe9-amd64 loopgc 200000 2>&1 | grep PROBE)"
+  o="$(cd "$P" && timeout 1200 gdb -batch -x "$root/test/redteam/rounds/round9/probe/setnext_amd64.py" --args ./probe9-amd64 loopgc 200000 2>&1 | grep PROBE)"
   on="$(sed -n 's/.*barrier_on=\([0-9]*\).*/\1/p' <<<"$o")"; old="$(sed -n 's/.*barrierok_satisfiable=\([0-9]*\).*/\1/p' <<<"$o")"
   new="$(sed -n 's/.*barrierok_round9=\([0-9]*\).*/\1/p' <<<"$o")"
   [ -n "$on" ] && [ "$old" -lt "$on" ] && [ "$new" = "$on" ]
   check S1_barrierok_real_calls $? "SetNext calls with the barrier on: $on; old [lo,hi) BarrierOK satisfiable for $old, round-9 BarrierOK for $new"
-  o="$(cd "$P" && timeout 1200 gdb -batch -x "$root/audit/round9/probe/maps_amd64.py" --args ./probe9-amd64 maps 2000 2>&1 | grep PROBE)"
+  o="$(cd "$P" && timeout 1200 gdb -batch -x "$root/test/redteam/rounds/round9/probe/maps_amd64.py" --args ./probe9-amd64 maps 2000 2>&1 | grep PROBE)"
   sm="$(sed -n 's/.*small=\([0-9]*\).*/\1/p' <<<"$o")"; hk="$(sed -n 's/.*heap_interval_ok=\([0-9]*\).*/\1/p' <<<"$o")"
   [ -n "$sm" ] && [ "$sm" -gt 0 ] && [ "$hk" = "$sm" ]
   check MP_smallmodel_heap_interval $? "small-map lookups: $sm; one heap interval holds header and group and misses the stack window at $hk"
 else printf '  %-40s skipped  (no gdb)\n' S1_barrierok_real_calls; fi
 "$P/probe9-amd64" grow 3000000 > "$T/grow-amd64"; qemu-aarch64 "$P/probe9-arm64" grow 3000000 > "$T/grow-arm64"
-o="$(cmp "$T/grow-amd64" "$T/grow-arm64" && audit/round9/model/grow_check.sh "$T/grow-arm64" 2>&1)"
+o="$(cmp "$T/grow-amd64" "$T/grow-arm64" && test/redteam/rounds/round9/model/grow_check.sh "$T/grow-arm64" 2>&1)"
 grep -q 'GROW OK' <<<"$o"; check G1_growslice_capacity_exact $? "$o"
 
 echo "== H2: bound-variable lookalikes the round-7 fold missed"
@@ -136,8 +136,8 @@ type tmark >/dev/null 2>&1 && tmark "== H2: bound-variable lookalikes the round-
 for a in H2a_binder_tonos_oxia H2b_binder_kelvin H2c_binder_prosgegrammeni; do
   v $A/$a.lean "$W/Add"; row "$a" blocked 'round 9 H2'
 done
-v audit/round7/attacks/H1a_binder_lookalike_vacuous.lean "$W/Add"; row H1a_still_blocked blocked 'look alike'
-v audit/round7/attacks/H1b_binder_greek_honest.lean "$W/Add"; row H2_ctl_H1b_greek_honest Verified
+v test/redteam/rounds/round7/attacks/H1a_binder_lookalike_vacuous.lean "$W/Add"; row H1a_still_blocked blocked 'look alike'
+v test/redteam/rounds/round7/attacks/H1b_binder_greek_honest.lean "$W/Add"; row H2_ctl_H1b_greek_honest Verified
 
 echo "== I1g: contract names must be recorded contracts"
 type tmark >/dev/null 2>&1 && tmark "== I1g: contract names must be recorded contracts"
@@ -153,7 +153,7 @@ done
 echo "== MG: memory-guard settings change limits only, never a verdict"
 type tmark >/dev/null 2>&1 && tmark "== MG: memory-guard settings change limits only, n"
 for mg in prlimit systemd-user none bogus; do
-  out="$(JANUS_MEMGUARD=$mg JANUS_MEM_MAX=300M "$J" verify --audit-only --fresh --janus-root "$root" --proof audit/round7/attacks/H1a_binder_lookalike_vacuous.lean "$W/Add" 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"
+  out="$(JANUS_MEMGUARD=$mg JANUS_MEM_MAX=300M "$J" verify --audit-only --fresh --janus-root "$root" --proof test/redteam/rounds/round7/attacks/H1a_binder_lookalike_vacuous.lean "$W/Add" 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"
   row "MG_attack_JANUS_MEMGUARD=$mg" blocked
 done
 out="$(JANUS_MEMGUARD=prlimit "$J" verify --fresh --fresh-framework --janus-root "$root" --proof examples/proofs/Add.lean "$W/Add" --theorem Proof.correctness --theorem Proof.Witness.nonvacuous 2>&1)"

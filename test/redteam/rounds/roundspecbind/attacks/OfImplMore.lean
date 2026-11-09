@@ -1,7 +1,7 @@
 import Extracted
 
 /-!
-# Round 15b (red team of round 15, internal calls): attacks beyond audit/roundofimpl
+# Round 15b (red team of round 15, internal calls): attacks beyond test/redteam/rounds/roundofimpl
 
 Statement-shape attacks on `Extracted.program.ofImpl impl` / `ImplApart Extracted.program impl`. Controls `c*` verify; attacks `m*` are rejected.
 -/
@@ -153,7 +153,7 @@ theorem m17 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : 
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
   intro ret hret s hs hp; exact hp.elim
 
-/-! ## The rows of audit/roundofimpl whose proof there is `sorry` (blocked there by sorryAx, not necessarily by the shape rule), with real proofs -/
+/-! ## The rows of test/redteam/rounds/roundofimpl whose proof there is `sorry` (blocked there by sorryAx, not necessarily by the shape rule), with real proofs -/
 section Shadows
 namespace Shadow
 /-- A look-alike defined by the consumer: trivially true. -/

@@ -11,7 +11,7 @@ import (
 
 // TestResultCache: a repeated identical verification is a cache hit that prints the same report
 // plus "Cached:"; any changed input, --fresh, --unsafe-no-sandbox and a tampered entry are
-// misses. (audit/round7 attacks the cache from a proof and a lakefile.)
+// misses. (test/redteam/rounds/round7 attacks the cache from a proof and a lakefile.)
 func TestResultCache(t *testing.T) {
 	defer parallel(t)()
 	needLean(t)

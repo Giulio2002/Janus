@@ -3,7 +3,7 @@ import Janus
 /-!
 # Audit: model vs. ARM ARM, memory corner cases (attack surface 3)
 
-Run: `cd /srv/janus && lake env lean audit/model/Model.lean`
+Run: `cd /srv/janus && lake env lean test/redteam/model/Model.lean`
 
 **Status after fix F5** (`Memory.accessible`: one region ending at or below `2^48`, and no
 read-only region overlapping a write): M1, M2 and M3 are blocked; each section below now has a

@@ -28,7 +28,7 @@ in progress. `printsp`, `printhex`, `printpointer`, `printuintptr`, `printslice`
 `printiface` and the floating-point printers (`printfloat64/32`, `printcomplex128/64`, through
 `internal/strconv`'s shortest formatting) are not proved yet: their output format is specified
 (`Janus.Spec.Print`: `fmtHex`, `fmtPointer`, `fmtSlice`, `fmtEface`, `fmtF64`, `fmtF32`,
-`fmtC128`, `fmtC64`) and differential-tested against the Go 1.26 runtime (`audit/rt-print`), but
+`fmtC128`, `fmtC64`) and differential-tested against the Go 1.26 runtime (`test/redteam/rounds/rt-print`), but
 no theorem about the machine code relies on those specifications yet.
 
 Three runtime functions are contracts (`janus extract --contract`), stated here:

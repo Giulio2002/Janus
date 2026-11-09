@@ -12,7 +12,7 @@ confinement, and the newest model semantics (amd64 DF/REP, YMM, VEX, FS, split-l
 Advanced SIMD/AES, atomics, DC ZVA). It also builds non-vacuity witnesses for the four newest
 example theorems and checks their doc comments against their statements.
 
-Attacks live in `audit/round3/` (`attacks/`, `controls/`) with `run-round3.sh`. Severity:
+Attacks live in `test/redteam/rounds/round3/` (`attacks/`, `controls/`) with `run-round3.sh`. Severity:
 **critical** = a false/misleading theorem prints `Verified`; **high** = a confinement break that
 lets untrusted proof code forge a verdict, or a wrong value for a valid instruction; **low** =
 hygiene / defence-in-depth.
@@ -30,7 +30,7 @@ Two findings, both now fixed in this branch; everything else attacked was blocke
 
 ## R1 (CRITICAL, BROKEN → fixed): the inline-instance lie, moved from the statement type into a disclosed definition body
 
-**Files:** `audit/round3/attacks/R1_def_body_instance.lean`. Target: the shipped
+**Files:** `test/redteam/rounds/round3/attacks/R1_def_body_instance.lean`. Target: the shipped
 `example.com/basic.Add`, which computes `x + y`.
 
 ### What happens
@@ -149,7 +149,7 @@ without risking the build's path assumptions.
 
 ## R2 (LOW, blocked — residual): a theorem-level instance binder prints a misleading operator, but self-disclosingly
 
-**File:** `audit/round3/attacks/R2_inst_binder.lean`. This is the instance-binder case from the
+**File:** `test/redteam/rounds/round3/attacks/R2_inst_binder.lean`. This is the instance-binder case from the
 round-3 brief (attack idea 2). The theorem takes an instance *binder* and a hypothesis tying it
 to `+`:
 
@@ -199,7 +199,7 @@ as a residual, not fixed.
   (and S2's fix applies to both). No consumer-reachable path changes the sandbox choice.
 
 * **sorry / disallowed axioms.** A statement whose postcondition needs an unproved step still
-  fails the axiom audit (`sorryAx`), as `audit/round3` confirmed incidentally. `native_decide`
+  fails the axiom audit (`sorryAx`), as `test/redteam/rounds/round3` confirmed incidentally. `native_decide`
   (`ofReduceBool`) and `bv_decide` (`trustCompiler`) remain rejected.
 
 ## Model (blocked)
@@ -225,7 +225,7 @@ as a residual, not fixed.
 
 Concrete positive-control witnesses, each building a satisfying call state and instantiating the
 shipped `Proof.correctness` to a concrete `Returns`, so none of the four newest examples is
-vacuous. All four compile (`audit/round3/controls/`, see `README.txt`):
+vacuous. All four compile (`test/redteam/rounds/round3/controls/`, see `README.txt`):
 
 * `A64Equal64_witness.lean` (arm64) — readable `stackguard0`, 24-byte stack window, two readable
   64-byte arrays, pairwise disjoint. ✓
@@ -253,6 +253,6 @@ memory is preserved, unlike the arm64 `CopyBlock`, whose statement and doc both 
 ## Reproduce
 
 ```
-audit/round3/run-round3.sh          # R1 (now Invalid), R2 (Verified, self-disclosing), regression
-                                    # witnesses: see audit/round3/controls/README.txt
+test/redteam/rounds/round3/run-round3.sh          # R1 (now Invalid), R2 (Verified, self-disclosing), regression
+                                    # witnesses: see test/redteam/rounds/round3/controls/README.txt
 ```

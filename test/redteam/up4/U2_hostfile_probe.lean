@@ -7,10 +7,10 @@ the framework build dir. Any success is turned into an elaboration error (so the
 Expected: Verified   (every probe fails inside the sandbox; a "SANDBOX ESCAPE" error means the verifier is attackable). -/
 
 /-! UP4: a proof must behave identically whether or not a host file exists. It checks a host path chosen by the runner
-(__ROOT__/audit/up4/HOSTFILE-PRESENT, created or removed by run-hermetic.sh); inside the hermetic sandbox it is
+(__ROOT__/test/redteam/up4/HOSTFILE-PRESENT, created or removed by run-hermetic.sh); inside the hermetic sandbox it is
 never visible, so the elaboration is the same either way. Expected: Verified in BOTH states, identical output. -/
 run_cmd do
-  if (← System.FilePath.pathExists "__ROOT__/audit/up4/HOSTFILE-PRESENT") then
+  if (← System.FilePath.pathExists "__ROOT__/test/redteam/up4/HOSTFILE-PRESENT") then
     throwError "HERMETIC ESCAPE: host file visible"
   logInfo m!"host-file probe: absent"
 

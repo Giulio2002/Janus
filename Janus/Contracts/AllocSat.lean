@@ -4,13 +4,13 @@ import Janus.Contracts.Alloc
 # The allocation contracts are satisfiable (arm64, round 9 C1)
 
 Before round 9 the allocation contracts were false for every implementation
-(`audit/round9/model/Unsat.lean`): their precondition said nothing about the runtime's own state.
+(`test/redteam/rounds/round9/model/Unsat.lean`): their precondition said nothing about the runtime's own state.
 With the readiness predicate `H : RtReady` they are not. For every contract of
 `Janus.Contracts` (`Alloc.lean`) this file gives machine code placed at `A0` of a program with no
 other code, a runtime-owned list `rt`, a readiness predicate `H`, a proof by symbolic execution
 that the code meets the contract, and a call state (`wstate`) that satisfies the contract's
 whole precondition, `H` included, for a non-zero size. `<contract>_satisfiable` states that they
-exist (`audit/round9/run-round9.sh`, row SAT, requires one for every contract).
+exist (`test/redteam/rounds/round9/run-round9.sh`, row SAT, requires one for every contract).
 
 The code is a toy, not the Go runtime: it returns the 64 KiB heap `heap` whatever is asked, and
 `H` says the heap is writable and zero and the request fits.

@@ -8,12 +8,12 @@ The claim under attack: *if `janus verify` prints `Verified` for a theorem, that
 for the actual bytes of this binary under the stated semantics, and the printed statement is
 that theorem.*
 
-**Post-fix status (re-run 2026-10-23 on `agent/deps-ci`, `audit/run-all.sh`):** every row of
+**Post-fix status (re-run 2026-10-23 on `agent/deps-ci`, `test/redteam/run-all.sh`):** every row of
 the table below is now blocked, verified-honest, mitigated or fixed; no row prints `Verified`
 for a false or misleading claim. The "Status after fixes" column has the per-row result and
 [Fixes applied](#fixes-applied) maps F1–F7 to the code. Finding R1 (compiled framework modules
 writable by the untrusted consumer build, and not bound to the framework sources) was found
-after F1–F6 and is fixed by F7; see [R1](#r1-critical-follow-up-compiled-framework-modules-were-not-bound-to-the-framework). `audit/run-all.sh` exits non-zero if
+after F1–F6 and is fixed by F7; see [R1](#r1-critical-follow-up-compiled-framework-modules-were-not-bound-to-the-framework). `test/redteam/run-all.sh` exits non-zero if
 any row regresses to BROKEN, and CI runs it. The rest of this document is the original audit
 of the pre-fix code (commit `665fb69`), kept as written. A second audit round found that an
 instance written inline in the statement could still make the printed statement lie (fixed: the
@@ -29,11 +29,11 @@ instruction semantics are fine. The holes are all in the verifier's handling of 
 Lean code. There are also two spec-level holes (`NeverPanics`, the `0` return sentinel) and
 minor memory-model looseness.
 
-All attack files are in `audit/`. `audit/run-all.sh` reproduces everything (it needs a
+All attack files are in `test/redteam/`. `test/redteam/run-all.sh` reproduces everything (it needs a
 building `lake build Janus`; on 2026-10-23 that build was broken by the in-progress
 `Janus/Amd64/Exec.lean`, unrelated to this audit). Every BROKEN result was reproduced twice:
-with `audit/bin/janus` built from the working tree at audit start (commit `665fb69` with
-the original `verify.go`), and with `audit/bin/janus-head` built later from the working tree,
+with `test/redteam/bin/janus` built from the working tree at audit start (commit `665fb69` with
+the original `verify.go`), and with `test/redteam/bin/janus-head` built later from the working tree,
 which includes the uncommitted `verify.go` rewrite (framework root, `modules` in the audit
 record).
 
@@ -69,16 +69,16 @@ satisfiable (concrete witnesses).
 
 ## 1. Verifier bypasses
 
-Workspace for every run: `audit/work/<Fn>` = copies of `artifacts/<Fn>/{Extracted.lean,identity.json}`
-plus `audit/work/examples-arm64` (same SHA). Command shape:
-`janus verify --proof audit/attacks/X.lean audit/work/Add`.
+Workspace for every run: `test/redteam/work/<Fn>` = copies of `artifacts/<Fn>/{Extracted.lean,identity.json}`
+plus `test/redteam/work/examples-arm64` (same SHA). Command shape:
+`janus verify --proof test/redteam/attacks/X.lean test/redteam/work/Add`.
 
 ### A3 (Critical, BROKEN): forged audit via `initialize`
 
-`audit/probe/{P,Q}.lean` shows that `lean` runs `initialize` blocks of imported modules (and
+`test/redteam/probe/{P,Q}.lean` shows that `lean` runs `initialize` blocks of imported modules (and
 `#eval` at compile time). The audit is `lake env lean Audit.lean` with `import Proof`, so proof
 code runs inside the audit process before the audit's own `#eval`.
-`audit/attacks/A3_initialize.lean` reads `$LEAN_PATH/Audit.lean`, extracts the
+`test/redteam/attacks/A3_initialize.lean` reads `$LEAN_PATH/Audit.lean`, extracts the
 `janus-audit-<nonce>: ` marker, prints
 `{"name":"Proof.correctness","kind":"theorem","module":"Proof","axioms":[],"statement":"…"}`
 and calls `IO.Process.exit 0`. The theorem in the file is `theorem correctness : False := sorry`.
@@ -95,8 +95,8 @@ Verified: Proof.correctness
 
 ### A6 (Critical, BROKEN): arbitrary IO at proof compile time
 
-`audit/attacks/A6_eval_io.lean` is the honest Add proof plus
-`#eval IO.FS.writeFile "/srv/janus/audit/work/A6-written-during-verify.txt" …`. It verifies, and
+`test/redteam/attacks/A6_eval_io.lean` is the honest Add proof plus
+`#eval IO.FS.writeFile "/srv/janus/test/redteam/work/A6-written-during-verify.txt" …`. It verifies, and
 the file appears. The check "Extracted.olean changed while the proof was being checked" only
 covers one file at one moment. The same IO could plant C1 in the Janus library dir or the
 framework cache (a persistent backdoor that affects every later verify), start the C2
@@ -108,9 +108,9 @@ watcher, or rewrite `bin/janus`.
 paths come **first** (the code comment says so). A file
 `<root>/.lake/build/lib/lean/Extracted.olean` therefore shadows the freshly compiled
 `.janus-build/Extracted.olean` for the proof, the audit and leanchecker. Repro, on a disposable
-copy of the root (`audit/work/janus-root-copy`, built by `run-all.sh`): compile
-`audit/attacks/C1_fake_Extracted.lean` (a program with `exitAddr := entry`) into the copy's lib
-dir, then `janus verify --janus-root <copy> --proof audit/attacks/C1_proof.lean audit/work/Add`:
+copy of the root (`test/redteam/work/janus-root-copy`, built by `run-all.sh`): compile
+`test/redteam/attacks/C1_fake_Extracted.lean` (a program with `exitAddr := entry`) into the copy's lib
+dir, then `janus verify --janus-root <copy> --proof test/redteam/attacks/C1_proof.lean test/redteam/work/Add`:
 
 ```
 Verified: Proof.correctness
@@ -126,7 +126,7 @@ outside `.janus-build`).
 
 ### C2 (High, BROKEN): TOCTOU on `.janus-build`
 
-`audit/attacks/C2_toctou_swap.sh` runs `janus verify` on the **honest**
+`test/redteam/attacks/C2_toctou_swap.sh` runs `janus verify` on the **honest**
 `examples/proofs/Add.lean`. A concurrent shell loop waits for the build dir to be recreated and
 for `Audit.lean` to appear, then copies a precompiled fake `(Extracted.olean, Proof.olean)`
 pair into it. The audit and leanchecker load the swapped pair (Lean does not check import
@@ -182,7 +182,7 @@ it.
 
 ## 2. Vacuous specs
 
-* **B1 (High, BROKEN): `NeverPanics`.** `audit/specs/B1_neverpanics_fault.lean`, on the Add256
+* **B1 (High, BROKEN): `NeverPanics`.** `test/redteam/specs/B1_neverpanics_fault.lean`, on the Add256
   artifact:
   `∀ z y s, CallSetup … [z, 0, y] s → s.mem.regions = [] → NeverPanics Extracted.program s`.
   It verifies (axioms propext, Quot.sound). The first instruction `ldr x3, [x1]` faults
@@ -190,7 +190,7 @@ it.
   satisfied by any fault, by `noCode` and by `undecodable`. In Go the nil check is implicit, so
   real execution panics with "invalid memory address or nil pointer dereference". README's
   "Go runtime panic stubs (bounds checks, nil, divide) are named outcomes" is wrong for nil.
-* **B2 (Medium, BROKEN by design): return sentinel 0.** `audit/specs/B2_exit_sentinel.lean` is a
+* **B2 (Medium, BROKEN by design): return sentinel 0.** `test/redteam/specs/B2_exit_sentinel.lean` is a
   synthetic one-word program `br x0` (`0xd61f0000`). `CallSetup … [0] s → Returns … (ABIReturn s ·)`
   is provable. `Program.run` treats *any* arrival at `pc = 0` as a return. A Go function that
   calls through a code pointer loaded from caller memory (closure, interface method table) is
@@ -203,7 +203,7 @@ it.
   vacuous, but that is visible in the statement.
 * **exitAddr collision with code**: 0 is outside `.text` and never a stub address, so the
   collision only comes from computed branches (B2).
-* **Positive controls (all Verified)**, in `audit/controls/*_witness.lean`: the original example
+* **Positive controls (all Verified)**, in `test/redteam/controls/*_witness.lean`: the original example
   proof plus a concrete state.
   * `Add`: `s0 x y` satisfies `CallSetup`, and applying `Proof.correctness (-1) 2` gives
     `x0 = 1`.
@@ -215,9 +215,9 @@ it.
 
 ## 3. Model vs. reality
 
-Details and runnable `#eval`/`decide` controls are in `audit/model/Model.lean`
-(`lake env lean audit/model/Model.lean`). The decoder was compared with objdump over 600k random
-words in the accepted classes (`audit/model/decoder_vs_objdump.sh`): no word was accepted by the
+Details and runnable `#eval`/`decide` controls are in `test/redteam/model/Model.lean`
+(`lake env lean test/redteam/model/Model.lean`). The decoder was compared with objdump over 600k random
+words in the accepted classes (`test/redteam/model/decoder_vs_objdump.sh`): no word was accepted by the
 model and rejected by objdump.
 
 **Matches ARM ARM** (each has a control in `Model.lean`):
@@ -394,20 +394,20 @@ link-time, and in `collectData` refuse any copied range that a `.rela*` entry ta
 
 ## Fixes applied
 
-All six proposed fixes are implemented (F7, for the later finding R1, is described in its own section below). `audit/run-all.sh` output on `agent/deps-ci`:
+All six proposed fixes are implemented (F7, for the later finding R1, is described in its own section below). `test/redteam/run-all.sh` output on `agent/deps-ci`:
 
 ```
 A1_instance                  blocked  Invalid: The audit rejected the proof: the statement uses the proof-local evilMul, whose type is the class HMul (a disguised instance)
 A3_initialize                blocked  Invalid: The audit rejected the proof: the statement does not mention Extracted.program or Extracted.entry, so it says nothing about the extracted code
-A6_eval_io                   blocked  Invalid: Lean rejected the proof audit/attacks/A6_eval_io.lean.   (read-only file system)
+A6_eval_io                   blocked  Invalid: Lean rejected the proof test/redteam/attacks/A6_eval_io.lean.   (read-only file system)
 A9_namespace_shadow          blocked  Invalid: The audit rejected the proof: a non-trusted module declares Proof.Extracted.program._closed_0, whose name shadows the Extracted namespace
 A5_skipkernel                blocked  Invalid: The audit rejected the proof: the statement does not mention Extracted.program or Extracted.entry, so it says nothing about the extracted code
-A7_private_shadow            blocked  Invalid: Lean rejected the proof audit/attacks/A7_private_shadow.lean.
+A7_private_shadow            blocked  Invalid: Lean rejected the proof test/redteam/attacks/A7_private_shadow.lean.
 A10_exit                     blocked  Invalid: the proof does not define Proof.correctness
 A2_unexpander                Verified-honest Verified: Proof.correctness
 A4_unexpand_janus            Verified-honest Verified: Proof.correctness
 A8_classic.t1/t3/t4          blocked  Invalid: The audit rejected the proof: the statement does not mention Extracted.program or Extracted.entry, …
-B1_neverpanics_fault         blocked  Invalid: Lean rejected the proof audit/specs/B1_neverpanics_fault.lean.
+B1_neverpanics_fault         blocked  Invalid: Lean rejected the proof test/redteam/specs/B1_neverpanics_fault.lean.
 B1_refuted                   Verified Verified: Proof.correctness
 B2_exit_sentinel             blocked  rejected (does not compile)
 B2_refuted                   ok       'br_zero_not_ensures' depends on axioms: [propext, Quot.sound]
@@ -427,7 +427,7 @@ Model.lean: all decide controls pass, including M1-M3 now faulting (blocked by F
 | F6 | E1 | `cmd/janus/binary.go` (`ET_DYN` rejected; test `TestRejectPIE` in `cmd/janus/hardening_test.go`) |
 | F7 | R1 | `cmd/janus/replay.go` (framework olean pins, `closureCheck`, content-keyed replay cache, chunked `leanchecker` replay of the whole non-core closure, `--replay-fresh`); `cmd/janus/sandbox.go` (`commandOverlay`: protected trees re-mounted read-only over writable ones, bubblewrap and `unshare`); `cmd/janus/consumer.go` (workspace framework build re-seeded from the trusted base when it differs from the pins, trusted `Extracted`/`JanusTrusted` build before any untrusted code, `janus/` read-only to the Lake build, pins re-checked after the build, every `lake query`, the audit and the replay); `cmd/janus/verify.go` (the same pins and closure replay for single-file proofs, audit in its own directory with the proof build read-only); `Janus/Tools/Audit.lean` (`imports`: the import graph of every non-core module, for the cache keys); tests `cmd/janus/replay_test.go` |
 
-`audit/specs/B1_neverpanics_fault.lean` and `B1_refuted.lean` now take the entry address from
+`test/redteam/specs/B1_neverpanics_fault.lean` and `B1_refuted.lean` now take the entry address from
 `Extracted.entry` instead of a literal, so they stay valid when the example binary changes.
 
 ## R1 (Critical, follow-up): compiled framework modules were not bound to the framework
@@ -443,7 +443,7 @@ the framework sources.
   the consumer's `lake build` in the sandbox with the whole workspace writable. A `lakefile.lean`
   (or a dependency's lakefile) runs arbitrary IO while Lake elaborates it, so it could replace any
   framework module. Reproduced with the pre-fix verifier (`6fbaeba`) under bubblewrap, using
-  `audit/attacks/R1_pkg` (`JANUS_R1_MODE` selects the variant):
+  `test/redteam/attacks/R1_pkg` (`JANUS_R1_MODE` selects the variant):
   * `ensures`: the lakefile recompiles `Janus/GoABI.lean` with `Ensures … := True` over
     `Janus/GoABI.olean`; `R1.Ensures.claim : Ensures Extracted.program Extracted.entry [x, y]
     (fun _ => True) (fun _ s' => s'.regs 0 = 42)` (Add returns 42) is proved by `trivial` and was
@@ -490,7 +490,7 @@ the framework sources.
    closure importing `Lean`), the most rigorous mode leanchecker has; it is not the default because
    of that cost and because Init/Std/Lean ship read-only with the toolchain.
 
-Regressions (`audit/run-all.sh`, rows `R1*`; Go tests `TestR1FrameworkTamper`,
+Regressions (`test/redteam/run-all.sh`, rows `R1*`; Go tests `TestR1FrameworkTamper`,
 `TestR1ForgedFrameworkLemma`, `TestPins`, `TestClosureCheck`, `TestReplayPlanKeys`,
 `TestProtectedOverlay` in `cmd/janus/replay_test.go`):
 
@@ -533,16 +533,16 @@ lakefiles a new hash so every row exercises its attack.
 
 `R1b_forged_lemma` is the case only the replay can catch: the forged olean is in a `--janus-root`
 copy, which is the build the pins are taken from (and the old prefix replay caught it as well).
-All earlier rows of `audit/run-all.sh` still print their expected result.
+All earlier rows of `test/redteam/run-all.sh` still print their expected result.
 
 ## Round 2 (2026-10-23)
 
 A second, independent adversarial review attacked the auditor's constant/instance rules, the
 dependency/replay/sandbox machinery and the newest model semantics. The full report is
-[docs/audit/AUDIT-ROUND2.md](AUDIT-ROUND2.md); its attack files are in `audit/round2/`
-(`attacks/`, `controls/`, `model/`, `amd64/`) and `audit/round2/run-round2.sh` reproduces the
+[docs/audit/AUDIT-ROUND2.md](AUDIT-ROUND2.md); its attack files are in `test/redteam/rounds/round2/`
+(`attacks/`, `controls/`, `model/`, `amd64/`) and `test/redteam/rounds/round2/run-round2.sh` reproduces the
 verifier findings and exits 1 if a fixed one regresses. The CRITICAL-1 and U1 rows are also in
-`audit/run-all.sh` (`R2.*`).
+`test/redteam/run-all.sh` (`R2.*`).
 
 | # | Finding | Severity | Status |
 |---|---|---|---|
@@ -598,8 +598,8 @@ clean prints round-trip). Tests: `cmd/janus/round2_test.go` (`TestInlineInstance
 
 `--asl` derives the verified theorem's corollary about Arm's ASL ([ASL.md](../design/ASL.md#janus-verify---asl-the-corollary-of-a-verified-theorem)).
 The corollary module imports the untrusted proof, so its compile runs sandboxed and its result is
-re-checked by the trusted auditor (`JanusAudit.runASL`). `audit/asl/attacks/` holds proofs whose
-main theorem verifies but which try to forge the corollary; `audit/run-all.sh` runs them with
+re-checked by the trusted auditor (`JanusAudit.runASL`). `test/redteam/asl/attacks/` holds proofs whose
+main theorem verifies but which try to forge the corollary; `test/redteam/run-all.sh` runs them with
 `JANUS_AUDIT_ASL=1` (rows `ASL.*`), and `TestASLForgeryRejected` in `cmd/janus/asl_test.go`.
 
 | attack | what it tries | result |
@@ -615,13 +615,13 @@ main theorem verifies but which try to forge the corollary; `audit/run-all.sh` r
 
 ## Files
 
-* `audit/run-all.sh`: reproduces every row (`BROKEN` rows print `Verified`, blocked rows `Invalid`), extracting its own `audit/work/{Add,Add256,Get}`; it marks a row `<-- BROKEN` and exits 1 if a blocked row verifies or a control does not.
-* `audit/attacks/`: A1–A10, C1 (`C1_fake_Extracted.lean`, `C1_proof.lean`), C2 (`C2_toctou_swap.sh`), R1 (`R1_pkg/` consumer package whose lakefile tampers with the framework build, `R1_dep/` a dependency that plants `Janus.Backdoor`, `R1_forged_lemma.lean` + `R1_forged_proof.lean`, `R1_proof_overwrite.lean`).
-* `audit/specs/`: B1 (`B1_neverpanics_fault.lean`, verify against Add256), B2 (`B2_exit_sentinel.lean`, `lake env lean`).
-* `audit/controls/`: Add, Add256 and Get witnesses (verify against the respective artifact).
-* `audit/model/`: `Model.lean` (M1–M3 and the OK controls), `decoder_vs_objdump.sh`, `gen_words.py`, `objcmp.py`.
-* `audit/probe/`: `P.lean` and `Q.lean` (shows that `initialize` and `#eval` run).
-* `audit/bin/`: `janus` (rebuilt by `run-all.sh` from the current tree), `janus-head` (working tree with the `verify.go` rewrite).
-* `audit/work/`: scratch artifact copies (regenerated by `run-all.sh`).
-* `audit/round2/`: the round-2 attacks (`attacks/S1*` inline instances, `M1_module_system`, `U1*` unshare fallback), positive controls, arm64/amd64 model probes and `run-round2.sh`; see [AUDIT-ROUND2.md](AUDIT-ROUND2.md).
-* `audit/round11/`: round 11 (red-team 11a): the round-10 V1 rule ("a runtime-contract hypothesis must quantify the runtime") covered only the types `RtReady`, `IfaceModel`, `MapModel`, `List (Nat × Nat)`; a closed or premise-pinned `HashModel` (`H1a`, `H1b`), `PanicRuntime` (`P1a`) or `CheckptrModel` (`K1a`) made the contract unsatisfiable (or dropped a precondition) and verified a false claim. Fixed generically (`contractParamKind` is default-deny: every contract argument that is neither the program nor a scalar number must be a free statement variable, mentioned only by contracts, `….Laws` and depth bounds; see docs/SOUNDNESS.md, "Every runtime argument is a free variable"). `run-round11.sh` reproduces the rows: blocked attacks, honest controls (`AlgMemhash16`, `DeferTwice`, `CheckWord`) and kernel-checked unsatisfiability of the closed models (`model/`).
+* `test/redteam/run-all.sh`: reproduces every row (`BROKEN` rows print `Verified`, blocked rows `Invalid`), extracting its own `test/redteam/work/{Add,Add256,Get}`; it marks a row `<-- BROKEN` and exits 1 if a blocked row verifies or a control does not.
+* `test/redteam/attacks/`: A1–A10, C1 (`C1_fake_Extracted.lean`, `C1_proof.lean`), C2 (`C2_toctou_swap.sh`), R1 (`R1_pkg/` consumer package whose lakefile tampers with the framework build, `R1_dep/` a dependency that plants `Janus.Backdoor`, `R1_forged_lemma.lean` + `R1_forged_proof.lean`, `R1_proof_overwrite.lean`).
+* `test/redteam/specs/`: B1 (`B1_neverpanics_fault.lean`, verify against Add256), B2 (`B2_exit_sentinel.lean`, `lake env lean`).
+* `test/redteam/controls/`: Add, Add256 and Get witnesses (verify against the respective artifact).
+* `test/redteam/model/`: `Model.lean` (M1–M3 and the OK controls), `decoder_vs_objdump.sh`, `gen_words.py`, `objcmp.py`.
+* `test/redteam/probe/`: `P.lean` and `Q.lean` (shows that `initialize` and `#eval` run).
+* `test/redteam/bin/`: `janus` (rebuilt by `run-all.sh` from the current tree), `janus-head` (working tree with the `verify.go` rewrite).
+* `test/redteam/work/`: scratch artifact copies (regenerated by `run-all.sh`).
+* `test/redteam/rounds/round2/`: the round-2 attacks (`attacks/S1*` inline instances, `M1_module_system`, `U1*` unshare fallback), positive controls, arm64/amd64 model probes and `run-round2.sh`; see [AUDIT-ROUND2.md](AUDIT-ROUND2.md).
+* `test/redteam/rounds/round11/`: round 11 (red-team 11a): the round-10 V1 rule ("a runtime-contract hypothesis must quantify the runtime") covered only the types `RtReady`, `IfaceModel`, `MapModel`, `List (Nat × Nat)`; a closed or premise-pinned `HashModel` (`H1a`, `H1b`), `PanicRuntime` (`P1a`) or `CheckptrModel` (`K1a`) made the contract unsatisfiable (or dropped a precondition) and verified a false claim. Fixed generically (`contractParamKind` is default-deny: every contract argument that is neither the program nor a scalar number must be a free statement variable, mentioned only by contracts, `….Laws` and depth bounds; see docs/SOUNDNESS.md, "Every runtime argument is a free variable"). `run-round11.sh` reproduces the rows: blocked attacks, honest controls (`AlgMemhash16`, `DeferTwice`, `CheckWord`) and kernel-checked unsatisfiability of the closed models (`model/`).

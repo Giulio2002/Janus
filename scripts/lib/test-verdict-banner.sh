@@ -34,7 +34,7 @@ case "$(printf '%s\n%s\n' "$B1" "$B3" | verdict_line)" in NOVERDICT*) ok "no ver
 case "$(: | verdict_line)" in NOVERDICT*) ok "empty output: NOVERDICT" ;; *) bad "empty not detected" ;; esac
 chk "lean_first skips banners" "$(printf '%s\n%s\n%s\n' "$B1" "$B2" "'X' depends on axioms: [propext]" | lean_first)" "'X' depends on axioms: [propext]"
 
-# ---- mutation tests: crafted outputs must never make an attack row pass (rows: audit/run-all.sh row())
+# ---- mutation tests: crafted outputs must never make an attack row pass (rows: test/redteam/run-all.sh row())
 chk "not anchored: indented Verified ignored"  "$(printf '  Verified: x\n%s\n' "$V" | verdict_line)" "$V"
 chk "no colon: Verified-honest ignored"        "$(printf 'Verified-honest\n%s\n' "$V" | verdict_line)" "$V"
 chk "no colon: Errors ignored"                 "$(printf 'Errors found\n%s\n' "$V" | verdict_line)" "$V"
@@ -48,8 +48,8 @@ isbad "Error then Verified (echoed text)"      "$(printf 'Error: x\n  Details:\n
 chk "Invalid then Error is not ambiguous"      "$(printf 'Invalid: a\nError: b\n' | verdict_line)" 'Invalid: a'
 # the whole stream is consumed: a producer writing after the verdict must not get SIGPIPE
 chk "producer not killed by SIGPIPE"           "$( { echo "$V"; sleep 0.2; echo late; echo "rc=ok" >&2; } 2>&1 | verdict_line | head -1)" "$V"
-# row(): extract the real function from audit/run-all.sh and drive it
-eval "$(sed -n '/^row() {/,/^}/p' "$root/audit/run-all.sh")"
+# row(): extract the real function from test/redteam/run-all.sh and drive it
+eval "$(sed -n '/^row() {/,/^}/p' "$root/test/redteam/run-all.sh")"
 rowres() { broken=(); row R "$1" "$2" >/dev/null; [ ${#broken[@]} -gt 0 ] && echo BROKEN || echo pass; }
 chk "row blocked + NOVERDICT is BROKEN"        "$(rowres blocked 'NOVERDICT (x)')" BROKEN
 chk "row blocked + AMBIGUOUS is BROKEN"        "$(rowres blocked 'AMBIGUOUS (x)')" BROKEN

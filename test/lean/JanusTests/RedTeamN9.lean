@@ -8,7 +8,7 @@ import Janus.Contracts.ErrorfRealLive64
 Each claim below is FALSE or NOT ENTAILED by the contract it targets, and is refuted by Lean: a countermodel
 (`∃ …` of a state the contract allows where the claim fails), a contradiction from the contract's own
 precondition or postcondition, or `fail_if_success` on the natural proof. If one of these ever becomes provable, a
-contract has become unsound. Rows named in `audit/roundn9/run-roundn9.sh`. -/
+contract has become unsound. Rows named in `test/redteam/rounds/roundn9/run-roundn9.sh`. -/
 
 namespace JanusTests.RedTeamN9
 

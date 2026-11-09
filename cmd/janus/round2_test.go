@@ -27,7 +27,7 @@ func TestInlineInstanceRejected(t *testing.T) {
 	add := mustExtract(t, "example.com/basic.Add")
 	for _, a := range []string{"S1_inline_instance", "S1c_mul", "S1d_ofnat", "S1e_decidable_if", "S1f_lt",
 		"S1g_coe", "S1h_coe_inline", "S1i_beta"} {
-		p := filepath.Join(repoRoot, "audit", "round2", "attacks", a+".lean")
+		p := filepath.Join(repoRoot, "test", "redteam", "rounds", "round2", "attacks", a+".lean")
 		code, _, stderr := runJanus(t, "verify", add, "--proof", p, "--janus-root", repoRoot)
 		if code != 1 || !strings.Contains(stderr, "inline instance") || !strings.Contains(stderr, "Stage: statement identity") {
 			t.Errorf("%s not rejected as an inline instance: %d %s", a, code, stderr)

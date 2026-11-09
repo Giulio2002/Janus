@@ -187,7 +187,7 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (rt : List (Nat × Na
 
 end Witness
 
-/-! ## Witness attack (audit/roundofimpl/run-roundofimpl.sh): the witness omits the placement premise -/
+/-! ## Witness attack (test/redteam/rounds/roundofimpl/run-roundofimpl.sh): the witness omits the placement premise -/
 
 namespace NoApart
 
