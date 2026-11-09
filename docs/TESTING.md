@@ -43,7 +43,7 @@ prebuilds once, then runs every stage as a parallel lane that reads the prebuilt
 
 **Phase 1, prebuild (once).** `go build bin/janus` (and `test/redteam/bin/janus-rounds`, the audit lanes'
 copy), `lake build` plus `lake build Janus Janus.Tools.Audit janus-audit`, the example binaries of every
-suite (`scripts/build-examples{,-amd64,-asm,-sys,-rtmisc,-print,-cgo}.sh`, in parallel), and the
+suite (`scripts/build/build-examples{,-amd64,-asm,-sys,-rtmisc,-print,-cgo}.sh`, in parallel), and the
 framework build and replay verdict (a first verification of the Add example). The later stages run with
 `JANUS_EXAMPLES_PREBUILT=1` / `JANUS_GATE_PREBUILT=1` and rebuild nothing.
 

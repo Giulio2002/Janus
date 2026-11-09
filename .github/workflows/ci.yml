@@ -218,7 +218,7 @@ jobs:
 
       - name: Differential oracle vs qemu (quick)
         env:
-          OUT: ${{ runner.temp }}/oracle
+          OUT: ${{ runner.temp }}/hardware-arm64
           KEEP: "1" # raw verdicts.jsonl for the check below (scripts/gate/lib/artifacts.sh)
         run: |
           scripts/validation/hardware-arm64.sh quick
@@ -232,8 +232,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: oracle-quick
-          path: ${{ runner.temp }}/oracle/*.md
+          name: hardware-arm64-quick
+          path: ${{ runner.temp }}/hardware-arm64/*.md
           if-no-files-found: ignore
 
       # Every "blocked" row must be rejected and every Verified / Verified-honest / mitigated
@@ -338,7 +338,7 @@ jobs:
       # reference as the Intel development host. The script exits non-zero on any MISMATCH.
       - name: Differential oracle vs native x86-64 (quick)
         env:
-          OUT: ${{ runner.temp }}/oracle-amd64
+          OUT: ${{ runner.temp }}/hardware-amd64
           JOBS: "4"
         run: |
           grep -m1 'model name' /proc/cpuinfo || true
@@ -348,6 +348,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: oracle-amd64-quick
-          path: ${{ runner.temp }}/oracle-amd64/*.md
+          name: hardware-amd64-quick
+          path: ${{ runner.temp }}/hardware-amd64/*.md
           if-no-files-found: ignore
