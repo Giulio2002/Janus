@@ -209,7 +209,7 @@ func TestASLPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{"models/asl/JanusASL/Verify.lean", "models/asl/JanusASL/Classify.lean", "models/asl/JanusASL/Proofs/Run.lean", "models/asl/JanusASL/Proofs/Examples.lean"} {
+	for _, p := range []string{"JanusASL/Verify.lean", "JanusASL/Classify.lean", "JanusASL/Proofs/Run.lean", "JanusASL/Proofs/Examples.lean"} {
 		if _, ok := pkg.Files[p]; !ok {
 			t.Errorf("embedded JanusASL lacks %s", p)
 		}
