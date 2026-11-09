@@ -1248,6 +1248,11 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	aslReps := make([]*aslReport, len(outs))
 	if asl != nil {
 		for _, i := range replayed {
+			// A witness (Witness.nonvacuous / Witness.returns, UP3: every main theorem is verified together with one) is not
+			// an arm64 Ensures specification and carries no ASL corollary; the main theorem's corollary is the one derived.
+			if strings.HasPrefix(ars[i].Role, "witness") {
+				continue
+			}
 			aslReps[i] = runASLStage(&aslEnv{sb: sb, tc: tc, build: asl, runBase: runBase,
 				trustedDirs: []string{trustedDir, janusLibDir}, searchDirs: []string{trustedDir, janusLibDir, workDir},
 				protected: append(append([]string{}, protected...), workDir), pinned: pinned, framework: fwPins,

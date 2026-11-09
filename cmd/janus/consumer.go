@@ -1816,7 +1816,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			},
 		}
 		// --asl: the request's ASL corollary (recorded; it never fails the theorem above).
-		if ws.asl != nil {
+		if ws.asl != nil && !strings.HasPrefix(r.audit.Role, "witness") { // a witness carries no ASL corollary (see verify.go)
 			runBase := filepath.Join(ws.Dir, "asl")
 			_ = os.MkdirAll(runBase, 0o755)
 			r.Report.ASL = runASLStage(&aslEnv{sb: ws.sb, tc: ws.tc, build: ws.asl, runBase: runBase,
