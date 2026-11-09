@@ -10,7 +10,7 @@ package main
 // reported here. (A rejected word only blocks a proof if execution can reach it; e.g. a
 // literal pool inside a function would be reported but never executed.)
 //
-// On amd64 (blockers_amd64.go) the unit is an instruction rather than a word: the extracted
+// On amd64 (blockers_x86.go) the unit is an instruction rather than a word: the extracted
 // bytes are swept with x86asm (untrusted, only to find instruction starts) and the bytes from
 // each start to the end of its function (at most 15, as Janus.Amd64.Program.fetch returns them)
 // are run through Janus.Amd64.decode.
