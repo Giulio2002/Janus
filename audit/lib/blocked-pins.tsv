@@ -303,7 +303,6 @@ round14/run-round14.sh	W1.Witness.returns	Proof.W1.Witness.returns is not the gu
 round14/run-round14.sh	W1.Witness.returns	its guarantee `Janus.GoABI.Returns ((Extracted.program.li
 round14/run-round14.sh	W2.Witness.returns	Proof.W2.Witness.returns is not the guarantee of any main theorem of the proof
 round14/run-round14.sh	W2.Witness.returns	its guarantee `Janus.GoABI.Returns ((Extracted.program.li
-round15/run-round15.sh	correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no
 round15/run-round15.sh	weak	Proof.weak assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.
 round15/run-round15.sh	weak	shows that its precondition, those contracts and this pro
 round15/run-round15.sh	Witness.weak	Proof.Witness.weak does not instantiate any main theorem of the proof module
@@ -830,3 +829,14 @@ roundup3/run-verify-rows.sh	FLT3_fact_other_state	Proof.faults has no kernel-che
 roundup3/run-verify-rows.sh	FLT3_fact_other_state	state satisfying it, so the theorem could be vacuous. Ever
 roundup3/run-verify-rows.sh	R01	Proof.correctness assumes runtime contracts
 roundup3/run-verify-rows.sh	R01	but no kernel-checked non-vacuity witness
+round15/run-round15.sh	N1:correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no kernel-checked non-vacuity witness
+round15/run-round15.sh	N1:correctness	jointly satisfiable
+round15/run-round15.sh	N1:correctness	anonymous `example`
+round15/run-round15.sh	N3:correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no kernel-checked non-vacuity witness
+round15/run-round15.sh	N3:correctness	does not show non-vacuity
+round15/run-round15.sh	N5:correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no kernel-checked non-vacuity witness
+round15/run-round15.sh	N5:correctness	Stage: non-vacuity
+round15/run-round15.sh	N7:correctness	Proof.correctness assumes runtime contracts (Janus.Contracts.NewobjectContract@runtime.newobject) but no kernel-checked non-vacuity witness
+round15/run-round15.sh	N7:correctness	does not bypass this and is ignored
+round15/run-round15.sh	N7b:correctness	Audit-only:
+round15/run-round15.sh	N7b:correctness	NOT A VERIFICATION

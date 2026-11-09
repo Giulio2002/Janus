@@ -56,29 +56,29 @@ row() { # NAME expect(blocked|Verified) pattern...   (single-theorem runs: the w
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
   # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
-  if [ "$expect" = blocked ]; then why="$(blocked_check round15/run-round15.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
+  if [ "$expect" = blocked ]; then why="$(blocked_check round15/run-round15.sh "$([ "$name" = correctness ] && echo "${sect:-?}:$name" || echo "$name")" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-34s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0
 }
-echo "== N1: a contract-assuming main theorem without a witness is rejected"
+echo "== N1: a contract-assuming main theorem without a witness is rejected"; sect=N1
 run $F "$W/NewPair" -- correctness
 row correctness blocked 'Stage: non-vacuity' 'jointly satisfiable' 'anonymous `example`'
-echo "== N2: with its witness"
+echo "== N2: with its witness"; sect=N2
 run $F "$W/NewPair" -- correctness Witness.nonvacuous Witness.returns
 row correctness Verified 'Non-vacuity: shown by Proof.Witness.nonvacuous'
 row Witness.nonvacuous Verified 'Non-vacuity: this is a witness'
-echo "== N3: Witness.returns alone does not show non-vacuity"
+echo "== N3: Witness.returns alone does not show non-vacuity"; sect=N3
 run $F "$W/NewPair" -- correctness Witness.returns
 row correctness blocked 'Stage: non-vacuity' 'does not show non-vacuity'
-echo "== N4: a weaker witness is no witness (the mains weak and lamWeak are the same statement as correctness; its witness leaves a conjunct out)"
+echo "== N4: a weaker witness is no witness (the mains weak and lamWeak are the same statement as correctness; its witness leaves a conjunct out)"; sect=N4
 run $F "$W/NewPair" -- weak Witness.weak
 row weak blocked 'Stage: non-vacuity'
 row Witness.weak blocked 'round 14, W2' 'is not among the conjuncts of the witness'
 run $F "$W/NewPair" -- lamWeak Witness.lamWeak
 row lamWeak blocked 'Stage: non-vacuity'
 row Witness.lamWeak blocked 'round 14, W2' 'conjuncts are matched after beta-reduction'
-echo "== N5: the witness of main X is Witness.X (any main name), also stated as an applied lambda; it never vouches for another main"
+echo "== N5: the witness of main X is Witness.X (any main name), also stated as an applied lambda; it never vouches for another main"; sect=N5
 run $F "$W/NewPair" -- correctness alt Witness.nonvacuous Witness.alt
 row alt Verified 'Non-vacuity: shown by Proof.Witness.alt'
 row Witness.alt Verified 'Role: WITNESS'
@@ -87,20 +87,20 @@ row lam Verified 'Non-vacuity: shown by Proof.Witness.lam'
 row Witness.lam Verified 'Role: WITNESS'
 run $F "$W/NewPair" -- correctness Witness.alt
 row correctness blocked 'Stage: non-vacuity'
-echo "== N6: a witness supports the theorems it instantiates, not another main theorem"
+echo "== N6: a witness supports the theorems it instantiates, not another main theorem"; sect=N6
 run $F "$W/NewPair" -- correctness otherMain Witness.nonvacuous
 row correctness Verified 'Non-vacuity: shown by'
 row otherMain blocked 'Stage: non-vacuity'
-echo "== N7: --allow-no-witness is inert (UP3): a contract-assuming theorem without a verified witness is still rejected"
+echo "== N7: --allow-no-witness is inert (UP3): a contract-assuming theorem without a verified witness is still rejected"; sect=N7
 run $F "$W/NewPair" --allow-no-witness -- correctness
 row correctness blocked 'Stage: non-vacuity' 'does not bypass'
 run $F "$W/NewPair" --allow-no-witness -- correctness Witness.nonvacuous
 row correctness Verified 'Non-vacuity: shown by'
-echo "== N7b: --audit-only is not a verification: 'Audit-only', no Verified line, no verified.json"
+echo "== N7b: --audit-only is not a verification: 'Audit-only', no Verified line, no verified.json"; sect=N7b
 run $F "$W/NewPair" --audit-only -- correctness
 row correctness blocked 'Audit-only:' 'NOT A VERIFICATION'
 [ ! -e "$W/NewPair/verified.json" ] && ! grep -q '^Verified:' <<<"$all" || broken+=(audit-only-wrote-report)
-echo "== N8: a theorem without contract hypotheses is verified with its tied witness (UP3c: every main theorem needs one) and reports no contracts"
+echo "== N8: a theorem without contract hypotheses is verified with its tied witness (UP3c: every main theorem needs one) and reports no contracts"; sect=N8
 run examples/proofs/Add.lean "$W/Add" -- correctness Witness.nonvacuous
 row correctness Verified 'Non-vacuity: shown by Proof.Witness.nonvacuous' 'Runtime contracts assumed: none'
 if [ ${#broken[@]} -gt 0 ]; then echo "round 15: BROKEN rows: ${broken[*]}"; exit 1; fi
