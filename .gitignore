@@ -38,3 +38,4 @@ audit/up4/work
 .sw/
 bin/
 janus-up4
+.workdir
