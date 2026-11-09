@@ -740,7 +740,7 @@ roundup3/run-verify-rows.sh	N18	Proof.correctness assumes runtime contracts
 roundup3/run-verify-rows.sh	N18	but no kernel-checked non-vacuity witness
 roundn9/icall/run-icall.sh	B17_stub_with_pin	the statement has the premise `R = fun x x_1 x_2 x_3 x_4 x_5 x_6 => False`
 roundn9/icall/run-icall.sh	B17_stub_with_pin	and the model laws may mention them (round 10 V1, round 11)
-roundn9/icall/run-icall.sh	B1_fn_pinned_by_premise	roundup3/run-verify-rows.sh
+roundn9/icall/run-icall.sh	B1_fn_pinned_by_premise	the statement has the premise `fn = Extracted.entry` (hfn) about the callee address of an abstract-callee contract
 roundup3/run-verify-rows.sh	N46	Proof.correctness assumes runtime contracts
 roundup3/run-verify-rows.sh	N46	but no kernel-checked non-vacuity witness
 roundn9/icall/run-icall.sh	B2_fn_pinned_numeral	the statement has the premise `fn = 1048576` (hfn) about the callee address of
