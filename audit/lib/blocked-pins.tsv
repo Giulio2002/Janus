@@ -680,3 +680,153 @@ roundup3/run-roundup3.sh	N65_w_in_pre_only/allow-no-witness	--allow-no-witness d
 round8/run-round8.sh	I1d_itab_other_data	the statement passes `[]` to Janus.Spec.ItabIs, which is not Extracted.program.data
 run-all.sh	R1_proof_overwrite_nosandbox	changed after the proof compile
 run-all.sh	R1_proof_overwrite_nosandbox	[Stage: framework integrity]
+icall/attacks.sh	A1_fn_numeral	the statement assumes the abstract-callee contract
+icall/attacks.sh	A1_fn_numeral	and a numeral are never accepted (U-ICALL)
+icall/attacks.sh	A2_fn_entry	the statement assumes the abstract-callee contract
+icall/attacks.sh	A2_fn_entry	and a numeral are never accepted (U-ICALL)
+icall/attacks.sh	A3_R_closed	the statement assumes the runtime contract Janus.Contracts.ICall.ICallContract
+icall/attacks.sh	A3_R_closed	or a number is a runtime parameter, whatever its type)
+icall/attacks.sh	A4_P_mentions_rt	the statement has an abstract-callee contract whose call-site property or kept
+icall/attacks.sh	A4_P_mentions_rt	may mention only the statement's own variables (U-ICALL)
+icall/attacks.sh	A5_outside_negated	the statement has the premise `¬Janus.Outside 0 100 rt` (hn), which constrains
+icall/attacks.sh	A5_outside_negated	and the model laws may mention them (round 10 V1, round 11)
+icall/attacks.sh	A6_outside_rt_range	the statement has the premise `Janus.Outside rt.length 8 rt` (ho), which
+icall/attacks.sh	A6_outside_rt_range	and the model laws may mention them (round 10 V1, round 11)
+icall/attacks.sh	A7_impl_pinned	the statement mentions a concrete runtime implementation (`[]`, a `List
+icall/attacks.sh	A7_impl_pinned	the runtime contracts) instead of choosing one (round 14)
+icall/attacks.sh	B12_unsat_stack	the statement assumes the runtime contract Janus.Contracts.ICall.ICallContract
+icall/attacks.sh	B12_unsat_stack	so the hypothesis would hold vacuously (U-ICALL-STACK)
+icall/attacks.sh	B1_fn_pinned_by_premise	the statement has the premise `fn = Extracted.entry` (hfn) about the callee
+icall/attacks.sh	B1_fn_pinned_by_premise	a premise that pins it chooses the callee (U-ICALL)
+icall/attacks.sh	B2_fn_pinned_numeral	the statement has the premise `fn = 1048576` (hfn) about the callee address of
+icall/attacks.sh	B2_fn_pinned_numeral	a premise that pins it chooses the callee (U-ICALL)
+icall/attacks.sh	B3_outside_conj	the statement has the premise `Janus.Outside 0 8 rt ∧ Janus.Outside 16 8 rt`
+icall/attacks.sh	B3_outside_conj	and the model laws may mention them (round 10 V1, round 11)
+icall/attacks.sh	B4_outside_exists	the statement has the premise `∃ k, Janus.Outside k 8 rt` (ho), which
+icall/attacks.sh	B4_outside_exists	and the model laws may mention them (round 10 V1, round 11)
+icall/attacks.sh	B5_outside_everything	the statement has the premise `Janus.Outside 0 281474976710656 rt` (ho), which
+icall/attacks.sh	B5_outside_everything	and the model laws may mention them (round 10 V1, round 11)
+icall/attacks.sh	B6_outside_two	the statement has the premise `Janus.Outside 0 140737488355328 rt` (ho1), which
+icall/attacks.sh	B6_outside_two	and the model laws may mention them (round 10 V1, round 11)
+icall/attacks.sh	P1_preserves_false	the statement assumes the abstract-callee contract
+icall/attacks.sh	P1_preserves_false	constrain bytes, values or registers (U-ICALL-PRESERVES)
+icall/attacks.sh	P2_preserves_bytes	the statement assumes the abstract-callee contract
+icall/attacks.sh	P2_preserves_bytes	constrain bytes, values or registers (U-ICALL-PRESERVES)
+icall/attacks.sh	P3_separate_premise	the statement has the premise `∀ (s : Janus.Arm64.State) (m :
+icall/attacks.sh	P3_separate_premise	and the model laws may mention them (round 10 V1, round 11)
+roundup3/run-verify-rows.sh	N10	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	N10	but no kernel-checked non-vacuity witness
+roundn9/icall/run-icall.sh	B10_keep_via_let	the statement has an abstract-callee contract whose call-site property or kept
+roundn9/icall/run-icall.sh	B11_R_let	the statement assumes the runtime contract Janus.Contracts.ICall.ICallContract
+roundn9/icall/run-icall.sh	B11_R_let	or a number is a runtime parameter, whatever its type)
+roundup3/run-verify-rows.sh	N11	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	N11	but no kernel-checked non-vacuity witness
+roundn9/icall/run-icall.sh	B12_unsat_stack	the statement assumes the runtime contract Janus.Contracts.ICall.ICallContract
+roundn9/icall/run-icall.sh	B12_unsat_stack	so the hypothesis would hold vacuously (U-ICALL-STACK)
+roundup3/run-verify-rows.sh	N13	the statement has the non-Prop binder `p : PLift (w < 8)` whose type mentions
+roundup3/run-verify-rows.sh	N13	and the contract would hold vacuously (U-ICALL-STACK)
+roundn9/icall/run-icall.sh	B13_stub_absent_name	the statement uses Janus.Program.contractAddr with the name "does.not.exist",
+roundn9/icall/run-icall.sh	B13_stub_absent_name	that object (a misspelt or lookalike name, round 8 I1)
+roundup3/run-verify-rows.sh	N16	the statement has the non-Prop binder `f : Fin w → Fin 0` whose type mentions
+roundup3/run-verify-rows.sh	N16	and the contract would hold vacuously (U-ICALL-STACK)
+roundn9/icall/run-icall.sh	B14_stub_computed_name	the statement uses Janus.Program.contractAddr with the name `"fmt." ++
+roundn9/icall/run-icall.sh	B14_stub_computed_name	so the report shows exactly which object is meant)
+roundn9/icall/run-icall.sh	B15_stub_plus_offset	the statement assumes the abstract-callee contract
+roundn9/icall/run-icall.sh	B15_stub_plus_offset	and a numeral are never accepted (U-ICALL)
+roundup3/run-verify-rows.sh	N17	the statement has the non-Prop binder `p : w < 8 ×' k ≤ w` whose type mentions
+roundup3/run-verify-rows.sh	N17	and the contract would hold vacuously (U-ICALL-STACK)
+roundn9/icall/run-icall.sh	B16_stub_other_program	the statement passes `Extracted.program.onlySegments []` to
+roundn9/icall/run-icall.sh	B16_stub_other_program	are looked up in the extracted program only (round 8 I1)
+roundup3/run-verify-rows.sh	N18	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	N18	but no kernel-checked non-vacuity witness
+roundn9/icall/run-icall.sh	B17_stub_with_pin	the statement has the premise `R = fun x x_1 x_2 x_3 x_4 x_5 x_6 => False`
+roundn9/icall/run-icall.sh	B17_stub_with_pin	and the model laws may mention them (round 10 V1, round 11)
+roundn9/icall/run-icall.sh	B1_fn_pinned_by_premise	roundup3/run-verify-rows.sh
+roundup3/run-verify-rows.sh	N46	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	N46	but no kernel-checked non-vacuity witness
+roundn9/icall/run-icall.sh	B2_fn_pinned_numeral	the statement has the premise `fn = 1048576` (hfn) about the callee address of
+roundn9/icall/run-icall.sh	B2_fn_pinned_numeral	a premise that pins it chooses the callee (U-ICALL)
+roundup3/run-verify-rows.sh	N50	the statement assumes runtime contracts whose sizes are jointly unsatisfiable:
+roundup3/run-verify-rows.sh	N50	the contract would hold vacuously (U-ICALL-STACK, joint)
+roundn9/icall/run-icall.sh	B3_outside_conj	the statement has the premise `Janus.Outside 0 8 rt ∧ Janus.Outside 16 8 rt`
+roundn9/icall/run-icall.sh	B3_outside_conj	and the model laws may mention them (round 10 V1, round 11)
+roundup3/run-verify-rows.sh	N51	the statement assumes a runtime contract whose `above` = 8 is below 8 + 8·nargs
+roundup3/run-verify-rows.sh	N51	the contract would hold vacuously (U-ICALL-STACK, joint)
+roundn9/icall/run-icall.sh	B4_outside_exists	the statement has the premise `∃ k, Janus.Outside k 8 rt` (ho), which
+roundn9/icall/run-icall.sh	B4_outside_exists	and the model laws may mention them (round 10 V1, round 11)
+roundn9/icall/run-icall.sh	B5_outside_everything	the statement has the premise `Janus.Outside 0 281474976710656 rt` (ho), which
+roundn9/icall/run-icall.sh	B5_outside_everything	and the model laws may mention them (round 10 V1, round 11)
+roundup3/run-verify-rows.sh	N52	the statement assumes a runtime contract whose `above` = 48 is below 8 +
+roundup3/run-verify-rows.sh	N52	the contract would hold vacuously (U-ICALL-STACK, joint)
+roundn9/icall/run-icall.sh	B6_outside_two	the statement has the premise `Janus.Outside 0 140737488355328 rt` (ho1), which
+roundn9/icall/run-icall.sh	B6_outside_two	and the model laws may mention them (round 10 V1, round 11)
+roundup3/run-verify-rows.sh	N60	the statement has the non-Prop binder `p : PLift (k = 7)` whose type mentions
+roundup3/run-verify-rows.sh	N60	and the contract would hold vacuously (U-ICALL-STACK)
+roundn9/icall/run-icall.sh	B7_P_via_premise_var	the statement has an abstract-callee contract whose call-site property or kept
+roundn9/icall/run-icall.sh	B7_P_via_premise_var	may mention only the statement's own variables (U-ICALL)
+roundup3/run-verify-rows.sh	N62	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	N62	but no kernel-checked non-vacuity witness
+roundn9/icall/run-icall.sh	B8_other_program	the statement assumes the runtime contract Janus.Contracts.ICall.ICallContract
+roundn9/icall/run-icall.sh	B8_other_program	a variable `impl` of the statement (round 10 V1, round 15)
+roundup3/run-verify-rows.sh	N64	the statement has the non-Prop binder `p : PLift (w ≤ 3)` whose type mentions
+roundup3/run-verify-rows.sh	N64	and the contract would hold vacuously (U-ICALL-STACK)
+roundup3/run-verify-rows.sh	N65	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	N65	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	PIN10_RF7_plift_hyp_runfree	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+roundup3/run-verify-rows.sh	PIN10_RF8_fin0_runfree	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+roundup3/run-verify-rows.sh	PIN10_RF9_subtype_runfree	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+roundup3/run-verify-rows.sh	PIN1_k_eq_7	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	PIN1_k_eq_7	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	PIN2_7_eq_k	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	PIN2_7_eq_k	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	PIN3_w_lt_8	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	PIN3_w_lt_8	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	PIN4_w_lt_20	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	PIN4_w_lt_20	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	PIN5_let_w2_lt_8	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	PIN5_let_w2_lt_8	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	PIN6_a_eq_48	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	PIN6_a_eq_48	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	PIN7_runfree_false_hyp	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+roundup3/run-verify-rows.sh	PIN8_runfree_custom_step	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+roundup3/run-verify-rows.sh	PIN9_REF5_neg_forall_absurd_conjunct	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+roundup3/run-verify-rows.sh	PIN9_REF6_neg_forall_unrelated_alt	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+roundup3/run-verify-rows.sh	PIN9_REF7_neg_forall_true_claim_flipped	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+roundup3/run-verify-rows.sh	ATT_N10_w_lt_8	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	ATT_N10_w_lt_8	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	ATT_N11_k_eq_7	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	ATT_N11_k_eq_7	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	ATT_N18_let_w2_lt_8	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	ATT_N18_let_w2_lt_8	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	ATT_NOCS_no_callsite	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	ATT_NOCS_no_callsite	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	ATT_NORUN_no_run	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	ATT_NORUN_no_run	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	WIT1_vacuous_contract_witness	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	WIT1_vacuous_contract_witness	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	WIT2_stack_via_def	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	WIT2_stack_via_def	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	WIT3_stack_via_let	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	WIT3_stack_via_let	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	WIT4_above_below_nargs	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	WIT4_above_below_nargs	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	WIT5_stack_pin_in_exists_only	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	WIT5_stack_pin_in_exists_only	but no kernel-checked non-vacuity witness
+roundup3/run-verify-rows.sh	WIT6_P_false_witness	the statement assumes the abstract-callee contract
+roundup3/run-verify-rows.sh	WIT6_P_false_witness	precondition is unsatisfiable and the hypothesis holds vacu
+roundup3/run-verify-rows.sh	PAIR1	Proof.extra has no kernel-checked non-vacuity witness verified in this run:
+roundup3/run-verify-rows.sh	PAIR1	state satisfying it, so the theorem could be vacuous. Every
+roundup3/run-verify-rows.sh	PAIR2	Proof.extra has no kernel-checked non-vacuity witness verified in this run:
+roundup3/run-verify-rows.sh	PAIR2	state satisfying it, so the theorem could be vacuous. Every
+roundup3/run-verify-rows.sh	PAIR3	Proof.correctness has no kernel-checked non-vacuity witness verified in this
+roundup3/run-verify-rows.sh	PAIR3	a state satisfying it, so the theorem could be vacuous.
+roundup3/run-verify-rows.sh	PAIR4	Proof.extra has no kernel-checked non-vacuity witness verified in this run:
+roundup3/run-verify-rows.sh	PAIR4	state satisfying it, so the theorem could be vacuous. Every
+roundup3/run-verify-rows.sh	FLT1_false_premise	Proof.faults has no kernel-checked non-vacuity witness verified in this run:
+roundup3/run-verify-rows.sh	FLT1_false_premise	state satisfying it, so the theorem could be vacuous. Ever
+roundup3/run-verify-rows.sh	FLT2_faults_untied_state	Proof.faults has no kernel-checked non-vacuity witness verified in this run:
+roundup3/run-verify-rows.sh	FLT2_faults_untied_state	state satisfying it, so the theorem could be vacuous. Ever
+roundup3/run-verify-rows.sh	FLT3_fact_other_state	Proof.faults has no kernel-checked non-vacuity witness verified in this run:
+roundup3/run-verify-rows.sh	FLT3_fact_other_state	state satisfying it, so the theorem could be vacuous. Ever
+roundup3/run-verify-rows.sh	R01	Proof.correctness assumes runtime contracts
+roundup3/run-verify-rows.sh	R01	but no kernel-checked non-vacuity witness

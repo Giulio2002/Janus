@@ -55,7 +55,11 @@ echo "== rows (no witness: rejected under every flag)"
 for n in N10 N11 N13 N16 N17 N18 N46 N50 N51 N52 N60 N62 N64 N65; do
   f=$(ls $R/rows/${n}_*.lean); check_rejected "$f" "$n" Proof.correctness
 done
-check_rejected $RT/rows2/R01_R_pinned_false_in_pre.lean R01 Proof.correctness
+# R01 is a statement about WriteTo (an abstract callee): against the Add artifact it never compiled ("too many variable names provided"),
+# so the row was rejected by Lean and exercised nothing. It needs the WriteTo extraction.
+mapfile -t tgW < <(scripts/example-targets.sh WriteTo)
+"$J" extract artifacts/examples-arm64 "$(example_symbol WriteTo)" "$W/WriteTo" ${tgW[@]+"${tgW[@]}"} >/dev/null 2>&1 || { echo "extract WriteTo failed"; bad=1; }
+ART="$W/WriteTo" check_rejected $RT/rows2/R01_R_pinned_false_in_pre.lean R01 Proof.correctness
 for f in $R/vrows/PIN*.lean; do check_rejected "$f" "$(basename "$f" .lean)" Proof.correctness; done
 echo "== attackers (witness-bearing: rejected for the named reason)"
 for f in $R/vrows/ATT_*.lean $R/wit/WIT[1-6]_*.lean; do check_rejected "$f" "$(basename "$f" .lean)" Proof.correctness Proof.Witness.nonvacuous; done
