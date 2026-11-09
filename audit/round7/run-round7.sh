@@ -47,7 +47,7 @@ row() {
   [ -n "$status" ] && broken+=("$name")
   return 0
 }
-v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" 2>&1)"; }
+v() { out="$("$J" verify --full-errors --fresh --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" 2>&1)"; }
 # UP3d: honest rows verify together with their Witness.nonvacuous
 vw() { out="$("$J" verify --fresh --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" --theorem Proof.correctness --theorem Proof.Witness.nonvacuous 2>&1)"; }
 gob() { ( cd audit/round7/asmstub && GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}" CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \

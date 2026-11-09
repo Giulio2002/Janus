@@ -68,9 +68,15 @@ echo "attack                       expect   result"
 # (no proof initializers run), the axiom audit, the Extracted-identity check or the
 # trusted-only / mentions-Extracted statement rules.
 if want base; then
-for a in A1_instance A3_initialize A6_eval_io A9_namespace_shadow A5_skipkernel A7_private_shadow A10_exit; do
+for a in A1_instance A3_initialize A9_namespace_shadow A5_skipkernel A7_private_shadow A10_exit; do
   par_run 'row "$a" blocked "$(v --proof audit/attacks/$a.lean $W/Add)"'
 done
+# A6: the #eval writes a marker at an absolute path of an existing host directory (the work dir); the sandbox must hide it (the
+# hermetic empty root: ENOENT, pinned) and the marker must not exist on the host afterwards.
+a6m="$root/$W/A6-written-during-verify.txt"
+sed "s#@MARKER@#$a6m#" audit/attacks/A6_eval_io.lean > $W/A6_eval_io.lean
+par_run 'rm -f "$a6m"; a6=$(v --proof $W/A6_eval_io.lean $W/Add)
+if [ -e "$a6m" ]; then row A6_eval_io blocked "accepted: the proof wrote the marker on the host"; else row A6_eval_io blocked "$a6"; fi; rm -f "$a6m"'
 # A2/A4 still verify, but the printed statement is now honest (the proof's unexpanders are
 # inactive in the clean print environment), so the attack no longer misleads. Since round 2 the
 # printed statement must also round-trip (re-elaborate to the checked type) and pass the
@@ -90,14 +96,16 @@ for a in S1_inline_instance S1c_mul S1d_ofnat S1e_decidable_if S1f_lt S1g_coe S1
   par_run 'row "R2.$a" blocked "$(v --proof audit/round2/attacks/$a.lean $W/Add)"'
 done
 # Round 2, U1: the unshare fallback (forced with JANUS_SANDBOX=unshare, cache on the separate
-# /tmp mount) now makes every mount read-only with private tmpfs /tmp and /dev/shm. The honest
-# theorems verify; neither the trusted-cache plant (U1) nor any host /tmp, /dev/shm, /boot or
-# /run marker (U1b) may appear.
+# /tmp mount) now makes every mount read-only with private tmpfs /tmp and /dev/shm. With the tied Add witness both probes print
+# Verified (the verification itself is honest and succeeds); "mitigated" means the SANDBOX PREVENTED THE EFFECT, not that the
+# verification fails: neither the trusted-cache plant (U1) nor any host /tmp, /dev/shm, /boot or /run marker (U1b) may appear
+# (the leak check in u1() below is the row's real assertion).
 u1() { # u1 NAME EXPECT ATTACK MARKER…: no marker may reach the host; EXPECT is the verdict row
   local name=$1 expect=$2 attack=$3; shift 3
   local c; c=$(mktemp -d /tmp/janus-u1-cache.XXXXXX)
   rm -f "$@"
-  local res; res=$(JANUS_SANDBOX=unshare JANUS_CACHE_DIR="$c" "$J" verify --janus-root "$root" --proof "$attack" $W/Add 2>&1)
+  # (the probes carry a tied Witness.nonvacuous: every main theorem needs one, so the probe reaches the sandbox stage it exercises)
+  local res; res=$(JANUS_SANDBOX=unshare JANUS_CACHE_DIR="$c" "$J" verify --janus-root "$root" --proof "$attack" --theorem Proof.correctness --theorem Proof.Witness.nonvacuous $W/Add 2>&1)
   local verdict; verdict="$(grep -m1 -E '^(Verified|Invalid)' <<<"$res" | cut -c1-80) [$(grep -m1 'Stage:' <<<"$res" | sed 's/.*Stage: //')]"
   local leaked=""
   for m in "$@" "$c/v1/replay/00/planted-by-sandboxed-proof"; do [ -e "$m" ] && leaked="$leaked $m"; done
@@ -107,9 +115,10 @@ u1() { # u1 NAME EXPECT ATTACK MARKER…: no marker may reach the host; EXPECT i
   elif [ -n "$leaked" ]; then row "$name" blocked "accepted: written to the host:$leaked"
   else row "$name" "$expect" "$verdict"; fi
 }
-# U1: hermetic sandbox (UP4): JANUS_CACHE_DIR is not even in the proof's environment, so the plant is never attempted;
-# the honest theorem verifies and nothing reaches the host (the leak check below is the row; was: the write threw, blocked).
-# U1b: the proof catches its failed writes, so the honest theorem verifies (mitigated).
+# U1: hermetic sandbox (UP4): JANUS_CACHE_DIR is not even in the proof's environment, so the plant is never attempted; the
+# probe verifies (Verified, with the tied witness) and nothing reaches the host. "mitigated" = the sandbox prevented the effect
+# (before UP4 the write threw and the row was `blocked`; with the witness it now verifies). The leak check is the row.
+# U1b: the proof catches its failed writes, so it verifies too (Verified, mitigated: no marker reaches the host).
 # (U1 and U1b use separate caches; only U1b plants the host markers, so they run in parallel.)
 par_run 'u1 R2.U1_unshare_cache_write mitigated audit/round2/attacks/U1_unshare_cache_write.lean'
 par_run 'u1 R2.U1b_unshare_mounts mitigated audit/round2/attacks/U1b_unshare_mounts.lean \
@@ -183,7 +192,7 @@ r1() {
   local out; out=$(JANUS_R1_MODE=$mode "$J" verify --janus-root "$root" $W/Add --proof "$R1/$name/R1/$proof.lean" \
     --proof-root "$R1/$name" --allow-unchecked-provenance --theorem "$thm" "$@" 2>&1)
   local what; what=$(grep -m1 -E '^  (modified|unexpected|missing) ' <<<"$out" | sed 's/^  //; s/ (pinned.*//')
-  printf '%s%s [%s]' "$(grep -m1 -E '^(Verified|Invalid)' <<<"$out" | cut -c1-90)" "${what:+ … $what}" "$(grep -m1 'Stage:' <<<"$out" | sed 's/.*Stage: //')"
+  printf '%s%s [%s]' "$(grep -m1 -E '^(Verified|Invalid)' <<<"$out" | cut -c1-90)" "${what:+ … $what}" "$(grep -m1 'Stage:' <<<"$out" | sed 's/.*Stage: //')$(verdict_reason <<<"$out" | grep -o ' \[\(Lean\|Lake\): .*' | cut -c1-300)"
 }
 if want r1; then
 # Each variant has its own package copy and workspace, so the rows run in parallel.

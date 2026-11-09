@@ -2,7 +2,7 @@ import Extracted
 /-! ATTACK A3: code in the proof module runs inside the audit process. An `initialize` block
 runs when `Audit.lean` imports `Proof`: it reads the audit file (found via LEAN_PATH) to learn the
 random marker, prints a forged audit record and exits 0 before the real audit runs. The theorem
-itself is `False`, proved by `sorry`. leanchecker accepts it (sorryAx is just an axiom).
+itself is false (`Extracted.entry = Extracted.entry + 1`, which mentions the extracted code so it passes the statement-identity rule), proved by `sorry`. leanchecker accepts it (sorryAx is just an axiom).
 Benign: it only reads Audit.lean and prints. -/
 
 initialize do
@@ -21,5 +21,5 @@ initialize do
           IO.Process.exit 0
 
 namespace Proof
-theorem correctness : False := sorry
+theorem correctness : Extracted.entry = Extracted.entry + 1 := sorry
 end Proof

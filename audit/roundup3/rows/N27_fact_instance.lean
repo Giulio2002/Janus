@@ -1,6 +1,6 @@
 import Extracted
 
-/-! Round n11 red team, row N27_fact_instance: [Fact (w < 8)] instance binder
+/-! Round n11 red team, row N27_fact_instance: [Nonempty (k < 8)] instance binder
 Expected: rejected. The proof is `Add`'s; the hypotheses are never used, so only the audit decides. -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Contracts.ICall
@@ -9,7 +9,7 @@ namespace Proof
 
 
 theorem correctness (impl : List Segment) (fn fn2 k w n a : Nat) (rt : List (Nat × Nat)) (R : Res) (x y : BitVec 64)
-    (hw : k ≤ w) [Fact (w < 8)]
+    [Nonempty (k < 8)]
     (hc : ICallContract (Extracted.program.link impl) fn 4 k 48 rt (fun _ => []) R (fun _ => True)) :
     Ensures (Extracted.program.link impl) Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by

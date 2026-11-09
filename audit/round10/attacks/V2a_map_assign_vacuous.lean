@@ -62,7 +62,7 @@ theorem rtpre_at {M : MapModel (BitVec 64) (BitVec 64)} {s : State} {m : Memory}
     rw [this]; exact g3
   · show m.accessible _ _ _ = true; rw [hacc]; exact c7
 
-theorem chain {p : Program} {addr : Nat} {M : MapModel (BitVec 64) (BitVec 64)} (hA : Assign p addr M)
+theorem chain {p : Program} {addr : Nat} {M : MapModel (BitVec 64) (BitVec 64)} {H : RtReady} (hA : Assign p addr M H)
     {s : State} {f : AMap (BitVec 64) (BitVec 64)}
     (hpc : s.pc = BitVec.ofNat 64 addr) (hpre : RTPre M 3 s) (ht : M.Typ (s.regs 0).toNat)
     (hm : (s.regs 1).toNat ≠ 0) (hgw : Outside ((s.regs 28).toNat + 16) 8 (rtWrites M s 3)) :
@@ -83,8 +83,8 @@ theorem chain {p : Program} {addr : Nat} {M : MapModel (BitVec 64) (BitVec 64)} 
 
 /-- `Assign`, `M.Laws` and one call state meeting `Assign`'s precondition (with the stack-guard
 word outside what the call may write) are contradictory. -/
-theorem assign_unsat {p : Program} {addr : Nat} {M : MapModel (BitVec 64) (BitVec 64)}
-    (hl : M.Laws) (hA : Assign p addr M) {s : State} {f : AMap (BitVec 64) (BitVec 64)}
+theorem assign_unsat {p : Program} {addr : Nat} {M : MapModel (BitVec 64) (BitVec 64)} {H : RtReady}
+    (hl : M.Laws) (hA : Assign p addr M H) {s : State} {f : AMap (BitVec 64) (BitVec 64)}
     (hpc : s.pc = BitVec.ofNat 64 addr) (hpre : RTPre M 3 s) (ht : M.Typ (s.regs 0).toNat)
     (hm : (s.regs 1).toNat ≠ 0) (hrep : M.Rep s.mem (s.regs 1).toNat f)
     (hgw : Outside ((s.regs 28).toNat + 16) 8 (rtWrites M s 3)) : False := by
@@ -106,9 +106,9 @@ def callState (s : State) (a t : Nat) (m : BitVec 64) : State :=
   { s with pc := BitVec.ofNat 64 a, sp := BitVec.ofNat 64 (s.sp.toNat - 48),
            regs := fun i => if i = 0 then BitVec.ofNat 64 t else if i = 1 then m else if i = 30 then 0 else s.regs i }
 
-theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64)) (hl : M.Laws)
+theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64)) (H : RtReady) (hl : M.Laws)
     (hasn : Assign (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.mapassign_fast64") M)
+      (Extracted.program.contractAddr "runtime.mapassign_fast64") M H)
     (m k v : BitVec 64) (f : AMap (BitVec 64) (BitVec 64)) :
     Ensures (Extracted.program.link impl) Extracted.entry [m, k, v]
       (fun s => CallerOK M s 48 32 ∧ M.Typ mapType ∧ m.toNat ≠ 0 ∧ M.Rep s.mem m.toNat f)

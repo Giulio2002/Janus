@@ -39,7 +39,7 @@ row() {
   [ -n "$status" ] && broken+=("$name")
   return 0
 }
-v() { out="$("$J" verify --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" 2>&1)"; }
+v() { out="$("$J" verify --full-errors --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" 2>&1)"; }
 # UP3d: honest rows verify together with their Witness.nonvacuous
 vw() { out="$("$J" verify --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" --theorem Proof.correctness --theorem Proof.Witness.nonvacuous 2>&1)"; }
 

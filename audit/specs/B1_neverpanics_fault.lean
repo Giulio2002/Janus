@@ -7,10 +7,14 @@ The printed claim "Add256(z, nil, y) never panics" is false of the Go program. -
 open Janus Janus.Arm64 Janus.GoABI
 
 namespace Proof
+/- The attack, ported to the fixed definition `NeverPanics p s := ∀ fuel, (∀ name s', p.run fuel s ≠ .ok (.stub name .panic s')) ∧
+(∀ e, p.run fuel s = .error e → e = .outOfFuel)`: the old proof (the first conjunct, which is all the old definition said) still goes
+through; the second conjunct is the fix F3 and is false here, so the last `simp` is left with the goal
+`outsideAllocation 0 8 = outOfFuel` and the proof does NOT compile (exactly one error, at the final `simp`). -/
 theorem correctness (z y : BitVec 64) (s : State)
     (hs : CallSetup Extracted.program Extracted.entry [z, 0, y] s) (hm : s.mem.regions = []) :
     NeverPanics Extracted.program s := by
-  intro fuel name s'
+  intro fuel
   have hpc : s.pc.toNat = Extracted.entry := hs.pc_toNat (by decide)
   have hx1 : s.regs 1 = 0 := hs.reg (i := 1) (by simp)
   cases fuel with
@@ -22,5 +26,9 @@ theorem correctness (z y : BitVec 64) (s : State)
         Memory.accessible, hm, hx1]
     rw [Program.run_succ_fault (by rw [hpc]; decide) (by rw [hpc]; decide)
       (by rw [hpc]; decide) hst]
+    refine ⟨by simp, ?_⟩
+    intro e he
+    cases he
+    -- the fault is `outsideAllocation 0 8`, not `outOfFuel`: the claim is false, nothing closes this goal
     simp
 end Proof
