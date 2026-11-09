@@ -32,6 +32,7 @@ A=audit/round9/attacks
 
 # row NAME EXPECT [PATTERN...] on $out: EXPECT "blocked" (no Verified; patterns must appear) or
 # "Verified" (Verified and every pattern).
+. "$root/audit/lib/blocked.sh"
 row() {
   local name=$1 expect=$2 verdict status="" pat
   shift 2
@@ -42,6 +43,8 @@ row() {
     Verified) case $verdict in Verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
+  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check round9/run-round9.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-40s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0

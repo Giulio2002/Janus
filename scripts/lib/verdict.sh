@@ -19,3 +19,12 @@ verdict_line() {
   printf '%s\n' "$out"
 }
 lean_first() { grep -v -E '^(janus: memory guard|janus-memguard:|memguard[:[])' | head -1; }
+
+# verdict_reason : stdin -> verdict_line, plus " [Stage: S]" (the first "Stage:" line of the stream) when there is one. The reason a
+# row's `blocked` pin (audit/lib/blocked.sh, audit/lib/blocked-pins.tsv) is matched against when the row only carries a verdict line.
+verdict_reason() {
+  local all; all="$(cat)"
+  local v; v="$(verdict_line <<<"$all")"
+  local st; st="$(grep -m1 -E '^ *Stage: ' <<<"$all" | sed -E 's/^ *Stage: //')"
+  printf '%s%s\n' "$v" "${st:+ [Stage: $st]}"
+}

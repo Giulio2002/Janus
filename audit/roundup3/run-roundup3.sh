@@ -12,6 +12,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 R=audit/roundup3
+. "$root/audit/lib/blocked.sh"
 J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
 if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
@@ -31,12 +32,18 @@ for f in "$R"/rows/*.lean; do
   elif printf '%s' "$out" | grep -q '^Verified:'; then got="FALSE-VERIFIED"
   else got=rejected; fi
   if [ "$got" = "$want" ]; then s=ok; else s="DIFFERS (wanted $want)"; bad=1; fi
+  # rejected rows: the pinned reason of the audit (audit/lib/blocked-pins.tsv), never an elaboration failure of the row file
+  if [ "$got" = rejected ] && [ "$want" = rejected ]; then why="$(blocked_check roundup3/run-roundup3.sh "$n" "$out")"; [ -n "$why" ] && { s="$s BROKEN: $why"; bad=1; }; fi
   printf '%-34s audit-only %-9s %s\n' "$n" "$got" "$s"
   [ "$got" = rejected ] && printf '%s\n' "$out" | grep -m1 -iE 'audit rejected|Lean errors|Invalid|error' | cut -c1-240 | sed 's/^/    /'
   # --allow-no-witness: inert, nothing here has a witness: never Verified
   out="$("$J" verify "$W/Add" --proof "$f" --theorem Proof.correctness --janus-root "$root" --allow-no-witness --no-result-cache 2>&1)"
   if printf '%s' "$out" | grep -q '^Verified:'; then printf '%-34s allow-no-witness VERIFIED   <-- BROKEN\n' "$n"; bad=1
-  else printf '%-34s allow-no-witness rejected ok\n' "$n"; fi
+  else
+    why="$(blocked_check roundup3/run-roundup3.sh "$n/allow-no-witness" "$out")"
+    if [ -n "$why" ]; then printf '%-34s allow-no-witness rejected for the WRONG reason   <-- BROKEN: %s\n' "$n" "$why"; bad=1
+    else printf '%-34s allow-no-witness rejected ok\n' "$n"; fi
+  fi
 done
 # witness rows (WIT*): the main theorem passes the statement audit (no size is pinned), but the witness instantiates a contract at sizes
 # where its call precondition is unsatisfiable (vacuously inhabited by `exfalso`): the witness must be rejected, so the main theorem

@@ -24,6 +24,7 @@ A=audit/round6/attacks
 
 # row NAME EXPECT [PATTERN]: verdict of $out. EXPECT "blocked" (must not print Verified; if PATTERN
 # is given the rejection must contain it) or "Verified" (must print Verified and contain PATTERN).
+. "$root/audit/lib/blocked.sh"
 row() {
   local name=$1 expect=$2 pat=${3:-} verdict status=""
   verdict="$(grep -m1 -E '^(Verified|Invalid|Error)' <<<"$out" | cut -c1-150)"
@@ -32,6 +33,8 @@ row() {
     blocked) case $verdict in Verified*) status=BROKEN ;; *) [ -n "$pat" ] && ! grep -qF -- "$pat" <<<"$out" && status=BROKEN ;; esac ;;
     Verified) case $verdict in Verified*) [ -n "$pat" ] && ! grep -qF -- "$pat" <<<"$out" && status=BROKEN ;; *) status=BROKEN ;; esac ;;
   esac
+  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check round6/run-round6.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-36s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0

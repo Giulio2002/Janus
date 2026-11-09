@@ -20,6 +20,7 @@ mkdir -m 700 "$W/cache"; export JANUS_CACHE_DIR="${JANUS_CACHE_DIR:-$W/cache}"
 . scripts/example-contracts.sh
 mapfile -t tg < <(scripts/example-targets.sh Add)
 "$J" extract artifacts/examples-arm64 "$(example_symbol Add)" "$W/Add" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || { echo "extract Add failed"; exit 1; }
+. "$root/audit/lib/blocked.sh"
 RT=/srv/janus-rt-n11/audit/roundn11
 bad=0
 # verdict of one verify run on ARTIFACT/PROOF with THEOREMS: prints verified|rejected and leaves the output in $out
@@ -42,7 +43,11 @@ check_rejected() { # file label thm...
   for fl in "" "--allow-no-witness"; do
     local v; v=$(vrun "${ART:-$W/Add}" "$f" "$fl" "$@"); out="$(cat "$W/out.txt")"
     if [ "$v" = verified ]; then printf '%-34s %-20s VERIFIED   <-- BROKEN\n' "$n" "${fl:-no-flag}"; bad=1
-    elif printf '%s' "$out" | grep -qE "$want"; then printf '%-34s %-20s rejected ok  [%s]\n' "$n" "${fl:-no-flag}" "$(reason_of)"
+    elif printf '%s' "$out" | grep -qE "$want"; then
+      # the pinned reason (audit/lib/blocked-pins.tsv; the Expected-reason header alone defaults to '.'), never a Lean elaboration failure
+      why="$(blocked_check roundup3/run-verify-rows.sh "$n" "$out")"
+      if [ -n "$why" ]; then printf '%-34s %-20s rejected for the WRONG reason   <-- BROKEN: %s\n' "$n" "${fl:-no-flag}" "$why"; bad=1
+      else printf '%-34s %-20s rejected ok  [%s]\n' "$n" "${fl:-no-flag}" "$(reason_of)"; fi
     else printf '%-34s %-20s rejected for ANOTHER reason (wanted /%s/)   <-- BROKEN\n' "$n" "${fl:-no-flag}" "$want"; printf '%s\n' "$out" | grep -m3 '^Invalid' | cut -c1-300 | sed 's/^/    /'; bad=1; fi
   done
 }

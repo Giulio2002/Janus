@@ -7,6 +7,7 @@ set -u
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 J="${1:?janus binary}"; JR="${2:?janus root}"; ADD="${3:?Add artifact}"; EW="${4:?ErrWrap artifact}"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT; mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"
+. "$(cd "$here/../.." && pwd)/lib/blocked.sh"
 bad=0
 for f in "$here"/*.lean; do
   n="$(basename "$f" .lean)"
@@ -17,5 +18,6 @@ for f in "$here"/*.lean; do
   if [ "$got" = "$want" ]; then s="ok"; else s="DIFFERS (wanted $want)"; bad=1; fi
   printf '%-28s %-9s %s\n' "$n" "$got" "$s"
   [ "$got" = rejected ] && printf '%s\n' "$out" | grep -m1 -iE 'audit rejected|Invalid|Lean errors' | cut -c1-200 | sed 's/^/    /'
+  if [ "$got" = rejected ] && [ "$want" = rejected ]; then why="$(blocked_check roundn9/icall/run-icall.sh "$n" "$out")"; [ -n "$why" ] && { printf '    BROKEN: %s\n' "$why"; bad=1; }; fi
 done
 exit $bad

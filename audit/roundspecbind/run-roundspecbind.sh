@@ -33,6 +33,7 @@ mapfile -t tg < <(scripts/example-targets.sh FromBytes)
 broken=()
 P=Proof
 blk() { awk -v n="=== $P.$1:" 'index($0,n)==1{p=1;print;next} /^=== /{p=0} p' <<<"$all"; }
+. "$root/audit/lib/blocked.sh"
 row() { # NAME expect(blocked|Verified) pattern...
   local name=$1 expect=$2 out verdict status="" pat; shift 2
   out="$(blk "$name")"
@@ -43,6 +44,8 @@ row() { # NAME expect(blocked|Verified) pattern...
     Verified) case $verdict in *verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
+  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check roundspecbind/run-roundspecbind.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-12s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0

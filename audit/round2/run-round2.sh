@@ -14,6 +14,8 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/memguard.sh"
 # shellcheck source=../../scripts/lib/verdict.sh
 . "$root/scripts/lib/verdict.sh"
+# shellcheck source=../lib/blocked.sh
+. "$root/audit/lib/blocked.sh"
 memguard_self "$@"
 par_init "$@"
 J="$root/audit/round2/bin/janus"
@@ -44,12 +46,17 @@ s1_row() {
   printf '  %-20s %s [%s]\n' "$a" "$r" "$st"
   case "$r" in Verified*) echo "      >>> BROKEN: binary adds, statement says otherwise, yet Verified."; broken+=("$a") ;;
     NOVERDICT*|AMBIGUOUS*) echo "      >>> BROKEN: no single verdict."; broken+=("$a") ;; esac
+  # blocked row: the pinned reason (audit/lib/blocked-pins.tsv), never an elaboration failure of the attack file
+  why="$(blocked_check round2/run-round2.sh "$a" "$out")"
+  [ -n "$why" ] && { echo "      >>> BROKEN: $why"; broken+=("$a"); }
 }
 m1_block() {
 echo
 echo "== M1: Lean module-system proof (blocked on the single-file path) =="
-r="$(line --proof audit/round2/attacks/M1_module_system.lean $W/Add)"; echo "  $r"
+out="$(v --proof audit/round2/attacks/M1_module_system.lean $W/Add)"; r="$(verdict_line <<<"$out")"; echo "  $r [$(grep -m1 'Stage:' <<<"$out" | sed 's/.*Stage: //')]"
 case "$r" in Verified*|NOVERDICT*|AMBIGUOUS*) broken+=(M1) ;; esac
+why="$(blocked_check round2/run-round2.sh M1 "$out")"
+[ -n "$why" ] && { echo "      >>> BROKEN: $why"; broken+=(M1); }
 
 echo
 echo "== Positive controls (must elaborate with only propext/Quot.sound/Classical.choice) =="
@@ -59,9 +66,11 @@ echo "  AtomicAdd_witness.lean: see audit/round2/controls/ (run under lake env l
 u1_block() {
 echo
 echo "== U1 / U1b (fixed): unshare fallback, forced with JANUS_SANDBOX=unshare =="
-echo "Expected: U1 Invalid (its write to the read-only cache throws), U1b Verified (it catches its failed"
-echo "writes); in both, nothing the sandboxed proof writes reaches the host"
-echo "(trusted cache on the /tmp mount, /tmp, /dev/shm, /boot, /run/user/0, /run)."
+echo "Expected (with the tied Add witness): U1 Verified and U1b Verified. \"Mitigated\" means the sandbox prevented the"
+echo "EFFECT, not that the verification fails: the hermetic sandbox keeps JANUS_CACHE_DIR out of U1's environment, so its"
+echo "plant is never attempted, and U1b catches its failed writes; in both, nothing the sandboxed proof writes reaches the"
+echo "host (trusted cache on the /tmp mount, /tmp, /dev/shm, /boot, /run/user/0, /run). BROKEN if either verdict is not"
+echo "Verified (unless the fallback refused on this host) or a marker reached the host."
 markers=(/tmp/janus-u1b-marker /dev/shm/janus-u1b-marker /boot/janus-u1b-marker /run/user/0/janus-u1b-marker /run/janus-u1b-marker)
 for a in U1_unshare_cache_write U1b_unshare_mounts; do
   c=$(mktemp -d /tmp/janus-u1-cache.XXXXXX); rm -f "${markers[@]}"
@@ -70,6 +79,7 @@ for a in U1_unshare_cache_write U1b_unshare_mounts; do
   rm -f "${markers[@]}"; rm -rf "$c"
   printf '  %-24s %s\n' "$a" "$(grep -m1 -E '^(Verified|Invalid)' <<<"$out" | cut -c1-100)"
   if [ -n "$leaked" ]; then echo "      >>> BROKEN: written to the host:$leaked"; broken+=("$a"); fi
+  if ! grep -q 'Stage: sandbox' <<<"$out" && ! grep -q '^Verified: ' <<<"$out"; then echo "      >>> BROKEN: expected Verified (the sandbox prevents the effect; the verification still succeeds)"; broken+=("$a"); fi
   if grep -q 'Stage: sandbox' <<<"$out"; then echo "      (the fallback refused on this host; install bubblewrap)"; fi
 done
 }

@@ -10,6 +10,8 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/parallel.sh"
 # shellcheck source=../../scripts/lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
+# shellcheck source=../lib/blocked.sh
+. "$root/audit/lib/blocked.sh"
 memguard_self "$@"
 par_init "$@"
 J="$root/audit/round3/bin/janus"; mkdir -p "$(dirname "$J")"
@@ -33,6 +35,7 @@ out="$(v --proof audit/round3/attacks/R1_def_body_instance.lean $W/Add)"
 r="$(grep -m1 -E '^(Verified|Invalid)' <<<"$out")"; st="$(grep -m1 'Stage:' <<<"$out" | sed 's/.*Stage: //')"
 printf '  R1 %s [%s]\n' "$r" "$st"
 case "$r" in Verified*) echo "      >>> BROKEN: binary adds, disclosed body says multiply, yet Verified."; broken+=(R1);; esac
+case "$r" in Verified*) ;; *) why="$(blocked_check round3/run-round3.sh R1 "$out")"; [ -n "$why" ] && { echo "      >>> BROKEN: $why"; broken+=(R1); } ;; esac
 }
 r2_block() {
 echo

@@ -16,6 +16,8 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/memguard.sh"
 # shellcheck source=../scripts/lib/verdict.sh
 . "$root/scripts/lib/verdict.sh"
+# shellcheck source=lib/blocked.sh
+. "$root/audit/lib/blocked.sh"
 memguard_self "$@"
 par_init "$@"
 # ALL_ROWS="base r1 root": only these row groups (default all); audit/run-rounds.sh runs them as the lanes alla, allb, allc.
@@ -47,7 +49,9 @@ broken=()
 row() {
   local status=""
   case "$2" in
-    blocked) case "$3" in Verified*|accepted*) status=BROKEN ;; esac ;;
+    blocked) case "$3" in Verified*|accepted*) status=BROKEN ;; esac
+      # a pinned reason (audit/lib/blocked-pins.tsv); a Lean elaboration failure ("Lean rejected the proof") is BROKEN unless pinned as expected
+      why="$(blocked_check run-all.sh "$1" "$3")"; [ -n "$why" ] && { status=BROKEN; set -- "$1" "$2" "$3 [$why]"; } ;;
     Verified|Verified-honest|mitigated) case "$3" in Verified*) ;; *) status=BROKEN ;; esac ;;
     ok) case "$3" in *"depends on axioms"*) ;; *) status=BROKEN ;; esac ;;
   esac
@@ -57,7 +61,7 @@ row() {
   [ -n "$status" ] && broken+=("$1")
   return 0
 }
-v() { "$J" verify --janus-root "$root" "$@" 2>&1 | verdict_line; }
+v() { "$J" verify --janus-root "$root" "$@" 2>&1 | verdict_reason; }
 
 echo "attack                       expect   result"
 # F1/F2 fixes: these attacks are now rejected (Invalid) by the sandbox, the trusted janus-audit
@@ -83,7 +87,7 @@ done
 # Decidable `dite` in an `if`, LT meaning ≤, an inline NatCast coercion, an inline Coe, and a
 # literal behind a beta-redex.
 for a in S1_inline_instance S1c_mul S1d_ofnat S1e_decidable_if S1f_lt S1g_coe S1h_coe_inline S1i_beta; do
-  par_run 'row "R2.$a" blocked "$(v --proof audit/round2/attacks/$a.lean $W/Add | cut -c1-120)"'
+  par_run 'row "R2.$a" blocked "$(v --proof audit/round2/attacks/$a.lean $W/Add)"'
 done
 # Round 2, U1: the unshare fallback (forced with JANUS_SANDBOX=unshare, cache on the separate
 # /tmp mount) now makes every mount read-only with private tmpfs /tmp and /dev/shm. The honest
@@ -116,7 +120,12 @@ done
 # B1/B2 are blocked by fixes F3/F4: the attacks no longer verify, and their negations do.
 par_run 'row B1_neverpanics_fault blocked "$(v --proof audit/specs/B1_neverpanics_fault.lean $W/Add256)"'
 par_run 'row B1_refuted Verified "$(v --proof audit/specs/B1_refuted.lean $W/Add256)"'
-par_run 'if lake env lean audit/specs/B2_exit_sentinel.lean >/dev/null 2>&1; then b2=accepted; else b2="rejected (does not compile)"; fi
+# B2: the file must FAIL to compile, and only at its final `rfl` (brProg.withExit ret does not return at pc 0): exactly ONE Lean error,
+# and it is that one (any other error means the attack file no longer exercises its target).
+par_run 'b2o=$(lake env lean audit/specs/B2_exit_sentinel.lean 2>&1) && b2="accepted (compiles)" || {
+  if [ "$(grep -c ": error:" <<<"$b2o")" = 1 ] && grep -qE "error: Tactic .rfl. failed" <<<"$b2o" && grep -qF "(brProg.withExit ret).run 1" <<<"$b2o"; then
+    b2="rejected: the only Lean error is the final rfl (brProg.withExit ret).run 1 does not return at pc := 0"
+  else b2="rejected for another reason: $(grep -m2 ": error:" <<<"$b2o" | cut -c1-160 | tr "\n" " ")"; fi; }
 row B2_exit_sentinel blocked "$b2"'
 par_run 'row B2_refuted ok "$(lake env lean audit/specs/B2_refuted.lean 2>&1 | lean_first)"'
 for n in Add Add256 Get; do
@@ -133,7 +142,7 @@ rm -rf $C; mkdir -p $C
 cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean Janus JanusTests Oracle .lake $C/
 cp audit/attacks/C1_fake_Extracted.lean $C/Extracted.lean
 (cd $C && lake env lean -o .lake/build/lib/lean/Extracted.olean Extracted.lean && rm Extracted.lean)
-row C1_shadow_library blocked "$("$J" verify --janus-root $C --proof audit/attacks/C1_proof.lean $W/Add 2>&1 | verdict_line)"
+row C1_shadow_library blocked "$("$J" verify --janus-root $C --proof audit/attacks/C1_proof.lean $W/Add 2>&1 | verdict_reason)"
 rm -rf $C'
 fi
 
@@ -200,7 +209,7 @@ cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean
 cp -a .lake/build $F/.lake/
 { echo "import Lean"; cat Janus/GoABI.lean audit/attacks/R1_forged_lemma.lean; } > $F/forge/Janus/GoABI.lean
 (cd $F && lake env lean --root=forge -o .lake/build/lib/lean/Janus/GoABI.olean forge/Janus/GoABI.lean >/dev/null && rm -rf forge)
-row R1b_forged_lemma blocked "$("$J" verify --janus-root $F --proof audit/attacks/R1_forged_proof.lean $W/Add 2>&1 | verdict_line)"
+row R1b_forged_lemma blocked "$("$J" verify --janus-root $F --proof audit/attacks/R1_forged_proof.lean $W/Add 2>&1 | verdict_reason)"
 rm -rf $F'
 # R1 proof-overwrite: a proof whose #eval corrupts the framework build on LEAN_PATH (a throwaway
 # --janus-root copy). Sandboxed the write fails and the honest theorem verifies; unsandboxed
@@ -211,7 +220,7 @@ for ns in "" --unsafe-no-sandbox; do
   rm -rf $O; mkdir -p $O/.lake
   cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean Janus JanusTests Oracle $O/
   cp -a .lake/build $O/.lake/
-  res="$("$J" verify --janus-root $O --proof audit/attacks/R1_proof_overwrite.lean $W/Add $ns 2>&1 | verdict_line)"
+  res="$("$J" verify --janus-root $O --proof audit/attacks/R1_proof_overwrite.lean $W/Add $ns 2>&1 | verdict_reason)"
   if [ -z "$ns" ]; then row R1_proof_overwrite mitigated "$res"; else row R1_proof_overwrite_nosandbox blocked "$res"; fi
   rm -rf $O'
 done

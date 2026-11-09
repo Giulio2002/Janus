@@ -27,6 +27,7 @@ all="$("$J" verify --audit-only --janus-root "$root" --proof "$R/attacks/RetLowA
   --theorem $P.b1 --theorem $P.b2 --theorem $P.b3 --theorem $P.b4 --theorem $P.b5 --theorem $P.b6 --theorem $P.b7 --theorem $P.b8 --theorem $P.b9 --theorem $P.b10 --theorem $P.b11 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"
 printf '%s\n' "$all" > "$W/RetLowAlias64.txt"
 blk() { awk -v n="=== $P.$1:" 'index($0,n)==1{p=1;print;next} /^=== /{p=0} p' <<<"$all"; }
+. "$root/audit/lib/blocked.sh"
 row() { # NAME blocked pattern
   local name=$1 expect=$2 pat=${3:-} out verdict status=""
   out="$(blk "$name")"; verdict="$(grep -m1 -E '^=== ' <<<"$out" | cut -c1-100)"
@@ -36,6 +37,8 @@ row() { # NAME blocked pattern
     blocked) case $verdict in *verified*) status=BROKEN ;; esac; grep -qF -- "$pat" <<<"$out" || status=BROKEN ;;
     gap) case $verdict in *verified*) ;; *) status=BROKEN ;; esac ;;
   esac
+  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check roundn9/run-roundn9.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-6s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name"); return 0
 }

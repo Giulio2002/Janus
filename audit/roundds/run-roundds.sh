@@ -32,6 +32,7 @@ mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"
 grep -q 'def dataAddr.«example.com/basic.symPows»' "$W/SymPows/Extracted.lean" || { echo "no data constant generated"; exit 1; }
 broken=()
 v() { "$J" verify --fresh --janus-root "$root" "$@" 2>&1; }
+. "$root/audit/lib/blocked.sh"
 row() { # NAME expect(blocked|Verified) OUTPUT pattern...
   local name=$1 expect=$2 out=$3 verdict status="" pat; shift 3
   verdict="$(grep -m1 -E '^=== |^Error|^Rejected|^Invalid|^Verified' <<<"$out" | cut -c1-120)"
@@ -41,6 +42,8 @@ row() { # NAME expect(blocked|Verified) OUTPUT pattern...
     Verified) case $verdict in *verified*|*Verified*) ;; *) status=BROKEN ;; esac ;;
   esac
   for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
+  # blocked rows: pinned reason, and no Lean elaboration failure (audit/lib/blocked.sh)
+  if [ "$expect" = blocked ]; then why="$(blocked_check roundds/run-roundds.sh "$name" "$out")"; [ -n "$why" ] && { status=BROKEN; verdict="$verdict [$why]"; }; fi
   printf '  %-12s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$name")
   return 0
