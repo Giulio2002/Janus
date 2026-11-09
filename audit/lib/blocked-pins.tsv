@@ -169,14 +169,10 @@ round9/run-round9.sh	H1a_still_blocked	the statement binds two variables whose n
 round9/run-round9.sh	H1a_still_blocked	statement cannot be read reliably; rename one (round 7 H1)
 round9/run-round9.sh	I1g_contract_name_lookalike	the statement uses Janus.Program.contractAddr with the name
 round9/run-round9.sh	I1g_contract_name_lookalike	that object (a misspelt or lookalike name, round 8 I1)
-round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=prlimit	the statement binds two variables whose names look alike, "o" and "ο" (they
-round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=prlimit	statement cannot be read reliably; rename one (round 7 H1)
-round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=systemd-user	the statement binds two variables whose names look alike, "o" and "ο" (they
-round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=systemd-user	statement cannot be read reliably; rename one (round 7 H1)
-round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=none	the statement binds two variables whose names look alike, "o" and "ο" (they
-round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=none	statement cannot be read reliably; rename one (round 7 H1)
-round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=bogus	the statement binds two variables whose names look alike, "o" and "ο" (they
-round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=bogus	statement cannot be read reliably; rename one (round 7 H1)
+round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=prlimit	the statement binds two variables whose names look alike, "o" and "ο" ||| exceeded the memory limit and was killed
+round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=systemd-user	the statement binds two variables whose names look alike, "o" and "ο" ||| exceeded the memory limit and was killed
+round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=none	the statement binds two variables whose names look alike, "o" and "ο" ||| exceeded the memory limit and was killed
+round9/run-round9.sh	MG_attack_JANUS_MEMGUARD=bogus	the statement binds two variables whose names look alike, "o" and "ο" ||| exceeded the memory limit and was killed
 round10/run-round10.sh	V1a_readiness_fun_true	the statement assumes the runtime contract Janus.Contracts.NewobjectContract
 round10/run-round10.sh	V1a_readiness_fun_true	or a number is a runtime parameter, whatever its type)
 round10/run-round10.sh	V2a_insert_stores_v_plus_1	Lean rejected the proof
