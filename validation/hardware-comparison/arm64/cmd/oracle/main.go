@@ -24,8 +24,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Giulio2002/Janus/oracle/gen"
-	L "github.com/Giulio2002/Janus/oracle/layout"
+	"github.com/Giulio2002/Janus/validation/hardware-comparison/arm64/gen"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/arm64/layout"
 )
 
 func die(f string, a ...any) {

@@ -19,7 +19,7 @@ proofs.
 | Go ABIInternal on amd64, specs | `Janus/Amd64/GoABI.lean` |
 | proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies), `Janus/Amd64/TacticSSE.lean` (stepping `ExecSSE`, element lemmas), `Janus/Amd64/TacticAVX2.lean` (stepping `ExecAVX`, the zero-upper theorems, 256-bit element lemmas, `dot32`), `Janus/Amd64/TacticEVEX.lean` (stepping `ExecEVEX`, 512-bit re-assembly, the EVEX zero-upper rule, VEX/SSE on the AVX-512 state, WP-D/WP-F compatibility) |
 | extractor | `cmd/janus/amd64.go` (plus small dispatch edits) |
-| differential oracle | `oracle-amd64/`, `Oracle/Amd64Main.lean`, `docs/validation/ORACLE-AMD64.md` |
+| differential oracle | `validation/hardware-comparison/amd64/`, `validation/model-runner/Oracle/Amd64Main.lean`, `docs/validation/ORACLE-AMD64.md` |
 | tests | `test/lean/JanusTests/Amd64.lean`, `cmd/janus/amd64_test.go` |
 | proofs | `examples/proofs-amd64/<Function>/Proof.lean` |
 

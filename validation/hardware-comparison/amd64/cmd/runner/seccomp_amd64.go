@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	L "github.com/Giulio2002/Janus/oracle-amd64/layout"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/layout"
 )
 
 // Safety net for executing arbitrary instruction bytes natively on a shared host.

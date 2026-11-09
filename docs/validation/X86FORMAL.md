@@ -38,7 +38,7 @@ the amd64 model or JanusX86.
 
 | | |
 |---|---|
-| model | [rems-project/sail-x86-from-acl2](https://github.com/rems-project/sail-x86-from-acl2) `0c6c023dccc7c20d8d9dbfc481f01d9bb49d62bf` (the commit `oracle-amd64-formal/build.sh` uses) |
+| model | [rems-project/sail-x86-from-acl2](https://github.com/rems-project/sail-x86-from-acl2) `0c6c023dccc7c20d8d9dbfc481f01d9bb49d62bf` (the commit `validation/reference-models/sail-x86/build.sh` uses) |
 | Sail | 0.20.3 with JanusASL's patches (JanusASL's opam switch `sail-0.20.3-janus`, `scripts/asl.sh deps`) |
 | Lean | 4.34.1 (`JanusX86/lean-toolchain`, as the main package) |
 | lean-sail | v7, `8fc8e29d7a62f832346cc7548953e44ec17bc271` |

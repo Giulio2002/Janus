@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Differential test of the Lean x86-64 model (Janus.Amd64.step) against native execution on
-# the x86-64 host (single-stepped, see oracle-amd64/cmd/runner). See docs/validation/ORACLE-AMD64.md.
+# the x86-64 host (single-stepped, see validation/hardware-comparison/amd64/cmd/runner). See docs/validation/ORACLE-AMD64.md.
 #
 #   scripts/oracle-amd64.sh selftest   build, then check the native harness on known answers
 #   scripts/oracle-amd64.sh quick      generated cases only (~100k)
@@ -45,7 +45,7 @@
 # default 40000 full / 15000 quick), K (states per harvested instruction, default 3),
 # PER_CLASS (harvested distinct instructions per modeled class, default 4000), SEED (default 1),
 # FPK (MXCSR settings per FP state, default 3 gen / 2 harvest),
-# MODEL (default .lake/build/bin/janus-oracle-amd64; e.g. MODEL=oracle-amd64/bin/fakemodel
+# MODEL (default .lake/build/bin/janus-oracle-amd64; e.g. MODEL=validation/hardware-comparison/amd64/bin/fakemodel
 # to exercise the pipeline without the Lean model).
 # KEEP: what the run leaves in OUT (scripts/lib/artifacts.sh). Default: summary.md, repro.*,
 # mismatches.jsonl (MISMATCH verdicts, if any) and cases/hw/model/verdicts.jsonl zstd-compressed
@@ -70,10 +70,10 @@ SEED="${SEED:-1}"
 K="${K:-3}"
 PER_CLASS="${PER_CLASS:-4000}"
 MODEL="${MODEL:-$root/.lake/build/bin/janus-oracle-amd64}"
-bin="$root/oracle-amd64/bin"
+bin="$root/validation/hardware-comparison/amd64/bin"
 
 echo "== build"
-(cd "$root/oracle-amd64" &&
+(cd "$root/validation/hardware-comparison/amd64" &&
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o "$bin/runner" ./cmd/runner &&
   CGO_ENABLED=0 go build -o "$bin/oracle" ./cmd/oracle &&
   go build -o "$bin/fakemodel" ./cmd/fakemodel)
@@ -130,7 +130,7 @@ elif [ "$mode" = avx512 ]; then
   echo "== harvest the WP-G (AVX-512, opmask, VPCLMULQDQ, GFNI) instructions of the std test binaries"
   corpus="$bin/corpus-avx512"
   mkdir -p "$corpus"
-  (cd "$root/oracle-amd64" &&
+  (cd "$root/validation/hardware-comparison/amd64" &&
     for p in $avx512pkgs; do
       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
@@ -157,7 +157,7 @@ if [ "$mode" = fp ]; then
   echo "== harvest the FP instructions of the math, strconv and sort test binaries"
   corpus="$bin/corpus-fp"
   mkdir -p "$corpus"
-  (cd "$root/oracle-amd64" &&
+  (cd "$root/validation/hardware-comparison/amd64" &&
     for p in math strconv sort; do
       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
@@ -170,7 +170,7 @@ if [ "$mode" = v3 ]; then
   echo "== harvest the v3-extension instructions of GOAMD64=v3 test binaries"
   corpus="$bin/corpus-v3"
   mkdir -p "$corpus"
-  (cd "$root/oracle-amd64" &&
+  (cd "$root/validation/hardware-comparison/amd64" &&
     for p in $v3pkgs; do
       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v3 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
@@ -186,7 +186,7 @@ if [ "$mode" = x87 ]; then
     command -v "$cc" >/dev/null || continue
     for opt in -O0 -O2 -O3 "-O2 -march=x86-64-v3"; do
       tag="$cc${opt// /}"
-      for src in "$root/oracle-amd64/harvest/x87/ld.c" "$root/scripts/coverage/ccorpus/abi.c"; do
+      for src in "$root/validation/hardware-comparison/amd64/harvest/x87/ld.c" "$root/scripts/coverage/ccorpus/abi.c"; do
         # shellcheck disable=SC2086
         $cc $opt -fPIC -pthread -c -o "$corpus/$(basename "$src" .c)-$tag.o" "$src"
       done
@@ -201,7 +201,7 @@ if [ "$mode" = sse ]; then
   echo "== harvest the WP-D instructions of std test binaries and of gcc/clang-compiled C"
   corpus="$bin/corpus-sse"
   mkdir -p "$corpus"
-  (cd "$root/oracle-amd64" &&
+  (cd "$root/validation/hardware-comparison/amd64" &&
     for p in $ssepkgs; do
       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
@@ -222,7 +222,7 @@ if [ "$mode" = crypto ]; then
   echo "== harvest the WP-E instructions of std test binaries"
   corpus="$bin/corpus-crypto"
   mkdir -p "$corpus"
-  (cd "$root/oracle-amd64" &&
+  (cd "$root/validation/hardware-comparison/amd64" &&
     for p in $cryptopkgs; do
       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
@@ -235,7 +235,7 @@ if [ "$mode" = avx ]; then
   echo "== harvest the WP-F instructions of GOAMD64=v3 std test binaries and of gcc/clang -march=x86-64-v3 C"
   corpus="$bin/corpus-avx"
   mkdir -p "$corpus"
-  (cd "$root/oracle-amd64" &&
+  (cd "$root/validation/hardware-comparison/amd64" &&
     for p in $avxpkgs; do
       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v3 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
@@ -257,7 +257,7 @@ if [ "$mode" = full ]; then
   echo "== harvest corpus (real Go amd64 code)"
   corpus="$bin/corpus"
   mkdir -p "$corpus"
-  (cd "$root/oracle-amd64" &&
+  (cd "$root/validation/hardware-comparison/amd64" &&
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -o "$corpus/bigprog" ./harvest/bigprog &&
     for p in math math/big strconv sort crypto/sha256 bytes strings math/bits encoding/binary sync/atomic; do
       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -o "$corpus/${p//\//_}.test" "$p"

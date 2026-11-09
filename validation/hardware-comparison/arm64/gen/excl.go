@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 
-	L "github.com/Giulio2002/Janus/oracle/layout"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/arm64/layout"
 )
 
 // Exclusive-monitor sequences (class seq.excl): short blocks of load-exclusive /

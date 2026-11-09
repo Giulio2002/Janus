@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 
-	L "github.com/Giulio2002/Janus/oracle-amd64/layout"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/layout"
 )
 
 // AVX-512 (WP-G): EVEX-encoded instructions with the ZMM/opmask state, the VEX opmask

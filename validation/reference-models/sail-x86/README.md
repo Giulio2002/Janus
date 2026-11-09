@@ -29,8 +29,8 @@ it has what this check needs:
 ## How to run
 
 ```
-oracle-amd64-formal/build.sh WORKDIR    # m4 + GMP + private opam root + Sail 0.20.3 + model; ~10 min cold, ~1 min warm
-python3 -I oracle-amd64-formal/compare.py WORKDIR/model-janus/x86_emulator artifacts/oracle-amd64 OUT.json --sample 20000 --jobs 20
+validation/reference-models/sail-x86/build.sh WORKDIR    # m4 + GMP + private opam root + Sail 0.20.3 + model; ~10 min cold, ~1 min warm
+python3 -I validation/reference-models/sail-x86/compare.py WORKDIR/model-janus/x86_emulator artifacts/oracle-amd64 OUT.json --sample 20000 --jobs 20
 ```
 
 Notes on the build:
@@ -158,8 +158,8 @@ sets quadword `j` of `zmms[i]` (`i < 16`, `j < 4`), and `printState` prints `ymm
 registers too, no longer excludes the SSE classes, and `--fs 1` keeps only `64`-prefixed cases:
 
 ```
-python3 -I oracle-amd64-formal/compare.py WORKDIR/model-janus/x86_emulator OUT_DIR fs.json --sample 1000000 --jobs 20 --fs 1
-python3 -I oracle-amd64-formal/compare.py WORKDIR/model-janus/x86_emulator OUT_DIR new.json --sample 1000000 --jobs 20 \
+python3 -I validation/reference-models/sail-x86/compare.py WORKDIR/model-janus/x86_emulator OUT_DIR fs.json --sample 1000000 --jobs 20 --fs 1
+python3 -I validation/reference-models/sail-x86/compare.py WORKDIR/model-janus/x86_emulator OUT_DIR new.json --sample 1000000 --jobs 20 \
   --classes '^(gen/(rcl|rcr|movss|movsd_xmm|movups|movaps|movupd|movapd|movdqu|movdqa|movq|movd|pxor|xorps|xorpd|pcmpeqb|pand|por|pmovmskb|pshufd|pshuflw|punpcklbw|prefetch.*|cld|v.*)|edge/(tls|sse-memmove|sse-align|vec-cmp|vec-align)|harvest/(rcr|movss|movsd_xmm|movups|movdqu|movq|movd|cld|v.*|p.*))$'
 ```
 

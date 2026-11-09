@@ -27,7 +27,7 @@ MODEL_DIR is sail-x86-from-acl2/model at the pinned commit; OUT_DIR receives a c
   and Lean can check the termination measure (termination_measures.sail).
 * **Undefined values.** `undef_read_logic()` (the source of every undefined flag and of the
   undefined rotate results) returns the register `janus_undef` instead of Sail's
-  `undefined`, as oracle-amd64-formal/build.sh does with `undef_val`: the check runs each
+  `undefined`, as validation/reference-models/sail-x86/build.sh does with `undef_val`: the check runs each
   case with 0 and with 1 and treats a flag that differs as undefined.
 """
 import json

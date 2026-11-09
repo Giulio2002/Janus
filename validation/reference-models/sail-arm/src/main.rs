@@ -2,7 +2,7 @@
 //! (rems-project/sail-arm, translated from Arm's ASL), embedded through the
 //! `sail-aarch64-oracle` crate.
 //!
-//! Input: `layout.Case` JSON lines (oracle/layout/layout.go), stdin.
+//! Input: `layout.Case` JSON lines (validation/hardware-comparison/arm64/layout/layout.go), stdin.
 //! Output: `layout.HW` JSON lines (the same format the qemu runner writes), stdout, in input
 //! order, plus a few extra fields (`el`, `esr`, `far`, `ec`, `flags`) that Go's decoder ignores.
 //!
@@ -51,7 +51,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-// ---- layout (must match oracle/layout/layout.go) ----
+// ---- layout (must match validation/hardware-comparison/arm64/layout/layout.go) ----
 const CODE_PAGE: u64 = 0x10_0000_0000;
 const TEST_PC: u64 = CODE_PAGE + 0x800;
 const ENTRY_PAGE: u64 = CODE_PAGE - 0x7F0_0000;

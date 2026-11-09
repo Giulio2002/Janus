@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 
-	L "github.com/Giulio2002/Janus/oracle/layout"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/arm64/layout"
 )
 
 // DCZID is the DCZID_EL0 value written into every case: the reference machine's own (the

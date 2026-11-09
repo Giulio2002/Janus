@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	L "github.com/Giulio2002/Janus/oracle/layout"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/arm64/layout"
 )
 
 type runOpts struct {
@@ -102,7 +102,7 @@ func cmdRun(args []string) {
 	outDir := fs.String("out", "oracle-out", "output directory")
 	var o runOpts
 	fs.StringVar(&o.qemu, "qemu", "/usr/bin/qemu-aarch64", "qemu-aarch64 (empty: run the runner directly, on arm64 hosts)")
-	fs.StringVar(&o.runner, "runner", "oracle/bin/runner", "native runner (GOARCH=arm64)")
+	fs.StringVar(&o.runner, "runner", "validation/hardware-comparison/arm64/bin/runner", "native runner (GOARCH=arm64)")
 	fs.StringVar(&o.model, "model", ".lake/build/bin/janus-oracle", "janus-oracle executable")
 	fs.IntVar(&o.jobs, "j", 16, "parallel shards")
 	fs.IntVar(&o.shard, "shard", 2000, "cases per shard")

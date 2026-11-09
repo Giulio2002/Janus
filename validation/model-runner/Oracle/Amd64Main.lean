@@ -4,7 +4,7 @@ import Lean.Data.Json
 /-!
 # `janus-oracle-amd64`: run `Janus.Amd64.step` on differential-test cases
 
-Reads one JSON test case per line on stdin (`oracle-amd64/layout/layout.go`, `Case`) and
+Reads one JSON test case per line on stdin (`validation/hardware-comparison/amd64/layout/layout.go`, `Case`) and
 prints one JSON result per line (`Model`):
 
 * the initial `State` has the 16 GPRs, the six status flags (all defined), `XMM0`–`XMM15`,
@@ -19,7 +19,7 @@ prints one JSON result per line (`Model`):
   mask of the defined ones, the XMM registers, the upper YMM halves, `MXCSR` and the buffer bytes that
   differ from the initial pattern.
 
-The constants below must match `oracle-amd64/layout/layout.go`.
+The constants below must match `validation/hardware-comparison/amd64/layout/layout.go`.
 -/
 
 open Lean Janus.Amd64

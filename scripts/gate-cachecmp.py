@@ -168,7 +168,7 @@ def hashes(worktree):
                     key = "ir:%s/%s" % (tree, os.path.relpath(p, base).replace(os.sep, "/"))
                     # a symlinked file is RECORDED, never skipped: 'symlink:<target>' differs from any regular file's hash
                     out[key] = "symlink:" + os.readlink(p) if os.path.islink(p) else sha_file(p)
-    drv = os.path.join(worktree, "oracle-sail", "target", "release", "janus-oracle-sail")
+    drv = os.path.join(worktree, "validation", "reference-models", "sail-arm", "target", "release", "janus-oracle-sail")
     if os.path.isfile(drv):
         out["sail-driver"] = sha_file(drv)
     out.update(config(worktree))

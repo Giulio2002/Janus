@@ -1,5 +1,5 @@
 // Package layout is the contract shared by the native runner (cmd/runner, executing on the
-// x86-64 host), the case generator, the comparator and the Lean side (Oracle/Amd64Main.lean,
+// x86-64 host), the case generator, the comparator and the Lean side (validation/model-runner/Oracle/Amd64Main.lean,
 // the `janus-oracle-amd64` executable). Every address here is concrete and fixed, so a test
 // case is a closed, deterministic description of one x86-64 instruction execution.
 //

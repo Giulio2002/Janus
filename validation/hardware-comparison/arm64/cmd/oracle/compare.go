@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	L "github.com/Giulio2002/Janus/oracle/layout"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/arm64/layout"
 )
 
 // Verdicts.

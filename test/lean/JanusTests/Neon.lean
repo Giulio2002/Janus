@@ -5,7 +5,7 @@ import JanusTests.Vector
 # The Advanced SIMD classes of `NeonInstr` on concrete states
 
 One instruction per mnemonic that `decodeNeon` accepts in the oracle corpora (the C harvest of
-`oracle/harvest/neon` and the targeted classes), each run under `qemu-aarch64 -cpu max` by the
+`validation/hardware-comparison/arm64/harvest/neon` and the targeted classes), each run under `qemu-aarch64 -cpu max` by the
 oracle runner from the state `JanusTests.Vector.stv` (`V[i]` = the bytes `16i .. 16i+15`, the
 general registers of `JanusTests.Exec.st`, a load/store base register pointing at `dataBase +
 0x100`, `FPCR = 0`); every `example` states the hardware's result and is re-checked by the kernel

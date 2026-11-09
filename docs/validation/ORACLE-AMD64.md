@@ -337,7 +337,7 @@ status word with sticky flags, the condition codes, and now and then a pending u
 exception). Plus `NOTRACK` (`3E`, alone, with another segment prefix, `66`, `REX`) on `FF /2`,
 `FF /4`, the `66 66 48 E8` call and its neighbours (`66 E8`, `66 66 E8`, `66 66 40 E8`, three
 `66`s), the `data16 lea` of the general-dynamic sequence, `3E E8`; and the harvest: every x87,
-`JMP` and `CALL` instruction of `oracle-amd64/harvest/x87/ld.c` and the C corpus's `abi.c`
+`JMP` and `CALL` instruction of `validation/hardware-comparison/amd64/harvest/x87/ld.c` and the C corpus's `abi.c`
 compiled by gcc and clang at `-O0`, `-O2`, `-O3` and `-O2 -march=x86-64-v3` (`X87_K` states
 each). The runner loads the case's x87 state with `FXRSTOR64` (an image repeating the case's
 `XMM` and `MXCSR`) and reads it back from the signal frame's fxsave area; the comparison covers
@@ -371,7 +371,7 @@ undefined).
 ### SSE packed instructions (WP-D, 2026-10-25)
 
 The SSE2/SSE3/SSSE3/SSE4.1/SSE4.2 packed instructions of `Janus/Amd64/ExecSSE.lean`.
-`scripts/oracle-amd64.sh sse` runs the targeted specs (`gen.SSESpecs`, `oracle-amd64/gen/sse.go`:
+`scripts/oracle-amd64.sh sse` runs the targeted specs (`gen.SSESpecs`, `validation/hardware-comparison/amd64/gen/sse.go`:
 every modelled `66 0F xx` packed-integer opcode in register and memory forms with its MMX and
 `F3` neighbours, the shift groups `66 0F 71/72/73` with every `/r`, the `MOVLPS`/`MOVHLPS`/
 `MOVHPS`/`MOVLHPS`/`MOVDDUP`/`MOVSLDUP`/`MOVSHDUP` opcodes under every mandatory prefix, the
@@ -419,7 +419,7 @@ for `PTEST`, `PALIGNR`, `PMULLD`, `ROUNDPS` (aligned) and `PCMPESTRI`, `PMOVSX` 
 
 AES-NI, `PCLMULQDQ`, SHA-NI and ADX (`Janus/Amd64/ExecCrypto.lean`), on a host with all four
 features (`grep -o 'aes\|pclmulqdq\|sha_ni\|adx' /proc/cpuinfo`). `scripts/oracle-amd64.sh
-crypto` runs the targeted specs (`gen.CryptoSpecs`, `oracle-amd64/gen/crypto.go`: every AES-NI
+crypto` runs the targeted specs (`gen.CryptoSpecs`, `validation/hardware-comparison/amd64/gen/crypto.go`: every AES-NI
 opcode `66 0F 38 DB..DF` and `66 0F 3A DF`, `PCLMULQDQ`, the SHA-NI opcodes `NP 0F 38 C8..CD` and
 `NP 0F 3A CC`, register and memory forms with random `REX` (`REX.W` is ignored), and their
 neighbours under the other mandatory prefixes and unallocated opcodes; `ADCX`/`ADOX` at both
@@ -455,7 +455,7 @@ FIPS 180-4 vectors and the Intel AES-NI white paper examples in the kernel.
 ### AVX, AVX2, FMA3 and F16C (WP-F, 2026-10-25)
 
 The VEX-encoded instructions of `Janus/Amd64/ExecAVX.lean`. `scripts/oracle-amd64.sh avx` runs
-the targeted specs (`gen.AVXSpecs`, `oracle-amd64/gen/avx.go`: every map-`0F`, `0F38` and `0F3A`
+the targeted specs (`gen.AVXSpecs`, `validation/hardware-comparison/amd64/gen/avx.go`: every map-`0F`, `0F38` and `0F3A`
 opcode of WP-F under every implied prefix it exists with, in register and memory forms, with
 `VEX.L`, `VEX.W` and the register fields uniform, `VEX.vvvv` uniform for the three-operand forms
 and mostly `1111` otherwise, sometimes a stray legacy prefix, another map or `pp`, the 2-byte form
@@ -507,7 +507,7 @@ Intel Xeon Gold 5412U, Sapphire Rapids, with AVX512F/BW/DQ/VL/CD, VBMI, VBMI2, B
 VPOPCNTDQ, IFMA, VNNI, BF16, FP16, GFNI, VAES and VPCLMULQDQ); no emulator. `scripts/oracle-amd64.sh
 avx512` runs:
 
-* the targeted specs (`gen.Evex512Specs`, `oracle-amd64/gen/avx512.go`): every opcode of the
+* the targeted specs (`gen.Evex512Specs`, `validation/hardware-comparison/amd64/gen/avx512.go`): every opcode of the
   decoder's table under its map and implied prefix, plus the rejected neighbours (the `X2`
   broadcasts before they were added, the shift-group extensions without an instruction, the scalar
   forms), with `EVEX.R/X/B/R'` random, `EVEX.W` per the SDM (random 1 in 16), `vvvv`/`V'` random
@@ -577,22 +577,22 @@ scripts/oracle-amd64.sh avx512     # the AVX-512 instructions of WP-G only (EVEX
 
 Knobs: `OUT` (default `artifacts/oracle-amd64`), `JOBS` (default 16, capped at 24), `N`
 (encodings per targeted spec), `GROUP` (random strings), `K` (states per harvested
-instruction), `PER_CLASS`, `SEED`, `MODEL` (`MODEL=oracle-amd64/bin/fakemodel` exercises the
+instruction), `PER_CLASS`, `SEED`, `MODEL` (`MODEL=validation/hardware-comparison/amd64/bin/fakemodel` exercises the
 pipeline without Lean), `KEEP` (what the run leaves in `OUT`: by default `summary.md`,
 `repro.*`, `mismatches.jsonl` and the cases, hardware, model and verdict dumps zstd-compressed,
 with the generated and harvested inputs removed; `KEEP=zst` compresses everything, `KEEP=1`
 keeps everything raw; see docs/validation/ORACLE.md and `scripts/lib/artifacts.sh`). After a model change
 the native side can be reused (decompress `hw.jsonl.zst` in `DIR` first):
-`oracle-amd64/bin/oracle run -reuse-native -runner oracle-amd64/bin/runner -model .lake/build/bin/janus-oracle-amd64 -cases A,B -out DIR`.
+`validation/hardware-comparison/amd64/bin/oracle run -reuse-native -runner validation/hardware-comparison/amd64/bin/runner -model .lake/build/bin/janus-oracle-amd64 -cases A,B -out DIR`.
 `oracle minimize -out DIR` shrinks mismatching cases into `repro.md`/`repro.jsonl`. A full run
 takes about 90 s, including the corpus build.
 `oracle harvest -only REGEX` keeps only the harvested instructions whose class matches (with a
 large `-k`, e.g. `-k 200 -per-class 0 -only '^(v.*|pcmpeqb|pand|...)$'` for the vector run
 above), and `-fs` only the `FS`-prefixed ones.
 
-Pieces: `oracle-amd64/` (a separate Go module: `layout/` is the contract, `cmd/runner` the
+Pieces: `validation/hardware-comparison/amd64/` (a separate Go module: `layout/` is the contract, `cmd/runner` the
 native executor, `cmd/oracle` the gen/harvest/run/compare/minimize/selftest driver, `gen/` the
-generators) and `Oracle/Amd64Main.lean` (the `janus-oracle-amd64` executable).
+generators) and `validation/model-runner/Oracle/Amd64Main.lean` (the `janus-oracle-amd64` executable).
 
 ## What a case is
 
@@ -617,7 +617,7 @@ an encoding is longer than the bytes a random case supplies.
 
 ## How the native side observes one instruction
 
-`oracle-amd64/cmd/runner` (Go, `GOARCH=amd64`) runs all cases of a shard in one process:
+`validation/hardware-comparison/amd64/cmd/runner` (Go, `GOARCH=amd64`) runs all cases of a shard in one process:
 
 1. The trampoline (`trampoline_amd64.s`) saves the host's callee state and its own `FS` base
    (`RDFSBASE`) in the context page, sets the case's `FS` base (`WRFSBASE`; the runner checks
@@ -674,7 +674,7 @@ restarted after the failing case, which is recorded as `error`.
   real Go amd64 binaries, decoded by a linear sweep of each function with
   `golang.org/x/arch/x86/x86asm`. The binaries are a program using `math/big`,
   `crypto/sha256`, `sort`, `encoding/json`, `regexp`, `compress/flate`, ...
-  (`oracle-amd64/harvest/bigprog`), `go test -c` binaries of `math/big strconv sort
+  (`validation/hardware-comparison/amd64/harvest/bigprog`), `go test -c` binaries of `math/big strconv sort
   crypto/sha256 bytes strings math/bits encoding/binary sync/atomic`, and `artifacts/examples-amd64`.
   Each modelled class is capped at `PER_CLASS` (uniformly sampled) and each instruction runs
   under `K` random states. Instructions outside the subset are sampled sparsely
@@ -719,7 +719,7 @@ restarted after the failing case, which is recorded as `error`.
 
 ## What agreement means
 
-The comparator is `oracle-amd64/cmd/oracle/compare.go`.
+The comparator is `validation/hardware-comparison/amd64/cmd/oracle/compare.go`.
 
 | hardware | model | verdict |
 |---|---|---|
@@ -781,7 +781,7 @@ The Sail translation of the ACL2 X86isa model (`rems-project/sail-x86-from-acl2`
 `0c6c023`, Sail 0.20.3) is built into a single-step emulator and run on a stratified sample
 of 20,000 integer cases. This mainly checks something hardware cannot show: *which flags are
 undefined*. Each case runs twice, with the formal model's undefined flags drawn as 0 and as 1.
-Build, driver and analysis are in `oracle-amd64-formal/` (`README.md`, `build.sh`,
+Build, driver and analysis are in `validation/reference-models/sail-x86/` (`README.md`, `build.sh`,
 `compare.py`). On the final model:
 
 | | cases |

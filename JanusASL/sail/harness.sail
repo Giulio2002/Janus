@@ -27,7 +27,7 @@ enum JanusOutcome = {
 
 register __janus_impdef : string
 
-/* Linux EL0 configuration (the same values as oracle-sail/src/main.rs, written directly
+/* Linux EL0 configuration (the same values as validation/reference-models/sail-arm/src/main.rs, written directly
  * instead of by stepping MSR at EL3 / ERET). */
 function janus_init() -> unit = {
     __InitSystem();

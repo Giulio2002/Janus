@@ -7,15 +7,15 @@ import Lean.Data.Json
 # `janus-x86-check`: Janus `Amd64.step` against the Sail x86 model, both in compiled Lean
 
 For every case of the amd64 oracle corpus (`artifacts/oracle-amd64/cases.jsonl`, format of
-`oracle-amd64/layout/layout.go`), run
+`validation/hardware-comparison/amd64/layout/layout.go`), run
 
 * the **Sail side**: `X86Sail.Functions.janus_x86_step` (rems-project/sail-x86-from-acl2, the
   Sail translation of ACL2 X86isa, sliced to the opcodes Janus decodes and translated to Lean
   by Sail's Lean backend, `JanusX86/sail/`), from `janus_x86_init` (64-bit mode, CPL 3,
   application-level memory view), with the code page and the data buffer in the Sail memory,
   **twice**: with the model's undefined-value source returning 0 and 1 (a flag or register that
-  differs between the two runs is undefined in the model, as in `oracle-amd64-formal/compare.py`);
-* the **Janus side**: `Janus.Amd64.step` from the state `Oracle/Amd64Main.lean` builds,
+  differs between the two runs is undefined in the model, as in `validation/reference-models/sail-x86/compare.py`);
+* the **Janus side**: `Janus.Amd64.step` from the state `validation/model-runner/Oracle/Amd64Main.lean` builds,
 
 and compare. This is a *test* (compiled evaluation), not a proof. See `docs/validation/X86FORMAL.md`.
 
@@ -46,7 +46,7 @@ open X86Sail X86Sail.Functions
 
 namespace JanusX86.Check
 
-/-! ## Layout (`oracle-amd64/layout/layout.go`) -/
+/-! ## Layout (`validation/hardware-comparison/amd64/layout/layout.go`) -/
 
 def codePage : Nat := 0x10_0000_0000
 def testPC : Nat := codePage + 0x800
@@ -56,7 +56,7 @@ def pageSize : Nat := 4096
 
 def pattern (seed i : Nat) : Nat := (i * 157 + seed * 89 + (i / 256) * 41 + 7) % 256
 
-/-! ## Case parsing (as `Oracle/Amd64Main.lean`) -/
+/-! ## Case parsing (as `validation/model-runner/Oracle/Amd64Main.lean`) -/
 
 def hexDigit? (c : Char) : Option Nat :=
   if '0' ≤ c ∧ c ≤ '9' then some (c.toNat - '0'.toNat)
@@ -237,7 +237,7 @@ def runSail (pre : SState) (undef : Nat) : SailResult × Option SState := Id.run
       let stray := if s2.mem.size = pre.mem.size then stray else stray ++ [0]
       return (.ok { regs := rs, rip, rflags := fl, ymm := ys, mem, stray }, some s2)
 
-/-! ## The Janus side (as `Oracle/Amd64Main.lean`) -/
+/-! ## The Janus side (as `validation/model-runner/Oracle/Amd64Main.lean`) -/
 
 open Janus.Amd64 in
 def janusInit (c : Case) (initArr : Array Nat) : State :=
@@ -492,7 +492,7 @@ def main (args : List String) : IO UInt32 := do
   let hwLines ← if (← System.FilePath.pathExists hwPath) then IO.FS.lines hwPath else pure #[]
   let mut hwById : Std.HashMap Nat String := {}
   for l in hwLines do
-    -- every record starts with `{"id":N,` (oracle-amd64/layout/layout.go field order)
+    -- every record starts with `{"id":N,` (validation/hardware-comparison/amd64/layout/layout.go field order)
     let fast := if l.startsWith "{\"id\":" then ((l.drop 6).takeWhile Char.isDigit).toString.toNat? else none
     match fast <|> (Json.parse l).toOption.bind (fun j => (j.getObjValAs? Nat "id").toOption) with
     | some id => hwById := hwById.insert id l

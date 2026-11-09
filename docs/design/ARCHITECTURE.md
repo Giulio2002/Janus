@@ -251,8 +251,8 @@ imports `Extracted` either way.
 | `Janus.Tools.Audit` | `janus-audit`: theorem lookup, axiom collection, statement rules, clean-environment printing | **yes** |
 | `Janus.Tools.Decode` | `janus-decode`: runs the arm64 decoder over words, for `janus blockers` | (uses the trusted decoder) |
 
-Outside the framework: `JanusTests` (concrete-execution and tactic tests), `Oracle/Main.lean` and
-`Oracle/Amd64Main.lean` (the Lean side of the differential oracles), and `JanusASL/` (work in progress
+Outside the framework: `JanusTests` (concrete-execution and tactic tests), `validation/model-runner/Oracle/Main.lean` and
+`validation/model-runner/Oracle/Amd64Main.lean` (the Lean side of the differential oracles), and `JanusASL/` (work in progress
 on an ASL-derived check).
 
 ### Go (`cmd/janus`)
@@ -274,13 +274,13 @@ on an ASL-derived check).
 | `consumer.go`, `batch.go`, `init.go` | consumer Lake packages, `verify-batch`, `janus init` | |
 | `explain.go`, `blockers.go` | `janus explain`, `janus blockers` | |
 
-### Oracles and audit
+### Reference validation and red team
 
 | Directory | What it is |
 |---|---|
-| `oracle/` | arm64 differential oracle vs qemu or native hardware ([ORACLE.md](../validation/ORACLE.md)) |
-| `oracle-sail/` | the same corpus on the Sail arm-v9.4-a model of Arm's ASL ([ORACLE-SAIL.md](../validation/ORACLE-SAIL.md)) |
-| `oracle-amd64/`, `oracle-amd64-formal/` | amd64 oracle on the host CPU, and the Sail/ACL2 X86isa flag cross-check ([ORACLE-AMD64.md](../validation/ORACLE-AMD64.md)) |
+| `validation/hardware-comparison/arm64/` | arm64 differential comparison vs qemu or native hardware ([ORACLE.md](../validation/ORACLE.md)) |
+| `validation/reference-models/sail-arm/` | the same corpus on the Sail arm-v9.4-a model of Arm's ASL ([ORACLE-SAIL.md](../validation/ORACLE-SAIL.md)) |
+| `validation/hardware-comparison/amd64/`, `validation/reference-models/sail-x86/` | amd64 oracle on the host CPU, and the Sail/ACL2 X86isa flag cross-check ([ORACLE-AMD64.md](../validation/ORACLE-AMD64.md)) |
 | `test/redteam/` | the attack files behind [AUDIT.md](../audit/AUDIT.md) and `run-all.sh` |
 
 ## Where the trust boundary runs inside `janus verify`

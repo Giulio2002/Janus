@@ -827,7 +827,7 @@ rounds restored 41, 80, 80, 80 and 6 modules whole and the rest not at all, neve
 
 Both sides start from the corpus case's registers, flags, V registers, TPIDR_EL0 and data buffer.
 The ASL state is `sail_model_init` followed by `janus_init`. That is the Linux EL0 setup of
-`oracle-sail/src/main.rs`: `__InitSystem`, EL0 AArch64 with the MMU on, and a 4-level identity
+`validation/reference-models/sail-arm/src/main.rs`: `__InitSystem`, EL0 AArch64 with the MMU on, and a 4-level identity
 map of the code page and the 4 KiB data buffer, built from the same page tables. Janus' DCZID is
 taken from the ASL's DCZID_EL0 (0x8). Each case is one `janus_step`, compared on X0–X30, SP, PC,
 NZCV, V0–V31, memory (the data buffer, and no other ASL byte changed) and the fault class. An

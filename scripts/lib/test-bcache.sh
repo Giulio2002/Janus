@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests of the build-cache integrity layer (scripts/lib/bcache.py), the per-module cache
-# (JanusASL/tools/asl_mod_cache.py) and the cache keys (asl_cache_key.py, oracle-sail/cache_key.py):
+# (JanusASL/tools/asl_mod_cache.py) and the cache keys (asl_cache_key.py, validation/reference-models/sail-arm/cache_key.py):
 # a tampered file, manifest or HMAC is rejected and rebuilt, a changed input changes the key, a
 # concurrent double build stays consistent. Seconds; everything happens in mktemp directories.
 #
@@ -179,7 +179,7 @@ ln -s "$t/lk/victim/target" "$t/lk/cache/sail/$K.use"; B fetch sail "$t/lk/cache
 echo; echo "-- keys: a changed input is a different key"
 cp_tree() { rm -rf "$1"; mkdir -p "$1"; rsync -a --exclude=.git --exclude=.lake --exclude=artifacts --exclude=target --exclude=ArmASL --exclude=ArmASL.lean --exclude=bin "$root/" "$1/"; }
 cp_tree "$t/k"
-skey() { python3 -I "$1/oracle-sail/cache_key.py" "$1" --pins crate_rev=x sail_model=vendored; }
+skey() { python3 -I "$1/validation/reference-models/sail-arm/cache_key.py" "$1" --pins crate_rev=x sail_model=vendored; }
 akey() { python3 -I "$1/JanusASL/tools/asl_cache_key.py" "$1"; }
 sk0=$(skey "$t/k"); ak0=$(akey "$t/k")
 [ "$sk0" = "$(skey "$t/k")" ] && ok "sail key is deterministic" || bad "sail key unstable"
@@ -188,11 +188,11 @@ chk() {  # chk DESC KEYFN EDIT-CMD
   local a b; a=$($2 "$t/k") ; b=$($2 "$t/k2")
   if [ "$a" != "$b" ]; then ok "key changes: $1"; else bad "key unchanged: $1"; fi
 }
-chk "sail driver source" skey 'echo "// x" >> oracle-sail/src/main.rs'
-chk "Cargo.lock" skey 'echo "# x" >> oracle-sail/Cargo.lock'
-chk "Cargo.toml" skey 'echo "# x" >> oracle-sail/Cargo.toml'
-chk "the model instrumenter" skey 'echo "# x" >> oracle-sail/instrument_model.py'
-chk "a cargo config" skey 'mkdir -p oracle-sail/.cargo; echo "[build]" > oracle-sail/.cargo/config.toml'
+chk "sail driver source" skey 'echo "// x" >> validation/reference-models/sail-arm/src/main.rs'
+chk "Cargo.lock" skey 'echo "# x" >> validation/reference-models/sail-arm/Cargo.lock'
+chk "Cargo.toml" skey 'echo "# x" >> validation/reference-models/sail-arm/Cargo.toml'
+chk "the model instrumenter" skey 'echo "# x" >> validation/reference-models/sail-arm/instrument_model.py'
+chk "a cargo config" skey 'mkdir -p validation/reference-models/sail-arm/.cargo; echo "[build]" > validation/reference-models/sail-arm/.cargo/config.toml'
 chk_env() { local a b; a=$($2 "$t/k"); b=$(export "$3"; $2 "$t/k"); [ "$a" != "$b" ] && ok "key changes: $1" || bad "key unchanged: $1"; }
 chk_env "RUSTFLAGS" skey RUSTFLAGS=-Cdebuginfo=2
 chk_env "CXXFLAGS" skey CXXFLAGS=-O0

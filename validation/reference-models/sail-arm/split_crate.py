@@ -4,7 +4,7 @@
 usage: split_crate.py CRATE_CHECKOUT DEST ORIG_BUILD_RS_SHA256 PATCHED_BUILD_RS_SHA256 PATCH
 
 CRATE_CHECKOUT is the crate at its pinned git revision (scripts/oracle-sail.sh fetch_crate). DEST/sail-aarch64-oracle
-becomes a copy of it in which ONLY build.rs differs: `patch` applies oracle-sail/build.rs.patch (an opt-in
+becomes a copy of it in which ONLY build.rs differs: `patch` applies validation/reference-models/sail-arm/build.rs.patch (an opt-in
 AARCH64_ORACLE_SAIL_MODEL_PARTS=<dir>: compile <dir>/model_part_*.cpp instead of the one model.cpp; nothing else changes),
 and both build.rs hashes are pinned. DEST/config.toml is a cargo `--config` file replacing the crate's git source with
 this directory (cargo's directory-source mechanism, as `cargo vendor` writes it): Cargo.lock is untouched and

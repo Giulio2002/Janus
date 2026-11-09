@@ -1,4 +1,4 @@
-module github.com/Giulio2002/Janus/oracle-amd64
+module github.com/Giulio2002/Janus/validation/hardware-comparison/amd64
 
 go 1.26.0
 

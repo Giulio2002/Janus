@@ -14,7 +14,7 @@ targets=("$@"); [ ${#targets[@]} -gt 0 ] || targets=(ArmASL.Defs ArmASL.FakeReal
 work=$(mktemp -d /srv/janus-ops/work.XXXX); trap 'rm -rf "$work"' EXIT
 co="$work/co"; tree="$co/JanusASL"   # the package requires the framework by path (..): a full checkout layout
 mkdir -p "$co"
-rsync -a --exclude=.git --exclude=.lake --exclude=artifacts --exclude=target --exclude=bin --exclude=JanusX86 --exclude=oracle-sail "$root/" "$co/" || exit 1
+rsync -a --exclude=.git --exclude=.lake --exclude=artifacts --exclude=target --exclude=bin --exclude=JanusX86 --exclude=sail-arm "$root/" "$co/" || exit 1
 (cd "$tree" && tar -xzf vendor/ArmASL.tar.gz && touch ArmASL.lean) || exit 1
 run() { # run THREADS OUTFILE: a clean .lake each time, the same path
   rm -rf "$tree/.lake"

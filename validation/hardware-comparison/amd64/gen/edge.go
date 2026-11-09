@@ -3,7 +3,7 @@ package gen
 import (
 	"math/rand/v2"
 
-	L "github.com/Giulio2002/Janus/oracle-amd64/layout"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/layout"
 )
 
 // EdgeCase is a hand-targeted encoding with a state chosen to hit a corner of its semantics.

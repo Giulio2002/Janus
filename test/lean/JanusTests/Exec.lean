@@ -4,7 +4,7 @@ import Janus.Arm64.Exec
 # Executor tests on concrete states
 
 The expected results below were produced by running each instruction under `qemu-aarch64`
-with the oracle runner (`oracle/bin/runner`) from the same initial state, so every
+with the oracle runner (`validation/hardware-comparison/arm64/bin/runner`) from the same initial state, so every
 `example` is a hardware-vs-model agreement check, re-checked by the Lean kernel (`decide`).
 
 Initial state (`st overrides sp nzcv`): `X[i] = (i + 1) * 0x0123456789ABCDEF mod 2^64` unless

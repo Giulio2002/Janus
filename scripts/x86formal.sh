@@ -43,7 +43,7 @@ here="$pkg/sail"
 
 # ---- pins (keep in sync with docs/validation/X86FORMAL.md) ----
 X86_URL=https://github.com/rems-project/sail-x86-from-acl2
-X86_REV=0c6c023dccc7c20d8d9dbfc481f01d9bb49d62bf   # Nov 2024; the commit oracle-amd64-formal/build.sh uses
+X86_REV=0c6c023dccc7c20d8d9dbfc481f01d9bb49d62bf   # Nov 2024; the commit validation/reference-models/sail-x86/build.sh uses
 SWITCH=sail-0.20.3-janus                          # JanusASL's opam switch (Sail 0.20.3 + patches)
 VENDOR="$pkg/vendor/X86Sail.tar.gz"
 

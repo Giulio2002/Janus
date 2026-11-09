@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 
-	L "github.com/Giulio2002/Janus/oracle-amd64/layout"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/layout"
 	"golang.org/x/arch/x86/x86asm"
 )
 

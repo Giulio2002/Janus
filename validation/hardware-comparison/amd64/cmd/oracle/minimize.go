@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	L "github.com/Giulio2002/Janus/oracle-amd64/layout"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/layout"
 )
 
 // cmdMinimize shrinks one mismatching case per distinct encoding: it repeatedly tries to
@@ -19,7 +19,7 @@ func cmdMinimize(args []string) {
 	outDir := fs.String("out", "oracle-out", "output directory of a previous run")
 	maxN := fs.Int("max", 100, "distinct mismatching encodings to minimize")
 	var o runOpts
-	fs.StringVar(&o.runner, "runner", "oracle-amd64/bin/runner", "native runner")
+	fs.StringVar(&o.runner, "runner", "validation/hardware-comparison/amd64/bin/runner", "native runner")
 	fs.StringVar(&o.model, "model", ".lake/build/bin/janus-oracle-amd64", "janus-oracle-amd64 executable")
 	fs.Parse(args)
 	cases := readJSONL[L.Case](filepath.Join(*outDir, "cases.jsonl"))

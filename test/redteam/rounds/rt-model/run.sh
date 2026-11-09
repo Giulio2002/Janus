@@ -23,14 +23,14 @@ fail=0
 
 echo "== build janus + oracle drivers + Lean models"
 CGO_ENABLED=0 go build -o "$work/janus" ./cmd/janus
-(cd oracle-amd64 && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o bin/runner ./cmd/runner && CGO_ENABLED=0 go build -o bin/oracle ./cmd/oracle)
-(cd oracle       && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/runner ./cmd/runner && CGO_ENABLED=0 go build -o bin/oracle ./cmd/oracle)
+(cd validation/hardware-comparison/amd64 && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o bin/runner ./cmd/runner && CGO_ENABLED=0 go build -o bin/oracle ./cmd/oracle)
+(cd validation/hardware-comparison/arm64 && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/runner ./cmd/runner && CGO_ENABLED=0 go build -o bin/oracle ./cmd/oracle)
 lake build janus-oracle janus-oracle-amd64 >/dev/null
 MDL64="$root/.lake/build/bin/janus-oracle-amd64"
 MDLA64="$root/.lake/build/bin/janus-oracle"
 
 run_amd64 () { # name casesfile
-  GODEBUG=asyncpreemptoff=1 ./oracle-amd64/bin/runner < "$2" > "$work/$1.hw" 2>"$work/$1.err" || true
+  GODEBUG=asyncpreemptoff=1 ./validation/hardware-comparison/amd64/bin/runner < "$2" > "$work/$1.hw" 2>"$work/$1.err" || true
   "$MDL64" < "$2" > "$work/$1.md"
   local line; line=$(python3 "$here/cmp.py" "$work/$1.hw" "$work/$1.md" "$2" | head -1)
   echo "  $1: $line"
@@ -51,10 +51,10 @@ done
 
 echo "== SEQ arm64 (qemu; straight-line blocks incl. FP/SIMD)"
 if command -v qemu-aarch64 >/dev/null 2>&1; then
-  dczid=$(GODEBUG=asyncpreemptoff=1 qemu-aarch64 ./oracle/bin/runner -dczid)
+  dczid=$(GODEBUG=asyncpreemptoff=1 qemu-aarch64 ./validation/hardware-comparison/arm64/bin/runner -dczid)
   for s in $SEEDS; do
     python3 "$here/a64seq.py" "$AN" "$s" "$work/a64-$s.jsonl" "$dczid"
-    GODEBUG=asyncpreemptoff=1 qemu-aarch64 ./oracle/bin/runner < "$work/a64-$s.jsonl" > "$work/a64-$s.hw" 2>"$work/a64-$s.err" || true
+    GODEBUG=asyncpreemptoff=1 qemu-aarch64 ./validation/hardware-comparison/arm64/bin/runner < "$work/a64-$s.jsonl" > "$work/a64-$s.hw" 2>"$work/a64-$s.err" || true
     "$MDLA64" < "$work/a64-$s.jsonl" > "$work/a64-$s.md"
     line=$(python3 "$here/a64cmp.py" "$work/a64-$s.hw" "$work/a64-$s.md" "$work/a64-$s.jsonl" | head -1)
     echo "  arm64-seq$s: $line"
@@ -62,7 +62,7 @@ if command -v qemu-aarch64 >/dev/null 2>&1; then
   done
   # arm64 FP-threading batch (fpsr cumulative flags + V registers across steps)
   python3 "$here/a64seq.py" "$AN" 9 "$work/a64fp.jsonl" "$dczid" fp
-  GODEBUG=asyncpreemptoff=1 qemu-aarch64 ./oracle/bin/runner < "$work/a64fp.jsonl" > "$work/a64fp.hw" 2>/dev/null || true
+  GODEBUG=asyncpreemptoff=1 qemu-aarch64 ./validation/hardware-comparison/arm64/bin/runner < "$work/a64fp.jsonl" > "$work/a64fp.hw" 2>/dev/null || true
   "$MDLA64" < "$work/a64fp.jsonl" > "$work/a64fp.md"
   line=$(python3 "$here/a64cmp.py" "$work/a64fp.hw" "$work/a64fp.md" "$work/a64fp.jsonl" | head -1)
   echo "  arm64-fp: $line"

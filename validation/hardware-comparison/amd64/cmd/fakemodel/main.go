@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"os"
 
-	L "github.com/Giulio2002/Janus/oracle-amd64/layout"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/layout"
 )
 
 func main() {

@@ -13,7 +13,7 @@ copy) in a pin store of their own, and the pin RECORD binds the entry to the exa
     <PIN>/.pin-write.lock             held by the (only) writer
 
 The pin store is NOT the build cache (the collector of asl_mod_cache.py never sees it, a cached run never writes it).
-The key is the build-cache key of the model inputs (asl_cache_key.py / oracle-sail/cache_key.py): a change of any
+The key is the build-cache key of the model inputs (asl_cache_key.py / validation/reference-models/sail-arm/cache_key.py): a change of any
 model input (sources, toolchain, environment, key scheme) is a different key, so the pin of the old key is not
 found: STALE.
 

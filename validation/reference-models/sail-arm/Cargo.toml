@@ -2,7 +2,7 @@
 name = "janus-oracle-sail"
 version = "0.1.0"
 edition = "2021"
-description = "Run Janus oracle cases (oracle/layout) on the Sail arm-v9.4-a (Arm ASL) model at EL0"
+description = "Run Janus oracle cases (validation/hardware-comparison/arm64/layout) on the Sail arm-v9.4-a (Arm ASL) model at EL0"
 publish = false
 
 [[bin]]

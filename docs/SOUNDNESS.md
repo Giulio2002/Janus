@@ -696,7 +696,7 @@ the proofs are checked by the kernel replay of the `.olean`s, and `janus-asl-che
   `lean-sail` package, as `lake build ArmASL` leaves them;
 * `mod`: the build outputs of one Lean module of the JanusASL package or of the Janus framework
   (`.olean`, `.ilean`, `.trace`, `.hash`, C and objects);
-* `sail`: the one binary `oracle-sail/target/release/janus-oracle-sail` (the Sail C model driver).
+* `sail`: the one binary `validation/reference-models/sail-arm/target/release/janus-oracle-sail` (the Sail C model driver).
 
 No check result, no theorem, no audit output and no replay marker is cached by this layer. Every
 check still runs on every invocation: `scripts/asl.sh prove` still has Lake check every JanusASL
@@ -708,7 +708,7 @@ not a cached outcome. A restored `.olean` is the same bytes that a build of the 
 produces (the key below), and the kernel replay re-checks them anyway.
 
 **The key is a hash of every input.** An entry lives at a path named by the SHA-256 of
-(`JanusASL/tools/asl_cache_key.py`, `asl_mod_cache.py`, `oracle-sail/cache_key.py`):
+(`JanusASL/tools/asl_cache_key.py`, `asl_mod_cache.py`, `validation/reference-models/sail-arm/cache_key.py`):
 
 * the sources: the vendored model tarball's digest, each module's source file by content, the
   Sail driver's `Cargo.toml`/`Cargo.lock`/`src/**`, the pinned crate revision and model digest,

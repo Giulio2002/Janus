@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	L "github.com/Giulio2002/Janus/oracle/layout"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/arm64/layout"
 )
 
 // cmdMinimize shrinks one mismatching case per distinct word: it repeatedly tries to set
@@ -20,7 +20,7 @@ func cmdMinimize(args []string) {
 	maxWords := fs.Int("max", 100, "distinct mismatching words to minimize")
 	var o runOpts
 	fs.StringVar(&o.qemu, "qemu", "/usr/bin/qemu-aarch64", "qemu-aarch64")
-	fs.StringVar(&o.runner, "runner", "oracle/bin/runner", "native runner")
+	fs.StringVar(&o.runner, "runner", "validation/hardware-comparison/arm64/bin/runner", "native runner")
 	fs.StringVar(&o.model, "model", ".lake/build/bin/janus-oracle", "janus-oracle executable")
 	fs.Parse(args)
 	cases := readJSONL[L.Case](filepath.Join(*outDir, "cases.jsonl"))

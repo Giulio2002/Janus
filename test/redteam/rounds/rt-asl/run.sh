@@ -185,7 +185,7 @@ grp_fsqrt() {
   mkdir -p "$W/fsqrt"
   if python3 -I "$here/sqrt/gen_cases.py" > "$W/fsqrt/cases.jsonl" &&
      scripts/oracle-sail.sh build > "$W/fsqrt/osb.log" 2>&1 &&
-     JANUS_SAIL_JOBS=8 "$root/oracle-sail/target/release/janus-oracle-sail" < "$W/fsqrt/cases.jsonl" > "$W/fsqrt/c.jsonl" &&
+     JANUS_SAIL_JOBS=8 "$root/validation/reference-models/sail-arm/target/release/janus-oracle-sail" < "$W/fsqrt/cases.jsonl" > "$W/fsqrt/c.jsonl" &&
      (cd "$root/JanusASL" && memguard_lake build janus-asl-check > "$W/fsqrt/build.log" 2>&1 &&
       fsqrt_dump_parallel "$W/fsqrt/cases.jsonl" "$W/fsqrt/lean.jsonl" "$W/fsqrt/lean.err"); then
     if python3 -I "$here/sqrt/compare.py" "$W/fsqrt/cases.jsonl" "$W/fsqrt/lean.jsonl" "$W/fsqrt/c.jsonl" > "$W/fsqrt/cmp.txt"; then

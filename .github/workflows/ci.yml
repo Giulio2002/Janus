@@ -255,7 +255,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: |
             go.sum
-            oracle-amd64/go.sum
+            validation/hardware-comparison/amd64/go.sum
 
       - name: Install bubblewrap
         run: |

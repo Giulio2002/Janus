@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the Sail x86 single-step emulator used by compare.py, entirely in user space.
-# Usage: oracle-amd64-formal/build.sh WORKDIR     (WORKDIR gets gmp, m4, an opam root, the model)
+# Usage: validation/reference-models/sail-x86/build.sh WORKDIR     (WORKDIR gets gmp, m4, an opam root, the model)
 set -euo pipefail
 W="$(realpath -m "${1:?usage: build.sh WORKDIR}")"; mkdir -p "$W"; cd "$W"
 L="$W/local"; export PATH="$L/bin:$PATH"

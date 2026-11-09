@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cross-check the floating-point model (Janus/Float, Janus/Arm64/Float.lean, Janus/Amd64/Float.lean)
 # against Berkeley TestFloat 3e / SoftFloat 3e: testfloat_gen writes test vectors whose
-# results SoftFloat computes, and janus-testfloat (Oracle/TestFloat.lean) runs every vector
+# results SoftFloat computes, and janus-testfloat (validation/model-runner/Oracle/TestFloat.lean) runs every vector
 # through the model. See docs/validation/ORACLE.md ("TestFloat").
 #
 #   scripts/testfloat.sh            level 1 (every function, every rounding mode)

@@ -1030,7 +1030,7 @@ check still runs. The policy:
   ArmASL/JanusASL `.olean` and the Sail driver), the cache served something its inputs do not
   determine, or a key misses an input. Treat every cached result since the last agreeing nightly as
   unproven, fix the key (`JanusASL/tools/asl_cache_key.py`, `asl_mod_cache.py`,
-  `oracle-sail/cache_key.py`), and add a case to `scripts/lib/test-bcache.sh`. (If a build step is
+  `validation/reference-models/sail-arm/cache_key.py`), and add a case to `scripts/lib/test-bcache.sh`. (If a build step is
   not reproducible bit for bit, the artifact comparison will say so on the first nightly: fix the
   non-determinism or drop that artifact from `gate-cachecmp.py hashes`, with a note here; never
   loosen the lane comparison.)
@@ -1082,7 +1082,7 @@ Those are treated like the Lean toolchain:
 * **Pinned by content.** The pin store (`$JANUS_MODEL_PIN_DIR`, default `/srv/janus-model-pin`; not the build cache, so no
   collector touches it) holds, per model key, a `bcache.py` entry (SHA-256 of every file, HMAC-signed manifest, per-user key)
   and a signed *pin record* that binds the entry to the SHA-256 of its exact manifest (`scripts/lib/modelpin.py`; no new storage
-  code, no python inside janus). The key is the existing build-cache key (`asl_cache_key.py`, `oracle-sail/cache_key.py`).
+  code, no python inside janus). The key is the existing build-cache key (`asl_cache_key.py`, `validation/reference-models/sail-arm/cache_key.py`).
 * **Checked on every cold gate.** First, in seconds and before anything is built (`scripts/model-pin.sh check`: record HMAC,
   manifest HMAC and hash, every file); again by each restore (two-phase verified copy) and after each build (every pinned file
   hashed again in the tree); once more after the lanes. A **tampered, corrupt, missing or incomplete** pin FAILS the gate, always (never rebuilt around).
@@ -1097,7 +1097,7 @@ Those are treated like the Lean toolchain:
   and the new cold build differs in any `.olean`/`.ilean`/driver byte it exits 1 `NOT REPRODUCED` and keeps the old pin.
   `modelpin.py write` refuses without the nightly's `JANUS_PIN_WRITER` and inside a cold gate.
 * A cold gate refuses to start on a checkout that already has a build (`.lake/build`, `JanusASL/.lake/build`, `JanusX86/.lake/build`,
-  `oracle-sail/target`): use a fresh worktree, or `--wipe`. It cannot be `--incremental`. Everything else (all lanes, the axiom
+  `validation/reference-models/sail-arm/target`): use a fresh worktree, or `--wipe`. It cannot be `--incremental`. Everything else (all lanes, the axiom
   guard, the speed check) is unchanged.
 
 Self-test: `scripts/lib/test-modelpin.sh` (lane `cachekeys`): tampered artifact, missing artifact, stale pin, corrupt manifest,

@@ -2,16 +2,16 @@
 """The key of the Sail oracle driver's build cache (scripts/oracle-sail.sh; docs/SOUNDNESS.md
 "Build caches").
 
-    python3 -I oracle-sail/cache_key.py ROOT --pins K=V ... [--model-file F] [--show]
+    python3 -I validation/reference-models/sail-arm/cache_key.py ROOT --pins K=V ... [--model-file F] [--show]
 
-The driver `oracle-sail/target/release/janus-oracle-sail` is a function of exactly:
+The driver `validation/reference-models/sail-arm/target/release/janus-oracle-sail` is a function of exactly:
 
   * the pinned crate revision and the SHA-256 of its vendored model (the script's pins, passed in
     --pins together with the cargo flags and the model flavour): the Sail-generated C++ the driver
     embeds; for SAIL_MODEL=regen the SHA-256 of the regenerated model.cpp itself (--model-file);
   * instrument_model.py, which rewrites that model before it is compiled, and (SAIL_SPLIT=1, the default)
     split_model.py / split_crate.py / build.rs.patch (and dir_digest.py, the integrity records of the model directories), which cut it into the translation units that are compiled;
-  * oracle-sail/Cargo.toml, Cargo.lock (every dependency version and checksum), src/**, build.rs,
+  * validation/reference-models/sail-arm/Cargo.toml, Cargo.lock (every dependency version and checksum), src/**, build.rs,
     rust-toolchain files and every .cargo/config file cargo reads;
   * rustc -vV and cargo -V, the C++ compiler (`$CXX`, else c++) --version, and the SHA-256 of the
     system libgmp the driver links dynamically;
@@ -85,7 +85,7 @@ def libgmp():
 
 
 def inputs(root, pins, model_file):
-    here = os.path.join(root, "oracle-sail")
+    here = os.path.join(root, "validation", "reference-models", "sail-arm")
     out = {"scheme": SCHEME, "pins": pins, "machine": platform.machine()}
     if model_file:
         out["model.cpp"] = sha_file(model_file)

@@ -58,8 +58,8 @@ mk "$t/a" c1 0 PASS h1; mk "$t/b" c1 0 PASS h1; sed -i 's/"config:SAIL_SPLIT":"1
 check "an unrecorded SAIL_SPLIT (older gate) fails closed" 2 "$t/a" "$t/b"
 mk "$t/a" c1 0 PASS h1; mk "$t/b" c1 0 PASS h1
 # hashes on a fake worktree
-mkdir -p "$t/w/JanusASL/.lake/build/lib/lean" "$t/w/oracle-sail/target/release"; echo o > "$t/w/JanusASL/.lake/build/lib/lean/ArmASL.olean"; echo d > "$t/w/oracle-sail/target/release/janus-oracle-sail"
-python3 -I "$cmp_py" hashes "$t/w" "$t/h1.json"; echo p >> "$t/w/oracle-sail/target/release/janus-oracle-sail"; python3 -I "$cmp_py" hashes "$t/w" "$t/h2.json"
+mkdir -p "$t/w/JanusASL/.lake/build/lib/lean" "$t/w/validation/reference-models/sail-arm/target/release"; echo o > "$t/w/JanusASL/.lake/build/lib/lean/ArmASL.olean"; echo d > "$t/w/validation/reference-models/sail-arm/target/release/janus-oracle-sail"
+python3 -I "$cmp_py" hashes "$t/w" "$t/h1.json"; echo p >> "$t/w/validation/reference-models/sail-arm/target/release/janus-oracle-sail"; python3 -I "$cmp_py" hashes "$t/w" "$t/h2.json"
 mkdir -p "$t/w/scripts"; printf 'SAIL_SPLIT_PARTS=48\n' > "$t/w/scripts/oracle-sail.sh"
 python3 -I "$cmp_py" hashes "$t/w" "$t/h3.json"; SAIL_SPLIT=0 python3 -I "$cmp_py" hashes "$t/w" "$t/h4.json"
 # every ir/*.c and ir/*.c.o.* of every Lake tree is hashed (traces are not: they hold worktree paths), and a changed Janus.* object is P0

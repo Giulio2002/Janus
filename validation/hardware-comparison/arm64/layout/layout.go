@@ -1,5 +1,5 @@
 // Package layout is the contract shared by the native runner (qemu-aarch64), the case
-// generator, the comparator and the Lean side (Oracle/Main.lean). Every address here is
+// generator, the comparator and the Lean side (validation/model-runner/Oracle/Main.lean). Every address here is
 // concrete and fixed, so a test case is a closed, deterministic description of one
 // AArch64 instruction execution.
 //
@@ -63,7 +63,7 @@ const (
 )
 
 // Pattern is the initial content of byte i of the data buffer for a given seed. The Lean
-// side implements the same function (Oracle/Main.lean: `pattern`).
+// side implements the same function (validation/model-runner/Oracle/Main.lean: `pattern`).
 func Pattern(seed uint64, i uint64) byte {
 	return byte((i*157 + seed*89 + (i/256)*41 + 7) % 256)
 }

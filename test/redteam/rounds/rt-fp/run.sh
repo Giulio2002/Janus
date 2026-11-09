@@ -3,7 +3,7 @@
 # example theorems. Writes only to a mktemp directory (and the Go/Lake build caches).
 #
 #   test/redteam/rounds/rt-fp/run.sh                 every row
-#   RT_FP_SKIP_SAIL=1 ...              skip A64-SAIL (needs oracle-sail/target/release/janus-oracle-sail,
+#   RT_FP_SKIP_SAIL=1 ...              skip A64-SAIL (needs validation/reference-models/sail-arm/target/release/janus-oracle-sail,
 #                                      built by `scripts/oracle-sail.sh build`, about 30 min once)
 #   RT_FP_SKIP_SPEC=1 ...              skip SPEC-TF (about 4 min, needs /srv/janus-fp-deps)
 #   JOBS=N                             oracle parallelism (default: by MemAvailable, at most 16)
@@ -36,9 +36,9 @@ summary() { sed -n 's/^\*\*\([0-9]*\) MISMATCH\*\*.*; \([0-9]*\) agree; \([0-9]*
 echo "== build (Lean model executables, oracle harnesses, generators)"
 memguard_lake build janus-oracle janus-oracle-amd64 janus-decode >"$W/lake.log" 2>&1 ||
   { tail -20 "$W/lake.log"; exit 1; }
-(cd oracle && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$W/a64/runner" ./cmd/runner &&
+(cd validation/hardware-comparison/arm64 && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$W/a64/runner" ./cmd/runner &&
   go build -o "$W/a64/oracle" ./cmd/oracle) || exit 1
-(cd oracle-amd64 && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o "$W/x64/runner" ./cmd/runner &&
+(cd validation/hardware-comparison/amd64 && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o "$W/x64/runner" ./cmd/runner &&
   CGO_ENABLED=0 go build -o "$W/x64/oracle" ./cmd/oracle) || exit 1
 (cd "$here/gen-a64" && go build -o "$W/gena64" .) || exit 1
 (cd "$here/gen-x64" && go build -o "$W/genx64" .) || exit 1
@@ -56,7 +56,7 @@ else
   sed -n '/## Mismatches/,$p' "$W/out-a64/summary.md" | head -20
 fi
 
-sail="$root/oracle-sail/target/release/janus-oracle-sail"
+sail="$root/validation/reference-models/sail-arm/target/release/janus-oracle-sail"
 if [ -n "${RT_FP_SKIP_SAIL:-}" ] || [ ! -x "$sail" ]; then
   row "A64-SAIL" skip "skip (no $sail or RT_FP_SKIP_SAIL)"
 else

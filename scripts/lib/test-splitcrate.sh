@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Self-test of the Sail split hardening (small fixtures, no Sail build, seconds):
-#   oracle-sail/split_crate.py  the patched crate copy is verified against the pinned checkout at every depth
-#   oracle-sail/dir_digest.py   + the model_dir / split_parts functions of scripts/oracle-sail.sh: a tampered part,
+#   validation/reference-models/sail-arm/split_crate.py  the patched crate copy is verified against the pinned checkout at every depth
+#   validation/reference-models/sail-arm/dir_digest.py   + the model_dir / split_parts functions of scripts/oracle-sail.sh: a tampered part,
 #                               model.h, model_missing.cpp or instrumented model is regenerated, never reused
 set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -18,7 +18,7 @@ git -C "$ck" init -q && git -C "$ck" add -A && git -C "$ck" -c user.name=t -c us
 cp "$ck/build.rs" "$t/new.rs"; sed -i 's/let b = 2;/let b = 22;/' "$t/new.rs"
 (cd "$t" && diff -u --label build.rs --label build.rs ck/build.rs new.rs > patch.diff)
 osha=$(sha256sum "$ck/build.rs" | cut -d' ' -f1); psha=$(sha256sum "$t/new.rs" | cut -d' ' -f1)
-sc() { python3 -I "$root/oracle-sail/split_crate.py" "$ck" "$t/dest" "$osha" "$psha" "$t/patch.diff" 2>&1; }
+sc() { python3 -I "$root/validation/reference-models/sail-arm/split_crate.py" "$ck" "$t/dest" "$osha" "$psha" "$t/patch.diff" 2>&1; }
 c="$t/dest/sail-aarch64-oracle"
 out=$(sc) && [ -f "$c/build.rs" ] && ok "split_crate: a clean copy is made and verified" || bad "clean copy: $out"
 out=$(sc) && ok "split_crate: an unchanged copy re-verifies" || bad "re-verify: $out"
@@ -45,7 +45,7 @@ out=$(sc) && ok "split_crate: the checkout's root target/ is ignored" || bad "ro
 rm -rf "$ck/target"
 
 # ---------- dir_digest.py ----------
-dd() { python3 -I "$root/oracle-sail/dir_digest.py" "$@"; }
+dd() { python3 -I "$root/validation/reference-models/sail-arm/dir_digest.py" "$@"; }
 p="$t/parts"; mkdir -p "$p"; for i in 00 01 02; do echo "part $i" > "$p/model_part_$i.cpp"; done; echo h > "$p/model.h"; echo m > "$p/model_missing.cpp"
 dd record "$p/.complete" "$p" -- inst=I >/dev/null && dd check "$p/.complete" "$p" -- inst=I 2>/dev/null && ok "dir_digest: a fresh record checks" || bad "fresh record"
 chk_bad() { # DESC SETUP UNDO
@@ -63,7 +63,7 @@ dd check "$p/.complete" "$p" -- inst=J 2>/dev/null && bad "dir_digest accepted a
 dd check "$p/.complete" "$p" -- inst=I 2>/dev/null && ok "dir_digest: accepted again after every tamper is undone" || bad "after undo"
 
 # ---------- model_dir / split_parts of scripts/oracle-sail.sh (fake instrumenter and splitter) ----------
-here="$t/here"; mkdir -p "$here"; cp "$root/oracle-sail/dir_digest.py" "$here/"
+here="$t/here"; mkdir -p "$here"; cp "$root/validation/reference-models/sail-arm/dir_digest.py" "$here/"
 cat > "$here/instrument_model.py" <<'PY'
 import sys
 open(sys.argv[2], "w").write("INSTR\n" + open(sys.argv[1]).read())

@@ -16,9 +16,9 @@ export PATH="$PATH:/usr/local/go/bin"
 . "$root/scripts/lib/artifacts.sh"
 B="$here/bin"; mkdir -p "$B/a64" "$B/x64"
 QEMU="${QEMU-/usr/bin/qemu-aarch64}"
-(cd "$root/oracle" && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$B/a64/runner" ./cmd/runner &&
+(cd "$root/validation/hardware-comparison/arm64" && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$B/a64/runner" ./cmd/runner &&
   go build -o "$B/a64/oracle" ./cmd/oracle)
-(cd "$root/oracle-amd64" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o "$B/x64/runner" ./cmd/runner &&
+(cd "$root/validation/hardware-comparison/amd64" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o "$B/x64/runner" ./cmd/runner &&
   CGO_ENABLED=0 go build -o "$B/x64/oracle" ./cmd/oracle)
 (cd "$root" && lake build janus-oracle janus-oracle-amd64 >/dev/null)
 fail=0

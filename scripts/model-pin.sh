@@ -13,7 +13,7 @@
 #                                             pinned hash (the gate runs it after the lanes). Reads only.
 #   scripts/model-pin.sh write --commit REV [--evidence FILE]
 #                                             create/confirm the pin from THIS checkout's truly-cold build
-#                                             (JanusASL/.lake, oracle-sail/target). Refused unless JANUS_PIN_WRITER is
+#                                             (JanusASL/.lake, validation/reference-models/sail-arm/target). Refused unless JANUS_PIN_WRITER is
 #                                             set by scripts/nightly-cold-gate.sh, which calls it only after a cold gate
 #                                             that built both from source passed and agreed with the cached run.
 #
@@ -70,8 +70,8 @@ case "$cmd" in
     rc=0
     "$root/scripts/asl.sh" files | python3 -I "$mp" write armasl "$pin" "$ak" "$root/JanusASL/.lake" --commit "$commit" "${ev[@]}" || rc=$?
     [ "$rc" = 0 ] || exit $rc
-    [ -f "$root/oracle-sail/target/release/janus-oracle-sail" ] || { echo "model-pin: no Sail driver built in $root/oracle-sail/target" >&2; exit 1; }
-    printf 'target/release/janus-oracle-sail\0' | python3 -I "$mp" write sail "$pin" "$sk" "$root/oracle-sail" --commit "$commit" "${ev[@]}" || rc=$?
+    [ -f "$root/validation/reference-models/sail-arm/target/release/janus-oracle-sail" ] || { echo "model-pin: no Sail driver built in $root/validation/reference-models/sail-arm/target" >&2; exit 1; }
+    printf 'target/release/janus-oracle-sail\0' | python3 -I "$mp" write sail "$pin" "$sk" "$root/validation/reference-models/sail-arm" --commit "$commit" "${ev[@]}" || rc=$?
     exit $rc ;;
   *) sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d'; exit 2 ;;
 esac

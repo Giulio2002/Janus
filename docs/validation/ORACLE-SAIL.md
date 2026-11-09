@@ -51,19 +51,19 @@ Exit criterion: `soundness.jsonl` is empty, i.e. `janus-vs-sail` has 0 `MISMATCH
 |---|---|
 | ISA semantics | [rems-project/sail-arm](https://github.com/rems-project/sail-arm) `arm-v9.4-a`, Arm ASL translated to Sail (BSD-3-Clause-Clear) |
 | single-step oracle around it | [yufengzjj/sail-aarch64-oracle](https://github.com/yufengzjj/sail-aarch64-oracle): Sail's C++ backend output of the model plus a harness (`step(opcode)` = `__DecodeExecute` + exception path, register/memory accessors) as a Rust crate with the generated model vendored |
-| test cases, layout, result formats | the qemu oracle (`oracle/layout/layout.go`): `Case` in, `HW` out (plus extra fields Go ignores) |
-| comparator, report, minimiser | the qemu oracle's `oracle run` / `oracle minimize` (`oracle/cmd/oracle`), run unchanged. The Sail driver is a drop-in `-runner`, or its results are replayed through `-reuse-native` / `-model` |
-| Lean side | `janus-oracle` (`Oracle/Main.lean`); `State.dczid` comes from the case |
+| test cases, layout, result formats | the qemu oracle (`validation/hardware-comparison/arm64/layout/layout.go`): `Case` in, `HW` out (plus extra fields Go ignores) |
+| comparator, report, minimiser | the qemu oracle's `oracle run` / `oracle minimize` (`validation/hardware-comparison/arm64/cmd/oracle`), run unchanged. The Sail driver is a drop-in `-runner`, or its results are replayed through `-reuse-native` / `-model` |
+| Lean side | `janus-oracle` (`validation/model-runner/Oracle/Main.lean`); `State.dczid` comes from the case |
 
-New code lives under `oracle-sail/` and in `scripts/oracle-sail.sh`. No file of the qemu oracle and
+New code lives under `validation/reference-models/sail-arm/` and in `scripts/oracle-sail.sh`. No file of the qemu oracle and
 no Lean file is modified.
 
-* `oracle-sail/src/main.rs`: the driver `janus-oracle-sail`. Supervisor plus worker processes; a
+* `validation/reference-models/sail-arm/src/main.rs`: the driver `janus-oracle-sail`. Supervisor plus worker processes; a
   Sail runtime assertion aborts only that case, which is reported as `status: error` with the
   assertion text.
-* `oracle-sail/instrument_model.py`: adds two counters to the generated C++ (see
+* `validation/reference-models/sail-arm/instrument_model.py`: adds two counters to the generated C++ (see
   "UNPREDICTABLE" below). It changes nothing else.
-* `oracle-sail/threeway.py`: joins the three verdict files and tags known non-authoritative
+* `validation/reference-models/sail-arm/threeway.py`: joins the three verdict files and tags known non-authoritative
   cases. `replay.py` serves precomputed results to `oracle run`. `smoke.py` holds the
   hand-checked cases. `spalign.py` generates the SP-misalignment corpus.
 
@@ -87,11 +87,11 @@ no Lean file is modified.
 
 | dependency | pin |
 |---|---|
-| sail-aarch64-oracle | git `2dffc81de96705d087b72a57047dd4589c6fb548` (crate 0.2.0; `oracle-sail/Cargo.toml`, `Cargo.lock`) |
+| sail-aarch64-oracle | git `2dffc81de96705d087b72a57047dd4589c6fb548` (crate 0.2.0; `validation/reference-models/sail-arm/Cargo.toml`, `Cargo.lock`) |
 | vendored model | `vendor/model.cpp.gz` sha256 `64e3a929…a6ae5` (checked by the script); unpacked `model.cpp` sha256 `06e9a6e1…cdbc`, `model.h` `4f7cda2c…a5`, `model_missing.cpp` `88ad0c13…26`. The crate generated it with Sail 0.20.1 from sail-arm master (2026-06) |
 | sail-arm (for `regen`) | `f5bf6c3a2b5df8c7f6f9d3572825ff074e0c6b7c`, the last `arm-v9.4-a` source change before the crate vendored its model. The only later source change (`7d05816`, `prelude.sail`) is a Lean-extraction annotation |
 | Sail (for `regen`) | opam `sail.0.20.1`, OCaml `ocaml-base-compiler.5.2.1`, opam 2.5.0, z3 4.13.3 |
-| Rust deps | `serde =1.0.228`, `serde_json =1.0.145`; full graph in `oracle-sail/Cargo.lock` (`cargo build --locked`) |
+| Rust deps | `serde =1.0.228`, `serde_json =1.0.145`; full graph in `validation/reference-models/sail-arm/Cargo.lock` (`cargo build --locked`) |
 | toolchain used | rustc/cargo 1.99.0, g++ 15.2.0, libgmp 6.3.0 (`system-gmp` feature), Go 1.26.0, Lean 4.34.1; qemu reference 10.2.1 |
 
 All external sources go to `DEPS` (default `/srv/janus-sail-deps`): the crate clone, the
@@ -286,7 +286,7 @@ The crypto corpus of `docs/validation/ORACLE.md` (`scripts/oracle.sh crypto`, th
 the generated and harvested SHA-1/SHA-256/SHA-512/SHA-3, PMULL, CRC32, permute and scalar-DUP
 classes and 150,000 sequence-mode blocks. The driver now runs sequence cases: a case's `words`
 are laid out in the code page and injected one at a time at the model's PC
-(`oracle-sail/src/main.rs`, the crate has no instruction fetch) until the PC leaves the block, an
+(`validation/reference-models/sail-arm/src/main.rs`, the crate has no instruction fetch) until the PC leaves the block, an
 exception is taken or a Sail exception escapes; the final state is reported as for one step.
 
 | pair (hardware side vs model side) | agree | MISMATCH | model-gap | unobserved | model-error |
@@ -385,7 +385,7 @@ Sail uses `State.dczid` = 8 as before.
   process memory); the rest are unmodelled `vls.other` words (`STLUR`/`LDAPUR` SIMD&FP, MOPS)
   under the existing tags. A first run
   showed 34 `WFI` cases where the driver did not report the vector registers on its "WFI
-  trapped and skipped" path; fixed in `oracle-sail/src/main.rs`.
+  trapped and skipped" path; fixed in `validation/reference-models/sail-arm/src/main.rs`.
 
 ## Results with the atomics / DC ZVA extension (2026-10-23, 486,463 cases)
 
@@ -470,7 +470,7 @@ Janus = `janus-oracle` built 13:55 (git `665fb69` + working tree); qemu = `artif
 
 ## Found on the way
 
-* qemu oracle comparator (`oracle/cmd/oracle/compare.go:142`): `d[:strings.IndexAny(d, ":[")]`
+* qemu oracle comparator (`validation/hardware-comparison/arm64/cmd/oracle/compare.go:142`): `d[:strings.IndexAny(d, ":[")]`
   panics on the `"... N more bytes"` line that is appended when more than 8 memory bytes
   differ. It never fires on Janus-vs-qemu, but does on qemu-vs-Sail. `scripts/oracle-sail.sh`
   builds the CLI from the unmodified sources with a `go build -overlay` replacement of that one
@@ -486,9 +486,9 @@ Janus = `janus-oracle` built 13:55 (git `665fb69` + working tree); qemu = `artif
 
 The Sail model is one 170 MB C++ translation unit; g++ builds it serially (cold driver build 23-31 min wall, ~1450-1900 CPU s).
 `scripts/oracle-sail.sh build` now cuts the instrumented model at top-level item boundaries into 48 translation units
-(`oracle-sail/split_model.py`; every layout assumption is asserted, ghost temporaries stay with their users, the static type
+(`validation/reference-models/sail-arm/split_model.py`; every layout assumption is asserted, ghost temporaries stay with their users, the static type
 helpers are replicated per unit) and builds them in parallel through a copy of the pinned crate whose only change is a
-`build.rs` patch (`oracle-sail/build.rs.patch`, accepts `AARCH64_ORACLE_SAIL_MODEL_PARTS`; `oracle-sail/split_crate.py` makes
+`build.rs` patch (`validation/reference-models/sail-arm/build.rs.patch`, accepts `AARCH64_ORACLE_SAIL_MODEL_PARTS`; `validation/reference-models/sail-arm/split_crate.py` makes
 the copy, verifies it file by file against the pinned checkout and pins the original and patched `build.rs` SHA-256; the crate
 is swapped in as a cargo directory source, so `Cargo.lock` and `--locked` are unchanged). Parsing the 40k-member `Model` class
 costs g++ ~4 min (quadratic member lookup), so the patched `build.rs` precompiles it once (`-Werror=invalid-pch`: a PCH that is
@@ -504,7 +504,7 @@ Hardening (RTSAIL follow-up, `scripts/lib/test-splitcrate.sh`, `scripts/lib/test
 * `split_crate.py` compares the crate copy with the pinned checkout at every depth: `.git` and `target` are ignored only
   directly under the checkout's root (the copy has neither, so there they count), dotted names are compared, the
   executable bit is compared, directories are compared, and a symlink (file or directory) is an error.
-* The model directories are re-hashed on every use, not only compared by mtime (`oracle-sail/dir_digest.py`): the
+* The model directories are re-hashed on every use, not only compared by mtime (`validation/reference-models/sail-arm/dir_digest.py`): the
   instrumented `model.cpp`, `model.h` and `model_missing.cpp` carry `.inst-complete` (their SHA-256, the source model's and
   `instrument_model.py`'s); the parts directory carries `.complete` (SHA-256 of every part, `model.h`, `model_missing.cpp`,
   the instrumented model, `split_model.py`, the parts count). A mismatch regenerates from the source model; the unpacked
@@ -514,7 +514,7 @@ Hardening (RTSAIL follow-up, `scripts/lib/test-splitcrate.sh`, `scripts/lib/test
   difference (or an unrecorded value) as a CONFIGURATION MISMATCH, exit 2, never as a P0 cache bug and never a pass;
   `nightly-cold-gate.sh` gives both runs the same explicit `SAIL_SPLIT`.
 * The oracle corpus has almost no SVE, Advanced SIMD/FP or SIMD load/store words, so it says little about the Sail
-  `__DecodeA64_SVE` and its neighbours. `oracle svegen` (oracle/gen/svesimd.go) draws, with a fixed seed, uniformly random
+  `__DecodeA64_SVE` and its neighbours. `oracle svegen` (validation/hardware-comparison/arm64/gen/svesimd.go) draws, with a fixed seed, uniformly random
   words of the SVE, SME, SIMD&FP data-processing and SIMD load/store top-level groups; `scripts/oracle.sh quick|full` adds
   `SVESIMD_N` (default 800) per group, about 3.5k cases with ids from 30000000 (no existing case or expected output
   changes; Janus does not model SVE, so those are model-gaps; 0 MISMATCH on seeds 2, 3, 4, 5 against qemu). RTSAIL's

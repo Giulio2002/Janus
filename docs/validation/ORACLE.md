@@ -29,7 +29,7 @@ summaries and compresses the dumps with zstd (`zstd -dc verdicts.jsonl.zst | …
 `scripts/lib/artifacts.sh`); `gen.jsonl` and `harvest.jsonl`, whose union is `cases.jsonl`, are
 removed. `KEEP=zst` compresses those too, `KEEP=1` keeps every file raw, as before. The drivers
 that read the corpus (`scripts/oracle-sail.sh`, `scripts/asl.sh check`, `scripts/x86formal.sh
-check`, `oracle-amd64-formal/compare.py`, `JanusASL/tools/evidence.py`) accept the compressed
+check`, `validation/reference-models/sail-x86/compare.py`, `JanusASL/tools/evidence.py`) accept the compressed
 files.
 
 Knobs: `JOBS`, `N` (words per generated class), `K` (states per harvested word), `PER_CLASS`
@@ -37,22 +37,22 @@ Knobs: `JOBS`, `N` (words per generated class), `K` (states per harvested word),
 the runner natively). After a model change you can skip the native side (it reads `hw.jsonl`
 from the output directory, so decompress the corpus first:
 `zstd -d artifacts/oracle/{cases,hw}.jsonl.zst`):
-`oracle/bin/oracle run -reuse-native -out artifacts/oracle -cases artifacts/oracle/cases.jsonl`.
+`validation/hardware-comparison/arm64/bin/oracle run -reuse-native -out artifacts/oracle -cases artifacts/oracle/cases.jsonl`.
 
-Single pieces, all in `oracle/` (a separate Go module) and `Oracle/Main.lean`:
+Single pieces, all in `validation/hardware-comparison/arm64/` (a separate Go module) and `validation/model-runner/Oracle/Main.lean`:
 
 ```
-oracle/bin/oracle gen -n 2000 -o gen.jsonl              # randomised encodings per class
-oracle/bin/oracle harvest -k 3 -o h.jsonl BINARY...     # every distinct .text word of arm64 ELFs
-GODEBUG=asyncpreemptoff=1 qemu-aarch64 oracle/bin/runner < cases.jsonl > hw.jsonl
+validation/hardware-comparison/arm64/bin/oracle gen -n 2000 -o gen.jsonl              # randomised encodings per class
+validation/hardware-comparison/arm64/bin/oracle harvest -k 3 -o h.jsonl BINARY...     # every distinct .text word of arm64 ELFs
+GODEBUG=asyncpreemptoff=1 qemu-aarch64 validation/hardware-comparison/arm64/bin/runner < cases.jsonl > hw.jsonl
 .lake/build/bin/janus-oracle < cases.jsonl > model.jsonl
-oracle/bin/oracle run -cases gen.jsonl,h.jsonl -out DIR # both sides in parallel + compare
-oracle/bin/oracle minimize -out DIR                     # shrink mismatches to repro.md
+validation/hardware-comparison/arm64/bin/oracle run -cases gen.jsonl,h.jsonl -out DIR # both sides in parallel + compare
+validation/hardware-comparison/arm64/bin/oracle minimize -out DIR                     # shrink mismatches to repro.md
 ```
 
 ## What a case is
 
-A case (`oracle/layout/layout.go`, `Case`) is one 32-bit instruction word plus a complete
+A case (`validation/hardware-comparison/arm64/layout/layout.go`, `Case`) is one 32-bit instruction word plus a complete
 initial state: `X0`–`X30`, `SP`, `NZCV`, `V0`–`V31` (field `v`, 128-bit hex; absent = zero),
 `TPIDR_EL0` (field `tpidr`), a seed for the contents of a 4 KiB data
 buffer, and `dczid`, the reference CPU's `DCZID_EL0`. That register is IMPLEMENTATION DEFINED
@@ -74,7 +74,7 @@ these registers (`State.vregs`, `State.tpidr`), `pc = TestPC`, `dczid` from the 
 
 ## How the native side observes one instruction
 
-`oracle/cmd/runner` (Go, `GOARCH=arm64`) runs all cases of a shard in one process, without
+`validation/hardware-comparison/arm64/cmd/runner` (Go, `GOARCH=arm64`) runs all cases of a shard in one process, without
 landing pads or per-case subprocesses:
 
 1. It writes the word at `TestPC`, refills the buffer, and calls a hand-assembled entry
@@ -108,7 +108,7 @@ handler with a foreign `g` register.
 
 * **Harvested** (`harvest/<class>`): every distinct word of the executable sections of real Go
   arm64 binaries — a program using `math/big`, `crypto/sha256`, `sort`, `encoding/json`,
-  `regexp`, `compress/flate`, ... (`oracle/harvest/bigprog`), `go test -c` binaries of
+  `regexp`, `compress/flate`, ... (`validation/hardware-comparison/arm64/harvest/bigprog`), `go test -c` binaries of
   `math/big strconv sort crypto/sha256 bytes strings sync/atomic runtime` (the last two bring
   the atomics, `LDAR`/`STLR`, exclusives, `PRFM`, `MRS DCZID_EL0` and `DC ZVA` the runtime
   uses), and any `artifacts/*-arm64` — minus system encodings other than `MRS` and the C7
@@ -131,7 +131,7 @@ handler with a foreign `g` register.
   Vector register values are random, edge values, bytes from a small alphabet, or copies of
   another register with a few bytes changed (so element compares hit both outcomes); `TBL`
   indices are mostly in range; SIMD&FP memory accesses land in the buffer like the integer ones.
-* **Exclusive-monitor sequences** (`gen/seq.excl`, `oracle gen -excl-seq N`; `oracle/gen/excl.go`):
+* **Exclusive-monitor sequences** (`gen/seq.excl`, `oracle gen -excl-seq N`; `validation/hardware-comparison/arm64/gen/excl.go`):
   blocks run in sequence mode (below) that exercise the monitor: load-exclusive/compute/
   store-exclusive pairs of every size and acquire/release form, the Go retry loop (`LDAXR`;
   `ADD`; `STLXR`; `CBNZ` back), exclusive pairs (`LDXP`/`STXP`, 32- and 64-bit), and the cases
@@ -148,7 +148,7 @@ handler with a foreign `g` register.
   (data-processing immediate / register, branches, loads/stores, SIMD&FP data processing,
   SIMD&FP loads/stores) — tests that the decoder rejects what it does not understand.
 
-The class is assigned by `oracle/gen/classify.go` from the fixed opcode bits of the
+The class is assigned by `validation/hardware-comparison/arm64/gen/classify.go` from the fixed opcode bits of the
 top-level A64 tables; it only groups results and steers state generation, it never decides
 what an instruction does. States: register values are a mix of edge values (`0`, `1`, `2^31`,
 `2^32-1`, `2^63`, `2^64-1`, ...), random 64/32-bit values, small signed values and buffer
@@ -163,7 +163,7 @@ never generated; harvested ones are tagged `!unpredictable` and reported separat
 
 ## What agreement means
 
-For each case the comparator (`oracle/cmd/oracle/compare.go`) produces one verdict:
+For each case the comparator (`validation/hardware-comparison/arm64/cmd/oracle/compare.go`) produces one verdict:
 
 | hardware | model | verdict |
 |---|---|---|
@@ -273,7 +273,7 @@ field). A separate 64,728-case run of the exclusive classes alone (`-only '^ls\.
 * **targeted** (`gen/`): the classes `neon.3same`, `neon.3samefp`, `neon.s3same`, `neon.3diff`,
   `neon.s3diff`, `neon.2misc`, `neon.s2misc`, `neon.across`, `neon.spair`, `neon.perm`,
   `neon.shift`, `neon.sshift`, `neon.elem`, `neon.selem`, `neon.sdup`, `vls.struct` (LD2–LD4/ST2–ST4,
-  with and without post-index) and `vls.np` (LDNP/STNP), 20,000 words each (`oracle/gen/neon.go`).
+  with and without post-index) and `vls.np` (LDNP/STNP), 20,000 words each (`validation/hardware-comparison/arm64/gen/neon.go`).
   Every field is drawn uniformly, so every opcode, `size`, `Q`, `U`, `immh`, `L:M:H` and arrangement
   occurs, allocated or not. States: for the floating-point forms (`neonFP`) **every lane** gets an
   IEEE edge value of the lane's format (±0, subnormals, ±∞, quiet and signalling NaNs, halfway and
@@ -284,9 +284,9 @@ field). A separate 64,728-case run of the exclusive classes alone (`-only '^ls\.
   is compared like any other bit;
 * **random** (`rand/`): 20,000 fully random words per top-level group;
 * **harvested** (`harvest/`): every distinct SIMD&FP word of the supplementary C corpus
-  (`oracle/harvest/neon`, 476 auto-vectorised loops built by gcc 15.2 and clang 21 at -O0/-O2/-O3,
+  (`validation/hardware-comparison/arm64/harvest/neon`, 476 auto-vectorised loops built by gcc 15.2 and clang 21 at -O0/-O2/-O3,
   20 states each) and of the Go harvest binaries (3 states each);
-* **sequence mode** (`seq/neon`, `oracle/cmd/neonseq`): 50,000 straight-line blocks of 4–24
+* **sequence mode** (`seq/neon`, `validation/hardware-comparison/arm64/cmd/neonseq`): 50,000 straight-line blocks of 4–24
   decodable SIMD&FP data-processing and load/store words (`Case.Words`; the runner lays them out
   from `TestPC`, `janus-oracle` threads the state through `runSeq`), with registers drawn from a
   small pool so instructions consume each other's results, base registers into the buffer, and the
@@ -332,7 +332,7 @@ model-gap, 0 unobserved (targeted 300,000, random 120,000, harvested 146,007, se
 The crypto corpus (`OUT=artifacts/oracle-crypto JOBS=8 scripts/oracle.sh crypto`, defaults
 `N=20000`, `CRYPTO_HARVEST_K=40`, `SEQ_N=10000`, `SEQ_WINDOWS=20000`):
 
-* **generated** (`gen/<class>`): the classes of `oracle/gen/crypto.go`, each the whole encoding
+* **generated** (`gen/<class>`): the classes of `validation/hardware-comparison/arm64/gen/crypto.go`, each the whole encoding
   group of the A64 tables (so its unallocated and UNDEFINED neighbours are classified with it):
   `crypto.sha3reg` (SHA1C/P/M/SU0, SHA256H/H2/SU1), `crypto.sha2reg` (SHA1H/SU1, SHA256SU0),
   `crypto.sha512` (SHA512H/H2/SU0/SU1, RAX1, and the SM3PARTW/SM4 neighbours), `crypto.sha3`
@@ -350,7 +350,7 @@ The crypto corpus (`OUT=artifacts/oracle-crypto JOBS=8 scripts/oracle.sh crypto`
   `ghash`, `crc32`, `permute`), so each instruction consumes what an earlier one produced, and
   `seq/harvest`: windows of 2–16 consecutive non-branch, non-memory words of the real crypto
   kernels (symbols matching `crypto/`, `hash/crc32`, `vendor/golang.org/x/crypto/`), each under
-  4 states. Case field `words` (`oracle/layout/layout.go`); the format is the one of
+  4 states. Case field `words` (`validation/hardware-comparison/arm64/layout/layout.go`); the format is the one of
   `test/redteam/rounds/rt-model`'s sequence oracle. `scripts/oracle.sh full` now also runs a smaller sequence
   corpus (`SEQ_N=500`, `SEQ_WINDOWS=2000`).
 
@@ -446,7 +446,7 @@ Together with the FP corpus: 1,897,749 arm64 cases against qemu, 0 MISMATCH.
 architectures (`ARM-VFPv2` for `FPCR.DN = 0` with tininess before rounding, `ARM-VFPv2-defaultNaN`
 for `DN = 1`, `8086-SSE` with tininess after rounding), generates TestFloat's level-1 vectors for
 every operation and rounding mode, and runs each through the model (`janus-testfloat`,
-`Oracle/TestFloat.lean`), comparing result bits and the five IEEE flags:
+`validation/model-runner/Oracle/TestFloat.lean`), comparing result bits and the five IEEE flags:
 
 | model | functions × modes | vectors | mismatches | known NaN-rule differences |
 |---|---:|---:|---:|---:|

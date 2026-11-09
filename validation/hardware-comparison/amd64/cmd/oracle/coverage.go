@@ -24,8 +24,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Giulio2002/Janus/oracle-amd64/gen"
-	L "github.com/Giulio2002/Janus/oracle-amd64/layout"
+	"github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/gen"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/layout"
 )
 
 type covFunc struct {

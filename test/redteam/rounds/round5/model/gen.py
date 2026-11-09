@@ -14,7 +14,7 @@ import json, os, random, sys
 out, dczid = sys.argv[1], int(sys.argv[2])
 rng = random.Random(5)
 
-# ---------------------------------------------------------------- arm64 layout (oracle/layout)
+# ---------------------------------------------------------------- arm64 layout (validation/hardware-comparison/arm64/layout)
 TEST_PC = 0x10_0000_0800
 DATA = 0x10_0004_0000
 EDGE64 = [0, 1, 2, 0x7f, 0x80, 0xff, 0x7fff, 0x8000, 0xffff, 0x7fffffff, 0x80000000,
@@ -127,7 +127,7 @@ for Q in (0, 1):
                         | (opcode << 12) | (0b10 << 10) | (rn << 5) | rd
                     a64case("r5/a64.simd.across", w)
 
-# ---------------------------------------------------------------- amd64 layout (oracle-amd64/layout)
+# ---------------------------------------------------------------- amd64 layout (validation/hardware-comparison/amd64/layout)
 XDATA = 0x10_0004_0000
 CF, PF, AF, ZF, SF, OF = 1, 4, 16, 64, 128, 2048
 x64 = []

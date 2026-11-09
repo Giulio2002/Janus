@@ -8,10 +8,10 @@
 #   scripts/oracle.sh fp              scalar floating point only: generated fp.* classes (FP_K
 #                                     states per word) + harvested fp.* words (FP_HARVEST_K states)
 #   scripts/oracle.sh neon            Advanced SIMD: the targeted neon.*/vls.struct/vls.np classes,
-#                                     the SIMD&FP words of the C harvest corpus (oracle/harvest/neon,
+#                                     the SIMD&FP words of the C harvest corpus (validation/hardware-comparison/arm64/harvest/neon,
 #                                     gcc/clang -O0/-O2/-O3, NEON_K states each) and of the Go
 #                                     harvest, random simd/vls group words, and SEQ straight-line
-#                                     blocks (sequence mode, oracle/cmd/neonseq)
+#                                     blocks (sequence mode, validation/hardware-comparison/arm64/cmd/neonseq)
 #   scripts/oracle.sh crypto          crypto extension / CRC32 / permutes only: generated classes
 #                                     (CRYPTO_CLASSES), harvested words of the crypto test binaries
 #                                     (CRYPTO_HARVEST_K states each) and sequence-mode blocks
@@ -44,10 +44,10 @@ SEED="${SEED:-1}"
 K="${K:-3}"
 PER_CLASS="${PER_CLASS:-8000}"
 QEMU="${QEMU-/usr/bin/qemu-aarch64}"
-bin="$root/oracle/bin"
+bin="$root/validation/hardware-comparison/arm64/bin"
 
 echo "== build"
-(cd "$root/oracle" &&
+(cd "$root/validation/hardware-comparison/arm64" &&
   CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$bin/runner" ./cmd/runner &&
   go build -o "$bin/oracle" ./cmd/oracle)
 (cd "$root" && memguard_lake build janus-oracle janus-decode)
@@ -83,15 +83,15 @@ if [ "$mode" = fp ]; then
   "$bin/oracle" gen -dczid "$DCZID" -n "$N" -only '^fp\.' -fp-k "$FP_K" -seed "$SEED" -o "$OUT/gen.jsonl"
 elif [ "$mode" = neon ]; then
   "$bin/oracle" gen -dczid "$DCZID" -n "$N" -only '^(neon|vls\.(struct|np))' -group "$N" -seed "$SEED" -o "$OUT/gen.jsonl"
-  echo "== harvest the C corpus (oracle/harvest/neon)"
+  echo "== harvest the C corpus (validation/hardware-comparison/arm64/harvest/neon)"
   ccdir="$(mktemp -d -p /var/tmp janus-neon-cc.XXXXXX)"
-  bash "$root/oracle/harvest/neon/build.sh" "$ccdir" > /dev/null
+  bash "$root/validation/hardware-comparison/arm64/harvest/neon/build.sh" "$ccdir" > /dev/null
   "$bin/oracle" harvest -dczid "$DCZID" -k "${NEON_K:-20}" -per-class 0 -only '^(simd|vls|fp)' -seed "$((SEED + 2))" \
     -first-id 20000000 -o "$OUT/harvest-c.jsonl" "$ccdir"/*/*.o
   rm -rf "$ccdir"
   cases+=("$OUT/harvest-c.jsonl")
   echo "== sequence mode (${SEQ:-50000} blocks)"
-  (cd "$root/oracle" && go build -o "$bin/neonseq" ./cmd/neonseq)
+  (cd "$root/validation/hardware-comparison/arm64" && go build -o "$bin/neonseq" ./cmd/neonseq)
   "$bin/neonseq" -n "${SEQ:-50000}" -seed "$SEED" -dczid "$DCZID" -decode "$root/.lake/build/bin/janus-decode" -o "$OUT/seq.jsonl"
   cases+=("$OUT/seq.jsonl")
 elif [ "$mode" = crypto ]; then
@@ -117,7 +117,7 @@ if [ "$mode" = full ] || [ "$mode" = fp ] || [ "$mode" = neon ] || [ "$mode" = c
   mkdir -p "$corpus"
   # The crypto packages bring the SHA-1/SHA-256/SHA-512/SHA-3, AES-GCM (PMULL), CRC32 and
   # chacha20 (ZIP, via crypto/tls) assembly kernels.
-  (cd "$root/oracle" &&
+  (cd "$root/validation/hardware-comparison/arm64" &&
     CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$corpus/bigprog" ./harvest/bigprog &&
     for p in math math/big strconv sort crypto/sha256 bytes strings sync/atomic sync runtime \
         crypto/sha1 crypto/sha512 crypto/sha3 crypto/cipher hash/crc32 crypto/tls; do

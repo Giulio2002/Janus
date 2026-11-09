@@ -8,13 +8,13 @@ import Lean.Data.Json
 # `janus-asl-check`: Janus `step` against Arm's ASL, both evaluated in compiled Lean
 
 For every case of the oracle corpus (`artifacts/oracle/cases.jsonl`, format of
-`oracle/layout/layout.go`), run
+`validation/hardware-comparison/arm64/layout/layout.go`), run
 
 * the **ASL side**: `ArmASL.Functions.janus_step` (the sail-arm arm-v9.4-a model, sliced to the
   Janus subset and translated to Lean by Sail's Lean backend, `JanusASL/sail/`), from the Linux
   EL0 state of `janus_init` with the MMU on and a 4-level identity map of the code page and the
-  data buffer (the same tables as `oracle-sail/src/main.rs`), and
-* the **Janus side**: `Janus.Arm64.step` from the state `Oracle/Main.lean` builds,
+  data buffer (the same tables as `validation/reference-models/sail-arm/src/main.rs`), and
+* the **Janus side**: `Janus.Arm64.step` from the state `validation/model-runner/Oracle/Main.lean` builds,
 
 and compare. This is a *test* (compiled evaluation), not a proof. See `docs/design/ASL.md`.
 
@@ -38,7 +38,7 @@ open ArmASL ArmASL.Functions
 
 namespace JanusASL.Check
 
-/-! ## Layout (`oracle/layout/layout.go`, `oracle-sail/src/main.rs`) -/
+/-! ## Layout (`validation/hardware-comparison/arm64/layout/layout.go`, `validation/reference-models/sail-arm/src/main.rs`) -/
 
 def codePage : Nat := 0x10_0000_0000
 def testPC : Nat := codePage + 0x800
@@ -49,7 +49,7 @@ def ttL0 : Nat := 0x7000_0000
 
 def pattern (seed i : Nat) : Nat := (i * 157 + seed * 89 + (i / 256) * 41 + 7) % 256
 
-/-! ## Case parsing (as `Oracle/Main.lean`) -/
+/-! ## Case parsing (as `validation/model-runner/Oracle/Main.lean`) -/
 
 def hexDigit? (c : Char) : Option Nat :=
   if '0' ≤ c ∧ c ≤ '9' then some (c.toNat - '0'.toNat)
@@ -125,7 +125,7 @@ def writeU64 (mem : Std.ExtHashMap Nat (BitVec 8)) (addr v : Nat) : Std.ExtHashM
 def zeroPage (mem : Std.ExtHashMap Nat (BitVec 8)) (base : Nat) : Std.ExtHashMap Nat (BitVec 8) :=
   (List.range pageSize).foldl (fun m i => m.insert (base + i) 0) mem
 
-/-- Translation tables of `oracle-sail/src/main.rs` (`install_tables`): L0..L3 at `ttL0`,
+/-- Translation tables of `validation/reference-models/sail-arm/src/main.rs` (`install_tables`): L0..L3 at `ttL0`,
 the code page user RW + PXN, the data page user RW + PXN + UXN, Normal WB (AttrIndx 0),
 inner shareable, AF, nG. Plus the (zero) code page and data page themselves. -/
 def baseMemory : Std.ExtHashMap Nat (BitVec 8) := Id.run do
@@ -382,7 +382,7 @@ def runAsl (base : SState) (c : Case) : AslResult × Bool × Bool := Id.run do
   | .Janus_See => return (.other "SEE", cfg, um)
   | .Janus_Other => return (.other "ReservedEncoding/SError", cfg, um)
 
-/-! ## The Janus side (as `Oracle/Main.lean`) -/
+/-! ## The Janus side (as `validation/model-runner/Oracle/Main.lean`) -/
 
 open Janus.Arm64 in
 def janusInit (dczid : Nat) (c : Case) : State :=

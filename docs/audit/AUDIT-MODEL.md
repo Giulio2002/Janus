@@ -21,7 +21,7 @@ Rows: `test/redteam/rounds/rt-model/run.sh` (SEQ, CORNER, EX1), `cmd/janus/rtmod
 (`TestSegmentMismatchRejected`). The model/decoder/runner infrastructure is built on the
 existing oracles (`docs/validation/ORACLE-AMD64.md`, `docs/validation/ORACLE.md`, `docs/validation/ORACLE-SAIL.md`); the
 sequence mode added here is a new `seq`/`words` field in the oracle case format
-(`oracle-amd64/layout`, `oracle/layout`) that both the native runners and the Lean models
+(`validation/hardware-comparison/amd64/layout`, `validation/hardware-comparison/arm64/layout`) that both the native runners and the Lean models
 (`Oracle.Amd64Main`, `Oracle.Main`) understand.
 
 ## Summary

@@ -181,7 +181,7 @@ echo "== holds: amd64 v3/SSE boundary encodings, arm64 crypto decode"
 type tmark >/dev/null 2>&1 && tmark "== holds: amd64 v3/SSE boundary encodings, arm64 c"
 if [ "$(uname -m)" = x86_64 ]; then
   O="$T/oracle"; mkdir -p "$O"
-  ( cd oracle-amd64 && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o "$O/runner" ./cmd/runner &&
+  ( cd validation/hardware-comparison/amd64 && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o "$O/runner" ./cmd/runner &&
     CGO_ENABLED=0 go build -o "$O/oracle" ./cmd/oracle ) || { echo "oracle build failed"; exit 1; }
   { python3 -I $R/x86/genC.py 40 "$O/c.jsonl" && python3 -I $R/x86/genF.py 1 20000 "$O/f.jsonl" &&
     python3 -I $R/x86/genP.py 1 20000 "$O/p.jsonl"; } >/dev/null

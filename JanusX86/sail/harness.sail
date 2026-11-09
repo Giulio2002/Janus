@@ -6,7 +6,7 @@
  * effective addresses and the application-level memory view are all the model's (ACL2 X86isa,
  * translated to Sail).
  *
- * The state set up by janus_x86_init is the one of oracle-amd64-formal/compare.py (the C
+ * The state set up by janus_x86_init is the one of validation/reference-models/sail-x86/compare.py (the C
  * emulator's `-C cr4=512 -C set64bit=1 -C app_view=1`), written directly, plus CPL 3
  * (CS.RPL = 3) and every other control/segment register zeroed instead of left undefined.
  * ===========================================================================*/

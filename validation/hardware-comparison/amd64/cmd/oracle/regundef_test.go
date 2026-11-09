@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	L "github.com/Giulio2002/Janus/oracle-amd64/layout"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/layout"
 )
 
 // A register the model marks architecturally undefined (RegUndef: the destination of BSF/BSR of

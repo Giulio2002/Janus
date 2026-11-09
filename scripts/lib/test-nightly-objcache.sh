@@ -10,7 +10,7 @@ set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 t=$(mktemp -d "${TMPDIR:-/tmp}/test-nightly-objcache.XXXXXX"); trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
-repo="$t/repo"; mkdir -p "$repo/scripts/lib" "$repo/oracle-sail"; cd "$repo"
+repo="$t/repo"; mkdir -p "$repo/scripts/lib" "$repo/validation/reference-models/sail-arm"; cd "$repo"
 git init -q . && git config user.email t@t && git config user.name t
 cp "$root/scripts/nightly-cold-gate.sh" scripts/; cp "$root/scripts/gate-cachecmp.py" scripts/
 cat > scripts/gate.sh <<'S'

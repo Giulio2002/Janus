@@ -26,7 +26,7 @@
 #             the driver is built from source inside the run, loudly, publishing nothing). Only
 #             scripts/nightly-cold-gate.sh writes the pin.
 #   SAIL_SPLIT  1 (default): build the model as SAIL_SPLIT_PARTS (48) translation units in parallel
-#             (oracle-sail/split_model.py + a patched copy of the pinned crate, oracle-sail/split_crate.py);
+#             (validation/reference-models/sail-arm/split_model.py + a patched copy of the pinned crate, validation/reference-models/sail-arm/split_crate.py);
 #             0: the original single translation unit (serial, ~24 min). Part of the driver cache key.
 #   KEEP      what `run` leaves in OUT (scripts/lib/artifacts.sh): by default the reports, the
 #             compressed corpus, results and verdicts, the MISMATCH verdicts; the per-comparison
@@ -46,9 +46,9 @@ OUT="${OUT:-$root/artifacts/oracle-sail}"
 JOBS="${JOBS:-$(nproc)}"
 DEPS="${DEPS:-/srv/janus-sail-deps}"
 SAIL_MODEL="${SAIL_MODEL:-vendored}"
-here="$root/oracle-sail"
+here="$root/validation/reference-models/sail-arm"
 
-# ---- pins (keep in sync with docs/validation/ORACLE-SAIL.md and oracle-sail/Cargo.toml) ----
+# ---- pins (keep in sync with docs/validation/ORACLE-SAIL.md and validation/reference-models/sail-arm/Cargo.toml) ----
 CRATE_URL=https://github.com/yufengzjj/sail-aarch64-oracle
 CRATE_REV=2dffc81de96705d087b72a57047dd4589c6fb548
 CRATE_MODEL_GZ_SHA256=64e3a9292cf2a722a9f2c59f2a379217a33556eb8c84f05501aa560315a0b78c
@@ -66,10 +66,10 @@ fetch_crate() {
   echo "$CRATE_MODEL_GZ_SHA256  $crate/vendor/model.cpp.gz" | sha256sum -c --quiet
 }
 
-# The model C++ the driver is built against, instrumented (oracle-sail/instrument_model.py)
+# The model C++ the driver is built against, instrumented (validation/reference-models/sail-arm/instrument_model.py)
 # and stored at a stable path: the crate's build.rs re-unpacks its vendored model into
 # OUT_DIR on every build script run, which makes cargo rebuild the 166 MB TU each time.
-# Integrity (oracle-sail/dir_digest.py): the instrumented model, model.h and model_missing.cpp carry a record
+# Integrity (validation/reference-models/sail-arm/dir_digest.py): the instrumented model, model.h and model_missing.cpp carry a record
 # (.inst-complete) of their SHA-256, of the source model they were made from and of instrument_model.py; the parts
 # directory a record (.complete) of the SHA-256 of every part, model.h and model_missing.cpp, of the instrumented
 # model and of split_model.py. Both are re-hashed on EVERY use (about 200 MB, ~1 s), not only compared by mtime: a
@@ -129,7 +129,7 @@ split_crate_cfg() {
 
 # ---- build cache for the driver (docs/SOUNDNESS.md "Build caches") ----
 # The driver is a pure function of the pinned crate and model, the instrumenter, oracle-sail's
-# sources and lockfile, the Rust and C++ toolchains and their environment (oracle-sail/cache_key.py).
+# sources and lockfile, the Rust and C++ toolchains and their environment (validation/reference-models/sail-arm/cache_key.py).
 # Its cache entry (scripts/lib/bcache.py kind "sail") holds the one binary, a SHA-256 manifest and an
 # HMAC of it under the per-user key; both are checked on every use, and an entry that fails either is
 # ignored and replaced by a rebuild. SAIL_CACHE=<dir> picks the directory (default: $ASL_CACHE, else
@@ -218,7 +218,7 @@ do_build() {
   fi
   # The qemu oracle CLI (its comparator is shared) and the framework's oracle: incremental builds.
   mkdir -p "$here/bin"
-  (cd "$root/oracle" && go build -o "$here/bin/oracle" ./cmd/oracle)
+  (cd "$root/validation/hardware-comparison/arm64" && go build -o "$here/bin/oracle" ./cmd/oracle)
   (cd "$root" && memguard_lake build janus-oracle >/dev/null) ||
     echo "warning: lake build janus-oracle failed; using the existing $root/.lake/build/bin/janus-oracle" >&2
 }

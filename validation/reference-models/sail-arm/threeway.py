@@ -11,7 +11,7 @@ DIR (written by scripts/oracle-sail.sh) holds
   janus-vs-sail/verdicts.jsonl   `oracle run` verdicts, hardware := Sail, model := Janus
   qemu-vs-sail/verdicts.jsonl    `oracle run` verdicts, hardware := qemu, model := Sail
   janus-vs-qemu/verdicts.jsonl   `oracle run` verdicts, hardware := qemu, model := Janus
-The pairwise verdicts come from the qemu agent's comparator (oracle/cmd/oracle/compare.go),
+The pairwise verdicts come from the qemu agent's comparator (validation/hardware-comparison/arm64/cmd/oracle/compare.go),
 unchanged; this script only joins them and adds a signal-level check of faults.
 Writes DIR/threeway.md and DIR/soundness.jsonl.
 """

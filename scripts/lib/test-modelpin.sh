@@ -172,15 +172,15 @@ fi
 
 # ---------------------------------------------------------------- build-script level: the pin steps of asl.sh / oracle-sail.sh
 # A fake checkout whose scripts and model inputs are the real ones (symlinks), with its own build directories.
-fr="$t/fake"; mkdir -p "$fr/JanusASL" "$fr/oracle-sail" "$fr/artifacts"
+fr="$t/fake"; mkdir -p "$fr/JanusASL" "$fr/validation/reference-models/sail-arm" "$fr/artifacts"
 ln -s "$root/scripts" "$fr/scripts"; ln -s "$root/lean-toolchain" "$fr/lean-toolchain"; ln -s "$root/lakefile.toml" "$fr/lakefile.toml"
 [ ! -e "$root/lakefile.lean" ] || ln -s "$root/lakefile.lean" "$fr/lakefile.lean"
 for x in vendor tools sail lake-manifest.json lakefile.toml lean-toolchain; do ln -s "$root/JanusASL/$x" "$fr/JanusASL/$x"; done
-for x in Cargo.lock Cargo.toml cache_key.py instrument_model.py src; do ln -s "$root/oracle-sail/$x" "$fr/oracle-sail/$x"; done
+for x in Cargo.lock Cargo.toml cache_key.py instrument_model.py src; do ln -s "$root/validation/reference-models/sail-arm/$x" "$fr/validation/reference-models/sail-arm/$x"; done
 if [ -n "$ak" ]; then
   A() { JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/asl.sh" restore; }
   S() { JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/oracle-sail.sh" build; }
-  fresh() { rm -rf "$fr/JanusASL/.lake" "$fr/oracle-sail/target"; }
+  fresh() { rm -rf "$fr/JanusASL/.lake" "$fr/validation/reference-models/sail-arm/target"; }
   gpin; fresh; expect 0 "asl.sh restore from a valid pin" A
   [ "$(cat "$fr/JanusASL/.lake/packages/Sail/Sail.olean" 2>/dev/null)" = s ] && ok "  ... the pinned files are in JanusASL/.lake" || bad "pinned files not restored"
   gpin; chmod u+w "$t/gp/$ak/tree/build/lib/lean/ArmASL/Part01.olean" "$t/gp/$ak/tree/build/lib/lean/ArmASL"; echo X >> "$t/gp/$ak/tree/build/lib/lean/ArmASL/Part01.olean"
@@ -202,7 +202,7 @@ if [ -n "$ak" ]; then
   fresh; expect 1 "oracle-sail.sh build: a STALE pin FAILS with JANUS_MODEL_PIN_STALE=fail" env JANUS_MODEL_PIN_STALE=fail JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/oracle-sail.sh" build
   gpin; chmod u+w "$t/gp/sail/$sk"; printf 'garbage\n' > "$t/gp/sail/$sk/MANIFEST.sha256"
   fresh; expect 1 "oracle-sail.sh build: a CORRUPT manifest FAILS" S
-  [ ! -e "$fr/oracle-sail/target/release/janus-oracle-sail" ] && ok "  ... no driver was produced" || bad "a driver exists after a failed pin"
+  [ ! -e "$fr/validation/reference-models/sail-arm/target/release/janus-oracle-sail" ] && ok "  ... no driver was produced" || bad "a driver exists after a failed pin"
 fi
 
 [ "$fail" = 0 ] && echo "model pin tests: all passed" || { echo "model pin tests: FAILED"; exit 1; }

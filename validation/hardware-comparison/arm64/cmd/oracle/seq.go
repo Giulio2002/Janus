@@ -10,12 +10,12 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/Giulio2002/Janus/oracle/gen"
+	"github.com/Giulio2002/Janus/validation/hardware-comparison/arm64/gen"
 )
 
 // seqgen writes sequence-mode cases (layout.Case.Words): straight-line blocks laid out from
 // TestPC that the runner executes in one go (falling through to the UDF after the last word)
-// and the Lean side steps word by word (Oracle/Main.lean runSeq). Two sources:
+// and the Lean side steps word by word (validation/model-runner/Oracle/Main.lean runSeq). Two sources:
 //
 //   - synthetic chains per instruction family (seq/<family>): random blocks over a small
 //     register pool, so every instruction reads what an earlier one wrote (the SHA-1/SHA-256/

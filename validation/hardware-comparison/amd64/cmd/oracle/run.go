@@ -17,8 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Giulio2002/Janus/oracle-amd64/gen"
-	L "github.com/Giulio2002/Janus/oracle-amd64/layout"
+	"github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/gen"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/layout"
 	"golang.org/x/arch/x86/x86asm"
 )
 
@@ -103,7 +103,7 @@ func cmdRun(args []string) {
 	casesF := fs.String("cases", "", "comma-separated case files")
 	outDir := fs.String("out", "oracle-out", "output directory")
 	var o runOpts
-	fs.StringVar(&o.runner, "runner", "oracle-amd64/bin/runner", "native runner")
+	fs.StringVar(&o.runner, "runner", "validation/hardware-comparison/amd64/bin/runner", "native runner")
 	fs.StringVar(&o.model, "model", ".lake/build/bin/janus-oracle-amd64", "janus-oracle-amd64 executable")
 	fs.IntVar(&o.jobs, "j", 16, "parallel shards")
 	fs.IntVar(&o.shard, "shard", 4000, "cases per shard")

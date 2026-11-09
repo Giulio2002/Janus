@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Giulio2002/Janus/oracle-amd64/gen"
+	"github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/gen"
 	"golang.org/x/arch/x86/x86asm"
 )
 

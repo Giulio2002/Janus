@@ -5,7 +5,7 @@ import Lean.Data.Json
 # `janus-oracle`: run `Janus.Arm64.step` on differential-test cases
 
 Reads one JSON test case per line on stdin (the format written by `oracle gen`, see
-`oracle/layout/layout.go` and `docs/validation/ORACLE.md`) and prints one JSON result per line:
+`validation/hardware-comparison/arm64/layout/layout.go` and `docs/validation/ORACLE.md`) and prints one JSON result per line:
 
 * the initial `State` has `X0..X30`, `SP`, `NZCV`, `pc`, `V0..V31` (field `v`, absent = 0),
   `tpidr` (TPIDR_EL0, absent = 0), `fpcr`/`fpsr` (absent = 0) and `dczid` (the reference machine's DCZID_EL0, field
@@ -21,7 +21,7 @@ Reads one JSON test case per line on stdin (the format written by `oracle gen`, 
 * sequence mode (field `words`, from the rt-model audit): the words are laid out from `testPC`
   and run until `pc` leaves the block.
 
-The constants below must match `oracle/layout/layout.go`.
+The constants below must match `validation/hardware-comparison/arm64/layout/layout.go`.
 -/
 
 open Lean Janus Janus.Arm64
@@ -201,7 +201,7 @@ def choices (c : Case) : Nat :=
 /-- The result of a case. Without store-exclusives, one result. With them, the model is
 nondeterministic: the result of the all-fail stream, plus `alts`, every other distinct result
 over all `2^choices` outcome streams. The comparator accepts the hardware result when it is any
-of them (`oracle/cmd/oracle/compare.go`). -/
+of them (`validation/hardware-comparison/arm64/cmd/oracle/compare.go`). -/
 def runCase (stub : Bool) (c : Case) : Json :=
   let k := choices c
   let primary := resultJson c (runMask stub c 0)

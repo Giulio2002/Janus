@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Giulio2002/Janus/oracle-amd64/gen"
-	L "github.com/Giulio2002/Janus/oracle-amd64/layout"
+	"github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/gen"
+	L "github.com/Giulio2002/Janus/validation/hardware-comparison/amd64/layout"
 )
 
 // cmdSelftest checks the native harness (not the model) against hand-computed results, so
@@ -15,7 +15,7 @@ import (
 func cmdSelftest(args []string) {
 	fs := flag.NewFlagSet("selftest", flag.ExitOnError)
 	var o runOpts
-	fs.StringVar(&o.runner, "runner", "oracle-amd64/bin/runner", "native runner")
+	fs.StringVar(&o.runner, "runner", "validation/hardware-comparison/amd64/bin/runner", "native runner")
 	fs.Parse(args)
 
 	type check func(c *L.Case, h *L.HW) string
