@@ -104,7 +104,7 @@ CORE = {"Init", "Std", "Lean", "Lake"}
 def load_bcache(root):
     """scripts/gate/lib/bcache.py: the integrity layer (per-user HMAC key, signed manifests)."""
     sys.dont_write_bytecode = True
-    spec = importlib.util.spec_from_file_location("bcache", os.path.join(root, "scripts", "lib", "bcache.py"))
+    spec = importlib.util.spec_from_file_location("bcache", os.path.join(root, "scripts", "gate", "lib", "bcache.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -791,7 +791,7 @@ def obj_files(lake, cs, partial=False):
 
 
 def load_bcache(root):
-    path = os.path.join(root, "scripts", "lib", "bcache.py")
+    path = os.path.join(root, "scripts", "gate", "lib", "bcache.py")
     spec = importlib.util.spec_from_file_location("bcache", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
