@@ -22,7 +22,7 @@ J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
 if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; go build -o "$J" ./cmd/janus || exit 1; fi
 if [ "${JANUS_AUDIT_PREBUILT:-}" != 1 ]; then
   lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
-  [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
+  [ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
 fi
 W=$R/work; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-roundds.XXXXXX")" || exit 1

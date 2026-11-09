@@ -4,7 +4,7 @@
 #
 #   test/redteam/rounds/rt-fp/run.sh                 every row
 #   RT_FP_SKIP_SAIL=1 ...              skip A64-SAIL (needs validation/reference-models/sail-arm/target/release/janus-oracle-sail,
-#                                      built by `scripts/oracle-sail.sh build`, about 30 min once)
+#                                      built by `scripts/validation/sail-arm.sh build`, about 30 min once)
 #   RT_FP_SKIP_SPEC=1 ...              skip SPEC-TF (about 4 min, needs /srv/janus-fp-deps)
 #   JOBS=N                             oracle parallelism (default: by MemAvailable, at most 16)
 #
@@ -12,8 +12,8 @@
 # and the script exits 1.
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-# shellcheck source=../../../../scripts/lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+# shellcheck source=../../../../scripts/gate/lib/memguard.sh
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 here="$root/test/redteam/rounds/rt-fp"
 cd "$root" || exit 1
@@ -62,7 +62,7 @@ if [ -n "${RT_FP_SKIP_SAIL:-}" ] || [ ! -x "$sail" ]; then
 else
   echo "== A64-SAIL: the same corpus on the Sail ASL model, three-way"
   # KEEP=1: the rows below read the raw verdicts (W is removed on exit anyway).
-  KEEP=1 QEMU_OUT="$W/out-a64" OUT="$W/out-sail" JOBS="$JOBS" scripts/oracle-sail.sh run >"$W/sail.log" 2>&1
+  KEEP=1 QEMU_OUT="$W/out-a64" OUT="$W/out-sail" JOBS="$JOBS" scripts/validation/sail-arm.sh run >"$W/sail.log" 2>&1
   js=$(mismatches "$W/out-sail/janus-vs-sail"); qs=$(mismatches "$W/out-sail/qemu-vs-sail")
   if [ -s "$W/out-sail/janus-vs-sail/summary.md" ] && [ "$js" = 0 ] && [ "$qs" = 0 ]; then
     row "A64-SAIL (Janus/qemu vs Sail)" ok "ok (Janus vs Sail: $(summary "$W/out-sail/janus-vs-sail"); qemu vs Sail: $qs MISMATCH)"
@@ -136,7 +136,7 @@ else
   st=""
   for f in AddF64 Dot3 F64ToU64; do
     rm -rf "$W/ex-$f"; cp -r "artifacts/amd64/$f" "$W/ex-$f" 2>/dev/null ||
-      { st="$st $f:not-extracted(run scripts/build-examples-amd64.sh)"; continue; }
+      { st="$st $f:not-extracted(run scripts/build/build-examples-amd64.sh)"; continue; }
     if out=$("$W/janus" verify "$W/ex-$f" --proof "examples/proofs-amd64/$f/Proof.lean" --theorem Proof.correctness --binary artifacts/examples-amd64 2>&1) &&
         grep -q 'GoABI.GoMXCSR s' <<<"$out"; then st="$st $f:ok"; else st="$st $f:FAILED"; fi
   done

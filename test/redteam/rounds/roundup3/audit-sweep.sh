@@ -9,11 +9,11 @@ export PATH=/usr/local/go/bin:$PATH
 out="${1:?outdir}"; shift; isa="${1:-both}"; [ $# -gt 0 ] && shift
 mkdir -p "$out/logs" "$out/art" "$out/cache"; export JANUS_CACHE_DIR="$out/cache"
 J="${JANUS_BIN:-$root/bin/janus}"
-. scripts/example-contracts.sh
+. scripts/verify/example-contracts.sh
 one() { # ISA NAME
   local i=$1 n=$2 proof art sym log="$out/logs/$1-$2.log"
   if [ $i = arm64 ]; then proof=examples/proofs/$n.lean; sym=$(example_symbol "$n"); art="$out/art/arm64-$n"
-    [ -d "$art" ] || { mapfile -t tg < <(scripts/example-targets.sh "$n"); "$J" extract artifacts/examples-arm64 "$sym" "$art" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1; }
+    [ -d "$art" ] || { mapfile -t tg < <(scripts/verify/example-targets.sh "$n"); "$J" extract artifacts/examples-arm64 "$sym" "$art" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1; }
   else proof=examples/proofs-amd64/$n/Proof.lean; art=artifacts/amd64/$n; fi
   [ -f "$proof" ] && [ -d "$art" ] || { printf '%s\t%s\tNOPROOF\t\n' $i $n; return; }
   local -a th=(--theorem Proof.correctness)

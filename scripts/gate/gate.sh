@@ -2,20 +2,20 @@
 # The gate: one driver for every check. It prebuilds once, then runs every stage as a parallel lane
 # that reads the prebuilt outputs.
 #
-#   scripts/gate.sh [-j N | --jobs N|auto] [--lanes N] [--changed] [--only a,b,..] [--skip a,b,..] [--out DIR]
+#   scripts/gate/gate.sh [-j N | --jobs N|auto] [--lanes N] [--changed] [--only a,b,..] [--skip a,b,..] [--out DIR]
 #
 #   -j N        items at once in the verify pool (default $JANUS_JOBS, else 2: RULES.md on the shared box;
-#               `auto` = the formula of scripts/lib/parallel.sh). The other stages scale with it: the go
+#               `auto` = the formula of scripts/gate/lib/parallel.sh). The other stages scale with it: the go
 #               test shards (max(N, JANUS_GATE_GOTEST_SHARDS=6), clamped to 2..8, one test slot each) and the audit lanes (N).
 #   --lanes N   lanes at once (default $JANUS_LANES, else N + 1: the verify pool and N others). Lanes are
 #               queued longest first by their time in the last run (artifacts/gate/lane-times).
-#   --changed   development only (scripts/verify-all-examples.sh --changed): not a gate run.
-#   --filter ERE   verify lane: only the items whose id matches (scripts/verify-all-examples.sh --filter)
+#   --changed   development only (scripts/verify/verify-all-examples.sh --changed): not a gate run.
+#   --filter ERE   verify lane: only the items whose id matches (scripts/verify/verify-all-examples.sh --filter)
 #   --gotest-run ERE   go test lane: only the tests whose name matches
 #   --rounds LIST  audit lane: only these rounds (test/redteam/run-rounds.sh, e.g. "r2 r3")
 #   --incremental  (or JANUS_GATE_INCREMENTAL=1) skip every item and lane for which the record of a PASS exists
 #               whose key is identical: a content hash of every input of the item (cmd/janus/incr.go,
-#               scripts/lib/incr.sh, docs/TESTING.md "Incremental gate"). Anything else runs, in full. The DEFAULT is
+#               scripts/gate/lib/incr.sh, docs/TESTING.md "Incremental gate"). Anything else runs, in full. The DEFAULT is
 #               a FULL run, which stays mandatory before every push to main and nightly; an incremental run says
 #               INCREMENTAL in its verdict and lists every item and lane as RAN or SKIPPED with the time, host and
 #               commit of the PASS a skip replays. The prebuild, the build lanes and the axiom guard always run.
@@ -32,12 +32,12 @@
 #               directory in <out>/cold-cache; the Go build cache and the HMAC key are kept), a fresh framework build
 #               (it REFUSES to start if .lake/build, models/asl/.lake/build, models/x86/.lake/build or validation/reference-models/sail-arm/target hold
 #               a build: use a fresh worktree, or --wipe), and no models/asl/JanusASL/Janus module cache. The model artifacts come ONLY from
-#               the model pin (scripts/model-pin.sh, scripts/lib/modelpin.py): content-hash pinned (SHA-256 of every file, the
+#               the model pin (scripts/gate/model-pin.sh, scripts/gate/lib/modelpin.py): content-hash pinned (SHA-256 of every file, the
 #               manifest HMAC, and a signed pin record that binds the exact manifest) and integrity-checked on EVERY cold
 #               gate, before anything is built (and again by every restore and after every build): a tampered, corrupt or missing
 #               pin FAILS the gate; a STALE pin (a model input changed: sources, toolchain, environment, key scheme) is rebuilt
 #               inside the gate (see --no-rebuild-stale-model), never replaced by a cached model. The pin is written ONLY by the nightly truly-cold run
-#               (scripts/nightly-cold-gate.sh: JANUS_ASL_CACHE=0, empty caches, builds the model from source, must pass and
+#               (scripts/gate/nightly-cold-gate.sh: JANUS_ASL_CACHE=0, empty caches, builds the model from source, must pass and
 #               agree with the cached run). Nothing else is relaxed: every check, lane and the speed check run as in a full gate.
 #               Not combinable with --incremental.
 #   --no-rebuild-stale-model   with --cold: by DEFAULT a STALE pin (no pin for the current model key: a model input changed) makes this
@@ -59,14 +59,14 @@
 #   (scripts/build-examples{,-amd64,-asm,-sys,-rtmisc,-print,-cgo}.sh), and the framework build and
 #   replay verdict (a first verification of the Add example).
 # PHASE 2, lanes (each a stage, its full log in <out>/lanes/<name>.log):
-#   verify      scripts/verify-all-examples.sh --cgo: ONE queue of every arm64, amd64, asm, rtmisc, sys, print
-#               and cgo item, longest first (scripts/lib/pool.sh), results streamed as they finish
-#   gotest      scripts/gotest-shards.sh: `go test -timeout 7000s ./cmd/...` in balanced shards, every test once
+#   verify      scripts/verify/verify-all-examples.sh --cgo: ONE queue of every arm64, amd64, asm, rtmisc, sys, print
+#               and cgo item, longest first (scripts/gate/lib/pool.sh), results streamed as they finish
+#   gotest      scripts/gate/gotest-shards.sh: `go test -timeout 7000s ./cmd/...` in balanced shards, every test once
 #   rounds      test/redteam/run-rounds.sh (all audit rounds, themselves parallel lanes)
-#   axiom       scripts/ci-axiom-guard.sh, then scripts/lint-example-addresses.sh (no hard-coded binary addresses in the example proofs)
-#   x86         scripts/x86formal.sh prove
-#   asl-build   scripts/asl.sh build (JanusASL, ArmASL and janus-asl-check, once: lakes that build in one package race)
-#   sail-build  scripts/oracle-sail.sh build (the Sail C oracle used by rtasl-fsqrt)
+#   axiom       scripts/gate/ci-axiom-guard.sh, then scripts/verify/lint-example-addresses.sh (no hard-coded binary addresses in the example proofs)
+#   x86         scripts/build/x86formal.sh prove
+#   asl-build   scripts/build/asl.sh build (JanusASL, ArmASL and janus-asl-check, once: lakes that build in one package race)
+#   sail-build  scripts/validation/sail-arm.sh build (the Sail C oracle used by rtasl-fsqrt)
 #   rtasl-prove (builds JanusASL first: set $ASL_CACHE; the others wait for it) rtasl-rel rtasl-strict rtasl-replay rtasl-btf rtasl-probes rtasl-fsqrt rtasl-go
 #               test/redteam/rounds/rt-asl/run.sh GROUP: the red-team round ASL, one lane per group
 # The verdict is strict: a failed, timed-out or missing item or lane fails the gate (exit 1). Item timeouts
@@ -75,28 +75,28 @@
 #
 # Output: a result line the moment each item or lane finishes (PASS/FAIL/TIMEOUT + wall seconds), a
 # progress line every minute, <out>/timeline.jsonl (one JSON object per prebuild step, item, pool and
-# lane: start/end epoch seconds, wall, status) and the report of scripts/gate-report.py at the end.
+# lane: start/end epoch seconds, wall, status) and the report of scripts/gate/gate-report.py at the end.
 # Refuses to start with load >= 70, MemAvailable < 40 GiB or < 60 GiB free on the checkout's disk
 # (RULES.md) unless JANUS_GATE_FORCE=1. LEAN_NUM_THREADS defaults to 4 and is capped at 4.
 set -uo pipefail
 # The names of the variables that were exported when the gate started (before any export of its own; kept across the re-execs below):
-# scripts/lib/incr-liveness.sh (lane cachekeys) changes every variable the gate ADDED to see that none of them is part of an incremental
+# scripts/gate/lib/incr-liveness.sh (lane cachekeys) changes every variable the gate ADDED to see that none of them is part of an incremental
 # key. Not a key prefix (GATE_..., not JANUS_...): it is read by that check only.
 [ -n "${GATE_ENV0_NAMES+x}" ] || export GATE_ENV0_NAMES="$(compgen -e | sort | tr '\n' ' ')"
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 [ ! -d "$HOME/.elan/bin" ] || export PATH="$HOME/.elan/bin:$PATH"
 # shellcheck source=lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+. "$root/scripts/gate/lib/parallel.sh"
 # shellcheck source=lib/pool.sh
-. "$root/scripts/lib/pool.sh"
+. "$root/scripts/gate/lib/pool.sh"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 # shellcheck source=lib/gate-decoder.sh
-. "$root/scripts/lib/gate-decoder.sh"
+. "$root/scripts/gate/lib/gate-decoder.sh"
 # shellcheck source=lib/incr.sh
-. "$root/scripts/lib/incr.sh"
+. "$root/scripts/gate/lib/incr.sh"
 memguard_self "$@"
 
 # Shards of the go test lane: JANUS_GATE_GOTEST_SHARDS (default 6), never fewer than -j N, clamped to 2..8. The shards are
@@ -168,7 +168,7 @@ while [ $# -gt 0 ]; do
     --update-baseline) sbmode=record; shift ;;
     --speed-baseline) sbmode="${2:?}"; shift 2 ;;
     -h|--help) sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d'; exit 0 ;;
-    *) echo "usage: scripts/gate.sh [--cold [--wipe] [--no-rebuild-stale-model]] [-j N|auto] [--lanes N] [--changed] [--only a,b] [--skip a,b] [--out DIR]" >&2; exit 2 ;;
+    *) echo "usage: scripts/gate/gate.sh [--cold [--wipe] [--no-rebuild-stale-model]] [-j N|auto] [--lanes N] [--changed] [--only a,b] [--skip a,b] [--out DIR]" >&2; exit 2 ;;
   esac
 done
 if [ -z "$cold" ] && { [ -n "$wipe" ] || [ "$stale_mode" = fail ] || [ -n "$cold_preflight_only" ]; }; then
@@ -178,10 +178,10 @@ if [ -n "$cold" ]; then
   if [ -n "$incremental" ]; then echo "gate: --cold is a full from-scratch run and cannot be --incremental" >&2; exit 2; fi
   # The model pin is checked FIRST, before anything is built: a tampered, corrupt, missing or stale pin fails in seconds.
   if [ -z "${JANUS_COLD_PIN_CHECKED:-}" ]; then
-    echo "gate: COLD mode: checking the ISA model pin (scripts/model-pin.sh check)"
+    echo "gate: COLD mode: checking the ISA model pin (scripts/gate/model-pin.sh check)"
     pin_log="$(mktemp "${TMPDIR:-/tmp}/gate-model-pin.XXXXXX")"
     pin_rc=0
-    scripts/model-pin.sh check --stale "$stale_mode" > "$pin_log" 2>&1 || pin_rc=$?
+    scripts/gate/model-pin.sh check --stale "$stale_mode" > "$pin_log" 2>&1 || pin_rc=$?
     grep -v '^memguard' "$pin_log"
     if [ "$pin_rc" != 0 ]; then
       rm -f "$pin_log"
@@ -193,7 +193,7 @@ if [ -n "$cold" ]; then
   fi
   if [ -n "$cold_preflight_only" ]; then echo "gate: cold preflight OK (the model pin holds)"; exit 0; fi
 fi
-# test-only narrowing of the nightly object audit (scripts/lib/nightly-objaudit.sh): never inherited by a gate run
+# test-only narrowing of the nightly object audit (scripts/gate/lib/nightly-objaudit.sh): never inherited by a gate run
 if [ -n "${NIGHTLY_OBJAUDIT_SCOPES:-}" ] || [ -n "${NIGHTLY_OBJAUDIT_TEST:-}" ]; then
   echo "gate: NIGHTLY_OBJAUDIT_SCOPES / NIGHTLY_OBJAUDIT_TEST are test-only knobs and are set in the environment: refusing" >&2
   exit 2
@@ -209,12 +209,12 @@ if [ -n "$explain_item" ]; then
   case "$explain_item" in
     lane:*) lname="${explain_item#lane:}"
       incr_lane "$lname" true $(lane_spec "$lname"); exit 0 ;;
-    *) exec scripts/verify-all-examples.sh --cgo --explain --filter "^${explain_item//./\\.}\$" ;;
+    *) exec scripts/verify/verify-all-examples.sh --cgo --explain --filter "^${explain_item//./\\.}\$" ;;
   esac
 fi
-# -j / --lanes not given (or -j auto): sized from the free cores and MemAvailable (scripts/lib/autojobs.sh),
+# -j / --lanes not given (or -j auto): sized from the free cores and MemAvailable (scripts/gate/lib/autojobs.sh),
 # using the largest recorded per-item peak of the speed baseline; an explicit -j / JANUS_JOBS is used as given.
-. "$root/scripts/lib/autojobs.sh"
+. "$root/scripts/gate/lib/autojobs.sh"
 autosized=""; auto_why=""; rounds_lanes_n=""; auto_budget=""
 if [ -n "${JANUS_GATE_AUTO_WHY:-}" ]; then   # (the setsid re-exec below keeps the first sizing)
   autosized=1; auto_why="$JANUS_GATE_AUTO_WHY"; rounds_lanes_n="${JANUS_GATE_ROUNDS_LANES:-}"; auto_budget="${JANUS_GATE_AUTO_BUDGET:-}"
@@ -225,7 +225,7 @@ elif [ -z "$jobs_n" ] || [ "$jobs_n" = auto ]; then
   autosized=1
   # the audit rounds' own lane count (test/redteam/run-rounds.sh reads JANUS_ROUNDS_LANES; an older one ignores it)
   rounds_lanes_n="${JANUS_ROUNDS_LANES:-$(autojobs_rounds_lanes)}"; auto_budget="$(autojobs_budget)"
-  # the verify pool memory budget (GiB): per-item admission in scripts/verify-all-examples.sh
+  # the verify pool memory budget (GiB): per-item admission in scripts/verify/verify-all-examples.sh
   export JANUS_VERIFY_MEM_BUDGET_GIB="${JANUS_VERIFY_MEM_BUDGET_GIB:-$(autojobs_verify_budget_gib)}"
 fi
 case "$jobs_n" in ''|*[!0-9]*|0) echo "gate: -j needs a positive number (got '$jobs_n')" >&2; exit 2 ;; esac
@@ -240,7 +240,7 @@ export JANUS_JOBS=$jobs_n
 if [ -z "$cold" ] && [ "${JANUS_ASL_CACHE:-}" != 0 ] && [ -z "${JANUS_FRAMEWORK_STORE+x}" ]; then
   export JANUS_FRAMEWORK_STORE="${XDG_CACHE_HOME:-$HOME/.cache}/janus-framework-store"
 fi
-# Admission control of every pool (scripts/lib/pool.sh): no new item starts when MemAvailable would fall below
+# Admission control of every pool (scripts/gate/lib/pool.sh): no new item starts when MemAvailable would fall below
 # the floor (JANUS_GATE_MEM_FLOOR_GIB, default 30) plus one item's estimate (largest recorded peak x1.5, at least 4 GiB)
 _pk="$(autojobs_peak_gib "$sbfile")"
 export POOL_MEM_HEADROOM_KB=$(( ${JANUS_GATE_MEM_FLOOR_GIB:-30} * 1048576 ))
@@ -248,7 +248,7 @@ export POOL_JOB_MEM_KB=$(awk -v p="${_pk:-6.1}" 'BEGIN { i = p * 1.5; if (i < 4)
 # incremental skipping is opt-in (the default is a full run); recording the passes is always on, so a full run
 # feeds the next incremental one
 export JANUS_INCR_RECORD=1
-# records are written only for a clean tree that does not change during the run (scripts/lib/incr.sh)
+# records are written only for a clean tree that does not change during the run (scripts/gate/lib/incr.sh)
 unset JANUS_GATE_TREE0; incr_tree_pin
 # private per-gate-run cache of the host build-tool digest (incr_hosttools); not a key input itself (stamped with PATH/CC/CXX inside)
 INCR_HOSTTOOLS_CACHE="$(mktemp "$root/artifacts/incr-hosttools.XXXXXX" 2>/dev/null)" && export INCR_HOSTTOOLS_CACHE || unset INCR_HOSTTOOLS_CACHE
@@ -359,10 +359,10 @@ printf '{"kind":"gate","commit":"%s","jobs":%s,"lanes":%s,"load1":%s,"memAvailGi
 [ -z "$autosized" ] || echo "gate: -j $jobs_n, $lanes_n lanes chosen automatically: $auto_why; audit rounds: ${rounds_lanes_n:-default} lanes
 gate: $auto_budget"
 echo "gate: $sha, pool -j $jobs_n, $lanes_n lanes, load $load1, MemAvailable $((memk / 1048576)) GiB, $(nproc) cores; logs and timeline in $out${partial:+; PARTIAL RUN (--only/--skip/--changed)}; lane-level incremental skipping $([ "${JANUS_INCR_LANES:-}" = 1 ] && echo 'ON (JANUS_INCR_LANES=1: EXPERIMENTAL, not cleared by a red team)' || echo 'OFF (default: every lane runs; set JANUS_INCR_LANES=1 to opt in)')"
-objc_state="$(scripts/asl.sh objcache-state 2>/dev/null | grep -v -E "^(memguard|janus: memory guard|janus-memguard)" | tail -n 1)"; [ -n "$objc_state" ] || objc_state=UNKNOWN
+objc_state="$(scripts/build/asl.sh objcache-state 2>/dev/null | grep -v -E "^(memguard|janus: memory guard|janus-memguard)" | tail -n 1)"; [ -n "$objc_state" ] || objc_state=UNKNOWN
 echo "gate: object cache: $objc_state (a result with it ON is not merge evidence by itself: the pre-push cold gate, JANUS_ASL_CACHE=0, and the nightly audit are)"
 
-# ---- the prebuild stages (they are items of the same pool as the lanes: scripts/lib/dag.sh)
+# ---- the prebuild stages (they are items of the same pool as the lanes: scripts/gate/lib/dag.sh)
 step() { # NAME CMD...: a prebuild step, logged and timed; returns its status
   local name=$1 s e rc=0; shift
   s=$(now); "$@" > "$out/prebuild/$name.log" 2>&1 || rc=$?; e=$(now)
@@ -377,18 +377,18 @@ pre_gobin() { CGO_ENABLED=0 go build -o bin/janus ./cmd/janus; }
 pre_rounds_bin() { mkdir -p test/redteam/bin && cp -f bin/janus test/redteam/bin/janus-rounds.new && mv -f test/redteam/bin/janus-rounds.new test/redteam/bin/janus-rounds; }
 # The go tests' prebuilt framework fixture (cmd/janus/fixture_test.go, docs/TESTING.md "Go tests"): built here, once, by
 # the tests' TestMain (a run that selects no test), so the gotest lane does not pay for it; it runs beside the verify pool.
-# Two stages (scripts/lib/dag.sh): the embedded framework's build and replay, in the fixture only (no user cache, no checkout
+# Two stages (scripts/gate/lib/dag.sh): the embedded framework's build and replay, in the fixture only (no user cache, no checkout
 # build: it starts at t=0), then the checkout's replay verdict (carried from the user cache where pre-stamp recorded it).
 pre_fixture_emb() { JANUS_TEST_FIXTURE_PART=embedded JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
 pre_fixture() { JANUS_TEST_FIXTURE_PART=checkout JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
-pre_stamp() { JANUS_ROOT="$root" JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
+pre_stamp() { JANUS_ROOT="$root" JANUS_EXAMPLES_PREBUILT=1 scripts/verify/verify-examples.sh -j 1 Add; }
 # pre-warm verifies Add against the EMBEDDED framework (JANUS_ROOT unset: janus builds it itself in the user cache and records its
 # replay verdict there) from a private extraction directory, so it neither reads the checkout's build nor shares artifacts/Add with
 # pre-stamp (the checkout's --janus-root verification): the two run side by side instead of one after the other.
-pre_warm() { mkdir -p "$out/prewarm"; env -u JANUS_ROOT JANUS_EXAMPLES_ARTIFACTS="$out/prewarm" JANUS_EXAMPLES_SUMMARY="$out/prewarm/summary.txt" JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
+pre_warm() { mkdir -p "$out/prewarm"; env -u JANUS_ROOT JANUS_EXAMPLES_ARTIFACTS="$out/prewarm" JANUS_EXAMPLES_SUMMARY="$out/prewarm/summary.txt" JANUS_EXAMPLES_PREBUILT=1 scripts/verify/verify-examples.sh -j 1 Add; }
 # From the moment the shared framework build (.lake/build) is finished nothing may write it (a lake that rebuilds a
 # module while another lane's verification has pinned its .olean fails that verification: "framework build changed after
-# the kernel replay"). pre-pin hashes the finished build and switches scripts/lib/lakeguard/lake on (it turns every
+# the kernel replay"). pre-pin hashes the finished build and switches scripts/gate/lib/lakeguard/lake on (it turns every
 # `lake build`/`lake exe` in this checkout's package into --no-build); every READER of the build needs pre-pin, so none starts
 # before the build it reads has finished and been hashed. The oleans are hashed again at the end of the run.
 fw_hash() { (cd "$root/.lake/build" && find . -type f \( -name '*.olean*' -o -name '*.ir' -o -name '*.ilean' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1); }
@@ -396,10 +396,10 @@ pre_pin() { fw_hash > "$out/fw_hash0" && : > "$out/.pinned" && echo "gate: frame
 # a rerun into the same --out must not find the last run's marker: it would arm the lakeguard before pre-lake ran
 rm -f "$out/.pinned" "$out/fw_hash0"
 JANUS_REAL_LAKE="$(command -v lake)"; export JANUS_REAL_LAKE JANUS_LAKEGUARD_ROOT="$root" JANUS_LAKEGUARD_PIN="$out/.pinned"
-export PATH="$root/scripts/lib/lakeguard:$PATH"
+export PATH="$root/scripts/gate/lib/lakeguard:$PATH"
 export JANUS_EXAMPLES_PREBUILT=1 JANUS_GATE_PREBUILT=1
-JANUS_GATE_RUN_ID="$$.$(date +%s%N)"; export JANUS_GATE_RUN_ID   # binds test/redteam/bin/janus-decode-gate to this run (scripts/lib/gate-decoder.sh)
-. "$root/scripts/lib/dag.sh"
+JANUS_GATE_RUN_ID="$$.$(date +%s%N)"; export JANUS_GATE_RUN_ID   # binds test/redteam/bin/janus-decode-gate to this run (scripts/gate/lib/gate-decoder.sh)
+. "$root/scripts/gate/lib/dag.sh"
 dag_check || { echo "gate: internal error: the stage graph is inconsistent"; exit 1; }
 
 # ---- phase 2: lanes
@@ -436,7 +436,7 @@ tree_x86="$treebase/x86" tree="$treebase/asl" tree_aslv="$treebase/aslv" tree_go
 mkdir -p "$treebase"
 exec {treelock}>"$treebase.lock"
 flock -n "$treelock" || { echo "gate: another run uses the same sources/trees ($treebase); wait for it"; exit 1; }
-# the JanusASL cache hook (scripts/asl.sh ASL_CACHE; agent/speed-asl's JANUS_ASL_CACHE is accepted as an alias;
+# the JanusASL cache hook (scripts/build/asl.sh ASL_CACHE; agent/speed-asl's JANUS_ASL_CACHE is accepted as an alias;
 # its interface is not final, this only forwards the directory)
 [ -n "${ASL_CACHE:-}" ] || { [ -z "${JANUS_ASL_CACHE:-}" ] || export ASL_CACHE="$JANUS_ASL_CACHE"; }
 mkdir -p "$root/models/asl/.lake" "$root/models/x86/.lake" "$root/validation/reference-models/sail-arm/target"
@@ -465,46 +465,46 @@ add() { # NAME CODE [NEEDS]
   WANT+=("$1")
   pool_add "$1" "$2" "$1" "${DAG_DEPS[$1]:-} ${3:-}"
 }
-# addc: a lane that may be skipped on the record of an identical PASS (incr_lane: scripts/lib/incr.sh)
+# addc: a lane that may be skipped on the record of an identical PASS (incr_lane: scripts/gate/lib/incr.sh)
 addc() { # NAME CODE [NEEDS]
   local spec
   spec="$(lane_spec "$1" | while IFS= read -r l; do printf ' %q' "$l"; done)"
   add "$1" "incr_lane $(printf '%q' "$1") $(printf '%q' "$2")$spec" "${3:-}"
 }
-# Lanes that share an isolated tree run `lake` through scripts/lib/lanelake/lake: every lake call in the tree holds
+# Lanes that share an isolated tree run `lake` through scripts/gate/lib/lanelake/lake: every lake call in the tree holds
 # a flock on the tree (exclusive for anything that can rewrite the package, shared for `lake env`), so a lane's
-# rebuild or dependency re-resolution never overlaps another lane's lake call (scripts/lib/test-lanelake.sh).
+# rebuild or dependency re-resolution never overlaps another lane's lake call (scripts/gate/lib/test-lanelake.sh).
 laneenv() { # TREE: the environment of a lane working in TREE (JANUS_REAL_LAKE is exported above)
   echo "echo 'lane: object cache: $objc_state';"
-  echo "export JANUS_LANE_TREE='$1' JANUS_LANE_LAKE_LOCK='$1/.gate-lake.lock' PATH='$root/scripts/lib/lanelake':\"\$PATH\";"
+  echo "export JANUS_LANE_TREE='$1' JANUS_LANE_LAKE_LOCK='$1/.gate-lake.lock' PATH='$root/scripts/gate/lib/lanelake':\"\$PATH\";"
 }
 WANT=()
 # a lane needs its prerequisite only when that stage is part of this run
 needs() { local r="" n; for n in "$@"; do ! selected "$n" || r="${r:+$r }$n"; done; echo "$r"; }
-add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed} ${incremental:+--incremental} ${vfilter:+--filter '$vfilter'}"
+add verify "scripts/verify/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed} ${incremental:+--incremental} ${vfilter:+--filter '$vfilter'}"
 JANUS_POOL_DIR="$out/verify"; export JANUS_POOL_DIR
-addc gotest "JANUS_REQUIRE_FIXTURE=1 JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
+addc gotest "JANUS_REQUIRE_FIXTURE=1 JANUS_JOBS=$jobs_n scripts/gate/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
 addc rounds "${rounds_lanes_n:+export JANUS_ROUNDS_LANES=$rounds_lanes_n; }test/redteam/run-rounds.sh $rounds"
-add axiom "scripts/ci-axiom-guard.sh && scripts/lint-example-addresses.sh"
-# (self-test hook, scripts/lib/test-gatelanes.sh: one extra lane running JANUS_GATE_TEST_LANE in the lake tree)
+add axiom "scripts/gate/ci-axiom-guard.sh && scripts/verify/lint-example-addresses.sh"
+# (self-test hook, scripts/gate/lib/test-gatelanes.sh: one extra lane running JANUS_GATE_TEST_LANE in the lake tree)
 [ -z "${JANUS_GATE_TEST_LANE:-}" ] || add testlane "$(laneenv "$tree") cd '$tree' && $JANUS_GATE_TEST_LANE"
-addc x86 "$(laneenv "$tree_x86") cd '$tree_x86' && scripts/x86formal.sh prove"
+addc x86 "$(laneenv "$tree_x86") cd '$tree_x86' && scripts/build/x86formal.sh prove"
 # CI checks that the gate used to lack (docs/TESTING.md "CI vs gate"): go vet, the JanusASL cache-key tests, the
 # decoder coverage of the arm64 examples, the quick differential oracles (qemu / native), and `asl.sh verify`
 add govet "go vet ./..."
-add cachekeys "models/asl/tools/test_asl_cache.sh && models/asl/tools/test_asl_mod_cache.sh && models/asl/tools/test_asl_obj_cache.sh && scripts/lib/test-nightly-objcache.sh && scripts/lib/test-modelpin.sh && scripts/lib/test-incr-liveness.sh && scripts/lib/test-incr-hosttools.sh && scripts/lib/test-verdict-banner.sh && scripts/lib/test-gate-decoder.sh && scripts/lib/test-gotest-extras.sh"
-add decoder "BLOCKERS_OUT='$out/decoder' scripts/decoder-coverage.sh"
-add oracle "$(laneenv "$tree") cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
+add cachekeys "models/asl/tools/test_asl_cache.sh && models/asl/tools/test_asl_mod_cache.sh && models/asl/tools/test_asl_obj_cache.sh && scripts/gate/lib/test-nightly-objcache.sh && scripts/gate/lib/test-modelpin.sh && scripts/gate/lib/test-incr-liveness.sh && scripts/gate/lib/test-incr-hosttools.sh && scripts/gate/lib/test-verdict-banner.sh && scripts/gate/lib/test-gate-decoder.sh && scripts/gate/lib/test-gotest-extras.sh"
+add decoder "BLOCKERS_OUT='$out/decoder' scripts/validation/decoder-coverage.sh"
+add oracle "$(laneenv "$tree") cd '$tree' && for p in hardware-arm64:oracle hardware-amd64:oracle-amd64; do s=\${p#*:}; O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/validation/\${p%%:*}.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
 # asl-verify waits for asl-build only to find the ArmASL model in the build cache (asl-build builds and publishes it, and the
-# model takes ~45 min to build): when the verified cache already holds this model (scripts/asl.sh cached) there is nothing to
+# model takes ~45 min to build): when the verified cache already holds this model (scripts/build/asl.sh cached) there is nothing to
 # wait for, and the two lanes (separate trees) run side by side; cache entries are published atomically under per-key locks.
-asl_verify_needs() { if scripts/asl.sh cached >/dev/null 2>&1; then echo "gate: the ArmASL model is in the verified build cache: asl-verify does not wait for asl-build" >&2; else needs asl-build; fi; }
-add asl-verify "$(laneenv "$tree_aslv") cd '$tree_aslv' && scripts/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4 && test ! -L '$tree_aslv/models/asl/.lake'" "$(asl_verify_needs)"
-add asl-build "$(laneenv "$tree") cd '$tree' && scripts/asl.sh build"
-add sail-build "$(laneenv "$tree") cd '$tree' && scripts/oracle-sail.sh build"
+asl_verify_needs() { if scripts/build/asl.sh cached >/dev/null 2>&1; then echo "gate: the ArmASL model is in the verified build cache: asl-verify does not wait for asl-build" >&2; else needs asl-build; fi; }
+add asl-verify "$(laneenv "$tree_aslv") cd '$tree_aslv' && scripts/build/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4 && test ! -L '$tree_aslv/models/asl/.lake'" "$(asl_verify_needs)"
+add asl-build "$(laneenv "$tree") cd '$tree' && scripts/build/asl.sh build"
+add sail-build "$(laneenv "$tree") cd '$tree' && scripts/validation/sail-arm.sh build"
 for g in prove rel strict replay btf probes fsqrt go; do
   nd=""
-  # rtasl-prove (scripts/asl.sh prove) builds JanusASL; two lakes in one package race, so every other lake-using
+  # rtasl-prove (scripts/build/asl.sh prove) builds JanusASL; two lakes in one package race, so every other lake-using
   # group runs after it (as in test/redteam/rounds/rt-asl/run.sh, where prove is the first group)
   case "$g" in prove) nd="$(needs asl-build)" ;; btf|go) ;; fsqrt) nd="$(needs rtasl-prove sail-build)" ;; *) nd="$(needs rtasl-prove)" ;; esac
   gt="$tree"; [ "$g" != go ] || gt="$tree_go"
@@ -514,10 +514,10 @@ done
 # dependencies. Prebuild stages and trees are not subject to --only/--skip.
 declare -A STAGE_CODE=(
   [pre-gobin]="step pre-gobin pre_gobin" [pre-lake]="step pre-lake pre_lake" [pre-rounds-bin]="step pre-rounds-bin pre_rounds_bin"
-  [pre-ex-arm64]="step pre-ex-arm64 scripts/build-examples.sh" [pre-ex-amd64]="step pre-ex-amd64 bash scripts/build-examples-amd64.sh"
-  [pre-ex-asm]="step pre-ex-asm scripts/build-examples-asm.sh" [pre-ex-sys]="step pre-ex-sys scripts/build-examples-sys.sh"
-  [pre-ex-rtmisc]="step pre-ex-rtmisc scripts/build-examples-rtmisc.sh" [pre-ex-print]="step pre-ex-print scripts/build-examples-print.sh"
-  [pre-ex-cgo]="step pre-ex-cgo scripts/build-examples-cgo.sh"
+  [pre-ex-arm64]="step pre-ex-arm64 scripts/build/build-examples.sh" [pre-ex-amd64]="step pre-ex-amd64 bash scripts/build/build-examples-amd64.sh"
+  [pre-ex-asm]="step pre-ex-asm scripts/build/build-examples-asm.sh" [pre-ex-sys]="step pre-ex-sys scripts/build/build-examples-sys.sh"
+  [pre-ex-rtmisc]="step pre-ex-rtmisc scripts/build/build-examples-rtmisc.sh" [pre-ex-print]="step pre-ex-print scripts/build/build-examples-print.sh"
+  [pre-ex-cgo]="step pre-ex-cgo scripts/build/build-examples-cgo.sh"
   [pre-stamp]="step pre-stamp pre_stamp" [pre-warm]="step pre-warm pre_warm" [pre-fixture-emb]="step pre-fixture-emb pre_fixture_emb" [pre-fixture]="step pre-fixture pre_fixture" [pre-pin]="step pre-pin pre_pin"
   [tree-x86]="mktree '$tree_x86'" [tree-asl]="mktree '$tree'" [tree-aslv]="mktree '$tree_aslv' private" [tree-go]="mktree '$tree_go'"
 )
@@ -558,22 +558,22 @@ if [ -z "$partial" ]; then
 fi
 gate_t1=$(now)
 tl_stage stage gate "$gate_t0" "$gate_t1" "$lanes_rc"
-python3 -I "$root/scripts/gate-report.py" "$tlf" || true
+python3 -I "$root/scripts/gate/gate-report.py" "$tlf" || true
 # the kernel-replay sizing the verifications of this run chose (workers x threads, number of verifications)
 { sed 's/ (effective limit.*//; s/^.*framework replay sizing: //' "$out/replay-sizing.log" 2>/dev/null | sort | uniq -c | sort -rn; } > "$out/replay-sizing.txt"
 echo "gate: kernel replay sizing (workers x threads, number of verifications): $(tr -s ' ' < "$out/replay-sizing.txt" | tr '\n' ';' | cut -c1-300) (list: $out/replay-sizing.txt)"
-# the speed-regression check (on top of every other check): scripts/gate-speedcheck.py, committed baseline
+# the speed-regression check (on top of every other check): scripts/gate/gate-speedcheck.py, committed baseline
 # scripts/speed-baseline.tsv; a regression fails the gate whatever the host load
 speed_rc=0
 if [ "$sbmode" = record ]; then
   if [ -z "$partial" ] && [ "$lanes_rc" = 0 ]; then
-    python3 -I "$root/scripts/gate-speedcheck.py" update "$tlf" "$sbfile" "$out/verify" "$root/artifacts"
+    python3 -I "$root/scripts/gate/gate-speedcheck.py" update "$tlf" "$sbfile" "$out/verify" "$root/artifacts"
     echo "speed check: baseline RECORDED in $sbfile (commit it after reviewing); no comparison made"
   else
     echo "speed check: baseline NOT recorded (record needs a passing full run)"
   fi
 elif [ -f "$sbfile" ]; then
-  python3 -I "$root/scripts/gate-speedcheck.py" check "$tlf" "$sbfile" "$out/verify" "$root/artifacts" || speed_rc=$?
+  python3 -I "$root/scripts/gate/gate-speedcheck.py" check "$tlf" "$sbfile" "$out/verify" "$root/artifacts" || speed_rc=$?
 else
   echo "!!!! speed check NOT enforced: no baseline file $sbfile (record one with --speed-baseline record after a green full gate) !!!!"
 fi
@@ -582,7 +582,7 @@ fi
 if [ -n "$cold" ]; then
   _which=""; selected asl-build && _which="armasl"; selected sail-build && _which="${_which:+$_which,}sail"
   if [ -n "$_which" ]; then
-    _pr=0; _po=$(scripts/model-pin.sh verify-tree --stale "$stale_mode" --only "$_which" 2>&1) || _pr=$?
+    _pr=0; _po=$(scripts/gate/model-pin.sh verify-tree --stale "$stale_mode" --only "$_which" 2>&1) || _pr=$?
     printf '%s\n' "$_po" | grep -v '^memguard'
     [ "$_pr" = 0 ] || { echo "gate: FAIL: the pinned model artifacts changed during the run"; lanes_rc=1; }
   fi

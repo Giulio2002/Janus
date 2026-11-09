@@ -21,7 +21,7 @@ Paths under the working directory are shown relative to it.
 ```sh
 export PATH=/usr/local/go/bin:$PATH          # Go 1.26
 go build -o bin/janus ./cmd/janus            # from the repository root
-scripts/build-examples.sh                    # builds artifacts/examples-arm64
+scripts/build/build-examples.sh                    # builds artifacts/examples-arm64
 ```
 
 The CLI is a Go module (`github.com/Giulio2002/Janus`, `go.mod` at the repository root). Its
@@ -41,7 +41,7 @@ initialised package-level `var` (`.noptrdata`) and `Bump` updates a zero-initial
 (`.noptrbss`), both writable.
 `examples/basic/cmd` is a `main` package that keeps every function alive: the Go linker removes
 functions nothing references, so each one is stored in a package-level `[]any` and also called
-on inputs derived from `os.Args`. `scripts/build-examples.sh` builds it with
+on inputs derived from `os.Args`. `scripts/build/build-examples.sh` builds it with
 `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath` into `artifacts/examples-arm64`.
 
 The CLI test fixtures `cmd/janus/testdata/Trivial.lean` (accepted; a placeholder statement that
@@ -635,7 +635,7 @@ keep working; no other theorem is ever recorded there). Every run first withdraw
 and the old `verified/*.json`, so a report file exists exactly for the theorems that passed this
 run. A one-theorem run writes only `verified.json`, as before. `--results FILE` writes
 `{"schema":1,"results":[{"theorem":…,"status":"verified"|"failed","report":…|"failure":…}]}` with
-every theorem's outcome (written by `janus` itself, outside the sandbox; `scripts/lib/theorems.sh`
+every theorem's outcome (written by `janus` itself, outside the sandbox; `scripts/gate/lib/theorems.sh`
 reads statuses from it); `--json` prints the same object.
 
 With `--proof-root` the theorems may be in different modules of the package: write them
@@ -823,10 +823,10 @@ limit, the largest measured `memory.peak` of its jobs and how many jobs ran.
   `lake build` gets `LEAN_NUM_THREADS` (lake's job count) = limit / `JANUS_LAKE_JOB_MEM` (default
   3G), at most `JANUS_LEAN_THREADS_MAX`.
 * `JANUS_LEAN_THREADS_MAX`: a CPU cap on one job's Lean parallelism (lake's job count, and the
-  default of `memguard_jobs` in `scripts/lib/memguard.sh`); default max(2, CPUs/8), so that
+  default of `memguard_jobs` in `scripts/gate/lib/memguard.sh`); default max(2, CPUs/8), so that
   several concurrent jobs on one host do not each take every core.
 * Mechanism, first that works: a child cgroup of a delegated `$JANUS_MEMGUARD_CGROUP` (set by
-  `scripts/lib/memguard.sh`, so janus's limits nest inside a script's or a parallel slot's);
+  `scripts/gate/lib/memguard.sh`, so janus's limits nest inside a script's or a parallel slot's);
   `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0` (janus re-runs itself in the
   scope as a small supervisor that reads the scope's `memory.peak`); the same with the system
   manager as root; `prlimit --as` (limit + 16 GiB per process: weak, Lean reserves ~10 GiB of
@@ -969,7 +969,7 @@ The exit code is `0` whenever the report was produced, including when words are 
 (`EM_X86_64`, build setting `GOARCH=amd64`); `blockers` handles them too: it sweeps each extracted function with x86asm (untrusted, it only finds instruction starts) and runs the bytes from each start, at most 15, through `Janus.Amd64.decode`. It reports an instruction when Lean rejects it, or when Lean decodes a different length than x86asm.
 
 ```
-scripts/build-examples-amd64.sh     # builds artifacts/examples-amd64, extracts artifacts/amd64/<Name>
+scripts/build/build-examples-amd64.sh     # builds artifacts/examples-amd64, extracts artifacts/amd64/<Name>
 janus extract artifacts/examples-amd64 example.com/basic.Add artifacts/amd64/Add
 ```
 
@@ -1008,7 +1008,7 @@ fixture caches, and `TestCacheGCConcurrentVerify` runs verifications while it em
 
 The `--asl` tests (`asl_test.go`) run only with `JANUS_TEST_ASL=1`; `JANUS_TEST_ASL_SEED=<dir>`
 seeds the test cache's JanusASL build from a built package (e.g. `JanusASL` after
-`scripts/asl.sh build`). They derive the corollaries of Add, Max, Mul64 and Add128 from their
+`scripts/build/asl.sh build`). They derive the corollaries of Add, Max, Mul64 and Add128 from their
 artifacts, check that Get's load is reported as uncovered, run the forgery attacks of
 `test/redteam/asl/attacks` and the consumer and batch paths.
 

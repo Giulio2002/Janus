@@ -148,7 +148,7 @@ systematic grids where random sampling is thin.
 * `FRINT{N,P,M,Z,A,X,I}` on ties and near-ties at every magnitude up to 2^53 (including
   `2^52 − 0.5` and `2^23 − 0.5`), denormals, ±0, NaNs, under 24 FPCR values (17,136).
 
-**A64-SAIL**: the same corpus on the Sail Armv9.4-A model (`scripts/oracle-sail.sh run`, driver
+**A64-SAIL**: the same corpus on the Sail Armv9.4-A model (`scripts/validation/sail-arm.sh run`, driver
 built from this tree), three ways: Janus vs Sail 0 MISMATCH (469,029 agree), qemu vs Sail 0
 MISMATCH. NEP, AH, FIZ, DN and FZ were included, alone and together.
 
@@ -209,7 +209,7 @@ opcodes of the `0F` and `0F 3A` maps, register and memory forms: 15,795 host cas
 **SPEC-TF.** The *specifications* `Janus.Float.add`, `mul` and `fma` (all five rounding
 directions) and `truncInt` (to `i32 i64 ui32 ui64`), checked directly against SoftFloat 3e
 (`testfloat_gen`, level 1): 1,534,752 vectors, 0 mismatches. Before, only the machine models
-had been checked against SoftFloat (`scripts/testfloat.sh`), and the specifications only
+had been checked against SoftFloat (`scripts/validation/testfloat.sh`), and the specifications only
 through the proved bridge lemmas. The specifications are defined with the same rounding core as
 the models, so this checks that "the IEEE sum" in a printed theorem is the IEEE sum, against an
 implementation that shares no code with Janus.

@@ -195,7 +195,7 @@ type leanRunner struct {
 	lake, root, buildDir string
 	stderr               io.Writer
 	// heldFW is the framework lock file this process holds EXCLUSIVELY while the runner's lake runs (the framework build):
-	// the child learns it in JANUS_FRAMEWORK_LOCK_HELD_X, so a lock-taking `lake` wrapper (scripts/lib/lanelake/lake) does
+	// the child learns it in JANUS_FRAMEWORK_LOCK_HELD_X, so a lock-taking `lake` wrapper (scripts/gate/lib/lanelake/lake) does
 	// not wait for a lock its own parent holds. Empty: nothing is claimed.
 	heldFW string
 }
@@ -1504,7 +1504,7 @@ func cmdVerifyMany(outdir string, opts map[string]string, flags map[string]bool,
 		mj.Results = append(mj.Results, it)
 	}
 	// --results FILE: the per-theorem outcomes, written by this process (a proof cannot write
-	// it: the sandbox is read-only outside the work directory). scripts/lib/theorems.sh reads
+	// it: the sandbox is read-only outside the work directory). scripts/gate/lib/theorems.sh reads
 	// each theorem's status from it.
 	if opts["results"] != "" {
 		b, _ := json.MarshalIndent(mj, "", "  ")

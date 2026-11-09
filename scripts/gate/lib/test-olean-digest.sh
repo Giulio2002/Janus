@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test of the layout-independent module digest (tools/oleandigest, scripts/gate-cachecmp.py `hashes`/`compare`) with REAL
+# Self-test of the layout-independent module digest (tools/oleandigest, scripts/gate/gate-cachecmp.py `hashes`/`compare`) with REAL
 # Lean builds of a small module and a fake-run comparison:
 #   * the same source in two directories (absolute paths) has different file bytes (the stored linter message embeds the path)
 #     but the same digest (SHA-256 of the message-log-stripped re-serialization); the layout check holds;
@@ -10,7 +10,7 @@
 #     a missing digest, other digest-tool binaries and non-object JSON all fail (rc 1 or 2);
 #   * the digest runner fails closed on a failing tool, a truncated olean and unexpected output.
 set -uo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 t=$(mktemp -d "${TMPDIR:-/tmp}/test-olean-digest.XXXXXX"); trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
 (cd "$root/tools/oleandigest" && lake build >/dev/null 2>&1) || { echo "FAIL cannot build tools/oleandigest"; exit 1; }
@@ -43,7 +43,7 @@ build() { # build MUTATION DIRNAME -> the olean path (built from an ABSOLUTE sou
 rec() { python3 -I - "$root" "$1" <<'PY'
 import importlib.util, sys
 root, ol = sys.argv[1:3]
-spec = importlib.util.spec_from_file_location("cc", root + "/scripts/gate-cachecmp.py"); cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
+spec = importlib.util.spec_from_file_location("cc", root + "/scripts/gate/gate-cachecmp.py"); cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
 exe, src, binsha = cc.digest_tool()
 dg, lint, lay = cc.semantic(exe, [ol])[ol]
 print(dg, lint, lay)
@@ -71,7 +71,7 @@ mkrun() { # mkrun DIR MODULE_REL OLEAN [ALT_SEM_FROM_OLEAN] [LINT_OVERRIDE] [LAY
   python3 -I - "$root" "$1" "$2" "$3" "${4:-}" "${5:-}" "${6:-}" "${7:-}" <<'PY'
 import importlib.util, json, sys
 root, out, rel, ol, alt, lint, lay, nosem = sys.argv[1:9]
-spec = importlib.util.spec_from_file_location("cc", root + "/scripts/gate-cachecmp.py"); cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
+spec = importlib.util.spec_from_file_location("cc", root + "/scripts/gate/gate-cachecmp.py"); cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
 exe, src, binsha = cc.digest_tool()
 h = {"olean:" + rel: cc.sha_file(ol), "config:SAIL_SPLIT": "1", "config:SAIL_SPLIT_PARTS": "48", "sail-driver": "d",
      "config:oleandigest-src": src, "config:oleandigest-bin": binsha, "ir:janus/Fake.c": "c0ffee"}  # compare needs some emitted-C record in both runs
@@ -81,7 +81,7 @@ if not nosem:
 json.dump(h, open(out + "/artifact-hashes.json", "w"))
 PY
 }
-cmpc() { python3 -I "$root/scripts/gate-cachecmp.py" compare "$1" "$2" 2>&1; }
+cmpc() { python3 -I "$root/scripts/gate/gate-cachecmp.py" compare "$1" "$2" 2>&1; }
 want() { # want DESC RC GREP DIR1 DIR2
   local out rc; out=$(cmpc "$4" "$5"); rc=$?
   if [ "$rc" = "$2" ] && { [ -z "$3" ] || grep -q -- "$3" <<<"$out"; }; then ok "$1 (rc $rc)"; else bad "$1: rc $rc (wanted $2): $out"; fi
@@ -110,7 +110,7 @@ cp "$b" "$t/hdr.olean"; printf 'X' | dd of="$t/hdr.olean" bs=1 seek=50 conv=notr
 (cd "$t" && python3 -I - "$root" "$t/hdr.olean" <<'PY'
 import importlib.util, sys
 root, ol = sys.argv[1:3]
-spec = importlib.util.spec_from_file_location("cc", root + "/scripts/gate-cachecmp.py"); cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
+spec = importlib.util.spec_from_file_location("cc", root + "/scripts/gate/gate-cachecmp.py"); cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
 exe, _, _ = cc.digest_tool()
 try:
     r = cc.semantic(exe, [ol])[ol]
@@ -141,7 +141,7 @@ want "compare: artifact-hashes.json null cannot be compared" 2 "" "$t/c1" "$t/j2
 python3 -I - "$root" "$a" "$t" <<'PY' && ok "semantic() fails closed on a failing tool, a truncated olean, unexpected and duplicate output" || bad "semantic() accepted bad output"
 import importlib.util, os, stat, sys
 root, ol, t = sys.argv[1:4]
-spec = importlib.util.spec_from_file_location("cc", root + "/scripts/gate-cachecmp.py"); cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
+spec = importlib.util.spec_from_file_location("cc", root + "/scripts/gate/gate-cachecmp.py"); cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
 exe, _, _ = cc.digest_tool()
 def raises(f):
     try:

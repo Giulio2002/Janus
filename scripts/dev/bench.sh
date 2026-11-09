@@ -2,7 +2,7 @@
 # Measure the elaboration time of proofs (the time `lean` spends checking the proof file
 # against a pre-compiled `Extracted.olean`, i.e. tactic run time plus kernel checking).
 #
-# Usage: scripts/bench.sh [suite ...]
+# Usage: scripts/dev/bench.sh [suite ...]
 #   suites: examples-arm64  examples/proofs/<F>.lean            against artifacts/<F>
 #           examples-amd64  examples/proofs-amd64/<F>/Proof.lean against artifacts/amd64/<F>
 #           bench-arm64     bench/proofs-arm64/<F>.lean         against artifacts/bench-arm64/<F>
@@ -17,9 +17,9 @@
 # CPU time (user + system of the `lean` process) is what to compare: wall time depends on the
 # load of the machine.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 cd "$root"
 export PATH="$PATH:/usr/local/go/bin"
@@ -74,14 +74,14 @@ for s in "${suites[@]}"; do
     examples-arm64)
       for f in examples/proofs/*.lean; do
         n=$(basename "$f" .lean); [ "$n" = WrongAdd ] && continue
-        [ -d "artifacts/$n" ] || { [ -x artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null;
+        [ -d "artifacts/$n" ] || { [ -x artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null;
           bin/janus extract artifacts/examples-arm64 "example.com/basic.$n" "artifacts/$n" >/dev/null; }
         echo "$s $n $f artifacts/$n" >> "$jobs_file"
       done ;;
     examples-amd64)
       for d in examples/proofs-amd64/*/; do
         n=$(basename "$d")
-        [ -d "artifacts/amd64/$n" ] || scripts/build-examples-amd64.sh >/dev/null
+        [ -d "artifacts/amd64/$n" ] || scripts/build/build-examples-amd64.sh >/dev/null
         echo "$s $n ${d}Proof.lean artifacts/amd64/$n" >> "$jobs_file"
       done ;;
     bench-arm64|bench-amd64)

@@ -1,4 +1,4 @@
-/* x87 harvest corpus for scripts/oracle-amd64.sh x87: long double code as gcc and clang emit it
+/* x87 harvest corpus for scripts/validation/hardware-amd64.sh x87: long double code as gcc and clang emit it
  * (-O0/-O2/-O3, with and without -march=x86-64-v3: FISTTP), together with the C corpus's abi.c.
  * Only the instructions are harvested; nothing here is run. */
 #include <math.h>

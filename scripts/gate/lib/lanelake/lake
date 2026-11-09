@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Serialises the `lake` invocations of the gate lanes that share one isolated source tree (scripts/gate.sh).
+# Serialises the `lake` invocations of the gate lanes that share one isolated source tree (scripts/gate/gate.sh).
 # Any lake call in a package under $JANUS_LANE_TREE takes a flock on $JANUS_LANE_LAKE_LOCK: EXCLUSIVE for every
 # command that can build or rewrite the package (build, update, exe, clean, cache, ... anything but `env` and
 # `--version`/`--help`), SHARED for `lake env` (read-only use of the built package, e.g. `lake env lean F`,
@@ -16,7 +16,7 @@ if [ -n "$tree" ] && [ -n "$enabled" ]; then
     "$tree"/*)
       pkg="$(lane_pkg_dir "$here")"
       lock="$(lane_lake_lock "$pkg")"   # keyed by the RESOLVED .lake of the package: trees sharing it by symlink share the lock
-      # the caller already holds this lock exclusively (scripts/asl.sh tl_run: a write phase runs under it): do not take it
+      # the caller already holds this lock exclusively (scripts/build/asl.sh tl_run: a write phase runs under it): do not take it
       # again (flock is not re-entrant across file descriptors)
       [ "${JANUS_LANE_LOCK_HELD:-}" = "$lock" ] && exec "$real" "$@"
       mode=-x

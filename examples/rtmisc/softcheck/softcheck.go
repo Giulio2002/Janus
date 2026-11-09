@@ -3,7 +3,7 @@
 // Janus.Contracts.SoftFloat (docs/RUNTIME-CONTRACTS.md, "Soft float").
 //
 // The functions under test are the runtime's own (//go:linkname), so build with
-// -ldflags=-checklinkname=0 (scripts/softfloat-check.sh does).
+// -ldflags=-checklinkname=0 (scripts/validation/softfloat-check.sh does).
 package softcheck
 
 import (

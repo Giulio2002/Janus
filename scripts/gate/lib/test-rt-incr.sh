@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Red-team tests of scripts/lib/incr.sh and the gate entry points (package RT). Run by go test
+# Red-team tests of scripts/gate/lib/incr.sh and the gate entry points (package RT). Run by go test
 # (TestRTIncrScripts). Each case performs an attack and must end in a RUN / no record:
 #   S1  JANUS_INCR_EXPLAIN / JANUS_INCR_PRECHECK left in the environment cannot reach a verifying gate
 #   S2  a record needs a clean tree that did not change since the gate started (print snapshot / lane copies)
@@ -8,7 +8,7 @@
 #   S5  lanes key the Go configuration (go env, the GOENV file, GOWORK)
 #   S6  a partial gate run is labelled, and the lane arguments of a partial run are keyed
 set -uo pipefail
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 t="$(mktemp -d "${TMPDIR:-/tmp}/test-rt-incr.XXXXXX")"
 trap 'rm -rf "$t"' EXIT
 fail=0
@@ -16,25 +16,25 @@ ok() { echo "ok   $*"; }
 bad() { echo "FAIL $*"; fail=1; }
 
 # ---- S1: the entry points clear the explain/precheck variables unless asked for them
-for f in scripts/gate.sh scripts/verify-all-examples.sh; do
+for f in scripts/gate/gate.sh scripts/verify/verify-all-examples.sh; do
   if grep -q 'unset JANUS_INCR_EXPLAIN JANUS_INCR_PRECHECK' "$here/$f"; then ok "S1 $f clears JANUS_INCR_EXPLAIN/PRECHECK"; else bad "S1 $f does not clear JANUS_INCR_EXPLAIN"; fi
 done
 # the unset in gate.sh comes before the first use of incr_*
-a=$(grep -n 'unset JANUS_INCR_EXPLAIN' "$here/scripts/gate.sh" | head -1 | cut -d: -f1)
-b=$(grep -n '^export JANUS_INCR_RECORD' "$here/scripts/gate.sh" | head -1 | cut -d: -f1)
+a=$(grep -n 'unset JANUS_INCR_EXPLAIN' "$here/scripts/gate/gate.sh" | head -1 | cut -d: -f1)
+b=$(grep -n '^export JANUS_INCR_RECORD' "$here/scripts/gate/gate.sh" | head -1 | cut -d: -f1)
 [ -n "$a" ] && [ "$a" -lt "$b" ] && ok "S1 gate.sh clears it before any lane runs" || bad "S1 order in gate.sh ($a, $b)"
 # the real thing: gate.sh with the variable set must not stop at the explain path. --only with an unknown stage and
 # a failing admission is enough to reach the unset; here we run the real arg parsing up to the admission check.
 out="$(cd "$here" && JANUS_INCR_EXPLAIN=1 JANUS_GATE_INCREMENTAL= bash -c '
-  sed -n "/^orig_args=/,/^\[ \"\$jobs_n\" != auto \]/p" scripts/gate.sh > /dev/null
-  grep -c "JANUS_INCR_EXPLAIN" scripts/gate.sh')"
+  sed -n "/^orig_args=/,/^\[ \"\$jobs_n\" != auto \]/p" scripts/gate/gate.sh > /dev/null
+  grep -c "JANUS_INCR_EXPLAIN" scripts/gate/gate.sh')"
 [ "$out" -ge 2 ] && ok "S1 gate.sh mentions the variable only to export (--explain) or clear it" || bad "S1 gate.sh"
 
 # ---- a stub verifier that logs what the scripts ask of it
-mkdir -p "$t/w/bin" "$t/w/scripts/lib"
+mkdir -p "$t/w/bin" "$t/w/scripts/gate/lib"
 cd "$t/w"
 git init -q . && git config user.email a@b && git config user.name n
-cp "$here/scripts/lib/incr.sh" scripts/lib/incr.sh
+cp "$here/scripts/gate/lib/incr.sh" scripts/gate/lib/incr.sh
 cat > bin/janus <<'EOS'
 #!/usr/bin/env bash
 echo "$*" >> "$STUBLOG"
@@ -47,7 +47,7 @@ chmod +x bin/janus
 echo a > file.txt; echo '.gitignore' > /dev/null; printf 'ignored/\n' > .gitignore
 git add -A && git commit -qm c
 export STUBLOG="$t/log"; : > "$STUBLOG"
-. scripts/lib/incr.sh
+. scripts/gate/lib/incr.sh
 
 # ---- S1 (function level): explain mode skips everything; that is why the entry points clear it
 JANUS_INCR_EXPLAIN=1 incr_begin "x" arm64 --proof p >/dev/null && ok "S1 (documented) explain mode reports 'skipped'" || bad "S1 explain mode"
@@ -101,26 +101,26 @@ mkdir -p "$t/fakego"; printf '#!/bin/sh\ncase "$1" in version) echo "go version 
 
 # ---- S4: every script the verify scripts source or run is in the key of its kind
 cd "$here"
-. scripts/lib/incr.sh
+. scripts/gate/lib/incr.sh
 for pair in arm64:verify-examples amd64:verify-amd64-examples asm:verify-asm-examples rtmisc:verify-rtmisc-examples sys:verify-sys-examples print:verify-print-examples cgo:verify-cgo-examples; do
   kind=${pair%%:*}; sc=${pair#*:}
   flags="$(incr_script_flags "$kind" | grep -v '^--script$')"
-  refs="$(grep -v '^\s*#' scripts/$sc.sh | grep -oE '(scripts/(lib/)?[A-Za-z0-9_-]+\.(sh|py))|\$root/scripts/lib/[A-Za-z0-9_-]+\.sh' | sed 's|^\$root/||' | sort -u)"
+  refs="$(grep -v '^\s*#' scripts/$sc.sh | grep -oE '(scripts/(lib/)?[A-Za-z0-9_-]+\.(sh|py))|\$root/scripts/gate/lib/[A-Za-z0-9_-]+\.sh' | sed 's|^\$root/||' | sort -u)"
   miss=""
   for r in $refs; do [ -f "$r" ] || continue; grep -qx "$r" <<<"$flags" || miss="$miss $r"; done   # (a here-string, not `echo | grep -q`: under pipefail grep -q exits at the first match, echo gets SIGPIPE and the pipeline reports "not keyed" at random)
   [ -z "$miss" ] && ok "S4 $kind: every referenced script is keyed" || bad "S4 $kind: not keyed:$miss"
 done
 # no gate script may use `echo "$v" | grep -q`: under pipefail grep -q exits at its first match, echo then gets SIGPIPE and the pipeline reports
 # "no match" at random (it made S4 cgo fail once in a cached nightly gate with the script in the key all along)
-pp="$(grep -rnE 'echo "?\$[A-Za-z_{}]+"? \| grep -[a-z]*q' scripts audit --include=*.sh | grep -v 'scripts/lib/test-rt-incr.sh' || true)"
+pp="$(grep -rnE 'echo "?\$[A-Za-z_{}]+"? \| grep -[a-z]*q' scripts audit --include=*.sh | grep -v 'scripts/gate/lib/test-rt-incr.sh' || true)"
 [ -z "$pp" ] && ok "S4 no 'echo \$v | grep -q' (SIGPIPE flake under pipefail) in gate scripts" || bad "S4 echo|grep -q under pipefail: $pp"
 # ---- S6: a partial run is labelled and its lane arguments are keyed
-grep -q "PARTIAL RUN: not a full gate" scripts/gate.sh && grep -q -- '--arg "run:' scripts/gate.sh && grep -q -- '--arg "rounds:' scripts/gate.sh && ok "S6 partial runs are labelled and keyed" || bad "S6"
+grep -q "PARTIAL RUN: not a full gate" scripts/gate/gate.sh && grep -q -- '--arg "run:' scripts/gate/gate.sh && grep -q -- '--arg "rounds:' scripts/gate/gate.sh && ok "S6 partial runs are labelled and keyed" || bad "S6"
 
-# ---- S7: JANUS_GATE_TREE0 may be set by scripts/gate.sh only (a dirty-tree operator cannot export a matching stamp)
+# ---- S7: JANUS_GATE_TREE0 may be set by scripts/gate/gate.sh only (a dirty-tree operator cannot export a matching stamp)
 cd "$here"
 PROBE='if incr_under_gate; then echo UNDER; else echo NOT; fi'
-# HERMETIC: when this test runs as a child of the REAL gate (the gotest lane), the real scripts/gate.sh is an ancestor of every process started here, and the
+# HERMETIC: when this test runs as a child of the REAL gate (the gotest lane), the real scripts/gate/gate.sh is an ancestor of every process started here, and the
 # product is right to say "under the gate" (a descendant of the real gate is trusted by definition). Every probe therefore runs ISOLATED: double-forked under
 # setsid and re-parented to init, so its ancestry holds only what the test builds on purpose (the fake checkout's gate.sh). The gate-exported stamp is unset first.
 unset JANUS_GATE_TREE0
@@ -131,33 +131,33 @@ iso() { # SCRIPT-TEXT: run it detached from this process tree (cwd and environme
   [ -f "$o.done" ] || { echo TIMEOUT; return; }
   cat "$o"
 }
-# a fake CHECKOUT (own copy of incr.sh): its scripts/gate.sh is "the real gate" for that copy; every gate.sh elsewhere is a fake for the real incr.sh
-mkdir -p "$t/s7/scripts/lib" "$t/fake" "$t/fake2/sub"
-cp scripts/lib/incr.sh scripts/lib/incr-host.sh "$t/s7/scripts/lib/"
-cat > "$t/s7/scripts/gate.sh" <<EOS
+# a fake CHECKOUT (own copy of incr.sh): its scripts/gate/gate.sh is "the real gate" for that copy; every gate.sh elsewhere is a fake for the real incr.sh
+mkdir -p "$t/s7/scripts/gate/lib" "$t/fake" "$t/fake2/sub"
+cp scripts/gate/lib/incr.sh scripts/gate/lib/incr-host.sh "$t/s7/scripts/gate/lib/"
+cat > "$t/s7/scripts/gate/gate.sh" <<EOS
 #!/usr/bin/env bash
-( setsid --wait bash -c '. "$t/s7/scripts/lib/incr.sh"; $PROBE' )
+( setsid --wait bash -c '. "$t/s7/scripts/gate/lib/incr.sh"; $PROBE' )
 EOS
 cat > "$t/fake/gate.sh" <<EOS
 #!/usr/bin/env bash
-. "$here/scripts/lib/incr.sh"; $PROBE
+. "$here/scripts/gate/lib/incr.sh"; $PROBE
 EOS
 cp "$t/fake/gate.sh" "$t/fake2/sub/gate.sh"; cp "$t/fake/gate.sh" "$t/s7/scripts/other.sh"
 cat > "$t/ec.txt" <<EOS
 $(cat "$t/fake/gate.sh")
-# $t/s7/scripts/gate.sh
+# $t/s7/scripts/gate/gate.sh
 EOS
 PYX='import os,sys; os.execv("/bin/bash", ["bash", sys.argv[1]])'
 want() { # EXPECTED DESCRIPTION SCRIPT-TEXT
   local got; got="$(iso "$3")"
   [ "$got" = "$1" ] && ok "S7 $2" || bad "S7 $2 (got: $got)"
 }
-want NOT "outside the gate: incr_under_gate is false (a plain shell, isolated from any real gate above this test)" ". '$here/scripts/lib/incr.sh'; $PROBE"
-want UNDER "the checkout's own scripts/gate.sh (through a subshell, setsid and bash -c): accepted" "bash '$t/s7/scripts/gate.sh'"
-want UNDER "relative script path resolved against the cwd: accepted" "cd '$t/s7' && bash scripts/gate.sh"
-want UNDER "bash -- <real gate>: accepted" "bash -- '$t/s7/scripts/gate.sh'"
-want UNDER "env -i bash <real gate>: accepted" "env -i PATH='$PATH' bash '$t/s7/scripts/gate.sh'"
-want UNDER "python os.execv of bash <real gate>: accepted (the process IS a shell running it)" "python3 -I -c '$PYX' '$t/s7/scripts/gate.sh'"
+want NOT "outside the gate: incr_under_gate is false (a plain shell, isolated from any real gate above this test)" ". '$here/scripts/gate/lib/incr.sh'; $PROBE"
+want UNDER "the checkout's own scripts/gate/gate.sh (through a subshell, setsid and bash -c): accepted" "bash '$t/s7/scripts/gate/gate.sh'"
+want UNDER "relative script path resolved against the cwd: accepted" "cd '$t/s7' && bash scripts/gate/gate.sh"
+want UNDER "bash -- <real gate>: accepted" "bash -- '$t/s7/scripts/gate/gate.sh'"
+want UNDER "env -i bash <real gate>: accepted" "env -i PATH='$PATH' bash '$t/s7/scripts/gate/gate.sh'"
+want UNDER "python os.execv of bash <real gate>: accepted (the process IS a shell running it)" "python3 -I -c '$PYX' '$t/s7/scripts/gate/gate.sh'"
 want NOT "below another script of the checkout: false" "bash '$t/s7/scripts/other.sh'"
 want NOT "a fake gate.sh in another directory: rejected" "bash '$t/fake/gate.sh'"
 want NOT "a fake gate.sh named relative to its own cwd: rejected" "cd '$t/fake' && bash gate.sh"
@@ -167,12 +167,12 @@ want NOT "env -i bash <fake>/gate.sh: rejected" "env -i PATH='$PATH' bash '$t/fa
 want NOT "setsid bash <fake>/gate.sh: rejected" "setsid --wait bash '$t/fake2/sub/gate.sh'"
 want NOT "python os.execv of bash <fake>/gate.sh: rejected" "python3 -I -c '$PYX' '$t/fake/gate.sh'"
 want NOT "bash -ec <wrapper text naming gate.sh>: rejected" "bash -ec \"\$(cat '$t/ec.txt')\""
-want NOT "gate.sh as a later argument of bash -c: rejected" "cd '$t/fake' && bash -c \". '$here/scripts/lib/incr.sh'; $PROBE\" x '$t/s7/scripts/gate.sh'"
-ln -sfn "$t/s7/scripts/gate.sh" "$t/fake/link-gate.sh"
+want NOT "gate.sh as a later argument of bash -c: rejected" "cd '$t/fake' && bash -c \". '$here/scripts/gate/lib/incr.sh'; $PROBE\" x '$t/s7/scripts/gate/gate.sh'"
+ln -sfn "$t/s7/scripts/gate/gate.sh" "$t/fake/link-gate.sh"
 want UNDER "a symlink to the real gate.sh IS the real script (resolved path): accepted" "bash '$t/fake/link-gate.sh'"
-want unset "a stamp exported by an operator is dropped (isolated from any real gate)" "JANUS_GATE_TREE0=forged-by-operator bash -c '. scripts/lib/incr.sh; incr_under_gate || unset JANUS_GATE_TREE0; echo \"\${JANUS_GATE_TREE0-unset}\"'"
+want unset "a stamp exported by an operator is dropped (isolated from any real gate)" "JANUS_GATE_TREE0=forged-by-operator bash -c '. scripts/gate/lib/incr.sh; incr_under_gate || unset JANUS_GATE_TREE0; echo \"\${JANUS_GATE_TREE0-unset}\"'"
 # and the premise of the hermetic design, checked whenever this test is itself below a real gate: an UNisolated probe may say UNDER (correct for the product)
-a=$(grep -n 'incr_under_gate || unset JANUS_GATE_TREE0' scripts/verify-all-examples.sh | head -1 | cut -d: -f1); b=$(grep -n '^incr_tree_pin' scripts/verify-all-examples.sh | head -1 | cut -d: -f1)
+a=$(grep -n 'incr_under_gate || unset JANUS_GATE_TREE0' scripts/verify/verify-all-examples.sh | head -1 | cut -d: -f1); b=$(grep -n '^incr_tree_pin' scripts/verify/verify-all-examples.sh | head -1 | cut -d: -f1)
 [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && ok "S7 verify-all-examples.sh drops a foreign stamp before it pins the tree" || bad "S7 verify-all-examples.sh does not clear JANUS_GATE_TREE0 ($a, $b)"
-grep -rn 'export JANUS_GATE_TREE0\|JANUS_GATE_TREE0=' scripts audit --include=*.sh | grep -v -e 'scripts/lib/incr.sh' -e 'scripts/lib/test-' -e '^\S*:[0-9]*:\s*#' | grep -q . && bad "S7 another script sets JANUS_GATE_TREE0" || ok "S7 only scripts/lib/incr.sh (called by gate.sh) sets JANUS_GATE_TREE0"
+grep -rn 'export JANUS_GATE_TREE0\|JANUS_GATE_TREE0=' scripts audit --include=*.sh | grep -v -e 'scripts/gate/lib/incr.sh' -e 'scripts/gate/lib/test-' -e '^\S*:[0-9]*:\s*#' | grep -q . && bad "S7 another script sets JANUS_GATE_TREE0" || ok "S7 only scripts/gate/lib/incr.sh (called by gate.sh) sets JANUS_GATE_TREE0"
 exit $fail

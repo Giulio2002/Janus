@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test of scripts/lib/pool.sh with toy items (seconds). Checks:
+# Self-test of scripts/gate/lib/pool.sh with toy items (seconds). Checks:
 #   1. longest first by the recorded times, items without a time first;
 #   2. every result line is printed when its item finishes (a fast item's line precedes the slow one's);
 #   3. PASS / FAIL / TIMEOUT / FAIL (a killed item; MISSING: the item's own shell vanished) / SKIP are told apart, any of FAIL, TIMEOUT and

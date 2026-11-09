@@ -10,7 +10,7 @@
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
-. "$root/scripts/lib/parallel.sh"
+. "$root/scripts/gate/lib/parallel.sh"
 par_init "$@"
 export PATH=/usr/local/go/bin:$PATH
 R=test/redteam/rounds/round10
@@ -22,20 +22,20 @@ if [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ]; then
 else
   lb="$(lake build Janus Janus.Tools.Audit janus-audit janus-oracle-amd64 2>&1)" || { echo "lake build failed:"; tail -30 <<<"$lb"; exit 1; }
 fi
-# janus-decode: see scripts/lib/gate-decoder.sh (inside the gate it is the one pre-lake saved; a missing one fails here)
-. "$root/scripts/lib/gate-decoder.sh"
+# janus-decode: see scripts/gate/lib/gate-decoder.sh (inside the gate it is the one pre-lake saved; a missing one fails here)
+. "$root/scripts/gate/lib/gate-decoder.sh"
 DEC="$(gate_decoder "$root")" || exit 1
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
-[ -d artifacts/amd64/Box ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
+[ -d artifacts/amd64/Box ] || bash scripts/build/build-examples-amd64.sh >/dev/null 2>&1
 W=$R/work/rows; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-round10.XXXXXX")" || exit 1
 trap 'rm -rf "$T"' EXIT
 mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"
 for f in NewPair Insert Box; do
-  mapfile -t tg < <(scripts/example-targets.sh "$f")
+  mapfile -t tg < <(scripts/verify/example-targets.sh "$f")
   "$J" extract artifacts/examples-arm64 "example.com/basic.$f" "$W/$f" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
 done
-mapfile -t tg < <(scripts/example-targets.sh MapAccess1Small)
+mapfile -t tg < <(scripts/verify/example-targets.sh MapAccess1Small)
 "$J" extract artifacts/examples-arm64 runtime.mapaccess1_fast64 "$W/MapAccess1Small" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
 broken=()
 A=$R/attacks

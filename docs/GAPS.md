@@ -29,8 +29,8 @@ the package table of section 4; their results are in [ORACLE-AMD64.md](validatio
 1. **std**: the corpus of COVERAGE.md. That is `go test -c -trimpath` of the 250 std packages
    with tests, `CGO_ENABLED=0` (plus `runtime/cgo` with cgo), for arm64, amd64 `GOAMD64=v1` and
    amd64 `GOAMD64=v3`.
-2. **C corpus**: `scripts/coverage/ccorpus/*.c` plus `examples/cgo/{ccover,cfuncs}.c`, in the 14
-   compiler configurations of `scripts/coverage.sh cc`.
+2. **C corpus**: `scripts/dev/coverage/ccorpus/*.c` plus `examples/cgo/{ccover,cfuncs}.c`, in the 14
+   compiler configurations of `scripts/dev/coverage.sh cc`.
 3. **A large application** (new). An open-source Go program: about 66k functions, many
    third-party modules, and Go assembly from `golang.org/x/crypto`, `golang.org/x/sys` and
    CPU-feature libraries. It is built `CGO_ENABLED=0` (arm64 and amd64 v1). Its three cgo C
@@ -38,7 +38,7 @@ the package table of section 4; their results are in [ORACLE-AMD64.md](validatio
    cryptography, one of them with perlasm-generated assembly. Their objects come from a
    `go build -work` and are decoded as kind `c`.
 
-**Method.** The `insn` stage of `scripts/coverage/` (the program behind `scripts/coverage.sh`). It
+**Method.** The `insn` stage of `scripts/dev/coverage/` (the program behind `scripts/dev/coverage.sh`). It
 sweeps every function and runs every distinct encoding through the trusted Lean decoder. It is
 run once per decoder set over the same binaries, so main and integ/wave1 are compared on
 identical input. Criterion 2 is the `runtime` stage with `-branches "origin/main integ/wave1"`.
@@ -65,7 +65,7 @@ framework pieces.
 | 7 | **Mutual-recursion summaries.** `Summary.induction` (`Janus/Tactic/Recursion.lean`, `Janus/Amd64/Recursion.lean`) takes one entry. Mutually recursive functions (multiplication ↔ Karatsuba, squaring ↔ Karatsuba squaring, even/odd dispatch in exponentiation, all common in bignum code) need a version over a finite family of entries with one measure. | every SCC of size > 1 | S | N4 |
 | 8 | **"A global holds its link-time initial value" precondition.** Code reads writable package variables that nothing writes at run time: tuning thresholds in `.noptrdata`, constant `nat`s in `.data`, pools in `.bss`, CPU-feature booleans set by `init`. The extractor lists them as "writable data referenced (not copied)". Each theorem now writes its own precondition. A predicate built from the ELF image (`GlobalInit p sym`: the bytes are the `.data`/`.noptrdata` initialiser, zero for `.bss`) and a tactic lemma would make this uniform. | every function that reads such a global | S | N6 |
 | 9 | **Pin the allocation, slice and write-barrier contracts.** `makeslice`, `newobject`, `growslice`, `gcWriteBarrier1..8` (and on integ/wave1 the `Slice.lean`/`String.lean` specs) are contracts but not in `runtimeContractStubs`, so `--contract` matches them by name only. `memmove`, `memclrNoHeapPointers`, the interface/map/hash/equality contracts and the panic contracts are pinned to the runtime's code. | 3 + 8 of the most-called entry points (std Go callers: `gcWriteBarrier2` 3,239, `gcWriteBarrier1` 1,833) | S | N7 |
-| 10 | **Measurement and extraction tooling.** (a) The `blockers` amd64 sweep lacks the coverage tool's `VZEROUPPER` length fix and loses sync after `ADCX`/`ADOX`. It reports `memmove`, `memclrNoHeapPointers`, `memeqbody`, `indexbytebody` as rejected, plus junk (`movq %mm5`, `fcomip`, `fisttp`, `data16`). (b) Dynamic-target inference adds an unrelated function from another package (a hash constructor) to an amd64 extraction. (c) The `runtime` stage only credits a contract file that writes `runtime.<name>`, so it reports 64 linked names missing on integ/wave1 where 36 are. (d) The `insn` stage measures only 6,248 of about 66k functions of an externally linked cgo binary (pclntab lookups miss), so cgo programs must be measured as above. (e) `scripts/coverage.sh`'s default `BRANCHES` still lists merged branches, and integ/wave1's COVERAGE.md carries "not yet re-measured together" figures that section 1 now measures. | accuracy of every later measurement | S each | N8a–N8d |
+| 10 | **Measurement and extraction tooling.** (a) The `blockers` amd64 sweep lacks the coverage tool's `VZEROUPPER` length fix and loses sync after `ADCX`/`ADOX`. It reports `memmove`, `memclrNoHeapPointers`, `memeqbody`, `indexbytebody` as rejected, plus junk (`movq %mm5`, `fcomip`, `fisttp`, `data16`). (b) Dynamic-target inference adds an unrelated function from another package (a hash constructor) to an amd64 extraction. (c) The `runtime` stage only credits a contract file that writes `runtime.<name>`, so it reports 64 linked names missing on integ/wave1 where 36 are. (d) The `insn` stage measures only 6,248 of about 66k functions of an externally linked cgo binary (pclntab lookups miss), so cgo programs must be measured as above. (e) `scripts/dev/coverage.sh`'s default `BRANCHES` still lists merged branches, and integ/wave1's COVERAGE.md carries "not yet re-measured together" figures that section 1 now measures. | accuracy of every later measurement | S each | N8a–N8d |
 
 ## 1. Instruction coverage, re-measured
 
@@ -186,7 +186,7 @@ generic needs. Each is independent of that target.
    caller's data) lets the caller use what `Get` returns. The satisfiability witness can be toy
    code, as for the allocation contracts; the real `Get`/`Put` are trusted, as `mallocgc` is.
    `sync` is not `runtime`, so `checkContractPin` needs to pin functions of other std packages
-   by their pclntab file and code hash (generalise `scripts/gen-stubpins.sh`).
+   by their pclntab file and code hash (generalise `scripts/dev/gen-stubpins.sh`).
 2. **Mutual recursion** (N4): see rank 7.
 3. **Initialised globals** (N6): see rank 8.
 4. **Pinning** (N7): see rank 9. The contracts of the two most-called allocation entry points
@@ -206,7 +206,7 @@ and one proved example per ISA it touches.
 | package | content | owns | size | depends on |
 |---|---|---|:-:|---|
 | **N1a** | `sync.Pool` contract: `PoolModel` (abstract pooled values, GC may drop), `PoolGetContract`/`PoolPutContract` on both ISAs, the pool invariant and its preservation lemmas, a `*Sat` witness, an example (`Get`/use/`Put` in a deferred call) proved on both ISAs | `Janus/Contracts/Pool*.lean`, `examples/basic/pool.go`, proofs | M | integ merge (Panic/defer contracts) |
-| **N1b** | Pinning for non-runtime std functions: `stdContractStubs` (`sync.(*Pool).Get`/`Put`, `sync.(*Once).doSlow`, …) checked by pclntab file and code hash; `gen-stubpins.sh` over `sync`; `identity.json` `"pinned"` | `cmd/janus/extract.go` (contract part), `cmd/janus/stubpins_gen.go`, `scripts/gen-stubpins.sh` | S | – |
+| **N1b** | Pinning for non-runtime std functions: `stdContractStubs` (`sync.(*Pool).Get`/`Put`, `sync.(*Once).doSlow`, …) checked by pclntab file and code hash; `gen-stubpins.sh` over `sync`; `identity.json` `"pinned"` | `cmd/janus/extract.go` (contract part), `cmd/janus/stubpins_gen.go`, `scripts/dev/gen-stubpins.sh` | S | – |
 | **N1c** | `sync.Once` single-threaded: `Do`'s fast path executes; contract for `doSlow` (runs `f` once through its funcval, then marks `done`), using the dynamic-call hypotheses | `Janus/Contracts/Once*.lean`, example | S–M | N1b |
 | **N1d** | `sync.Mutex`/`RWMutex` uncontended: the inlined fast paths execute (atomics, already modelled); contracts that `lockSlow`/`rUnlockSlow`/`SemacquireRWMutexR` are never reached when the lock state is unlocked, and that a contended call does not return (so a theorem about single-threaded code shows it is unreachable) | `Janus/Contracts/Mutex*.lean`, example | M | N1b |
 | **N2** (**done**, agent/cover: `F3`/`F2` before `C3` and `C2 imm16` decode as `RET`; `edge/repret` oracle family, 0 MISMATCH over 1,017,804 cases; `JanusX86.Proofs.Call.ret_agree` without `p.rep = 0`; example `CRepRet`; the same prefixes on `JMP`/`CALL` are not done: the measured gap is `RET` only) | amd64 `REP RET`/`BND RET` and the ignored legacy prefixes on near `RET`/`JMP`/`CALL` (Intel SDM: `F3`/`F2` have no effect there), oracle on hardware | `Janus/Amd64/Decode.lean` (prefix rule), `validation/hardware-comparison/amd64/gen` spec | S | integ merge |
@@ -217,8 +217,8 @@ and one proved example per ISA it touches.
 | **N7** | Pin `makeslice`, `newobject`, `growslice` and its variants, `gcWriteBarrier1..8`, the `Slice.lean`/`String.lean` entry points: add them to `runtimeContractStubs`, regenerate `stubpins_gen.go` for go1.26.0/.5/.8/.10 | `cmd/janus/extract.go` (lists), `cmd/janus/stubpins_gen.go` | S | integ merge |
 | **N8a** | `blockers` amd64 sweep: share the coverage tool's sweep (`VZEROUPPER` length fix, VEX/EVEX lengths, `0F 38`/`0F 3A` fallbacks), regression test on `memmove` and `addMulVVWW` | `cmd/janus/blockers.go` | S | – |
 | **N8b** | Dynamic-target inference: restrict inferred function addresses to those whose `LEA`/`ADRP+ADD` result reaches a call or a stored funcval in the same function, or report why each target was added (`identity.json` `dynamicTargets[].reason`) | `cmd/janus/dynamic.go` | S | – |
-| **N8c** | Coverage tool: (1) the `runtime` stage credits names written without `runtime.` in the contract files' tables and doc comments (and `gcWriteBarrierN`); (2) the `insn` stage handles externally linked cgo binaries (pclntab text base); (3) `coverage.sh` default `BRANCHES`, and a `-decode-set` option so main and a branch can be compared in one run | `scripts/coverage/*.go`, `scripts/coverage.sh` | S | – |
-| **N8d** | Add the application corpus to `scripts/coverage.sh` (an optional `app` stage: a pinned third-party module built `CGO_ENABLED=0`, plus its cgo objects from `go build -work`), and re-baseline COVERAGE.md after the merge | `scripts/coverage.sh`, docs/COVERAGE.md | S | N8c, integ merge |
+| **N8c** | Coverage tool: (1) the `runtime` stage credits names written without `runtime.` in the contract files' tables and doc comments (and `gcWriteBarrierN`); (2) the `insn` stage handles externally linked cgo binaries (pclntab text base); (3) `coverage.sh` default `BRANCHES`, and a `-decode-set` option so main and a branch can be compared in one run | `scripts/dev/coverage/*.go`, `scripts/dev/coverage.sh` | S | – |
+| **N8d** | Add the application corpus to `scripts/dev/coverage.sh` (an optional `app` stage: a pinned third-party module built `CGO_ENABLED=0`, plus its cgo objects from `go build -work`), and re-baseline COVERAGE.md after the merge | `scripts/dev/coverage.sh`, docs/COVERAGE.md | S | N8c, integ merge |
 | R7 | Stack growth (unchanged from COVERAGE.md §6) | | XL | |
 | R8 | `print`/`println` over the `write(2)` contract | `Janus/Contracts/Print.lean` | S–M | integ merge |
 | R9′ (**done for** `KeepAlive`, `fadd64`, `fsub64`, `fmul64`, `fdiv64`: contracts on both ISAs, IEEE where the exact result is not tiny, tested against the real runtime, pinned, `_satisfiable`, examples `SoftAdd`/`SoftMul`/`SoftDiv`/`KeepAlive`; `morestackc` and `f64to32` open) | `KeepAlive`, `morestackc` (as a fault: `morestack` on the system stack), soft-float `f64to32`/`fadd64`/`fmul64`/`fdiv64` proofs against `Janus.Spec.SoftFloat` | `Janus/Contracts/Misc.lean`, `examples/rtmisc` | S | integ merge |
@@ -241,10 +241,10 @@ decodes everywhere. N1 adds contracts only for the uncontended, single-goroutine
 ```sh
 # decoders: main from this worktree, integ/wave1 copied from its build (read-only)
 LEAN_NUM_THREADS=4 lake build janus-decode janus-oracle-amd64
-(cd scripts/coverage && GOWORK=off go build -o "$T/covtool" .)
+(cd scripts/dev/coverage && GOWORK=off go build -o "$T/covtool" .)
 
 # std corpus (arm64; amd64-v1/-v3 likewise with CONFIGS)
-CONFIGS=arm64 WORK="$T/stdwork" OUT="$T/out" JOBS=2 KEEP=1 scripts/coverage.sh build
+CONFIGS=arm64 WORK="$T/stdwork" OUT="$T/out" JOBS=2 KEEP=1 scripts/dev/coverage.sh build
 for set in main integ; do
   "$T/covtool" insn -arch arm64 -j 2 -cache "$T/vcache-$set-arm64.txt" \
     -decode "$T/$set-bin/janus-decode" -model "$T/$set-bin/janus-oracle-amd64" \

@@ -3,7 +3,7 @@
 #
 #   autojobs_size            prints "JOBS LANES REASON..." (one line) from the host state
 #
-# Inputs (each overridable for the self-test scripts/lib/test-autojobs.sh):
+# Inputs (each overridable for the self-test scripts/gate/lib/test-autojobs.sh):
 #   AUTOJOBS_NPROC     cores (default nproc)            AUTOJOBS_LOAD1   1-minute load (default /proc/loadavg)
 #   AUTOJOBS_MEMKB     MemAvailable in kB (/proc/meminfo)
 #   AUTOJOBS_PEAK_GIB  per-item peak memory, GiB: the largest recorded peak of a pool item in the speed
@@ -14,7 +14,7 @@
 #   JANUS_GATE_LANE_GIB (memory reserved for them: they have their own budgets, default 40),
 #   JANUS_GATE_CORES_PER_ITEM (measured: one verify item uses ~2.1 cores, default 2.1)
 # Memory: the verify pool gets a BUDGET (MemAvailable - floor - other lanes 25 GiB - round lanes x 15 GiB), shared by
-#   its running items through per-item admission (scripts/lib/pool.sh), so -j is limited by cores, not by the worst case.
+#   its running items through per-item admission (scripts/gate/lib/pool.sh), so -j is limited by cores, not by the worst case.
 # Rules: fewer free cores than 8, or a 1-minute load of 60 or more (RULES.md), falls back to 2 jobs. Otherwise
 #   jobs = min(cap, (free cores - reserved) / cores per item, (MemAvailable - floor - reserved) / item GiB), at
 #   least 2; lanes = min(jobs + 3, 15). The memguard per-job limits are untouched.
@@ -40,7 +40,7 @@ autojobs_plan() { # prints: JOBS LANES ROUNDS|REASON|BUDGET
     r = int(free / 8); if (r > 6) r = 6
     if (j < 2) { j = 2; why = why " (raised to the minimum 2)" }
     if (r < 2) r = 2
-    # The verify pool memory is a BUDGET shared by its running items (per-item admission, scripts/lib/pool.sh:
+    # The verify pool memory is a BUDGET shared by its running items (per-item admission, scripts/gate/lib/pool.sh:
     # each item reserves its own recorded peak x1.3, the conservative item estimate when unknown), not a charge of
     # the worst case per slot. The round lanes keep 15 GiB each; the budget is what is left after them, the other
     # lanes and the floor. It must hold at least two worst-case items: round lanes are cut first if not.

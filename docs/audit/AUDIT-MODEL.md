@@ -200,7 +200,7 @@ flag definedness tracking is consistent across steps.
 ## Regression status
 
 `test/redteam/rounds/rt-model/run.sh` (SEQ, CORNER, EX1) passes. `cmd/janus/rtmodel_test.go`
-(`TestSegmentMismatchRejected`) passes. The full suite — `scripts/verify-all-examples.sh`,
+(`TestSegmentMismatchRejected`) passes. The full suite — `scripts/verify/verify-all-examples.sh`,
 `test/redteam/run-all.sh`, `test/redteam/rounds/round2`–`round7`, `go test ./cmd/...`, and the amd64/arm64 oracles —
 is run one job at a time before reporting.
 

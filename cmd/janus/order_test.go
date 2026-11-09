@@ -26,7 +26,7 @@ import (
 // testDurations are measured running times (seconds, 2026-10-31, go test -parallel 4 on the 48-core host at load 10-15) of the
 // tests that take 1 s or more: for a test that calls parallel(t) the time it HELD its slot (JANUS_TEST_DURATIONS, recordHold
 // below; `go test -v` reports a parallel test's duration including its wait for a slot, which is meaningless with few slots),
-// for the others their -v duration. scripts/gotest-shards.sh balances the shards with them; the scheduler below orders by them.
+// for the others their -v duration. scripts/gate/gotest-shards.sh balances the shards with them; the scheduler below orders by them.
 // The order matters, not the exact values. To remeasure: JANUS_TEST_DURATIONS=file go test -v -parallel 4 ./cmd/janus (docs/TESTING.md).
 // The four tests that dominate (a framework kernel replay each, ~210 s: TestCacheGCConcurrentVerify, TestR1ForgedFrameworkLemma,
 // TestResultCache, TestConcurrentVerify) are about 1100 of the 2150 s of the whole package.
@@ -149,7 +149,7 @@ func (s *testScheduler) best() *testing.T {
 // recordHold appends "name seconds" to the file named by JANUS_TEST_DURATIONS: the time a test held its slot, i.e. its
 // own running time. `go test -v` reports a parallel test's duration INCLUDING the wait for a slot of this scheduler
 // (the wait is after t.Parallel returns), so with few slots it says nothing about the test; this does, and
-// scripts/gotest-shards.sh balances with these figures (docs/TESTING.md "Go tests").
+// scripts/gate/gotest-shards.sh balances with these figures (docs/TESTING.md "Go tests").
 func recordHold(name string, d time.Duration) {
 	path := os.Getenv("JANUS_TEST_DURATIONS")
 	if path == "" {

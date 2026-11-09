@@ -17,7 +17,7 @@ import Extracted
 the dictionary's first word (the code address of `Meters.Scale`) and calls it with `blr`, twice.
 The executor reads that word from the extracted dictionary, so the target is a literal and no
 hypothesis about it is needed. (`Meters.Scale` is extracted with `--targets`,
-`scripts/example-targets.sh`.)
+`scripts/verify/example-targets.sh`.)
 -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec

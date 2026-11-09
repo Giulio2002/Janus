@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Regenerates the numbers of docs/COVERAGE.md: how much of single-threaded Go Janus can model today.
 #
-#   scripts/coverage.sh [all]     build + insn + runtime + cc (default)
-#   scripts/coverage.sh build     `go test -c` every std package with tests, for linux/arm64,
+#   scripts/dev/coverage.sh [all]     build + insn + runtime + cc (default)
+#   scripts/dev/coverage.sh build     `go test -c` every std package with tests, for linux/arm64,
 #                                 linux/amd64 GOAMD64=v1 and linux/amd64 GOAMD64=v3
-#   scripts/coverage.sh insn      criterion 1: run the trusted Lean decoders over every function
+#   scripts/dev/coverage.sh insn      criterion 1: run the trusted Lean decoders over every function
 #                                 of those binaries (janus-decode on arm64 words, janus-oracle-amd64
 #                                 on x86asm-swept amd64 instructions); Go-compiled vs assembly
-#   scripts/coverage.sh runtime   criterion 2: the runtime entry points the compiler can call
+#   scripts/dev/coverage.sh runtime   criterion 2: the runtime entry points the compiler can call
 #                                 (typecheck/_builtin/runtime.go + ssagen/walk lookups) against
 #                                 the contracts on main and the unmerged branches
-#   scripts/coverage.sh asmcalls  criterion 4: which assembly functions Go-compiled std code
+#   scripts/dev/coverage.sh asmcalls  criterion 4: which assembly functions Go-compiled std code
 #                                 calls directly, and whether they decode (written by insn)
-#   scripts/coverage.sh cc        criterion 5: a C corpus compiled by gcc and clang at -O0/-O2/-O3
+#   scripts/dev/coverage.sh cc        criterion 5: a C corpus compiled by gcc and clang at -O0/-O2/-O3
 #                                 the way cgo does, both architectures, decoded per function
 #
 # Environment:
@@ -28,10 +28,10 @@
 # at a time; the decoders run after the builds), and it waits while MemAvailable < 40 GiB.
 set -euo pipefail
 export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PATH="$PATH:/usr/local/go/bin:$HOME/.elan/bin"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 mode="${1:-all}"
 OUT="${OUT:-$root/artifacts/coverage}"
 CONFIGS="${CONFIGS:-arm64 amd64-v1 amd64-v3}"
@@ -66,7 +66,7 @@ tool="$WORK/janus-coverage-tool"
 
 build_tool() {
   [ -x "$tool" ] && return
-  (cd "$root/scripts/coverage" && GOWORK=off go build -o "$tool" .)
+  (cd "$root/scripts/dev/coverage" && GOWORK=off go build -o "$tool" .)
 }
 
 cfg_env() { # cfg -> GOARCH/GOAMD64 assignments
@@ -106,7 +106,7 @@ stage_build() {
   done
 }
 
-# Criterion 5: a C corpus (scripts/coverage/ccorpus/*.c, plus agent/ffi's examples/cgo/ccover.c
+# Criterion 5: a C corpus (scripts/dev/coverage/ccorpus/*.c, plus agent/ffi's examples/cgo/ccover.c
 # and cfuncs.c when that branch exists) compiled the way cgo invokes the C compiler
 # (-fPIC -pthread -g, CGO_CFLAGS default -O2; also -O0 and -O3), by gcc and clang, for both
 # architectures, plus -O3 -march=x86-64-v3 on amd64. Object files are decoded function by function.
@@ -134,7 +134,7 @@ stage_cc() {
   (cd "$root" && memguard_lake build janus-decode janus-oracle-amd64 >/dev/null)
   local src="$WORK/ccorpus" arch name cc rest f
   mkdir -p "$src"
-  cp "$root"/scripts/coverage/ccorpus/*.c "$src/"
+  cp "$root"/scripts/dev/coverage/ccorpus/*.c "$src/"
   if git -C "$root" rev-parse -q --verify agent/ffi >/dev/null; then
     git -C "$root" show agent/ffi:examples/cgo/ccover.c > "$src/ccover.c"
     git -C "$root" show agent/ffi:examples/cgo/cfuncs.c > "$src/cfuncs.c"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the Go assembly examples (scripts/build-examples-asm.sh: examples/asm, Go 1.26.0 pinned
+# Build the Go assembly examples (scripts/build/build-examples-asm.sh: examples/asm, Go 1.26.0 pinned
 # there), extract every proved function on both ISAs into artifacts/asm/<isa>/<Name>/, and verify
 # examples/asm/proofs/<isa>/<Name>.lean against it with `janus verify` (kernel check, axiom audit,
 # leanchecker replay). docs/ABI0.md describes the examples.
@@ -9,19 +9,19 @@
 #   the ABIInternal -> ABI0 wrapper (Ensures):            XorWrapper
 #   (Twice also goes through the ABI0 -> ABIInternal wrapper double.abi0 into Go.)
 #
-# Usage: scripts/verify-asm-examples.sh [-j N] [isa/Name ...]   (default: all, e.g. amd64/Twice)
+# Usage: scripts/verify/verify-asm-examples.sh [-j N] [isa/Name ...]   (default: all, e.g. amd64/Twice)
 # A verification also fails if `janus verify` warns that the statement uses the other calling
 # convention than the entry. Writes artifacts/asm/<isa>/<Name>/verified.json and a summary to
 # artifacts/verify-asm-examples.txt (unless JANUS_EXAMPLES_SUMMARY names another file).
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
-. "$root/scripts/lib/itemtimeout.sh"
+. "$root/scripts/gate/lib/itemtimeout.sh"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+. "$root/scripts/gate/lib/parallel.sh"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 par_init "$@"
 set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
@@ -38,13 +38,13 @@ if [ ${#names[@]} -eq 0 ]; then
   done
 fi
 
-# JANUS_EXAMPLES_PREBUILT=1 (scripts/verify-all-examples.sh): bin/janus and the binaries exist.
+# JANUS_EXAMPLES_PREBUILT=1 (scripts/verify/verify-all-examples.sh): bin/janus and the binaries exist.
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
   CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
-  scripts/build-examples-asm.sh >/dev/null
+  scripts/build/build-examples-asm.sh >/dev/null
 fi
 
-. scripts/lib/incr.sh
+. scripts/gate/lib/incr.sh
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-asm-examples.txt}"
 : > "$summary"
 lines="$(mktemp -d)"
@@ -55,7 +55,7 @@ verify_one() {
   isa="${target%%/*}"; n="${target#*/}"
   out="artifacts/asm/$isa/$n"
   bin/janus extract "artifacts/examples-asm-$isa" "${sym[$n]}" "$out" >/dev/null
-  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs
+  # the incremental gate (scripts/gate/lib/incr.sh): skipped only on the record of a PASS with identical inputs
   local -a ispec=(--fw dir:. --proof "examples/asm/proofs/$isa/$n.lean" --art "$out" --arg "sym:${sym[$n]}")
   if incr_begin "asm:$isa/$n" asm "${ispec[@]}"; then echo "$INCR_MSG" | tee "$lines/${isa}_$n"; return 0; fi
   start=$(date +%s.%N)

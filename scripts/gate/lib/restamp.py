@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Re-stamp a private tree's framework build after the module cache restored Janus modules into it.
 
-    python3 -I scripts/lib/restamp.py TREE RECORD
+    python3 -I scripts/gate/lib/restamp.py TREE RECORD
 
-`scripts/asl.sh verify` restores the cached builds of the Janus and JanusASL modules into the gate's private tree (a
+`scripts/build/asl.sh verify` restores the cached builds of the Janus and JanusASL modules into the gate's private tree (a
 copy of the finished, stamped framework build). An .olean embeds the absolute path of its source file, so a restored
 Janus module differs byte for byte from the one the tree was copied with, and the tree's stamp
 (.lake/janus-framework.ready: the SHA-256 of every framework module-data file as built) no longer matches. `janus verify
@@ -12,7 +12,7 @@ traces name the restored bytes, all rebuild too (79 min in the last gate).
 
 This updates the stamp's pin of a module to the file's current SHA-256 ONLY when that file is exactly what the module
 cache restored from an HMAC-verified entry (RECORD: path -> SHA-256 written by `asl_mod_cache.py restore --record`).
-The record carries an HMAC (scripts/lib/bcache.py record_mac: the cache's per-user key, domain "restamp", bound to the
+The record carries an HMAC (scripts/gate/lib/bcache.py record_mac: the cache's per-user key, domain "restamp", bound to the
 tree root); a missing or wrong MAC, or a record that is not exactly {"files", "mac"}, is REFUSED (exit 2, nothing pinned).
 Every path component from the tree root to a module file is lstat'ed; a symbolic link anywhere on it, a '..' or '.'
 component, or a record path outside the tree's lib/lean directory never matches. Anything else that differs from the stamp (a file the cache did not restore, a missing or foreign file) is left as it is:

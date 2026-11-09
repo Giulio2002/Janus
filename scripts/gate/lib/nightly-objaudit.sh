@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The cold-side audit of the compiled-object cache, as the nightly cold gate runs it (scripts/nightly-cold-gate.sh):
-#   scripts/lib/nightly-objaudit.sh COLD_TREE CACHE_DIR
+# The cold-side audit of the compiled-object cache, as the nightly cold gate runs it (scripts/gate/nightly-cold-gate.sh):
+#   scripts/gate/lib/nightly-objaudit.sh COLD_TREE CACHE_DIR
 # For both scopes (arm, jasl, janus) every cache entry of an id the cold tree also has is compared object by object with the
 # cold tree's freshly compiled objects (asl_mod_cache.py objaudit). A differing entry is quarantined (.poisoned-<id>,
 # never served again). Exit 0 only if both scopes compared something and found nothing; 1 on a poisoned entry, a

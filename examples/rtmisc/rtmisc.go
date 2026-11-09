@@ -2,7 +2,7 @@
 // R9; docs/RUNTIME-CONTRACTS.md, "Remaining runtime"): complex division, CPU feature flags,
 // the runtime's read-only data objects (staticuint64s, zeroVal) and runtime.KeepAlive. The
 // instrumented builds are in the subpackages: cover (-cover), soft (-d=softfloat) and checkptr
-// (-d=checkptr), all linked into the binary of ./cmd (scripts/build-examples-rtmisc.sh), and
+// (-d=checkptr), all linked into the binary of ./cmd (scripts/build/build-examples-rtmisc.sh), and
 // sc (GOEXPERIMENT=sizespecializedmalloc), a binary of its own.
 package rtmisc
 

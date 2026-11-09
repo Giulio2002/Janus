@@ -7,9 +7,9 @@ set -euo pipefail
 # Example binaries (and so every address a proof depends on) are built with exactly this Go
 # release, whatever Go is installed; the go command downloads it on first use.
 export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 export PATH="$PATH:/usr/local/go/bin"
 mkdir -p "$root/artifacts" "$root/bin"
@@ -20,9 +20,9 @@ echo "built $root/artifacts/examples-amd64"
 # Every examples/basic function, except those of arm64-only files (`*_arm64.go`, e.g. A64Crc32).
 funcs=$(for g in "$root"/examples/basic/*.go; do case "$g" in *_arm64.go) ;; *) cat "$g" ;; esac; done |
   grep -oE '^func [A-Z][A-Za-z0-9]*' | awk '{print $2}')
-. "$root/scripts/example-contracts.sh"
+. "$root/scripts/verify/example-contracts.sh"
 for f in $funcs; do
-  mapfile -t extract_args < <("$root/scripts/example-targets.sh" "$f")
+  mapfile -t extract_args < <("$root/scripts/verify/example-targets.sh" "$f")
   "$root/bin/janus" extract "$root/artifacts/examples-amd64" "example.com/basic.$f" "$root/artifacts/amd64/$f" "${extract_args[@]}"
 done
 # The GOAMD64=v3 examples (examples/basic/v3: BMI1/BMI2, MOVBE, FMA3), in a binary of their own
@@ -78,11 +78,11 @@ echo "built $root/artifacts/examples-amd64-scan.test"
 # The runtime's equality, hashing and typed-memory functions verified on their own, and the
 # compiler-generated hash and equality functions of a struct key (examples/basic/rteq.go).
 for f in $runtime_examples HashFKey EqFKey; do
-  mapfile -t extract_args < <("$root/scripts/example-targets.sh" "$f")
+  mapfile -t extract_args < <("$root/scripts/verify/example-targets.sh" "$f")
   "$root/bin/janus" extract "$root/artifacts/examples-amd64" "$(example_symbol "$f")" "$root/artifacts/amd64/$f" "${extract_args[@]}"
 done
 # The write barrier's gcWriteBarrier1..8 verified against WbContract64 (examples/proofs-amd64/WriteBarrier).
-mapfile -t wb_args < <("$root/scripts/example-targets.sh" WriteBarrier)
+mapfile -t wb_args < <("$root/scripts/verify/example-targets.sh" WriteBarrier)
 "$root/bin/janus" extract "$root/artifacts/examples-amd64" runtime.gcWriteBarrier1 "$root/artifacts/amd64/WriteBarrier" "${wb_args[@]}"
 # The bit-scan examples (examples/basic/bitscan: math/bits Len/TrailingZeros), built at GOAMD64=v1
 # (BSR/BSF with CMOV on ZF: the scan of zero leaves its destination undefined) and at GOAMD64=v3

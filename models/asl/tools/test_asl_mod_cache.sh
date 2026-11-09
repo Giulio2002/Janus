@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests of the per-module JanusASL build cache (models/asl/tools/asl_mod_cache.py; scripts/asl.sh
+# Tests of the per-module JanusASL build cache (models/asl/tools/asl_mod_cache.py; scripts/build/asl.sh
 # ASL_CACHE; docs/design/ASL.md "Build cache").
 #
 #   models/asl/tools/test_asl_mod_cache.sh              key tests (seconds)
@@ -89,11 +89,11 @@ c=$(changed "$t/a" "$t/b" | wc -l)
 [ "$c" = "$n" ] && ok "the toolchain changes every key" || bad "the toolchain changed $c of $n keys"
 
 
-# `restore --record`: a signed record (scripts/lib/restamp.py verifies it), written O_EXCL|O_NOFOLLOW at 0600
+# `restore --record`: a signed record (scripts/gate/lib/restamp.py verifies it), written O_EXCL|O_NOFOLLOW at 0600
 old_kd="${JANUS_CACHE_KEY_DIR-}"; export JANUS_CACHE_KEY_DIR="$t/key"; mkdir -m 700 "$t/key"
 mkdir -m 700 "$t/recd" "$t/emptycache"
 python3 -I "$t/a/models/asl/tools/asl_mod_cache.py" restore "$t/a" "$t/emptycache" --record "$t/recd/record.json" > /dev/null 2>&1
-if python3 -I - "$t/recd/record.json" "$t/a" "$root/scripts/lib/bcache.py" <<'PY'
+if python3 -I - "$t/recd/record.json" "$t/a" "$root/scripts/gate/lib/bcache.py" <<'PY'
 import importlib.util, json, os, stat, sys
 rec, tree, bcp = sys.argv[1:4]
 spec = importlib.util.spec_from_file_location("bcache", bcp); bc = importlib.util.module_from_spec(spec); spec.loader.exec_module(bc)
@@ -139,7 +139,7 @@ if [ -n "$e2e" ]; then
   copy "$t/w"
   (cd "$t/w/models/asl" && tar -xzf vendor/ArmASL.tar.gz && touch ArmASL.lean)
   start=$(date +%s)
-  (cd "$t/w" && ASL_CACHE="$e2e" ASL_CACHE_READONLY=1 scripts/asl.sh restore) > "$t/restore.log" 2>&1
+  (cd "$t/w" && ASL_CACHE="$e2e" ASL_CACHE_READONLY=1 scripts/build/asl.sh restore) > "$t/restore.log" 2>&1
   python3 -I "$t/w/models/asl/tools/asl_mod_cache.py" restore "$t/w" "$e2e" | tee -a "$t/restore.log"
   (cd "$t/w/models/asl" && lake build --no-ansi JanusASL) > "$t/build.log" 2>&1
   secs=$(( $(date +%s) - start ))

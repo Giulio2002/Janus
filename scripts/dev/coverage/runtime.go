@@ -308,7 +308,7 @@ func cmdRuntime(args []string) {
 				}
 			}
 		}
-		for _, m := range contractFlagRe.FindAllStringSubmatch(gitShow(*repo, br, "scripts/example-contracts.sh"), -1) {
+		for _, m := range contractFlagRe.FindAllStringSubmatch(gitShow(*repo, br, "scripts/verify/example-contracts.sh"), -1) {
 			if have[m[1]] == "" {
 				have[m[1]] = "proof-local contract (--contract in an example)"
 			}

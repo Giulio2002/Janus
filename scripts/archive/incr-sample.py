@@ -3,17 +3,17 @@
 
 NOT part of the trust base and not used by any gate: a measuring tool. For every first-parent commit C of REF it
 takes the files C changes relative to its first parent and models, from the rules of cmd/janus/incr.go and
-scripts/lib/incr.sh, which of the 461 verify items and which gate lanes an incremental gate would have to run,
+scripts/gate/lib/incr.sh, which of the 461 verify items and which gate lanes an incremental gate would have to run,
 and WHY (the input that changed). Two rule sets are modelled:
 
   before   the rules of integ/speed5 (ad264a2): the gate's own bookkeeping variables are part of every key
-           (JANUS_GATE_TREE0, JANUS_LAKEGUARD_PIN, ... : scripts/gate.sh exports them and they differ from run to run), so
+           (JANUS_GATE_TREE0, JANUS_LAKEGUARD_PIN, ... : scripts/gate/gate.sh exports them and they differ from run to run), so
            a gate run never finds the record of an earlier run: 0 items skipped. 'before-designed' is the same model
            with that bug removed (what the design of ad264a2 would give: the 'older measurement').
   after    the rules of this branch.
 
-Usage: scripts/incr-sample.py [--ref main] [-n 30] [--items items.txt] [--tsv out.tsv] [--md out.md]
-items.txt: one id per line, as printed by scripts/verify-all-examples.sh (arm64:Add, amd64:Add, asm:..., cgo:...);
+Usage: scripts/archive/incr-sample.py [--ref main] [-n 30] [--items items.txt] [--tsv out.tsv] [--md out.md]
+items.txt: one id per line, as printed by scripts/verify/verify-all-examples.sh (arm64:Add, amd64:Add, asm:..., cgo:...);
 without it the list is derived from the tree by running the bash that verify-all-examples.sh runs to build it.
 The model is conservative where the tree does not say: a file it cannot classify invalidates every item.
 """
@@ -37,26 +37,26 @@ def verifier_file(p):
     return p.endswith((".go", ".s", ".h")) and "/" not in p or p in ("go.mod", "go.sum")
 
 
-COMMON_SCRIPTS_BEFORE = """scripts/gate.sh scripts/lib/incr.sh scripts/lib/pool.sh scripts/lib/parallel.sh scripts/lib/memguard.sh
-scripts/lib/itemtimeout.sh scripts/lib/theorems.sh scripts/verify-all-examples.sh scripts/example-contracts.sh
-scripts/example-targets.sh""".split()
+COMMON_SCRIPTS_BEFORE = """scripts/gate/gate.sh scripts/gate/lib/incr.sh scripts/gate/lib/pool.sh scripts/gate/lib/parallel.sh scripts/gate/lib/memguard.sh
+scripts/gate/lib/itemtimeout.sh scripts/gate/lib/theorems.sh scripts/verify/verify-all-examples.sh scripts/verify/example-contracts.sh
+scripts/verify/example-targets.sh""".split()
 KIND_SCRIPTS = {
-    "arm64": ["scripts/verify-examples.sh", "scripts/build-examples.sh", "scripts/break-demo.sh"],
-    "amd64": ["scripts/verify-amd64-examples.sh", "scripts/build-examples-amd64.sh"],
-    "asm": ["scripts/verify-asm-examples.sh", "scripts/build-examples-asm.sh"],
-    "rtmisc": ["scripts/verify-rtmisc-examples.sh", "scripts/build-examples-rtmisc.sh"],
-    "sys": ["scripts/verify-sys-examples.sh", "scripts/build-examples-sys.sh"],
-    "print": ["scripts/verify-print-examples.sh", "scripts/build-examples-print.sh", "scripts/gen-print-code.py",
-              "scripts/gen-print-examples.py"],
-    "cgo": ["scripts/verify-cgo-examples.sh", "scripts/build-examples-cgo.sh"],
+    "arm64": ["scripts/verify/verify-examples.sh", "scripts/build/build-examples.sh", "scripts/archive/break-demo.sh"],
+    "amd64": ["scripts/verify/verify-amd64-examples.sh", "scripts/build/build-examples-amd64.sh"],
+    "asm": ["scripts/verify/verify-asm-examples.sh", "scripts/build/build-examples-asm.sh"],
+    "rtmisc": ["scripts/verify/verify-rtmisc-examples.sh", "scripts/build/build-examples-rtmisc.sh"],
+    "sys": ["scripts/verify/verify-sys-examples.sh", "scripts/build/build-examples-sys.sh"],
+    "print": ["scripts/verify/verify-print-examples.sh", "scripts/build/build-examples-print.sh", "scripts/dev/gen-print-code.py",
+              "scripts/dev/gen-print-examples.py"],
+    "cgo": ["scripts/verify/verify-cgo-examples.sh", "scripts/build/build-examples-cgo.sh"],
 }
-PINS = ["cmd/janus/stubpins_gen.go", "scripts/gen-stubpins.sh", "scripts/stubpins/main.go"]
+PINS = ["cmd/janus/stubpins_gen.go", "scripts/dev/gen-stubpins.sh", "scripts/dev/stubpins/main.go"]
 FW_CONFIG = ["lakefile.toml", "lake-manifest.json", "lean-toolchain"]
 
 
 def load_rules():
-    """The script lists of THIS tree (scripts/lib/incr.sh), so the model follows the code under analysis."""
-    src = open(os.path.join(ROOT, "scripts/lib/incr.sh")).read()
+    """The script lists of THIS tree (scripts/gate/lib/incr.sh), so the model follows the code under analysis."""
+    src = open(os.path.join(ROOT, "scripts/gate/lib/incr.sh")).read()
     m = re.search(r"incr_script_flags\(\) \{(.*?)\n\}", src, re.S)
     common = re.search(r"local -a fs=\((.*?)\)\n", m.group(1), re.S).group(1).split()
     kinds = {}
@@ -207,7 +207,7 @@ def main():
     if a.items:
         items = [l.strip() for l in open(a.items) if l.strip()]
     else:
-        src = subprocess.check_output(["sed", "-n", "80,117p", os.path.join(ROOT, "scripts/verify-all-examples.sh")], text=True)
+        src = subprocess.check_output(["sed", "-n", "80,117p", os.path.join(ROOT, "scripts/verify/verify-all-examples.sh")], text=True)
         out = subprocess.check_output(["bash", "-c", 'cd %s; cgo=1; eval "$(cat)"; printf "%%s\\n" "${items[@]}"' % ROOT], input=src, text=True)
         items = [l for l in out.split("\n") if l]
     commits = git("log", "--first-parent", "--format=%h", a.ref).split()[a.skip : a.skip + a.n]

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Mutation tests of incr_hosttools (scripts/lib/incr-host.sh) and the other lane-key inputs of scripts/lib/incr.sh: the host compiler, linker, loader,
+# Mutation tests of incr_hosttools (scripts/gate/lib/incr-host.sh) and the other lane-key inputs of scripts/gate/lib/incr.sh: the host compiler, linker, loader,
 # libc, Go toolchain, compiler-steering environment, dependency trees and LD_* variables are part of every lane key; lanes are skipped only on opt-in.
 set -uo pipefail
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "$here"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"; cd "$here"
 mkdir -p artifacts; t="$(mktemp -d "$here/artifacts/test-incr-hosttools.XXXXXX")" || exit 2
 trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
@@ -21,7 +21,7 @@ done
 mkdir -p "$t/bin"
 export PATH="$t/bin:$t/sysbin"
 export IH_ROOT="$t/iroot" DEPS="$t/nodeps" X86DEPS="$t/nodeps"
-. scripts/lib/incr.sh
+. scripts/gate/lib/incr.sh
 H() { incr_hosttools --nocache 2>/dev/null; }
 base="$(H)"
 [ "$base" = "$(H)" ] && [[ "$base" =~ ^tools=[0-9a-f]{64}$ ]] && ok "deterministic and well-formed" || bad "not deterministic: $base"
@@ -70,7 +70,7 @@ r1="$(PATH="$t/bin:$PATH" H)"; echo c2 > "$fakeroot/pkg/tool/x/compile"; r2="$(P
 differs "a changed Go tool (compile) changes the digest" "$r2" "$r1"; differs "a changed GOROOT source changes it" "$r3" "$r2"; rm -f "$t/bin/go"
 # the dynamic loader / libc (a copy of the library files with the loader paths pointed at a scratch dir)
 ld="$(ls /lib64/ld-linux-*.so.* /lib/*-linux-gnu/ld-linux-*.so.* 2>/dev/null | head -n 1)"
-mkdir -p "$t/lib" "$t/sys"; cp scripts/lib/incr.sh scripts/lib/incr-host.sh "$t/lib/"; cp "$(readlink -f "$ld")" "$t/sys/ld-linux-x.so.2"
+mkdir -p "$t/lib" "$t/sys"; cp scripts/gate/lib/incr.sh scripts/gate/lib/incr-host.sh "$t/lib/"; cp "$(readlink -f "$ld")" "$t/sys/ld-linux-x.so.2"
 sed -i -e "s#/lib64/ld-linux-\*\.so\.\*#$t/sys/ld-linux-x.so.2#" -e "s#/lib/ld-linux-\*\.so\.\*#/nonexistent#" -e "s#/lib/\*-linux-gnu/ld-linux-\*\.so\.\*#/nonexistent#" "$t/lib/incr-host.sh"
 grep -q "$t/sys/ld-linux-x.so.2" "$t/lib/incr-host.sh" || bad "test setup: loader path not substituted"
 s1="$(. "$t/lib/incr.sh"; incr_hosttools --nocache 2>/dev/null)"; echo X >> "$t/sys/ld-linux-x.so.2"; s2="$(. "$t/lib/incr.sh"; incr_hosttools --nocache 2>/dev/null)"
@@ -83,7 +83,7 @@ mkdir -p "$t/inc"; echo '#define A 1' > "$t/inc/h.h"
 e0="$(H)"; e1="$(CPATH="$t/inc" H)"; echo '#define A 2' > "$t/inc/h.h"; e2="$(CPATH="$t/inc" H)"
 differs "CPATH changes the digest" "$e1" "$e0"; differs "the header CPATH names is hashed" "$e2" "$e1"
 for v in C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH COMPILER_PATH CFLAGS CXXFLAGS CPPFLAGS LDFLAGS PYTHONPATH PYTHONSTARTUP; do
-  [ "$(env "$v=$t/inc" bash -c '. scripts/lib/incr.sh; _ih_env' 2>/dev/null)" != "$(bash -c '. scripts/lib/incr.sh; _ih_env' 2>/dev/null)" ] && ok "$v enters the environment part of the digest (_ih_env; the whole digest is the hash of it and the other parts)" || bad "$v not keyed"
+  [ "$(env "$v=$t/inc" bash -c '. scripts/gate/lib/incr.sh; _ih_env' 2>/dev/null)" != "$(bash -c '. scripts/gate/lib/incr.sh; _ih_env' 2>/dev/null)" ] && ok "$v enters the environment part of the digest (_ih_env; the whole digest is the hash of it and the other parts)" || bad "$v not keyed"
 done
 echo 'echo hi' > "$t/benv"; b1="$(BASH_ENV="$t/benv" H)"; echo 'echo ho' > "$t/benv"; b2="$(BASH_ENV="$t/benv" H)"; differs "BASH_ENV and the file it names are keyed" "$b2" "$b1"
 echo c > "$t/starts"; p1="$(PYTHONSTARTUP="$t/starts" H)"; echo d > "$t/starts"; p2="$(PYTHONSTARTUP="$t/starts" H)"; differs "PYTHONSTARTUP content is keyed" "$p2" "$p1"
@@ -126,13 +126,13 @@ k_a="$(HOME="$t/go-build1" incr_lane_spec t | grep '^goenv:' | sha256sum)"; k_b=
 { [ "$k_a" != "$k_b" ] && [ "$k_a" != "$k_c" ] && [ "$k_b" != "$k_c" ]; } && ok "HOME=.../go-build1, go-build2 and go-build give different goenv arguments (only GOGCCFLAGS is normalised)" || bad "go-build rewrite is not confined to GOGCCFLAGS"
 # lane skipping is OFF by default: with the default setting incr_lane always runs the code, reads and writes no record
 export JANUS_GATE_TREE0=forged
-d="$(mktemp -d "$t/lanes.XXXXXX")"; ( cd "$here" && JANUS_INCR_RECORD=1 JANUS_GATE_INCREMENTAL=1 JANUS_CACHE_DIR="$d/cache" bash -c '. scripts/lib/incr.sh; n=0; for i in 1 2 3; do incr_lane t1 "echo ran >> '"$d"'/log" >/dev/null; done; wc -l < '"$d"'/log' ) > "$d/out" 2>&1
+d="$(mktemp -d "$t/lanes.XXXXXX")"; ( cd "$here" && JANUS_INCR_RECORD=1 JANUS_GATE_INCREMENTAL=1 JANUS_CACHE_DIR="$d/cache" bash -c '. scripts/gate/lib/incr.sh; n=0; for i in 1 2 3; do incr_lane t1 "echo ran >> '"$d"'/log" >/dev/null; done; wc -l < '"$d"'/log' ) > "$d/out" 2>&1
 [ "$(tail -n 1 "$d/out")" = 3 ] && ok "default (JANUS_INCR_LANES unset): the lane ran all 3 times, none skipped" || bad "lane skipped by default: $(cat "$d/out")"
-grep -q 'JANUS_INCR_LANES' scripts/gate.sh && grep -q 'OFF (default' scripts/gate.sh && ok "the gate banner states the lane setting" || bad "banner lacks the setting"
+grep -q 'JANUS_INCR_LANES' scripts/gate/gate.sh && grep -q 'OFF (default' scripts/gate/gate.sh && ok "the gate banner states the lane setting" || bad "banner lacks the setting"
 unset JANUS_GATE_TREE0
 # SKIP-as-pass: gotest-shards.sh reports skipped tests and leaves a no-record note
-grep -q 'INCR_NORECORD_FILE' scripts/gotest-shards.sh && grep -q 'a skip is not a pass' scripts/gotest-shards.sh && ok "gotest-shards.sh never lets a run with a SKIP be recorded" || bad "SKIP-as-pass not guarded"
+grep -q 'INCR_NORECORD_FILE' scripts/gate/gotest-shards.sh && grep -q 'a skip is not a pass' scripts/gate/gotest-shards.sh && ok "gotest-shards.sh never lets a run with a SKIP be recorded" || bad "SKIP-as-pass not guarded"
 nr="$(mktemp "$t/nr.XXXXXX")"; echo "gotest: 2 skipped" > "$nr"
-( cd "$here"; JANUS_INCR_LANES=1 JANUS_INCR_RECORD=1 JANUS_GATE_INCREMENTAL=1 bash -c '. scripts/lib/incr.sh; incr_tree_ok() { return 0; }; incr_active() { return 0; }; incr_begin() { return 1; }; incr_end() { echo RECORDED; }; incr_lane lanex '"'"'echo x >> "$INCR_NORECORD_FILE"'"'"'' ) > "$t/nr.out" 2>&1
+( cd "$here"; JANUS_INCR_LANES=1 JANUS_INCR_RECORD=1 JANUS_GATE_INCREMENTAL=1 bash -c '. scripts/gate/lib/incr.sh; incr_tree_ok() { return 0; }; incr_active() { return 0; }; incr_begin() { return 1; }; incr_end() { echo RECORDED; }; incr_lane lanex '"'"'echo x >> "$INCR_NORECORD_FILE"'"'"'' ) > "$t/nr.out" 2>&1
 grep -q 'not recorded: x' "$t/nr.out" && ! grep -q RECORDED "$t/nr.out" && ok "a lane that wrote to INCR_NORECORD_FILE is not recorded" || bad "norecord ignored: $(cat "$t/nr.out")"
 [ "$fail" = 0 ] && echo "all checks passed"; exit $fail

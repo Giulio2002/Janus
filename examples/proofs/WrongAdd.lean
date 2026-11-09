@@ -3,7 +3,7 @@ import Extracted
 /-!
 # The subtracting `Add` violates the `Add` specification
 
-This file is verified against the binary built by `scripts/break-demo.sh`, in which the Go
+This file is verified against the binary built by `scripts/archive/break-demo.sh`, in which the Go
 source of `Add` was changed from `x + y` to `x - y`.
 
 **Guarantee.** It is *not* the case that for all `x`, `y` every Go call of the compiled function

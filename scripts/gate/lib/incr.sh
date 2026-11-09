@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # The incremental merge gate, shell side (docs/TESTING.md "Incremental gate"). Sourced by the verify-*
-# scripts and by scripts/gate.sh. The decision and the records are `bin/janus incr` (cmd/janus/incr.go).
+# scripts and by scripts/gate/gate.sh. The decision and the records are `bin/janus incr` (cmd/janus/incr.go).
 #
 # An item is SKIPPED only when `janus incr check` finds the record of a PASS whose key (a content hash
 # of every input of the item: its extraction, proof file(s), the transitive import closure of its
@@ -11,8 +11,8 @@
 #
 #   JANUS_GATE_INCREMENTAL=1   skip items that have such a record (the default is a FULL run: nothing is
 #                              skipped; the cold gate is mandatory before every push to main and nightly)
-#   JANUS_INCR_RECORD=1        record the PASS of every item that runs (scripts/gate.sh and
-#                              scripts/verify-all-examples.sh set it; implied by JANUS_GATE_INCREMENTAL=1)
+#   JANUS_INCR_RECORD=1        record the PASS of every item that runs (scripts/gate/gate.sh and
+#                              scripts/verify/verify-all-examples.sh set it; implied by JANUS_GATE_INCREMENTAL=1)
 #   JANUS_INCR_EXPLAIN=1       print the key components of each item and run nothing (gate.sh --explain)
 #
 #   incr_begin ID KIND SPEC...   returns 0 if the item must NOT run (skipped, or explain-only), with INCR_MSG
@@ -25,7 +25,7 @@
 incr_enabled() { [ "${JANUS_GATE_INCREMENTAL:-}" = 1 ]; }
 incr_recording() { [ "${JANUS_INCR_RECORD:-}" = 1 ] || incr_enabled; }
 incr_explaining() { [ "${JANUS_INCR_EXPLAIN:-}" = 1 ]; }
-# JANUS_INCR_PRECHECK=1 (scripts/verify-all-examples.sh --incremental): the script is run only to find out
+# JANUS_INCR_PRECHECK=1 (scripts/verify/verify-all-examples.sh --incremental): the script is run only to find out
 # whether its item is skipped; an item that is not exits with status 90 before running anything
 incr_prechecking() { [ "${JANUS_INCR_PRECHECK:-}" = 1 ]; }
 incr_active() { incr_enabled || incr_recording || incr_explaining; }
@@ -36,24 +36,24 @@ incr_fw_embedded() { if [ -n "${JANUS_ROOT:-}" ]; then echo "--fw dir:$JANUS_ROO
 # the scripts and libraries that run an item of KIND, as --script flags (hashed by content)
 incr_script_flags() {
   local kind=$1 f
-  local -a fs=(scripts/gate.sh scripts/lib/incr.sh scripts/lib/pool.sh scripts/lib/parallel.sh scripts/lib/incr-host.sh scripts/lib/memguard.sh
-    scripts/lib/itemtimeout.sh scripts/lib/theorems.sh scripts/verify-all-examples.sh scripts/example-contracts.sh
-    scripts/example-targets.sh)
+  local -a fs=(scripts/gate/gate.sh scripts/gate/lib/incr.sh scripts/gate/lib/pool.sh scripts/gate/lib/parallel.sh scripts/gate/lib/incr-host.sh scripts/gate/lib/memguard.sh
+    scripts/gate/lib/itemtimeout.sh scripts/gate/lib/theorems.sh scripts/verify/verify-all-examples.sh scripts/verify/example-contracts.sh
+    scripts/verify/example-targets.sh)
   case "$kind" in
-    arm64) fs+=(scripts/verify-examples.sh scripts/build-examples.sh scripts/break-demo.sh) ;;
-    amd64) fs+=(scripts/verify-amd64-examples.sh scripts/build-examples-amd64.sh) ;;
-    asm) fs+=(scripts/verify-asm-examples.sh scripts/build-examples-asm.sh) ;;
-    rtmisc) fs+=(scripts/verify-rtmisc-examples.sh scripts/build-examples-rtmisc.sh) ;;
-    sys) fs+=(scripts/verify-sys-examples.sh scripts/build-examples-sys.sh) ;;
-    print) fs+=(scripts/verify-print-examples.sh scripts/build-examples-print.sh scripts/gen-print-code.py scripts/gen-print-examples.py) ;;
-    cgo) fs+=(scripts/verify-cgo-examples.sh scripts/build-examples-cgo.sh) ;;
-    lane) fs+=(scripts/gotest-shards.sh scripts/ci-axiom-guard.sh scripts/x86formal.sh scripts/asl.sh test/redteam/run-rounds.sh test/redteam/rounds/rt-asl/run.sh) ;;
+    arm64) fs+=(scripts/verify/verify-examples.sh scripts/build/build-examples.sh scripts/archive/break-demo.sh) ;;
+    amd64) fs+=(scripts/verify/verify-amd64-examples.sh scripts/build/build-examples-amd64.sh) ;;
+    asm) fs+=(scripts/verify/verify-asm-examples.sh scripts/build/build-examples-asm.sh) ;;
+    rtmisc) fs+=(scripts/verify/verify-rtmisc-examples.sh scripts/build/build-examples-rtmisc.sh) ;;
+    sys) fs+=(scripts/verify/verify-sys-examples.sh scripts/build/build-examples-sys.sh) ;;
+    print) fs+=(scripts/verify/verify-print-examples.sh scripts/build/build-examples-print.sh scripts/dev/gen-print-code.py scripts/dev/gen-print-examples.py) ;;
+    cgo) fs+=(scripts/verify/verify-cgo-examples.sh scripts/build/build-examples-cgo.sh) ;;
+    lane) fs+=(scripts/gate/gotest-shards.sh scripts/gate/ci-axiom-guard.sh scripts/build/x86formal.sh scripts/build/asl.sh test/redteam/run-rounds.sh test/redteam/rounds/rt-asl/run.sh) ;;
   esac
   for f in "${fs[@]}"; do printf '%s\n' --script "$f"; done
 }
 
 # the pins: the stub pins (also compiled into the verifier) and their generator
-incr_pin_flags() { printf '%s\n' --pin cmd/janus/stubpins_gen.go --pin scripts/gen-stubpins.sh --pin scripts/stubpins/main.go; }
+incr_pin_flags() { printf '%s\n' --pin cmd/janus/stubpins_gen.go --pin scripts/dev/gen-stubpins.sh --pin scripts/dev/stubpins/main.go; }
 
 # ---- the tree pin: records are written only for a run of a CLEAN tree that did not change while it ran.
 # A key is computed from the live tree, but some items verify a copy made earlier (the print snapshot, the
@@ -75,7 +75,7 @@ incr_tree_clean() {
 }
 # _incr_is_gate_proc PID: PID is a real gate: its executable is a shell (readlink /proc/PID/exe), it has the uid of this process, argv is
 # <shell> [options without -c/-s/--command] <script> ..., and the FIRST non-option argument, resolved against that process's cwd and symlinks, is
-# exactly <this checkout>/scripts/gate.sh (the checkout that holds the incr.sh that is running: a gate.sh anywhere else, text inside a `bash -c`
+# exactly <this checkout>/scripts/gate/gate.sh (the checkout that holds the incr.sh that is running: a gate.sh anywhere else, text inside a `bash -c`
 # string, `bash -s gate.sh`, a later argument, another user's process: all rejected).
 _incr_is_gate_proc() {
   local pid=$1 exe uid av=() i a want sp
@@ -83,7 +83,7 @@ _incr_is_gate_proc() {
   [[ "$exe" =~ /(bash|sh|dash)$ ]] || return 1
   uid="$(stat -c %u "/proc/$pid" 2>/dev/null)" || return 1
   [ "$uid" = "$(id -u)" ] || return 1
-  want="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd -P)/scripts/gate.sh"
+  want="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." 2>/dev/null && pwd -P)/scripts/gate/gate.sh"
   mapfile -d '' -t av < "/proc/$pid/cmdline" 2>/dev/null || true
   [ "${#av[@]}" -ge 2 ] || return 1
   for ((i = 1; i < ${#av[@]}; i++)); do
@@ -100,10 +100,10 @@ _incr_is_gate_proc() {
   case "$a" in /*) sp="$(readlink -f -- "$a" 2>/dev/null)" ;; *) sp="$(readlink -f -- "/proc/$pid/cwd/$a" 2>/dev/null)" ;; esac
   [ "$sp" = "$want" ]
 }
-# incr_under_gate: true only when the real scripts/gate.sh of THIS checkout is an ancestor PROCESS of this shell.
-# JANUS_GATE_TREE0 is the stamp the gate takes at its start: only scripts/gate.sh may set it. An operator with a dirty tree who exported a
+# incr_under_gate: true only when the real scripts/gate/gate.sh of THIS checkout is an ancestor PROCESS of this shell.
+# JANUS_GATE_TREE0 is the stamp the gate takes at its start: only scripts/gate/gate.sh may set it. An operator with a dirty tree who exported a
 # matching stamp would make incr_tree_ok true and get PASS records written for content that was never verified, so
-# scripts/verify-all-examples.sh run by itself clears it (and pins the tree itself); under the gate it keeps the gate's. An environment
+# scripts/verify/verify-all-examples.sh run by itself clears it (and pins the tree itself); under the gate it keeps the gate's. An environment
 # variable cannot say who set it, a process ancestry (verified by exe, uid, cwd-resolved script path) can.
 incr_under_gate() {
   local pid=$$ i
@@ -114,7 +114,7 @@ incr_under_gate() {
   done
   return 1
 }
-# incr_tree_pin: call once, at the start of a gate (scripts/gate.sh, scripts/verify-all-examples.sh); idempotent
+# incr_tree_pin: call once, at the start of a gate (scripts/gate/gate.sh, scripts/verify/verify-all-examples.sh); idempotent
 incr_tree_pin() {
   [ -z "${JANUS_GATE_TREE0:-}" ] || return 0
   if incr_tree_clean; then JANUS_GATE_TREE0=$(incr_tree_stamp); else JANUS_GATE_TREE0=dirty; fi
@@ -150,7 +150,7 @@ $id  skipped (unchanged: --explain only; nothing was verified)"
   case "$key" in [0-9a-f]*) INCR_KEY=$key ;; esac
   [ "${#INCR_KEY}" = 64 ] || INCR_KEY=""
   if [ "$verdict" = SKIP ] && [ -n "$INCR_KEY" ] && incr_enabled; then
-    # ' skipped (unchanged' is the marker scripts/lib/pool.sh counts as a skipped (not run) item
+    # ' skipped (unchanged' is the marker scripts/gate/lib/pool.sh counts as a skipped (not run) item
     local this=""
     # a PASS recorded since this gate run began was recorded by its own prebuild warm-up (a verification of Add
     # with the freshly built binary): legitimate, and labelled
@@ -218,7 +218,7 @@ incr_report() {
 # every non-documentation file of the working tree, the toolchain, the full verifier identity (Go and Lean), the
 # machine, the relevant environment, the prebuilt example binaries and the lane's arguments (SPEC). CODE is shell
 # code (eval'd here); a lane is skipped only on the record of a PASS with that key, and recorded when it passes.
-# incr_lane_spec NAME [SPEC...]: the key arguments of a lane, one per line (incr_lane, scripts/lib/test-incr-liveness.sh). An argument
+# incr_lane_spec NAME [SPEC...]: the key arguments of a lane, one per line (incr_lane, scripts/gate/lib/test-incr-liveness.sh). An argument
 # is one line (`janus incr` refuses a newline): multi-line values (go env -json, the GOENV file) have each newline replaced by \001,
 # which is injective (_incr_oneline escapes \\001 and \\002 first). `go env -json` also holds GOGCCFLAGS with a RANDOM directory (-ffile-prefix-map=/tmp/go-build<random>=...), different on every
 # call: only the value of GOGCCFLAGS is normalised (a random directory, /go-build<digits>), or every gate run would key its lanes differently. (Until this was fixed `go env -json` made every lane's `janus incr check` fail: no lane was ever skipped or recorded.)

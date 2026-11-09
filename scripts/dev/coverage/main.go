@@ -1,5 +1,5 @@
 // Command janus-coverage measures how much of Go (and cgo's C) the Janus decoders accept, and
-// which runtime entry points have contracts. Driven by scripts/coverage.sh; see docs/COVERAGE.md.
+// which runtime entry points have contracts. Driven by scripts/dev/coverage.sh; see docs/COVERAGE.md.
 //
 //	janus-coverage insn -arch A -decode D -model M [-json F] [-calls F] [-c] BINARY_OR_OBJECT...
 //	janus-coverage runtime -goroot G -repo R -branches "main agent/x" [-o F]

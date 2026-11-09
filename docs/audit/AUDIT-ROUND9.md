@@ -213,7 +213,7 @@ On the tree merged with main `a3626db` (HEAD of agent/redteam9), one heavy job a
 | Suite | Result |
 |---|---|
 | `test/redteam/rounds/round9/run-round9.sh` | all rows as expected (C1a–d, C2a–b, M1a–b, S1, MP, G1, SAT, SAT_selftest, H2a–c, I1g, D1, MG), 526 s |
-| `scripts/verify-all-examples.sh -j 1` | all ok: 74 arm64 items, 74 amd64 functions, 10 assembly items (MallocFast, MakeAdder included) |
+| `scripts/verify/verify-all-examples.sh -j 1` | all ok: 74 arm64 items, 74 amd64 functions, 10 assembly items (MallocFast, MakeAdder included) |
 | `go test -count=1 -timeout 50m ./cmd/...` | ok, 584 s |
 | `test/redteam/run-all.sh -j 1` | ok, 367 s |
 | `test/redteam/rounds/round{2,3,4,5,6,7,8}` runners, `test/redteam/rounds/rt-model/run.sh` | all rows as expected |

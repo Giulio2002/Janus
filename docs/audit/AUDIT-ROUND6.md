@@ -208,8 +208,8 @@ equation-lemma disclosure is still recommended hardening, not a fix. It was not 
 
 ## Regression status
 
-With this branch, all of these pass: `test/redteam/rounds/round6/run-round6.sh`, `scripts/verify-examples.sh`,
-`scripts/verify-amd64-examples.sh`, `test/redteam/run-all.sh`, `test/redteam/rounds/round2/run-round2.sh` through
+With this branch, all of these pass: `test/redteam/rounds/round6/run-round6.sh`, `scripts/verify/verify-examples.sh`,
+`scripts/verify/verify-amd64-examples.sh`, `test/redteam/run-all.sh`, `test/redteam/rounds/round2/run-round2.sh` through
 `test/redteam/rounds/round5/run-round5.sh`, and `go test -timeout 50m ./cmd/...`.
 
 ## Reproduce

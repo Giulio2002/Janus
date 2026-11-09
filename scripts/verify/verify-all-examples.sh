@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Verify every arm64 example proof (with the WrongAdd demonstration), every amd64 example
 # theorem and the Go assembly (ABI0) examples of both ISAs in one pool of parallel jobs:
-# scripts/verify-examples.sh, scripts/verify-amd64-examples.sh and
-# scripts/verify-asm-examples.sh and scripts/verify-rtmisc-examples.sh one item at a time, longest first (by the times measured in the
+# scripts/verify/verify-examples.sh, scripts/verify/verify-amd64-examples.sh and
+# scripts/verify/verify-asm-examples.sh and scripts/verify/verify-rtmisc-examples.sh one item at a time, longest first (by the times measured in the
 # last run, artifacts/verify-all-examples.times; a built-in order before the first run), so that
 # the long proofs overlap the rest instead of ending the run alone.
-# The kernel examples (scripts/verify-sys-examples.sh) and the print examples
-# (scripts/verify-print-examples.sh) are items of the same queue; --cgo adds the cgo rows
-# (scripts/verify-cgo-examples.sh, the slowest suite). One queue, one pool (scripts/lib/pool.sh):
+# The kernel examples (scripts/verify/verify-sys-examples.sh) and the print examples
+# (scripts/verify/verify-print-examples.sh) are items of the same queue; --cgo adds the cgo rows
+# (scripts/verify/verify-cgo-examples.sh, the slowest suite). One queue, one pool (scripts/gate/lib/pool.sh):
 # every item's result line (PASS / FAIL / TIMEOUT and its wall seconds) is printed the moment it
 # finishes, with a progress line every minute; the full log of each item is kept in
 # $JANUS_POOL_DIR (default artifacts/verify-all-logs/).
-# Usage: scripts/verify-all-examples.sh [-j N] [--incremental|--changed] [--explain] [--cgo]
-#   -j N        jobs at once (default and memory admission: scripts/lib/parallel.sh).
+# Usage: scripts/verify/verify-all-examples.sh [-j N] [--incremental|--changed] [--explain] [--cgo]
+#   -j N        jobs at once (default and memory admission: scripts/gate/lib/parallel.sh).
 #   --cgo       also verify the cgo rows (examples/proofs-cgo) in the same queue.
 #   --filter ERE   development only: queue just the items whose id ("arm64:Add", "cgo:amd64/CAdd", ...)
 #               matches the regular expression; not a gate run.
@@ -20,7 +20,7 @@
 #               PASS exists whose key is identical: a content hash of EVERY input of the item (its
 #               extraction, proof file, the transitive import closure of its modules with their compiled
 #               data, the toolchain, the verifier identity, the auditor and leanchecker, the pins, these
-#               scripts, the item's arguments and environment: cmd/janus/incr.go, scripts/lib/incr.sh).
+#               scripts, the item's arguments and environment: cmd/janus/incr.go, scripts/gate/lib/incr.sh).
 #               Anything else -- no record, a damaged or foreign one, an input that cannot be hashed --
 #               runs the item, and every item that runs is still checked in full. The default is a FULL
 #               run; the full cold gate is mandatory before every push to main and nightly.
@@ -30,13 +30,13 @@
 # (a skip names the time, host and commit of the PASS it replays) and totals. Exits non-zero if any item
 # fails. Every item that passes is recorded (JANUS_INCR_RECORD=1, set here) for later incremental runs.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+. "$root/scripts/gate/lib/parallel.sh"
 # shellcheck source=lib/pool.sh
-. "$root/scripts/lib/pool.sh"
+. "$root/scripts/gate/lib/pool.sh"
 par_init "$@"
 changed=""
 explain=""
@@ -49,31 +49,31 @@ for ((i = 0; i < ${#args[@]}; i++)); do
     --explain) explain=1 ;;
     --cgo) cgo=1 ;;
     --filter) i=$((i + 1)); filter="${args[$i]:?--filter needs a regular expression}" ;;
-    *) echo "usage: scripts/verify-all-examples.sh [-j N] [--incremental|--changed] [--explain] [--cgo] [--filter ERE]" >&2; exit 2 ;;
+    *) echo "usage: scripts/verify/verify-all-examples.sh [-j N] [--incremental|--changed] [--explain] [--cgo] [--filter ERE]" >&2; exit 2 ;;
   esac
 done
-# the incremental gate (scripts/lib/incr.sh): skipping is opt-in; recording the passes is the default
+# the incremental gate (scripts/gate/lib/incr.sh): skipping is opt-in; recording the passes is the default
 [ -z "$changed" ] || export JANUS_GATE_INCREMENTAL=1
 if [ -n "$explain" ]; then export JANUS_INCR_EXPLAIN=1; else unset JANUS_INCR_EXPLAIN JANUS_INCR_PRECHECK; fi
 export JANUS_INCR_RECORD="${JANUS_INCR_RECORD:-1}"
-# records are written only for a clean tree that does not change during the run (scripts/lib/incr.sh)
-. scripts/lib/incr.sh
-# JANUS_GATE_TREE0 (the stamp of the tree at the start of a gate run) may be set by scripts/gate.sh ONLY: a value from anywhere else is dropped
+# records are written only for a clean tree that does not change during the run (scripts/gate/lib/incr.sh)
+. scripts/gate/lib/incr.sh
+# JANUS_GATE_TREE0 (the stamp of the tree at the start of a gate run) may be set by scripts/gate/gate.sh ONLY: a value from anywhere else is dropped
 # (an operator with a dirty tree could otherwise export a matching stamp and get PASS records for content that was never verified)
 incr_under_gate || unset JANUS_GATE_TREE0
 incr_tree_pin
 
-# JANUS_EXAMPLES_PREBUILT=1 (scripts/gate.sh): bin/janus, the examples' binaries and the framework
+# JANUS_EXAMPLES_PREBUILT=1 (scripts/gate/gate.sh): bin/janus, the examples' binaries and the framework
 # build exist already (built once by the gate); nothing is rebuilt.
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
   CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
-  scripts/build-examples.sh >/dev/null
-  bash scripts/build-examples-amd64.sh >/dev/null 2>&1
-  scripts/build-examples-asm.sh >/dev/null
-  scripts/build-examples-sys.sh >/dev/null 2>&1
-  scripts/build-examples-rtmisc.sh >/dev/null
-  scripts/build-examples-print.sh >/dev/null 2>&1
-  [ -z "$cgo" ] || scripts/build-examples-cgo.sh >/dev/null
+  scripts/build/build-examples.sh >/dev/null
+  bash scripts/build/build-examples-amd64.sh >/dev/null 2>&1
+  scripts/build/build-examples-asm.sh >/dev/null
+  scripts/build/build-examples-sys.sh >/dev/null 2>&1
+  scripts/build/build-examples-rtmisc.sh >/dev/null
+  scripts/build/build-examples-print.sh >/dev/null 2>&1
+  [ -z "$cgo" ] || scripts/build/build-examples-cgo.sh >/dev/null
   [ -n "${JANUS_ROOT:-}" ] && (cd "$JANUS_ROOT" && lake build Janus >/dev/null)
   [ -z "$cgo" ] || lake build Janus >/dev/null
 fi
@@ -93,7 +93,7 @@ arm64=(MallocFast RuneLen SumRunes ClearWords A64IndexByte A64Crc32 A64CountByte
        SpanSum MinStr I64ToF64 F64ToI64 U64ToF64 F64ToF32 F32ToF64 LoadThird MinF64 MaxF64
        Box AsHasher Classify Equal ScratchSum StackGrow Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
        WrongAdd)
-. scripts/example-contracts.sh
+. scripts/verify/example-contracts.sh
 arm64+=($runtime_examples $runtime_examples_arm64_only)
 amd64=()
 for d in examples/proofs-amd64/*/; do amd64+=("$(basename "$d")"); done
@@ -110,12 +110,12 @@ for f in examples/rtmisc/proofs/*/*/lakefile.toml; do d="$(dirname "$f")"; rtmis
 for t in "${rtmisc[@]}"; do items+=("rtmisc:$t"); done
 # the kernel examples, the print examples and (--cgo) the cgo rows: the rows of their own scripts
 sys=(); prt=(); cgorows=()
-mapfile -t sys < <(scripts/verify-sys-examples.sh --list)
-mapfile -t prt < <(scripts/verify-print-examples.sh --list)
+mapfile -t sys < <(scripts/verify/verify-sys-examples.sh --list)
+mapfile -t prt < <(scripts/verify/verify-print-examples.sh --list)
 for t in "${sys[@]}"; do items+=("sys:$t"); done
 for t in "${prt[@]}"; do items+=("print:$t"); done
 if [ -n "$cgo" ]; then
-  mapfile -t cgorows < <(scripts/verify-cgo-examples.sh --list)
+  mapfile -t cgorows < <(scripts/verify/verify-cgo-examples.sh --list)
   for t in "${cgorows[@]}"; do items+=("cgo:$t"); done
 fi
 
@@ -131,7 +131,7 @@ wall=$(date +%s)
 times="$root/artifacts/verify-all-examples.times"
 
 tmp_unused=""
-. scripts/example-contracts.sh
+. scripts/verify/example-contracts.sh
 declare -A asm_sym=(
   [AddAsm]=example.com/asm.AddAsm.abi0 [XorSlice]=example.com/asm.XorSlice.abi0
   [Twice]=example.com/asm.Twice.abi0 [CallXor]=example.com/asm.CallXor
@@ -140,23 +140,23 @@ declare -A asm_sym=(
 
 # run_item ITEM: one item of the pool. Everything it prints is the item's log; its exit status is
 # its verdict (0: passed, or skipped by the incremental gate on the record of an identical PASS: the
-# per-kind scripts decide that, scripts/lib/incr.sh).
+# per-kind scripts decide that, scripts/gate/lib/incr.sh).
 run_item() {
   local it=$1 kind=${1%%:*} n=${1#*:} rc=0
   case "$kind" in
-    arm64) JANUS_EXAMPLES_SUMMARY="$tmp/arm64-$n" scripts/verify-examples.sh -j 1 "$n" || rc=$? ;;
-    amd64) scripts/verify-amd64-examples.sh -j 1 "$n" || rc=$? ;;
-    asm) JANUS_EXAMPLES_SUMMARY="$tmp/asm-${n//\//_}" scripts/verify-asm-examples.sh -j 1 "$n" || rc=$? ;;
-    rtmisc) JANUS_EXAMPLES_SUMMARY="$tmp/rtmisc-${n//\//_}" scripts/verify-rtmisc-examples.sh -j 1 "$n" || rc=$? ;;
-    sys) JANUS_EXAMPLES_SUMMARY="$tmp/sys-${n//\//_}" scripts/verify-sys-examples.sh -j 1 "$n" || rc=$? ;;
-    print) JANUS_EXAMPLES_SUMMARY="$tmp/print-${n//\//_}" scripts/verify-print-examples.sh -j 1 "$n" || rc=$? ;;
-    cgo) JANUS_EXAMPLES_SUMMARY="$tmp/cgo-${n//\//_}" scripts/verify-cgo-examples.sh -j 1 "$n" || rc=$? ;;
+    arm64) JANUS_EXAMPLES_SUMMARY="$tmp/arm64-$n" scripts/verify/verify-examples.sh -j 1 "$n" || rc=$? ;;
+    amd64) scripts/verify/verify-amd64-examples.sh -j 1 "$n" || rc=$? ;;
+    asm) JANUS_EXAMPLES_SUMMARY="$tmp/asm-${n//\//_}" scripts/verify/verify-asm-examples.sh -j 1 "$n" || rc=$? ;;
+    rtmisc) JANUS_EXAMPLES_SUMMARY="$tmp/rtmisc-${n//\//_}" scripts/verify/verify-rtmisc-examples.sh -j 1 "$n" || rc=$? ;;
+    sys) JANUS_EXAMPLES_SUMMARY="$tmp/sys-${n//\//_}" scripts/verify/verify-sys-examples.sh -j 1 "$n" || rc=$? ;;
+    print) JANUS_EXAMPLES_SUMMARY="$tmp/print-${n//\//_}" scripts/verify/verify-print-examples.sh -j 1 "$n" || rc=$? ;;
+    cgo) JANUS_EXAMPLES_SUMMARY="$tmp/cgo-${n//\//_}" scripts/verify/verify-cgo-examples.sh -j 1 "$n" || rc=$? ;;
     *) echo "run_item: unknown kind $kind"; rc=2 ;;
   esac
   return $rc
 }
 
-# one snapshot of the print proof package for all print items (see scripts/verify-print-examples.sh)
+# one snapshot of the print proof package for all print items (see scripts/verify/verify-print-examples.sh)
 if [ ${#prt[@]} -gt 0 ]; then
   JANUS_PRINT_SNAPSHOT="$(mktemp -d "$root/examples/.print-proofs.XXXXXX")"
   export JANUS_PRINT_SNAPSHOT
@@ -169,7 +169,7 @@ POOL_GUARD=0
 pooldir="${JANUS_POOL_DIR:-$root/artifacts/verify-all-logs}"
 rm -rf "$pooldir"
 pool_init verify "$PAR_JOBS" "$pooldir"
-# per-item memory admission when the gate gave the pool a budget (scripts/lib/pool.sh): each running item reserves its
+# per-item memory admission when the gate gave the pool a budget (scripts/gate/lib/pool.sh): each running item reserves its
 # own recorded peak x1.3 (the conservative estimate when unknown) of JANUS_VERIFY_MEM_BUDGET_GIB
 if [ -n "${JANUS_VERIFY_MEM_BUDGET_GIB:-}" ]; then
   POOL_BUDGET_KB=$(awk -v g="$JANUS_VERIFY_MEM_BUDGET_GIB" 'BEGIN { printf "%d", g * 1048576 }');
@@ -227,7 +227,7 @@ fi
 pool_run || pool_rc=$?
 broken=(${POOL_FAILED[@]+"${POOL_FAILED[@]}"})
 # the report: every item RAN or was SKIPPED, with totals
-. scripts/lib/incr.sh
+. scripts/gate/lib/incr.sh
 incr_report "$pooldir" "${items[@]}"
 { [ -f "$times" ] && cat "$times"; cat "$pooldir"/*.time 2>/dev/null; } |
   awk -F'\t' '{ t[$1] = $2 } END { for (k in t) printf "%s\t%s\n", k, t[k] }' | sort > "$times.tmp" || true

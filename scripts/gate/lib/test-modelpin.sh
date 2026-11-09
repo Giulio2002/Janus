@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Self-test of the ISA model pin of the cold gate (scripts/lib/modelpin.py, scripts/model-pin.sh, scripts/gate.sh --cold,
-# the pin steps of scripts/asl.sh and scripts/oracle-sail.sh). Every damaged pin must FAIL the gate, never pass:
+# Self-test of the ISA model pin of the cold gate (scripts/gate/lib/modelpin.py, scripts/gate/model-pin.sh, scripts/gate/gate.sh --cold,
+# the pin steps of scripts/build/asl.sh and scripts/validation/sail-arm.sh). Every damaged pin must FAIL the gate, never pass:
 #   a tampered artifact, a missing artifact, a stale pin (a model input changed), a corrupt manifest, a corrupt or forged
 #   record, a manifest re-signed with the real key (the record binds the pinned manifest), an artifact changed after the build.
 # And: only the nightly truly-cold run may write a pin; a pin that is not reproduced is not replaced.
 # Seconds; everything happens in a mktemp directory on disk (the real pin store and the real build tree are never touched).
 #
-#   scripts/lib/test-modelpin.sh
+#   scripts/gate/lib/test-modelpin.sh
 set -uo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-mp="$root/scripts/lib/modelpin.py"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+mp="$root/scripts/gate/lib/modelpin.py"
 mkdir -p "$root/artifacts"
 t=$(mktemp -d "${TMPDIR:-$root/artifacts}/test-modelpin.XXXXXX")
 trap 'chmod -R u+w "$t" 2>/dev/null; rm -rf "$t"' EXIT
@@ -132,15 +132,15 @@ newpin; expect 0 "(control) the pin holds again" P check armasl "$t/pin" "$K"
 grep -q locked-ok "$t/lk" && ok "a second pin writer is refused while the lock is held" || bad "pin write lock: $(cat "$t/lk")"
 [ -z "$(find "$t/pin" -name '.rec.tmp-*' -o -name '.tmp-*' -o -name '.bad-*' 2>/dev/null)" ] && ok "no temporary files left in the pin store" || bad "temporaries left"
 
-# ---------------------------------------------------------------- gate level: scripts/gate.sh --cold on the REAL keys of this checkout
+# ---------------------------------------------------------------- gate level: scripts/gate/gate.sh --cold on the REAL keys of this checkout
 # (the pins hold fake files: only the checks run, nothing is built; --cold-preflight-only stops after the pin check)
-ak=$("$root/scripts/asl.sh" key 2>/dev/null) && sk=$("$root/scripts/oracle-sail.sh" key 2>/dev/null) || { bad "cannot compute the model keys"; ak=""; }
+ak=$("$root/scripts/build/asl.sh" key 2>/dev/null) && sk=$("$root/scripts/validation/sail-arm.sh" key 2>/dev/null) || { bad "cannot compute the model keys"; ak=""; }
 if [ -n "$ak" ]; then
   mkdir -p "$t/gsrc/build/lib/lean/ArmASL" "$t/gsrc/packages/Sail" "$t/ssrc/target/release"
   echo o > "$t/gsrc/build/lib/lean/ArmASL/Part01.olean"; echo s > "$t/gsrc/packages/Sail/Sail.olean"; echo drv > "$t/ssrc/target/release/janus-oracle-sail"
   gpin() { rm -rf "$t/gp"; printf 'build/lib/lean/ArmASL/Part01.olean\0packages/Sail/Sail.olean\0' | W armasl "$t/gp" "$ak" "$t/gsrc" --commit abc > /dev/null &&
            printf 'target/release/janus-oracle-sail\0' | W sail "$t/gp" "$sk" "$t/ssrc" --commit abc > /dev/null; }
-  G() { JANUS_MODEL_PIN_DIR="$t/gp" "$root/scripts/gate.sh" --cold --cold-preflight-only "$@"; }
+  G() { JANUS_MODEL_PIN_DIR="$t/gp" "$root/scripts/gate/gate.sh" --cold --cold-preflight-only "$@"; }
   gpin; expect 0 "gate --cold: a valid pin passes the preflight" G
   grep -q "cold preflight OK" "$t/out" && ok "gate --cold: says the pin holds" || bad "no preflight OK line"
   gpin; chmod u+w "$t/gp/$ak/tree/packages/Sail/Sail.olean" "$t/gp/$ak/tree/packages/Sail"; echo X >> "$t/gp/$ak/tree/packages/Sail/Sail.olean"
@@ -166,11 +166,11 @@ if [ -n "$ak" ]; then
   rm -rf "$t/keys"; mv "$t/keys.off" "$t/keys"
   rm -rf "$t/gp"
   expect 1 "gate --cold: no pin store at all, with --no-rebuild-stale-model, FAILS the gate" G --no-rebuild-stale-model
-  expect 2 "gate --cold --incremental is refused" env JANUS_MODEL_PIN_DIR="$t/gp" "$root/scripts/gate.sh" --cold --incremental
-  expect 2 "gate --wipe without --cold is refused" "$root/scripts/gate.sh" --wipe
+  expect 2 "gate --cold --incremental is refused" env JANUS_MODEL_PIN_DIR="$t/gp" "$root/scripts/gate/gate.sh" --cold --incremental
+  expect 2 "gate --wipe without --cold is refused" "$root/scripts/gate/gate.sh" --wipe
 fi
 
-# ---------------------------------------------------------------- build-script level: the pin steps of asl.sh / oracle-sail.sh
+# ---------------------------------------------------------------- build-script level: the pin steps of asl.sh / sail-arm.sh
 # A fake checkout whose scripts and model inputs are the real ones (symlinks), with its own build directories.
 fr="$t/fake"; mkdir -p "$fr/models/asl" "$fr/validation/reference-models/sail-arm" "$fr/artifacts"
 ln -s "$root/scripts" "$fr/scripts"; ln -s "$root/lean-toolchain" "$fr/lean-toolchain"; ln -s "$root/lakefile.toml" "$fr/lakefile.toml"
@@ -178,8 +178,8 @@ ln -s "$root/scripts" "$fr/scripts"; ln -s "$root/lean-toolchain" "$fr/lean-tool
 for x in vendor tools sail lake-manifest.json lakefile.toml lean-toolchain; do ln -s "$root/models/asl/$x" "$fr/models/asl/$x"; done
 for x in Cargo.lock Cargo.toml cache_key.py instrument_model.py src; do ln -s "$root/validation/reference-models/sail-arm/$x" "$fr/validation/reference-models/sail-arm/$x"; done
 if [ -n "$ak" ]; then
-  A() { JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/asl.sh" restore; }
-  S() { JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/oracle-sail.sh" build; }
+  A() { JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/build/asl.sh" restore; }
+  S() { JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/validation/sail-arm.sh" build; }
   fresh() { rm -rf "$fr/models/asl/.lake" "$fr/validation/reference-models/sail-arm/target"; }
   gpin; fresh; expect 0 "asl.sh restore from a valid pin" A
   [ "$(cat "$fr/models/asl/.lake/packages/Sail/Sail.olean" 2>/dev/null)" = s ] && ok "  ... the pinned files are in models/asl/.lake" || bad "pinned files not restored"
@@ -188,20 +188,20 @@ if [ -n "$ak" ]; then
   gpin; chmod u+w "$t/gp/$ak/tree/packages/Sail"; rm -f "$t/gp/$ak/tree/packages/Sail/Sail.olean"
   fresh; expect 1 "asl.sh restore: a MISSING pinned artifact FAILS" A
   gpin; rm -f "$t/gp/records/armasl-$ak.json"
-  fresh; expect 1 "asl.sh restore: a STALE pin FAILS with JANUS_MODEL_PIN_STALE=fail" env JANUS_MODEL_PIN_STALE=fail JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/asl.sh" restore
+  fresh; expect 1 "asl.sh restore: a STALE pin FAILS with JANUS_MODEL_PIN_STALE=fail" env JANUS_MODEL_PIN_STALE=fail JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/build/asl.sh" restore
   fresh; expect 0 "asl.sh restore: a stale pin goes on to build from source by default" A
   grep -q "STALE PIN: ArmASL is built from source" "$t/out" && ok "  ... loudly" || bad "no stale announcement"
   gpin; chmod u+w "$t/gp/$ak"; printf 'garbage\n' > "$t/gp/$ak/MANIFEST.sha256"
   fresh; expect 1 "asl.sh restore: a CORRUPT manifest FAILS" A
-  fresh; expect 1 "asl.sh restore: a corrupt manifest FAILS also with JANUS_MODEL_PIN_STALE=rebuild" env JANUS_MODEL_PIN_STALE=rebuild JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/asl.sh" restore
+  fresh; expect 1 "asl.sh restore: a corrupt manifest FAILS also with JANUS_MODEL_PIN_STALE=rebuild" env JANUS_MODEL_PIN_STALE=rebuild JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/build/asl.sh" restore
   gpin; chmod u+w "$t/gp/sail/$sk/tree/target/release"; echo X >> "$t/gp/sail/$sk/tree/target/release/janus-oracle-sail"
-  fresh; expect 1 "oracle-sail.sh build: a TAMPERED pinned driver FAILS (no cargo build)" S
+  fresh; expect 1 "sail-arm.sh build: a TAMPERED pinned driver FAILS (no cargo build)" S
   gpin; chmod u+w "$t/gp/sail/$sk/tree/target/release"; rm -f "$t/gp/sail/$sk/tree/target/release/janus-oracle-sail"
-  fresh; expect 1 "oracle-sail.sh build: a MISSING pinned driver FAILS" S
+  fresh; expect 1 "sail-arm.sh build: a MISSING pinned driver FAILS" S
   gpin; rm -f "$t/gp/records/sail-$sk.json"
-  fresh; expect 1 "oracle-sail.sh build: a STALE pin FAILS with JANUS_MODEL_PIN_STALE=fail" env JANUS_MODEL_PIN_STALE=fail JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/oracle-sail.sh" build
+  fresh; expect 1 "sail-arm.sh build: a STALE pin FAILS with JANUS_MODEL_PIN_STALE=fail" env JANUS_MODEL_PIN_STALE=fail JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/validation/sail-arm.sh" build
   gpin; chmod u+w "$t/gp/sail/$sk"; printf 'garbage\n' > "$t/gp/sail/$sk/MANIFEST.sha256"
-  fresh; expect 1 "oracle-sail.sh build: a CORRUPT manifest FAILS" S
+  fresh; expect 1 "sail-arm.sh build: a CORRUPT manifest FAILS" S
   [ ! -e "$fr/validation/reference-models/sail-arm/target/release/janus-oracle-sail" ] && ok "  ... no driver was produced" || bad "a driver exists after a failed pin"
 fi
 

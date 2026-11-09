@@ -2,7 +2,7 @@
 # Every soundness audit (test/redteam/run-all.sh and test/redteam/rounds/round{2..8}/run-round*.sh) as parallel lanes,
 # after one shared build: janus is built once (test/redteam/bin/janus-rounds, passed to every lane as
 # JANUS_AUDIT_BIN), and the framework build of this checkout and the example binaries once, so no
-# lane rebuilds them (JANUS_AUDIT_PREBUILT=1; JANUS_GATE_PREBUILT=1: scripts/gate.sh has built all of it already). The rounds are independent: each writes only its own
+# lane rebuilds them (JANUS_AUDIT_PREBUILT=1; JANUS_GATE_PREBUILT=1: scripts/gate/gate.sh has built all of it already). The rounds are independent: each writes only its own
 # test/redteam/<round>/work and temporary caches, and they share only the read-only framework build and
 # artifacts/ (built here first). Each lane's output is printed whole, in order; a lane whose script
 # fails (any BROKEN row) fails the run.
@@ -14,10 +14,10 @@ set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../scripts/lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
-# shellcheck source=../../scripts/lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+# shellcheck source=../../scripts/gate/lib/parallel.sh
+. "$root/scripts/gate/lib/parallel.sh"
+# shellcheck source=../../scripts/gate/lib/memguard.sh
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 # A lane holds several rows at once: two jobs' budget each (admission, default -j and cgroup
 # limit), and at most 4 lanes by default (each runs -j $JANUS_LANE_JOBS rows).
@@ -53,7 +53,7 @@ done
 wall=$(date +%s)
 mkdir -p test/redteam/bin
 if [ "${JANUS_GATE_PREBUILT:-}" = 1 ]; then
-  # scripts/gate.sh built (once) test/redteam/bin/janus-rounds, the framework, the auditor and both ISAs' example binaries
+  # scripts/gate/gate.sh built (once) test/redteam/bin/janus-rounds, the framework, the auditor and both ISAs' example binaries
   [ -x test/redteam/bin/janus-rounds ] || { echo "JANUS_GATE_PREBUILT=1 but test/redteam/bin/janus-rounds is missing"; exit 1; }
 else
   CGO_ENABLED=0 go build -o test/redteam/bin/janus-rounds ./cmd/janus || exit 1
@@ -62,9 +62,9 @@ else
   # runs may prune of extra module outputs).
   memguard_lake build Janus Janus.Tools.Audit janus-audit janus-oracle-amd64 janus-decode >/dev/null || { echo "lake build failed (fix the Lean library first)"; exit 1; }
   cp -f .lake/build/bin/janus-decode test/redteam/bin/janus-decode-prebuilt.new && mv -f test/redteam/bin/janus-decode-prebuilt.new test/redteam/bin/janus-decode-prebuilt || exit 1
-  [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null || exit 1
+  [ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null || exit 1
   { [ -f artifacts/examples-amd64 ] && [ -d artifacts/amd64/HexDigit ] && [ -d artifacts/amd64/Add ]; } ||
-    bash scripts/build-examples-amd64.sh >/dev/null 2>&1 || exit 1
+    bash scripts/build/build-examples-amd64.sh >/dev/null 2>&1 || exit 1
 fi
 export JANUS_AUDIT_BIN="$root/test/redteam/bin/janus-rounds" JANUS_AUDIT_PREBUILT=1
 export JANUS_JOBS="${JANUS_LANE_JOBS:-2}"

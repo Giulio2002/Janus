@@ -4,17 +4,17 @@
 # results SoftFloat computes, and janus-testfloat (validation/model-runner/Oracle/TestFloat.lean) runs every vector
 # through the model. See docs/validation/ORACLE.md ("TestFloat").
 #
-#   scripts/testfloat.sh            level 1 (every function, every rounding mode)
-#   LEVEL=2 N=2000000 scripts/testfloat.sh   level 2, N vectors per run
+#   scripts/validation/testfloat.sh            level 1 (every function, every rounding mode)
+#   LEVEL=2 N=2000000 scripts/validation/testfloat.sh   level 2, N vectors per run
 #
 # SoftFloat is built three times, with the specializations that match the architectures:
 # ARM-VFPv2 (Arm, FPCR.DN = 0, tininess before rounding), ARM-VFPv2-defaultNaN (FPCR.DN = 1)
 # and 8086-SSE (x86 SSE, tininess after rounding). Sources go to DEPS (default
 # /srv/janus-fp-deps), pinned to the 3e releases.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 DEPS="${DEPS:-/srv/janus-fp-deps}"
 LEVEL="${LEVEL:-1}"
 N="${N:-}"

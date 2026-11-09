@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# Build the remaining-runtime examples (scripts/build-examples-rtmisc.sh: examples/rtmisc, Go
+# Build the remaining-runtime examples (scripts/build/build-examples-rtmisc.sh: examples/rtmisc, Go
 # 1.26.0 pinned there), extract every proved function on both ISAs into
 # artifacts/rtmisc/<isa>/<Name>/, and verify examples/rtmisc/proofs/<isa>/<Name>.lean against it
 # with `janus verify` (kernel check, axiom audit, leanchecker replay), and its non-vacuity
 # witnesses (Proof.Witness.nonvacuous, Proof.Witness.returns) where it has them.
 # docs/RUNTIME-CONTRACTS.md ("Remaining runtime") describes the examples.
 #
-# Usage: scripts/verify-rtmisc-examples.sh [-j N] [isa/Name ...]   (default: all, e.g. amd64/Pop)
+# Usage: scripts/verify/verify-rtmisc-examples.sh [-j N] [isa/Name ...]   (default: all, e.g. amd64/Pop)
 # Writes artifacts/rtmisc/<isa>/<Name>/verified.json and a summary to
 # artifacts/verify-rtmisc-examples.txt (unless JANUS_EXAMPLES_SUMMARY names another file).
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
-. "$root/scripts/lib/theorems.sh"
+. "$root/scripts/gate/lib/theorems.sh"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+. "$root/scripts/gate/lib/parallel.sh"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 par_init "$@"
 set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
@@ -72,13 +72,13 @@ if [ ${#names[@]} -eq 0 ]; then
   for f in examples/rtmisc/proofs/*/*/lakefile.toml; do d="$(dirname "$f")"; names+=("$(basename "$(dirname "$d")")/$(basename "$d")"); done
 fi
 
-# JANUS_EXAMPLES_PREBUILT=1 (scripts/verify-all-examples.sh): bin/janus and the binaries exist.
+# JANUS_EXAMPLES_PREBUILT=1 (scripts/verify/verify-all-examples.sh): bin/janus and the binaries exist.
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
   CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
-  scripts/build-examples-rtmisc.sh >/dev/null
+  scripts/build/build-examples-rtmisc.sh >/dev/null
 fi
 
-. scripts/lib/incr.sh
+. scripts/gate/lib/incr.sh
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-rtmisc-examples.txt}"
 : > "$summary"
 lines="$(mktemp -d)"
@@ -90,7 +90,7 @@ verify_one() {
   out="artifacts/rtmisc/$isa/$n"
   mapfile -t xargs < <(args "$n")
   bin/janus extract "$(bin "$isa" "$n")" "$(sym "$n")" "$out" ${xargs[@]+"${xargs[@]}"} >/dev/null 2>&1
-  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs
+  # the incremental gate (scripts/gate/lib/incr.sh): skipped only on the record of a PASS with identical inputs
   local -a ispec=(--fw dir:. --art "$out" --arg "sym:$(sym "$n")") ia
   for ia in ${xargs[@]+"${xargs[@]}"}; do ispec+=(--arg "extract:$ia"); done
   if [ -f "examples/rtmisc/proofs/$isa/$n/lakefile.toml" ]; then
@@ -133,7 +133,7 @@ verify_one() {
     return 0
   fi
   # correctness and, where the proof has them, the non-vacuity witnesses: one janus run, one
-  # compile of the proof (scripts/lib/theorems.sh)
+  # compile of the proof (scripts/gate/lib/theorems.sh)
   local -a thms=(Proof.correctness)
   local st i
   if grep -q '^namespace Witness' "examples/rtmisc/proofs/$isa/$n.lean"; then

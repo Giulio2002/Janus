@@ -428,7 +428,7 @@ func (b *Binary) classifyStub(g Func) (StubKind, bool, error) {
 			Msg: fmt.Sprintf("the code calls %s at 0x%x, a runtime stub's name, but that function is not the Go runtime's %s: %v. Janus models a stub call as its outcome (%s) only when the function's code is the runtime's (round 8 G3), so it neither treats it as a stub nor verifies it as code",
 				g.Name, g.Addr, g.Name, err, k),
 			Stage: "code extraction",
-			Next:  "If the binary was built by a Go toolchain Janus does not pin yet (" + stubPinToolchains + "), add it to scripts/gen-stubpins.sh and regenerate cmd/janus/stubpins_gen.go; otherwise remove the function that reuses a runtime function's name.",
+			Next:  "If the binary was built by a Go toolchain Janus does not pin yet (" + stubPinToolchains + "), add it to scripts/dev/gen-stubpins.sh and regenerate cmd/janus/stubpins_gen.go; otherwise remove the function that reuses a runtime function's name.",
 		}}
 	}
 	if b.stubCache == nil {

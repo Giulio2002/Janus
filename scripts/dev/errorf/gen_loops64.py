@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Generate Janus/Contracts/ErrorfRealLoops64.lean (amd64 loop lemmas) from scripts/errorf/loop_templates64.py. Run from the repo root."""
+"""Generate Janus/Contracts/ErrorfRealLoops64.lean (amd64 loop lemmas) from scripts/dev/errorf/loop_templates64.py. Run from the repo root."""
 import sys
-sys.path.insert(0, "scripts/errorf")
+sys.path.insert(0, "scripts/dev/errorf")
 import gen_amd64
 from loop_templates64 import HDR, DIG, CPY
 _, lab = gen_amd64.build()

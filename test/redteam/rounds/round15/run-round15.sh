@@ -21,15 +21,15 @@ J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
 if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; go build -o "$J" ./cmd/janus || exit 1; fi
 if [ "${JANUS_AUDIT_PREBUILT:-}" != 1 ]; then
   lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
-  [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
+  [ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
 fi
 W=$R/work; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-round15.XXXXXX")" || exit 1
 trap 'rm -rf "$T"' EXIT
 mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"
-. scripts/example-contracts.sh
+. scripts/verify/example-contracts.sh
 for n in NewPair Add; do
-  mapfile -t tg < <(scripts/example-targets.sh $n)
+  mapfile -t tg < <(scripts/verify/example-targets.sh $n)
   "$J" extract artifacts/examples-arm64 "$(example_symbol $n)" "$W/$n" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
 done
 broken=()

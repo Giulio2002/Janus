@@ -5,13 +5,13 @@
 # Every attack verification passes --fresh (the cold path) and uses a private temporary cache;
 # the M1/C1 rows use their own temporary caches. All are removed at the end.
 # Writes only under test/redteam/rounds/round8/work/rows/, test/redteam/rounds/round8/bin/ and those temporary caches.
-# Usage: test/redteam/rounds/round8/run-round8.sh [-j N]   (the --fresh rows N at once: scripts/lib/parallel.sh)
+# Usage: test/redteam/rounds/round8/run-round8.sh [-j N]   (the --fresh rows N at once: scripts/gate/lib/parallel.sh)
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../../../scripts/lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+# shellcheck source=../../../../scripts/gate/lib/parallel.sh
+. "$root/scripts/gate/lib/parallel.sh"
 par_init "$@"
 # R8_ROWS="fresh ctl rest": only these row groups (default all); test/redteam/run-rounds.sh runs them as the lanes r8a, r8b, r8c.
 want() { [ -z "${R8_ROWS:-}" ] || [[ " $R8_ROWS " == *" $1 "* ]]; }
@@ -20,14 +20,14 @@ J="$root/test/redteam/rounds/round8/bin/janus"; mkdir -p "$(dirname "$J")"
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
-[ -d artifacts/amd64/HexDigit ] && [ -d artifacts/amd64/Add ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
+[ -d artifacts/amd64/HexDigit ] && [ -d artifacts/amd64/Add ] || bash scripts/build/build-examples-amd64.sh >/dev/null 2>&1
 W=test/redteam/rounds/round8/work/rows${R8_ROWS:+-$R8_ROWS}; rm -rf "$W"; mkdir -p $W
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-round8.XXXXXX")" || exit 1   # 0700: the caches' parent
 trap 'rm -rf "$T"' EXIT
 mkdir -m 700 "$T/fresh"; export JANUS_CACHE_DIR="$T/fresh"
 for f in Add HashWith AddThree; do
-  mapfile -t tg < <(scripts/example-targets.sh "$f")   # HashWith: its two static itabs
+  mapfile -t tg < <(scripts/verify/example-targets.sh "$f")   # HashWith: its two static itabs
   "$J" extract artifacts/examples-arm64 "example.com/basic.$f" "$W/$f" ${tg[@]+"${tg[@]}"} >/dev/null || exit 1
 done
 broken=()
@@ -57,7 +57,7 @@ row() {
 v() { out="$("$J" verify --audit-only --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"; }
 
 # The --fresh rows (each a cold kernel replay of the framework) are independent: they run as
-# parallel blocks (-j N, scripts/lib/parallel.sh); output is printed in this order.
+# parallel blocks (-j N, scripts/gate/lib/parallel.sh); output is printed in this order.
 echo "== I1: every object name in the statement resolves in Extracted.program"
 type tmark >/dev/null 2>&1 && tmark "== I1: every object name in the statement resolves"
 nodata='but the extracted program has no data object of that name'

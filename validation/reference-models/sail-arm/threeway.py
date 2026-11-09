@@ -3,7 +3,7 @@
 
 usage: threeway.py DIR
 
-DIR (written by scripts/oracle-sail.sh) holds
+DIR (written by scripts/validation/sail-arm.sh) holds
   cases.jsonl               the corpus (layout.Case)
   qemu.jsonl                qemu runner results (layout.HW)
   janus.jsonl               janus-oracle results (layout.Model), with Sail's DCZID_EL0

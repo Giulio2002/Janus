@@ -1,7 +1,7 @@
 // Package bench holds self-written Go functions that stress the Janus proof automation:
 // a long straight-line function, nested loops, a deep call chain, many possibly aliasing
 // pointers and a large stack frame. Every function is proved on arm64 and amd64
-// (bench/proofs-arm64, bench/proofs-amd64); scripts/bench.sh times the proofs.
+// (bench/proofs-arm64, bench/proofs-amd64); scripts/dev/bench.sh times the proofs.
 //
 // This module is separate from examples/basic so that adding or changing a benchmark never
 // moves an address the example proofs mention.

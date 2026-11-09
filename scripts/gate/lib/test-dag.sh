@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test of the gate's stage graph (scripts/lib/dag.sh) run through the real pool (scripts/lib/pool.sh) with FAKE stages
+# Self-test of the gate's stage graph (scripts/gate/lib/dag.sh) run through the real pool (scripts/gate/lib/pool.sh) with FAKE stages
 # (sleep + a start/end log): 1. the graph is consistent; every reader of the shared framework build (verify, gotest, rounds,
 # decoder, every tree copy and so every lake lane) has pre-pin in its closure, i.e. starts only after the build it reads has
 # finished and been hashed; 2. a stage starts only after all its dependencies ended; 3. independent stages overlap (lanes
@@ -16,11 +16,11 @@ for r in verify gotest rounds decoder tree-x86 tree-asl tree-aslv tree-go x86 or
   dag_has "$r" pre-pin || bad "$r does not wait for pre-pin"
 done; ok "every reader of the shared framework build waits for pre-pin"
 for r in axiom govet cachekeys; do [ -z "${DAG_DEPS[$r]}" ] && ok "$r needs nothing" || bad "$r has deps"; done
-# lane cachekeys also runs the incremental-key liveness check (scripts/lib/test-incr-liveness.sh): it needs nothing built, so it must stay
+# lane cachekeys also runs the incremental-key liveness check (scripts/gate/lib/test-incr-liveness.sh): it needs nothing built, so it must stay
 # dependency-free, and it must touch no shared resource of DAG_RES: its own binary and result cache live in a private mktemp directory
 # (never bin/janus, artifacts/Add, the framework build or a shared cache), its only inputs are checked-in files and the toolchain.
-grep -n '^add cachekeys ' "$here/../gate.sh" | grep -q 'scripts/lib/test-incr-liveness.sh' && ok "lane cachekeys runs the incremental-key liveness check" || bad "cachekeys does not run test-incr-liveness.sh"
-grep -n "^add cachekeys " "$here/../gate.sh" | grep -q "scripts/lib/test-incr-hosttools.sh" && ok "lane cachekeys runs the host-tool key mutation tests" || bad "cachekeys does not run test-incr-hosttools.sh"
+grep -n '^add cachekeys ' "$here/../gate.sh" | grep -q 'scripts/gate/lib/test-incr-liveness.sh' && ok "lane cachekeys runs the incremental-key liveness check" || bad "cachekeys does not run test-incr-liveness.sh"
+grep -n "^add cachekeys " "$here/../gate.sh" | grep -q "scripts/gate/lib/test-incr-hosttools.sh" && ok "lane cachekeys runs the host-tool key mutation tests" || bad "cachekeys does not run test-incr-hosttools.sh"
 ! grep -v '^\s*#' "$here/test-incr-liveness.sh" "$here/incr-liveness.sh" "$here/test-incr-hosttools.sh" | grep -qE 'bin/janus|artifacts/(Add|examples)|framework|\.lake' && ok "the liveness check uses only private files (no bin/janus, no shared artifact or build): no DAG_RES entry needed" || bad "the liveness check touches a shared resource"
 dag_has pre-pin pre-stamp && ! dag_has pre-stamp pre-pin && ok "pre-pin waits for pre-stamp (every write janus can make to the shared build precedes the hash)" || bad "stamp before pin"
 dag_has pre-pin pre-lake && ! dag_has pre-lake pre-pin && ok "pre-pin follows pre-lake (the only writer), not the reverse" || bad "pin/lake order"
@@ -37,9 +37,9 @@ saved=${DAG_DEPS[pre-fixture]}; DAG_DEPS[pre-fixture]="pre-lake pre-stamp pre-pi
 mut=$(dag_unordered); grep -q 'go-test-fixture: pre-fixture (w) and pre-fixture-emb (w) are not ordered\|go-test-fixture: pre-fixture-emb (w) and pre-fixture (w) are not ordered' <<<"$mut" && ok "the resource check catches an unordered fixture pair" || bad "the resource check missed an unordered fixture pair"
 DAG_DEPS[pre-fixture]=$saved
 # a rerun into the same --out with a stale marker: gate.sh removes it before any stage, so the lakeguard is not armed early
-here_repo="$(cd "$here/../.." && pwd)"
-grep -n 'rm -f "$out/.pinned" "$out/fw_hash0"' "$here_repo/scripts/gate.sh" | cut -d: -f1 > "$t/rmline"
-rml=$(head -1 "$t/rmline"); pml=$(grep -n '^pre_pin()' "$here_repo/scripts/gate.sh" | cut -d: -f1); poolrun=$(grep -n '^pool_run\|pool_run ||' "$here_repo/scripts/gate.sh" | head -1 | cut -d: -f1)
+here_repo="$(cd "$here/../../.." && pwd)"
+grep -n 'rm -f "$out/.pinned" "$out/fw_hash0"' "$here_repo/scripts/gate/gate.sh" | cut -d: -f1 > "$t/rmline"
+rml=$(head -1 "$t/rmline"); pml=$(grep -n '^pre_pin()' "$here_repo/scripts/gate/gate.sh" | cut -d: -f1); poolrun=$(grep -n '^pool_run\|pool_run ||' "$here_repo/scripts/gate/gate.sh" | head -1 | cut -d: -f1)
 [ -n "$rml" ] && [ "$rml" -gt "$pml" ] && [ "$rml" -lt "$poolrun" ] && ok "gate.sh clears a stale .pinned/fw_hash0 before the pool runs" || bad "stale marker is not cleared before the stages ($rml $pml $poolrun)"
 mkdir -p "$t/rerun/root" "$t/rerun/out"; : > "$t/rerun/root/lakefile.toml"; : > "$t/rerun/out/.pinned"; echo stale > "$t/rerun/out/fw_hash0"
 cat > "$t/rerun/real" <<'EOS'
@@ -47,7 +47,7 @@ cat > "$t/rerun/real" <<'EOS'
 echo "$@" > "$RERUN_LOG"
 EOS
 chmod +x "$t/rerun/real"
-out="$t/rerun/out"; eval "$(grep -m1 'rm -f "$out/.pinned" "$out/fw_hash0"' "$here_repo/scripts/gate.sh")"
+out="$t/rerun/out"; eval "$(grep -m1 'rm -f "$out/.pinned" "$out/fw_hash0"' "$here_repo/scripts/gate/gate.sh")"
 ( cd "$t/rerun/root" && RERUN_LOG="$t/rerun/log" JANUS_REAL_LAKE="$t/rerun/real" JANUS_LAKEGUARD_ROOT="$(pwd -P)" JANUS_LAKEGUARD_PIN="$out/.pinned" "$here/lakeguard/lake" build X )
 [ "$(cat "$t/rerun/log")" = "build X" ] && [ ! -e "$out/fw_hash0" ] && ok "after the startup cleanup a stale .pinned does not make lake build a --no-build" || bad "guard armed by a stale marker: $(cat "$t/rerun/log")"
 ( : > "$out/.pinned"; cd "$t/rerun/root" && RERUN_LOG="$t/rerun/log" JANUS_REAL_LAKE="$t/rerun/real" JANUS_LAKEGUARD_ROOT="$(pwd -P)" JANUS_LAKEGUARD_PIN="$out/.pinned" "$here/lakeguard/lake" build X )
@@ -74,14 +74,14 @@ else
 fi
 
 # host sanity: gate.sh refuses to run when /dev/null is not the null device, before any stage
-hs=$(grep -n '^if \[ ! -c /dev/null \]' "$here_repo/scripts/gate.sh" | head -1 | cut -d: -f1); pl=$(grep -n '^pre_pin()' "$here_repo/scripts/gate.sh" | cut -d: -f1)
+hs=$(grep -n '^if \[ ! -c /dev/null \]' "$here_repo/scripts/gate/gate.sh" | head -1 | cut -d: -f1); pl=$(grep -n '^pre_pin()' "$here_repo/scripts/gate/gate.sh" | cut -d: -f1)
 [ -n "$hs" ] && [ "$hs" -lt "$pl" ] && ok "gate.sh refuses a host whose /dev/null is not a character device (before any stage)" || bad "no /dev/null preflight in gate.sh"
 
 # the replay sizing goes to a FILE (JANUS_REPLAY_SIZING_FILE), never to JANUS_MEMGUARD_LOG's stderr lines (they broke parsed rows)
-rs=$(grep -n '^: > "$out/replay-sizing.log"; export JANUS_REPLAY_SIZING_FILE=' "$here_repo/scripts/gate.sh" | head -1 | cut -d: -f1); pl2=$(grep -n '^pre_pin()' "$here_repo/scripts/gate.sh" | cut -d: -f1)
-[ -n "$rs" ] && [ "$rs" -lt "$pl2" ] && ! grep -q 'export JANUS_MEMGUARD_LOG' "$here_repo/scripts/gate.sh" && ok "gate.sh exports JANUS_REPLAY_SIZING_FILE before the stages and does not export JANUS_MEMGUARD_LOG" || bad "replay sizing wiring wrong"
+rs=$(grep -n '^: > "$out/replay-sizing.log"; export JANUS_REPLAY_SIZING_FILE=' "$here_repo/scripts/gate/gate.sh" | head -1 | cut -d: -f1); pl2=$(grep -n '^pre_pin()' "$here_repo/scripts/gate/gate.sh" | cut -d: -f1)
+[ -n "$rs" ] && [ "$rs" -lt "$pl2" ] && ! grep -q 'export JANUS_MEMGUARD_LOG' "$here_repo/scripts/gate/gate.sh" && ok "gate.sh exports JANUS_REPLAY_SIZING_FILE before the stages and does not export JANUS_MEMGUARD_LOG" || bad "replay sizing wiring wrong"
 
-grep -q '^unset JANUS_MEMGUARD_LOG JANUS_MEMGUARD_VERBOSE' "$here_repo/scripts/gate.sh" && ok "gate.sh unsets JANUS_MEMGUARD_LOG / VERBOSE (rows parse the first output line)" || bad "gate.sh may inherit JANUS_MEMGUARD_LOG"
+grep -q '^unset JANUS_MEMGUARD_LOG JANUS_MEMGUARD_VERBOSE' "$here_repo/scripts/gate/gate.sh" && ok "gate.sh unsets JANUS_MEMGUARD_LOG / VERBOSE (rows parse the first output line)" || bad "gate.sh may inherit JANUS_MEMGUARD_LOG"
 
 # the round scripts run `go test` (D3, A1, D1, ...): their TestMain waits for the fixture lock while pre-fixture builds the fixture (1583 s
 # when the verifier changed), longer than go test's default 10 min timeout: rounds must start after pre-fixture

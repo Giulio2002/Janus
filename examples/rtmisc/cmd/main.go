@@ -1,4 +1,4 @@
-// Command cmd links every rtmisc example (scripts/build-examples-rtmisc.sh).
+// Command cmd links every rtmisc example (scripts/build/build-examples-rtmisc.sh).
 package main
 
 import (

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test of the pool's per-item memory admission (scripts/lib/pool.sh): a fake item set of a few heavy items
+# Self-test of the pool's per-item memory admission (scripts/gate/lib/pool.sh): a fake item set of a few heavy items
 # (recorded peak 6 GiB) and many small ones (0.3 GiB), 12 slots, a 20 GiB budget. Checks: peak concurrency >= 10
 # (small items run wide), the sum of reservations never exceeds the budget at any admission step, the heavy items
 # never run all together (3 x 7.8 GiB > 20 GiB), an unknown item reserves the conservative 9.15 GiB, a deferral

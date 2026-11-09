@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test of scripts/lib/artifacts.sh (run by `go test ./cmd/janus`, TestArtifactsLib): the
+# Self-test of scripts/gate/lib/artifacts.sh (run by `go test ./cmd/janus`, TestArtifactsLib): the
 # pruning of an oracle output directory under KEEP unset / zst / 1, and art_input / art_cat /
 # art_cleanup on a pruned directory. Writes only to a mktemp directory.
 set -euo pipefail

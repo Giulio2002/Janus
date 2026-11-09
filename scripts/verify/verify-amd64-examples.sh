@@ -1,34 +1,34 @@
 #!/usr/bin/env bash
 # Check and verify every amd64 example proof (examples/proofs-amd64/<Function>/Proof.lean)
-# against its extraction in artifacts/amd64/<Function>, which scripts/build-examples-amd64.sh
+# against its extraction in artifacts/amd64/<Function>, which scripts/build/build-examples-amd64.sh
 # (run first) builds and extracts.
 # Also verifies the extra `Proof.panics` theorems of Div and Get. Exits non-zero on any failure.
-# Usage: scripts/verify-amd64-examples.sh [-j N] [Function ...]   (default: every function)
+# Usage: scripts/verify/verify-amd64-examples.sh [-j N] [Function ...]   (default: every function)
 #   -j N   verify up to N functions at once (default: $JANUS_JOBS, else the number of cores
-#          capped by memory, see scripts/lib/parallel.sh); -j 1 verifies them one by one. The
-#          theorems of one function run up to two at once (scripts/lib/theorems.sh).
+#          capped by memory, see scripts/gate/lib/parallel.sh); -j 1 verifies them one by one. The
+#          theorems of one function run up to two at once (scripts/gate/lib/theorems.sh).
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PATH="$PATH:/usr/local/go/bin"
 cd "$root"
 # shellcheck source=lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+. "$root/scripts/gate/lib/parallel.sh"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 par_init "$@"
 set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
-# JANUS_EXAMPLES_PREBUILT=1 (scripts/verify-all-examples.sh): already built and extracted.
+# JANUS_EXAMPLES_PREBUILT=1 (scripts/verify/verify-all-examples.sh): already built and extracted.
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
   [ -x bin/janus ] || CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
-  bash scripts/build-examples-amd64.sh
+  bash scripts/build/build-examples-amd64.sh
 fi
 broken=()
-. scripts/lib/theorems.sh
-. scripts/lib/incr.sh
+. scripts/gate/lib/theorems.sh
+. scripts/gate/lib/incr.sh
 # verify_function F: every theorem of examples/proofs-amd64/F (correctness, Div's and Get's
 # `panics`, the non-vacuity witnesses: the hypotheses hold together and the conclusion is
-# reached), up to two at once (scripts/lib/theorems.sh); printed in order.
+# reached), up to two at once (scripts/gate/lib/theorems.sh); printed in order.
 verify_function() {
   local f=$1 st i
   local -a thms=(Proof.correctness)
@@ -42,7 +42,7 @@ verify_function() {
   for c in $(grep -oE '^theorem corollary[A-Za-z0-9_]*' "examples/proofs-amd64/$f/Proof.lean" | awk '!seen[$2]++ {print $2}'); do
     thms+=("Proof.$c" "Proof.Witness.$c")
   done
-  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs
+  # the incremental gate (scripts/gate/lib/incr.sh): skipped only on the record of a PASS with identical inputs
   local -a ispec=($(incr_fw_embedded) --proof "examples/proofs-amd64/$f/Proof.lean" --art "artifacts/amd64/$f")
   local thm_a item_rc=0 t0
   for thm_a in "${thms[@]}"; do ispec+=(--arg "thm:$thm_a"); done

@@ -9,21 +9,21 @@
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
-. "$root/scripts/lib/tmark.sh"
+. "$root/scripts/gate/lib/tmark.sh"
 export PATH=/usr/local/go/bin:$PATH
 J="$root/test/redteam/rounds/round9/bin/janus"; mkdir -p "$(dirname "$J")"
 CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
 # JANUS_AUDIT_PREBUILT=1 (test/redteam/run-rounds.sh built everything once): no build here, a concurrent lake build would rewrite the
 # framework while other lanes verify against it.
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
-[ -d artifacts/amd64/NewPair ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
+[ -d artifacts/amd64/NewPair ] || bash scripts/build/build-examples-amd64.sh >/dev/null 2>&1
 W=test/redteam/rounds/round9/work/rows; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-round9.XXXXXX")" || exit 1
 trap 'rm -rf "$T"' EXIT
 mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"
 for f in Add NewPair; do
-  mapfile -t tg < <(scripts/example-targets.sh "$f")
+  mapfile -t tg < <(scripts/verify/example-targets.sh "$f")
   "$J" extract artifacts/examples-arm64 "example.com/basic.$f" "$W/$f" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
 done
 LEAN="$(lake env which lean)"; LP="$root/.lake/build/lib/lean"

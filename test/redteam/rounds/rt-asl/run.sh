@@ -3,21 +3,21 @@
 # concurrent `janus verify`. Writes only to a mktemp directory (and the Go/Lake build caches).
 #
 #   test/redteam/rounds/rt-asl/run.sh            every row, one group after the other
-#   test/redteam/rounds/rt-asl/run.sh GROUP...   only these groups (independent: scripts/gate.sh runs each as its own
+#   test/redteam/rounds/rt-asl/run.sh GROUP...   only these groups (independent: scripts/gate/gate.sh runs each as its own
 #                                  lane): prove (asl.sh prove) rel (A1-A3) strict (A6) replay (A7)
 #                                  btf (A8) probes (A5/C2) fsqrt (A5 fsqrt) go (C1)
 #   RT_ASL_SKIP_GO=1 ...           skip the concurrency tests (about 6 min)
-#   (the groups share only read-only inputs and the Lake builds of JanusASL, which `scripts/asl.sh build`
+#   (the groups share only read-only inputs and the Lake builds of JanusASL, which `scripts/build/asl.sh build`
 #   makes first; the groups run in subshells, so a group's environment changes do not reach the next)
-#   DEPS=/srv/janus-asl-deps       the pinned JanusASL toolchain (scripts/asl.sh deps); the Sail
+#   DEPS=/srv/janus-asl-deps       the pinned JanusASL toolchain (scripts/build/asl.sh deps); the Sail
 #                                  backend rows are skipped without it
 #
 # Every row prints its result; a row whose result contradicts its expectation is marked
 # BROKEN and the script exits 1.
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-# shellcheck source=../../../../scripts/lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+# shellcheck source=../../../../scripts/gate/lib/memguard.sh
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 here="$root/test/redteam/rounds/rt-asl"
 cd "$root" || exit 1
@@ -46,8 +46,8 @@ row() { # row NAME EXPECT RESULT  (EXPECT ok|blocked|latent: RESULT must start w
 lean_in_pkg() { (cd "$root/models/asl" && lake env lean "$@"); }
 
 grp_prove() {
-  echo "== JanusASL (scripts/asl.sh prove)"
-  if scripts/asl.sh prove > "$W/prove.log" 2>&1; then
+  echo "== JanusASL (scripts/build/asl.sh prove)"
+  if scripts/build/asl.sh prove > "$W/prove.log" 2>&1; then
     row "asl-prove (84 theorems)" ok "ok ($(grep -o 'audited [0-9]* theorems' "$W/prove.log"))"
   else
     row "asl-prove (84 theorems)" ok "FAILED: $(tail -3 "$W/prove.log" | tr '\n' ' ')"
@@ -87,9 +87,9 @@ grp_strict() {
 
 grp_replay() {
   echo "== A7: independent kernel replay of the JanusASL modules (leanchecker)"
-  # Every module of JanusASL.Proofs, batched by `scripts/asl.sh replay` (one leanchecker over all of
+  # Every module of JanusASL.Proofs, batched by `scripts/build/asl.sh replay` (one leanchecker over all of
   # JanusASL.Proofs holds several copies of the model's environment at once: ~16 GiB, docs/design/ASL.md "Memory").
-  if "$root/scripts/asl.sh" replay > "$W/replay.log" 2>&1 && grep -q '^replay: leanchecker passed on all' "$W/replay.log"; then
+  if "$root/scripts/build/asl.sh" replay > "$W/replay.log" 2>&1 && grep -q '^replay: leanchecker passed on all' "$W/replay.log"; then
     row "A7 leanchecker JanusASL.Proofs" ok "ok (every proof module replayed by the kernel)"
   else
     row "A7 leanchecker JanusASL.Proofs" ok "FAILED: $(tail -3 "$W/replay.log" | tr '\n' ' ')"
@@ -99,7 +99,7 @@ grp_replay() {
 
 grp_btf() {
   echo "== A8: Go binaries carry no BTI property (so InGuardedPage = false is faithful)"
-  [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null 2>&1
+  [ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null 2>&1
   if [ -f artifacts/examples-arm64 ] && command -v readelf >/dev/null; then
     if readelf -lW artifacts/examples-arm64 | grep -q GNU_PROPERTY || readelf -nW artifacts/examples-arm64 | grep -qi 'AArch64 feature'; then
       row "A8 no GNU_PROPERTY BTI note" blocked "FOUND a GNU property note: pages may be guarded"
@@ -149,7 +149,7 @@ grp_probes() {
     if [ "$hits" = 0 ]; then row "C2 shape in the sliced sources" blocked "blocked (0 let/var-bound blocks in sail-arm + models/asl/sail)"
     else row "C2 shape in the sliced sources" blocked "FOUND $hits let/var-bound blocks: C2 may be reached"; fi
   else
-    echo "   (skipped: no pinned toolchain at $DEPS; run scripts/asl.sh deps)"
+    echo "   (skipped: no pinned toolchain at $DEPS; run scripts/build/asl.sh deps)"
   fi
 
 }
@@ -184,7 +184,7 @@ grp_fsqrt() {
   # V0-V31 and FPSR must be equal on every case.
   mkdir -p "$W/fsqrt"
   if python3 -I "$here/sqrt/gen_cases.py" > "$W/fsqrt/cases.jsonl" &&
-     scripts/oracle-sail.sh build > "$W/fsqrt/osb.log" 2>&1 &&
+     scripts/validation/sail-arm.sh build > "$W/fsqrt/osb.log" 2>&1 &&
      JANUS_SAIL_JOBS=8 "$root/validation/reference-models/sail-arm/target/release/janus-oracle-sail" < "$W/fsqrt/cases.jsonl" > "$W/fsqrt/c.jsonl" &&
      (cd "$root/models/asl" && memguard_lake build janus-asl-check > "$W/fsqrt/build.log" 2>&1 &&
       fsqrt_dump_parallel "$W/fsqrt/cases.jsonl" "$W/fsqrt/lean.jsonl" "$W/fsqrt/lean.err"); then

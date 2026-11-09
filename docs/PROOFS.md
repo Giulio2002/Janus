@@ -3,7 +3,7 @@
 This guide shows how to state and prove a theorem about a compiled Go function with Janus,
 using the proof automation in `Janus/Tactic` and the specification vocabulary in
 `Janus/Spec`. Every proof in `examples/proofs/` is verified end to end by
-`scripts/verify-examples.sh`; they are the reference examples for each technique below.
+`scripts/verify/verify-examples.sh`; they are the reference examples for each technique below.
 
 Nothing in the automation is trusted. The tactics only build proofs, and the Lean kernel checks
 them (`janus verify` replays them with `leanchecker`). A tactic bug can make a proof fail. It
@@ -14,7 +14,7 @@ cannot make a false theorem verify. What you must get right is the **statement**
 
 ```sh
 go build -o bin/janus ./cmd/janus
-scripts/build-examples.sh                                   # artifacts/examples-arm64
+scripts/build/build-examples.sh                                   # artifacts/examples-arm64
 bin/janus extract artifacts/examples-arm64 example.com/basic.Add artifacts/Add
 bin/janus verify artifacts/Add --proof examples/proofs/Add.lean
 ```
@@ -317,7 +317,7 @@ The non-vacuity witness (`Proof.Witness`) reuses the two-slot toy runtime of
 whose frame does **not** fit (`Witness.no_room`), shows all hypotheses hold together
 (`nonvacuous`) and that the conclusion is reached (`returns`).
 
-**The frame table.** Extract with `--frames` (`scripts/example-targets.sh` adds it for the
+**The frame table.** Extract with `--frames` (`scripts/verify/example-targets.sh` adds it for the
 stack-growth examples): `Extracted.frames` then lists the binary's frame records, and the theorem
 assumes `hA : FT.Agrees Extracted.frames`. Read what you need at a pc into a small `TableOK`
 predicate with `hA _ (List.mem_cons_self ..) pc (by decide) (by decide)` — never `rw`/`simp`
@@ -564,7 +564,7 @@ the extraction). Two situations:
 
   Extract the possible targets with `janus extract … --targets SYM,…` (an itab copies the itab
   as a data object named after its symbol, and the code of every method in it; a function or a
-  static funcval `…·f` copies that function). `scripts/example-targets.sh` lists the ones the
+  static funcval `…·f` copies that function). `scripts/verify/example-targets.sh` lists the ones the
   examples use.
 
 In the proof, destructure the precondition (the stack window first), then `janus_dyn h₁ h₂ …`
@@ -872,7 +872,7 @@ so the SSE path is no longer blocked by the model on that point (not attempted).
 
 `examples/basic/countbyte_arm64.s` embeds, word for word, what gcc 15.2.0 emits at cgo's default
 `-O2` for the C loop `for (i = 0; i < n; i++) k += p[i] == c;` (`v_count` of
-`scripts/coverage/ccorpus/vec.c`), behind an ABI0 shim that loads `X0`–`X2` from the Go argument
+`scripts/dev/coverage/ccorpus/vec.c`), behind an ABI0 shim that loads `X0`–`X2` from the Go argument
 frame; `A64CountByte` calls it. The theorem holds for every length, so it has two loop
 invariants, each proved by induction on the iterations left (the template of `Sum`):
 
@@ -904,7 +904,7 @@ package so the `example.com/cgo` wrapper hash, and so `GoAdd`/`GoSum`, are uncha
 
 ### Runtime contracts and heap allocation (`NewPair`, `MakeSlice`, `AppendOne`, `SetNext`, `MallocFast`)
 
-Extract with `--contract runtime.newobject` (see `scripts/example-contracts.sh`), state the theorem
+Extract with `--contract runtime.newobject` (see `scripts/verify/example-contracts.sh`), state the theorem
 about `Extracted.program.link impl` for every `impl` satisfying a contract hypothesis, and use the
 hypothesis at the call with `calls [hnew.pos]` (docs/RUNTIME-CONTRACTS.md):
 
@@ -990,7 +990,7 @@ theorem correctness (P : PanicRuntime) (x etyp edata : BitVec 64) :
   is below `0x1000`). A function that never panics proves `fun _ _ _ => False` for the panic case,
   and every existing `Ensures` lifts with `Ensures.toGo`.
 * **Heap defers** (`DeferTwice`): extract with `--contract 'runtime.deferproc*' --contract
-  runtime.deferreturn` (`scripts/example-targets.sh`) and step over each `deferproc` call with
+  runtime.deferreturn` (`scripts/verify/example-targets.sh`) and step over each `deferproc` call with
   `janus_run until [Extracted.program.contractAddr "runtime.deferproc"]` then
   `ReachesRet.call hdp rfl ⟨…⟩ ?_` (the precondition at a call site comes from
   `PanicCallerOK P s frame above` via `PanicPre.of_within`: the stack window and `P.Env` after the
@@ -1035,11 +1035,11 @@ theorem correctness (P : PanicRuntime) (x etyp edata : BitVec 64) :
 * **Non-vacuity**: `Proof.Witness.nonvacuous` instantiates every hypothesis at once (the model
   `PanicSat.P0`, model code at the contract addresses proved to meet each contract, a concrete
   call state) and `Proof.Witness.returns` applies the theorem to it; both are verified by
-  `scripts/verify-examples.sh` when the proof has a `namespace Witness`.
+  `scripts/verify/verify-examples.sh` when the proof has a `namespace Witness`.
 
 ### Counterexamples (`WrongAdd`)
 
-`scripts/break-demo.sh` changes `x + y` to `x - y` in a copy of the Go source, rebuilds,
+`scripts/archive/break-demo.sh` changes `x + y` to `x - y` in a copy of the Go source, rebuilds,
 re-extracts, and checks that `examples/proofs/Add.lean` is now **rejected**. It then verifies
 `examples/proofs/WrongAdd.lean` on the broken binary: the negation of the spec, proved by running
 one concrete call (built with `GoABI.setup`, with the concrete return address `0x1000`, shown
@@ -1049,7 +1049,7 @@ admissible by `RetAddr.of_check (by decide)`) and comparing its result with what
 ## Performance
 
 Each instruction costs one `simp` call on the instruction and the current state plus one kernel
-check of the program fact `stepOK`. `scripts/bench.sh` measures the elaboration time (CPU) of
+check of the program fact `stepOK`. `scripts/dev/bench.sh` measures the elaboration time (CPU) of
 every example and of the benchmarks in `bench/`; `bench/RESULTS.md` has the numbers, and the
 before/after comparison of the optimisations below.
 

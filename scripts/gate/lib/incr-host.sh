@@ -3,7 +3,7 @@
 # compilers, linkers, assemblers, interpreters and loaders (by the SHA-256 of the resolved binaries), what the compilers read (crt files, libgcc, libc
 # scripts, /usr/include, package versions), the environment that steers them (CPATH, CFLAGS, PYTHONPATH, ... by value AND by the content they name),
 # the Go toolchain (go, its tool directory, a manifest of GOROOT), and the dependency trees of the ISA-model lanes (manifests).
-# Sourced by scripts/lib/incr.sh; the result is one line, `tools=<sha256>[ extra]`, used as lane argument `hosttools:`. Any doubt is a MISS:
+# Sourced by scripts/gate/lib/incr.sh; the result is one line, `tools=<sha256>[ extra]`, used as lane argument `hosttools:`. Any doubt is a MISS:
 # an unreadable name, a cap exceeded, a malformed digest or an unstable (changed while computing) input keys a fresh random value.
 # docs/TESTING.md "Keyed and unkeyed inputs" has the argument. Cost: about 2 s uncached, once per gate run through the cache.
 
@@ -132,7 +132,7 @@ _ih_deps() {
 _ih_stamp() {
   { printf '%s\0' "$PATH" "${CC-}" "${CXX-}" "${DEPS-}" "${X86DEPS-}" "$(pwd)"; _ih_tools | while read -r n; do type -P -- "$n" 2>/dev/null; done | sort -u | while read -r p; do stat -L -c '%n %i %s %.9Y %.9Z' -- "$p" 2>/dev/null; done; _ih_env | sha256sum; } | sha256sum | cut -c1-64
 }
-# incr_hosttools [--nocache]: one line. The expensive part is cached for the whole gate run in INCR_HOSTTOOLS_CACHE (a private file made by scripts/gate.sh)
+# incr_hosttools [--nocache]: one line. The expensive part is cached for the whole gate run in INCR_HOSTTOOLS_CACHE (a private file made by scripts/gate/gate.sh)
 # only when its stamp still matches; --nocache recomputes everything (incr_end compares it with the digest the lane started with).
 incr_hosttools() {
   local c="${INCR_HOSTTOOLS_CACHE:-}" stamp line="" w q n

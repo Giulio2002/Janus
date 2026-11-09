@@ -8,7 +8,7 @@ Architecture* (AAPCS64, Arm IHI 0055, §6.8.2 "Parameter passing rules" and §6.
 return"), for GNU/Linux (`aarch64-linux-gnu`: variadic arguments follow the same rules as named
 ones, and a stacked argument smaller than 8 bytes takes an 8-byte slot). It is a function of the
 C types only, computed by `assign`/`assignAll`, and checked against gcc and clang by the
-differential probe (`scripts/cabi-probe.sh`, docs/FFI.md § 1.3).
+differential probe (`scripts/build/cabi-probe.sh`, docs/FFI.md § 1.3).
 
 Stage A: `NGRN = NSRN = NSAA = 0` (`Next`). Then for each argument (stage C, after the stage B
 rewrites):

@@ -517,7 +517,7 @@ empty replay cache (the first verification per framework version replays all 29 
 one `leanchecker` run) 25.3–27.5 s; after F7 with the cache warm 16.1–16.8 s. The pre-fix verifier
 spent about 10 s of every run replaying the unchanged framework (`leanchecker Janus` replays all of
 `Janus.*`); now only modules whose bytes, or whose imports' bytes, changed are replayed (a new
-proof: just the proof module). `scripts/verify-examples.sh` (14 examples): 422–548 s summed before,
+proof: just the proof module). `scripts/verify/verify-examples.sh` (14 examples): 422–548 s summed before,
 320 s after (warm), under load that varied between runs.
 
 The layers also back each other up. Re-running the unsandboxed rows in the same workspaces

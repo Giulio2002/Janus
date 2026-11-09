@@ -3,7 +3,7 @@
 // results in the caller's frame), the Go functions that call them, and the ABI wrappers the
 // toolchain generates between ABIInternal and ABI0.
 //
-// Every address a proof depends on comes from the binary scripts/build-examples-asm.sh builds
+// Every address a proof depends on comes from the binary scripts/build/build-examples-asm.sh builds
 // (Go pinned there); the proofs in proofs/{arm64,amd64}/ name addresses only through the
 // extraction.
 package asm

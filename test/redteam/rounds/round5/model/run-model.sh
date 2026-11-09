@@ -6,14 +6,14 @@
 # Writes only under test/redteam/rounds/round5/model/{bin,cases,out-a64,out-x64}. Exits 1 on any MISMATCH,
 # on a failing hand-derived check, or if a family that must agree stopped agreeing. Afterwards the
 # per-case dumps are pruned (summaries and compressed verdicts kept; the generated cases/ removed;
-# KEEP=1 keeps everything, scripts/lib/artifacts.sh).
+# KEEP=1 keeps everything, scripts/gate/lib/artifacts.sh).
 # Usage: test/redteam/rounds/round5/model/run-model.sh   (about a minute on 48 cores)
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
 here="$root/test/redteam/rounds/round5/model"
 export PATH="$PATH:/usr/local/go/bin"
-# shellcheck source=../../../../../scripts/lib/artifacts.sh
-. "$root/scripts/lib/artifacts.sh"
+# shellcheck source=../../../../../scripts/gate/lib/artifacts.sh
+. "$root/scripts/gate/lib/artifacts.sh"
 B="$here/bin"; mkdir -p "$B/a64" "$B/x64"
 QEMU="${QEMU-/usr/bin/qemu-aarch64}"
 (cd "$root/validation/hardware-comparison/arm64" && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$B/a64/runner" ./cmd/runner &&

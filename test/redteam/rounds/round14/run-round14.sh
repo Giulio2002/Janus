@@ -20,14 +20,14 @@ J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
 if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; go build -o "$J" ./cmd/janus || exit 1; fi
 if [ "${JANUS_AUDIT_PREBUILT:-}" != 1 ]; then
   lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
-  [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
+  [ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
 fi
 W=$R/work; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-round14.XXXXXX")" || exit 1
 trap 'rm -rf "$T"' EXIT
 mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"
-. scripts/example-contracts.sh
-mapfile -t tg < <(scripts/example-targets.sh NewPair)
+. scripts/verify/example-contracts.sh
+mapfile -t tg < <(scripts/verify/example-targets.sh NewPair)
 "$J" extract artifacts/examples-arm64 "$(example_symbol NewPair)" "$W/NewPair" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
 broken=()
 P=Proof
@@ -82,7 +82,7 @@ all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/FakeContracts
   --theorem $P.fake1 --theorem $P.fake2 --theorem $P.fake3 2>&1)"
 for f in fake1 fake2 fake3; do row $f blocked 'constrains a runtime variable'; done
 echo "== (c): a witness must cover EVERY conjunct of a conjunction main theorem (IsEven ∧ IsOdd)"
-mapfile -t tg < <(scripts/example-targets.sh IsEven)
+mapfile -t tg < <(scripts/verify/example-targets.sh IsEven)
 "$J" extract artifacts/examples-arm64 "$(example_symbol IsEven)" "$W/IsEven" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
 all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/IsEvenOneMember.lean "$W/IsEven" \
   --theorem $P.correctness --theorem $P.Witness.nonvacuous --theorem $P.Witness.returns --theorem $P.OneMember.Witness.nonvacuous 2>&1)"

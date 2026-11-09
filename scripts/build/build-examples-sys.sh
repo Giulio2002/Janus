@@ -7,9 +7,9 @@
 # Go release is pinned (GOTOOLCHAIN, downloaded on first use).
 set -euo pipefail
 export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 export PATH="$PATH:/usr/local/go/bin"
 mkdir -p "$root/artifacts"

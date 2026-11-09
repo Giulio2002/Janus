@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # The merge check: the checks an integration branch must pass before it is merged (lake build incl. JanusTests and
 # the auditor, the axiom guard and address lint, go vet/build, `go test ./cmd/...`, every audit round, and the
-# example sweep with cgo), run as ONE scripts/gate.sh with its dependency graph instead of one phase after the
+# example sweep with cgo), run as ONE scripts/gate/gate.sh with its dependency graph instead of one phase after the
 # other. Nothing is dropped or weakened: these are the lanes `verify`, `gotest`, `rounds`, `axiom`, `govet` of the
 # gate, with their own checks, timeouts and verdict. It is a PARTIAL gate (the ISA-model lanes x86, asl-*, rtasl-*,
 # sail and the decoder lane are left out, as the sequential merge-check scripts left them out): it does not replace
 # the full gate before a push to main.
 #
-#   scripts/check-merge.sh [-j N] [--lanes N] [any other scripts/gate.sh option]
+#   scripts/gate/check-merge.sh [-j N] [--lanes N] [any other scripts/gate/gate.sh option]
 #
 #   -j N       items at once in the example pool and the gate's own pool (default $JANUS_JOBS, else 12); the
 #              go test shards and the audit lanes scale with it (docs/TESTING.md "The gate driver")
@@ -19,7 +19,7 @@
 # one process with -parallel 2) and the example sweep is one longest-first queue. Run under `memcap` and, on the
 # shared box, `heavy-run` (RULES.md); the gate refuses to start on a loaded host unless JANUS_GATE_FORCE=1.
 set -uo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
 jobs_n="${JANUS_JOBS:-12}"
 # memory stays admitted by the pools (MemAvailable never below this floor + one item), measured at -j 8 alongside another (and -j 12 alone: peak 24.8 GiB verify lane, min MemAvailable 178 GiB)
@@ -35,4 +35,4 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$lanes_n" ] || lanes_n=$((jobs_n + 3))
-exec scripts/gate.sh -j "$jobs_n" --lanes "$lanes_n" --only verify,gotest,rounds,axiom,govet "${args[@]}"
+exec scripts/gate/gate.sh -j "$jobs_n" --lanes "$lanes_n" --only verify,gotest,rounds,axiom,govet "${args[@]}"

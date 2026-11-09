@@ -311,7 +311,7 @@ func TestCacheGCStressConsumerVerifies(t *testing.T) {
 	start := time.Now()
 	// The merge gate runs ONE round of four concurrent verifications under the collector; the nightly gate (JANUS_NIGHTLY=1)
 	// runs the full two (the second round meets the entries the first left and the collector emptied, a stronger race).
-	// The shorter variant is announced as REDUCED-COVERAGE in the gate's report (scripts/gotest-shards.sh).
+	// The shorter variant is announced as REDUCED-COVERAGE in the gate's report (scripts/gate/gotest-shards.sh).
 	rounds := 1
 	if os.Getenv("JANUS_NIGHTLY") == "1" {
 		rounds = 2

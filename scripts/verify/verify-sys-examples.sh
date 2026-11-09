@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the kernel examples (scripts/build-examples-sys.sh), extract every proved function on both
+# Build the kernel examples (scripts/build/build-examples-sys.sh), extract every proved function on both
 # ISAs into artifacts/sys/<isa>/<Name>/, and verify examples/proofs-sys/<isa>/<Name>.lean against it
 # with `janus verify` (kernel check, axiom audit, leanchecker replay). WP-C: the kernel is the
 # environment of Janus.Kernel.EnsuresK (Janus/Contracts/Syscall.lean, SyscallAmd64.lean).
@@ -12,20 +12,20 @@
 #   AESField, SVEField  (arm64 only, N5) fields of ID_AA64ISAR0_EL1 / ID_AA64PFR0_EL1: the
 #                feature-ID register read is an arbitrary 64-bit value (Kernel.Site.mrs .idreg)
 #
-# Usage: scripts/verify-sys-examples.sh [-j N] [--list] [isa/Name ...]   (default: all, e.g. arm64/WriteOut)
-#   -j N     rows at once (default: $JANUS_JOBS, else see scripts/lib/parallel.sh); the theorems of one
-#            row run up to two at once (scripts/lib/theorems.sh).
-#   --list   print the default rows, one per line, and exit (scripts/verify-all-examples.sh queues them).
+# Usage: scripts/verify/verify-sys-examples.sh [-j N] [--list] [isa/Name ...]   (default: all, e.g. arm64/WriteOut)
+#   -j N     rows at once (default: $JANUS_JOBS, else see scripts/gate/lib/parallel.sh); the theorems of one
+#            row run up to two at once (scripts/gate/lib/theorems.sh).
+#   --list   print the default rows, one per line, and exit (scripts/verify/verify-all-examples.sh queues them).
 # Writes artifacts/sys/<isa>/<Name>/verified.json and a summary to artifacts/verify-sys-examples.txt.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
-. "$root/scripts/lib/itemtimeout.sh"
+. "$root/scripts/gate/lib/itemtimeout.sh"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+. "$root/scripts/gate/lib/parallel.sh"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 
 all=(WriteOut NowNano Pid MustNonNeg)
 default_rows() {
@@ -52,12 +52,12 @@ sys_args() {
 
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
   CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
-  scripts/build-examples-sys.sh >/dev/null
+  scripts/build/build-examples-sys.sh >/dev/null
 fi
 extra=()
 [ -n "${JANUS_ROOT:-}" ] && extra=(--janus-root "$JANUS_ROOT")
-. scripts/lib/theorems.sh
-. scripts/lib/incr.sh
+. scripts/gate/lib/theorems.sh
+. scripts/gate/lib/incr.sh
 
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-sys-examples.txt}"
 : > "$summary"
@@ -86,7 +86,7 @@ verify_one() {
     printf '%-18s FAILED (no theorem found in examples/proofs-sys/%s/%s.lean)\n' "$target" "$isa" "$n" | tee "$lines/${isa}_$n"
     broken+=("sys:$target"); return 0
   fi
-  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs
+  # the incremental gate (scripts/gate/lib/incr.sh): skipped only on the record of a PASS with identical inputs
   local -a ispec=($(incr_fw_embedded) --proof "examples/proofs-sys/$isa/$n.lean" --art "$out" --arg "sym:example.com/sys.$n")
   local a
   for a in ${args[@]+"${args[@]}"}; do ispec+=(--arg "extract:$a"); done

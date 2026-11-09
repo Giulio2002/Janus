@@ -54,7 +54,7 @@ def expected : List Name := [
   ``JanusASL.Proofs.step_agree, ``JanusASL.Proofs.run_agree, ``JanusASL.Proofs.Ensures.toASL,
   ``JanusASL.Proofs.StepOK.of_agree,
   -- `janus verify --asl` (the four example transfers are derived from the artifacts per run,
-  -- `scripts/asl.sh verify`): the soundness of its kernel-evaluated coverage check
+  -- `scripts/build/asl.sh verify`): the soundness of its kernel-evaluated coverage check
   ``JanusASL.Verify.classify_sound]
 
 elab "#janus_asl_audit_strict" : command => do

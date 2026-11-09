@@ -6,7 +6,7 @@ set -euo pipefail
 # Every address a proof depends on comes from these binaries, so Go is pinned (the go command
 # downloads the release on first use).
 export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PATH="$PATH:/usr/local/go/bin"
 mkdir -p "$root/artifacts"
 cd "$root/examples/asm"

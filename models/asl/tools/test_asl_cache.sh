@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests of the shared ArmASL build cache key (scripts/asl.sh ASL_CACHE; docs/design/ASL.md "Build cache").
+# Tests of the shared ArmASL build cache key (scripts/build/asl.sh ASL_CACHE; docs/design/ASL.md "Build cache").
 #
 #   models/asl/tools/test_asl_cache.sh              key tests (seconds): edits that cannot change
 #                                                 the ArmASL build keep the key, edits that can change it
@@ -103,16 +103,16 @@ if [ -n "$e2e" ]; then
   hashes() { (cd "$1/models/asl/.lake" && find build/lib/lean/ArmASL* build/ir/ArmASL* packages/Sail/.lake/build -type f -print0 | sort -z | xargs -0 sha256sum); }
   # A: this checkout, restored from CACHE (read only), then published into a temporary cache.
   copy "$t/a"; mkdir -p "$t/cache"
-  ASL_CACHE="$e2e" ASL_CACHE_READONLY=1 "$t/a/scripts/asl.sh" restore
+  ASL_CACHE="$e2e" ASL_CACHE_READONLY=1 "$t/a/scripts/build/asl.sh" restore
   [ -f "$t/a/models/asl/.lake/build/lib/lean/ArmASL.olean" ] || { echo "FAIL $e2e has no entry for this checkout"; exit 1; }
   (cd "$t/a/models/asl" && lake build ArmASL --no-build) || { echo "FAIL lake wants to rebuild ArmASL after a restore of an unedited checkout"; exit 1; }
-  ASL_CACHE="$t/cache" "$t/a/scripts/asl.sh" model | tee "$t/a.log"
+  ASL_CACHE="$t/cache" "$t/a/scripts/build/asl.sh" model | tee "$t/a.log"
   grep -q "asl cache: ArmASL .*: stored" "$t/a.log" || { echo "FAIL nothing published"; fail=1; }
   # B: the aslverify-style lakefile, restored from the temporary cache.
   copy "$t/b"; edit "$t/b" "$VERIFY_EDIT"
   [ "$(key "$t/b")" = "$(key "$t/a")" ] || { echo "FAIL the edited copy has another key"; exit 1; }
   s=$(date +%s%N)
-  ASL_CACHE="$t/cache" ASL_CACHE_READONLY=1 "$t/b/scripts/asl.sh" restore
+  ASL_CACHE="$t/cache" ASL_CACHE_READONLY=1 "$t/b/scripts/build/asl.sh" restore
   echo "restore took $(( ($(date +%s%N) - s) / 1000000 )) ms"
   # The restored tree is the entry, byte for byte (also checked by the restore itself). Checked
   # before Lake runs: Lake's git calls refresh the stat cache in packages/Sail/.git/index.

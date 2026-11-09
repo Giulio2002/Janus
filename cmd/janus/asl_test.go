@@ -231,9 +231,9 @@ func TestASLPackage(t *testing.T) {
 		t.Fatalf("unpack: %d files, %v", len(model), err)
 	}
 	// The recorded version pins are the ones the generator and the lakefile use.
-	asl, _ := os.ReadFile(filepath.Join(repoRoot, "scripts", "asl.sh"))
+	asl, _ := os.ReadFile(filepath.Join(repoRoot, "scripts", "build", "asl.sh"))
 	if m := regexp.MustCompile(`SAIL_ARM_REV=([0-9a-f]{40})`).FindSubmatch(asl); m == nil || string(m[1]) != pkg.Version["sail-arm"] {
-		t.Errorf("vendor/ArmASL.version sail-arm %q does not match scripts/asl.sh", pkg.Version["sail-arm"])
+		t.Errorf("vendor/ArmASL.version sail-arm %q does not match scripts/build/asl.sh", pkg.Version["sail-arm"])
 	}
 	if !strings.Contains(string(pkg.Files["lakefile.toml"]), `rev = "`+pkg.Version["lean-sail"]+`"`) {
 		t.Errorf("vendor/ArmASL.version lean-sail %q does not match models/asl/lakefile.toml", pkg.Version["lean-sail"])
@@ -454,7 +454,7 @@ func TestASLSibling(t *testing.T) {
 	}
 }
 
-// A symlinked <cacheDir>/.lake (scripts/asl.sh verify once seeded with `cp -a` of a gate tree's models/asl/.lake, itself
+// A symlinked <cacheDir>/.lake (scripts/build/asl.sh verify once seeded with `cp -a` of a gate tree's models/asl/.lake, itself
 // a link into the main checkout) is replaced by a private directory; the link's target and the package override
 // written afterwards never touch it.
 func TestASLSymlinkedLakeDirIsReplaced(t *testing.T) {

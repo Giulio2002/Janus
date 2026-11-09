@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Tests of the build-cache integrity layer (scripts/lib/bcache.py), the per-module cache
+# Tests of the build-cache integrity layer (scripts/gate/lib/bcache.py), the per-module cache
 # (models/asl/tools/asl_mod_cache.py) and the cache keys (asl_cache_key.py, validation/reference-models/sail-arm/cache_key.py):
 # a tampered file, manifest or HMAC is rejected and rebuilt, a changed input changes the key, a
 # concurrent double build stays consistent. Seconds; everything happens in mktemp directories.
 #
-#   scripts/lib/test-bcache.sh
+#   scripts/gate/lib/test-bcache.sh
 set -uo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-bc="$root/scripts/lib/bcache.py"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+bc="$root/scripts/gate/lib/bcache.py"
 t=$(mktemp -d "${TMPDIR:-/tmp}/test-bcache.XXXXXX")
 trap 'rm -rf "$t"' EXIT
 export JANUS_CACHE_KEY_DIR="$t/keys"
@@ -247,7 +247,7 @@ fake_build; rm -rf "$mc"; $mp publish "$t/m" "$mc" JanusASL.Audit > /dev/null 2>
 python3 -I - "$t/m" "$e" "$mk" <<'PY'
 import importlib.util, os, sys
 root, e, key = sys.argv[1:]
-spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 man = b.parse_manifest(open(e + "/MANIFEST.sha256", "rb").read())
 for rel in ("janusasl/.lake/build/lib/lean/JanusASL/Other.olean", "janusasl/JanusASL/Audit.lean"):
     z = e + "/tree/" + rel; os.makedirs(os.path.dirname(z), exist_ok=True); open(z, "w").write("smuggled"); man[rel] = b.sha_file(z)
@@ -269,7 +269,7 @@ if grep -q 'ir/JanusASL/Audit.c$' "$e/MANIFEST.sha256" && ! grep -q '\.c\.o\.' "
 python3 -I - "$t/m" "$e" "$mk" <<'PY'
 import importlib.util, os, sys
 root, e, key = sys.argv[1:]
-spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 man = b.parse_manifest(open(e + "/MANIFEST.sha256", "rb").read())
 for rel in ("janusasl/.lake/build/ir/JanusASL/Audit.c.o.export", "janusasl/.lake/build/ir/JanusASL/Audit.c.o.export.hash",
             "janusasl/.lake/build/ir/JanusASL/Audit.c.o.export.trace", "janusasl/.lake/build/lib/lean/JanusASL/Audit.c.o.export"):

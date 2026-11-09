@@ -1,4 +1,4 @@
-// Package cover is built with -cover -covermode=count (scripts/build-examples-rtmisc.sh): every
+// Package cover is built with -cover -covermode=count (scripts/build/build-examples-rtmisc.sh): every
 // basic block increments its counter in the package's coverage counter array.
 package cover
 

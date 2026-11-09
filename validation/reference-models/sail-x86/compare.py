@@ -159,7 +159,7 @@ def work(item):
 
 def open_jsonl(path):
     """The JSON-lines file at path, or its zstd-compressed copy path.zst (the oracle drivers keep
-    their dumps compressed unless KEEP=1, scripts/lib/artifacts.sh)."""
+    their dumps compressed unless KEEP=1, scripts/gate/lib/artifacts.sh)."""
     if os.path.exists(path) or not os.path.exists(path + ".zst"):
         return open(path)
     p = subprocess.Popen(["zstd", "-q", "-dc", path + ".zst"], stdout=subprocess.PIPE, text=True)

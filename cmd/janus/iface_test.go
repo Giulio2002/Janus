@@ -125,10 +125,10 @@ func TestContractPinNeedsRuntimeFile(t *testing.T) {
 
 // The names of the list are the runtime entry points with a contract in the contract library
 // (the interface ones of agent/rtiface, the equality, hashing and typed-memory ones of
-// agent/eqhash, the map ones of agent/maps2, and sync.(*Pool).Get/Put): each is described in Janus/Contracts (as `name(` or `runtime.name(`), and scripts/stubpins
+// agent/eqhash, the map ones of agent/maps2, and sync.(*Pool).Get/Put): each is described in Janus/Contracts (as `name(` or `runtime.name(`), and scripts/dev/stubpins
 // links every one (so gen-stubpins measures them).
 func TestContractStubNames(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "stubpins", "main.go"))
+	src, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "dev", "stubpins", "main.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,16 +154,16 @@ func TestContractStubNames(t *testing.T) {
 		if m, ok := strings.CutPrefix(name, "sync.(*Pool)."); ok {
 			// a method: referenced as a method expression
 			if contractStubPackage(name) != "sync" || !strings.Contains(string(src), "\t(*sync.Pool)."+m+",\n") {
-				t.Errorf("scripts/stubpins does not reference %s", name)
+				t.Errorf("scripts/dev/stubpins does not reference %s", name)
 			}
 		} else if m, ok := strings.CutPrefix(name, "fmt."); ok {
 			// an unexported function of package fmt: pulled by //go:linkname
 			if contractStubPackage(name) != "fmt" || !strings.Contains(string(src), "//go:linkname s_fmt_"+m+" "+name+"\n") {
-				t.Errorf("scripts/stubpins does not link %s", name)
+				t.Errorf("scripts/dev/stubpins does not link %s", name)
 			}
 		} else if contractStubPackage(name) != "runtime" ||
 			!strings.Contains(string(src), "//go:linkname s_"+strings.TrimPrefix(name, "runtime.")+" "+name+"\n") {
-			t.Errorf("scripts/stubpins does not link %s", name)
+			t.Errorf("scripts/dev/stubpins does not link %s", name)
 		}
 		short := strings.TrimPrefix(name, "runtime.")
 		// The write-barrier entries are pinned so that a --contract naming one is the runtime's

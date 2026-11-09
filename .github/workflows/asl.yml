@@ -22,7 +22,7 @@ on:
       - "examples/proofs/Max.lean"
       - "examples/proofs/Mul64.lean"
       - "examples/proofs/Add128.lean"
-      - "scripts/asl.sh"
+      - "scripts/build/asl.sh"
       - ".github/workflows/asl.yml"
 
 permissions:
@@ -59,7 +59,7 @@ jobs:
             sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      # Memory guard: janus and scripts/lib/memguard.sh run every Lean job (lean, leanchecker,
+      # Memory guard: janus and scripts/gate/lib/memguard.sh run every Lean job (lean, leanchecker,
       # lake, go test) inside a cgroup v2 memory limit, through `systemd-run --user --scope`.
       # GitHub's runners have systemd but no user manager for the runner account until it lingers;
       # start one and export its runtime dir. Without it the guard degrades to prlimit (or none)
@@ -74,8 +74,8 @@ jobs:
           echo "XDG_RUNTIME_DIR=/run/user/$uid" >> "$GITHUB_ENV"
           echo "JANUS_MEM_MAX=12G" >> "$GITHUB_ENV"
           export XDG_RUNTIME_DIR="/run/user/$uid" JANUS_MEM_MAX=12G
-          echo "memguard mechanism: $(bash scripts/lib/memguard.sh mechanism)"
-          bash scripts/lib/memguard.sh run -l 1G -n ci-probe -- true
+          echo "memguard mechanism: $(bash scripts/gate/lib/memguard.sh mechanism)"
+          bash scripts/gate/lib/memguard.sh run -l 1G -n ci-probe -- true
 
       - name: Cache the ArmASL build
         uses: actions/cache@v4
@@ -86,11 +86,11 @@ jobs:
           key: asl-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'models/asl/vendor/ArmASL.tar.gz', 'models/asl/lakefile*', 'models/asl/lake-manifest.json') }}
 
       - name: Build ArmASL, JanusASL and janus-asl-check
-        run: scripts/asl.sh build
+        run: scripts/build/asl.sh build
 
       - name: Audit the equivalence theorems (only propext, Classical.choice, Quot.sound)
         run: |
-          scripts/asl.sh prove | tee audit.txt
+          scripts/build/asl.sh prove | tee audit.txt
           grep -q "only propext, Classical.choice, Quot.sound" audit.txt
 
       # janus verify --asl on the four examples: the corollary of each shipped theorem, derived
@@ -99,7 +99,7 @@ jobs:
       # cache is seeded from the one above.
       - name: janus verify --asl (Add, Max, Mul64, Add128)
         run: |
-          scripts/asl.sh verify | tee verify-asl.txt
+          scripts/build/asl.sh verify | tee verify-asl.txt
           test "$(grep -c ': ASL corollary verified' verify-asl.txt)" = 4
 
       - name: Upload the ASL verification logs

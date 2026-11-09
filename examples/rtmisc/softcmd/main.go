@@ -1,4 +1,4 @@
-// Command softcmd links the soft-float examples and runtime.KeepAlive (scripts/build-examples-rtmisc.sh).
+// Command softcmd links the soft-float examples and runtime.KeepAlive (scripts/build/build-examples-rtmisc.sh).
 package main
 
 import (

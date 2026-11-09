@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Round 7 cache rows (docs/audit/AUDIT-ROUND7.md §7, docs/SOUNDNESS.md, "Verification-result cache"): attempts to poison or misuse the
 # trusted verification-result cache. Exits 1 if a row regresses (BROKEN).
-# Usage: test/redteam/rounds/round7/run-cache.sh [-j N]   (-j: rows at once, scripts/lib/parallel.sh)
+# Usage: test/redteam/rounds/round7/run-cache.sh [-j N]   (-j: rows at once, scripts/gate/lib/parallel.sh)
 # Writes only under test/redteam/rounds/round7/work/ and a temporary janus cache (removed at the end).
 # R7C_ROWS="priming rc1 rc2 rc3 rc4 rc56": only these row groups (default all). test/redteam/run-rounds.sh runs three lanes,
 # r7c1..r7c3 (run-cache-{1,2,3}.sh), so the lane is no longer the longest one of the rounds.
@@ -10,8 +10,8 @@ want() { [ -z "${R7C_ROWS:-}" ] || [[ " $R7C_ROWS " == *" $1 "* ]]; }
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../../../scripts/lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+# shellcheck source=../../../../scripts/gate/lib/parallel.sh
+. "$root/scripts/gate/lib/parallel.sh"
 par_init "$@"
 tmark "cache start"
 J="$root/test/redteam/rounds/round7/bin/janus"; mkdir -p "$(dirname "$J")"
@@ -19,7 +19,7 @@ J="$root/test/redteam/rounds/round7/bin/janus"; mkdir -p "$(dirname "$J")"
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
 W=test/redteam/rounds/round7/work-cache${R7C_WORK:+-$R7C_WORK}; rm -rf "$W"; mkdir -p $W
 C="$(mktemp -d "${TMPDIR:-/tmp}/janus-round7-cache.XXXXXX")"
 trap 'rm -rf "$C"' EXIT

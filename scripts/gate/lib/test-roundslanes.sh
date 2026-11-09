@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test of scripts/lib/rounds-lanes.sh (lane-count selection and the longest-first order).
+# Self-test of scripts/gate/lib/rounds-lanes.sh (lane-count selection and the longest-first order).
 set -u
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$here/rounds-lanes.sh"

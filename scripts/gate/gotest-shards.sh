@@ -2,14 +2,14 @@
 # `go test ./cmd/...` split into shards that run at once, balanced by measured duration, with a
 # proof that every test runs exactly once.
 #
-#   scripts/gotest-shards.sh [-n SHARDS] [-p PARALLEL] [--plan] [--outdir DIR]
+#   scripts/gate/gotest-shards.sh [-n SHARDS] [-p PARALLEL] [--plan] [--outdir DIR]
 #
 #   -n SHARDS     number of shards (default: max(2, $JANUS_JOBS), at most 8)
 #   -p PARALLEL   `go test -parallel` of each shard (default 1: the shards are the parallelism, so the
 #                 total number of test slots is SHARDS x PARALLEL; $JANUS_GOTEST_PARALLEL)
 #   --plan        print the assignment (shard, estimated seconds, tests) and the checks below, run nothing
 #   --run ERE     development subset: only the tests whose name matches ERE (the partition check is then
-#                 against that list; scripts/gate.sh --gotest-run). Not a gate run.
+#                 against that list; scripts/gate/gate.sh --gotest-run). Not a gate run.
 #   --outdir DIR  per-shard logs and the result (default artifacts/gate/gotest)
 #
 # DYNAMIC QUEUE (default; JANUS_GOTEST_STATIC=1 restores the static shards below). The shards are worker slots that pull work
@@ -18,7 +18,7 @@
 # each item is `PKG.test -test.run '^(T1|T2)$'` run in the package directory. Static shards fixed the assignment from stale
 # estimates (a full gate: shard 3 took 3564 s while shards 1/2/4/5/6 took 1266/1286/323/1505/895 s: the gate waited for the
 # slowest of six while the others idled); a queue is balanced by construction, wall = max(longest item, total / workers).
-# Estimates: cmd/janus/order_test.go, overridden by scripts/gotest-durations.tsv (`name<TAB>seconds`; refreshed from the
+# Estimates: cmd/janus/order_test.go, overridden by scripts/gate/gotest-durations.tsv (`name<TAB>seconds`; refreshed from the
 # measured wall of each single-test item, written to $outdir/learned.tsv after every run). The partition check is the same.
 # The plan (static shards): `go test -list` gives the full list of tests (Test*, Example* and Fuzz* functions; benchmarks
 # are not run by `go test` either) of every package under ./cmd/...; they are dealt to the shards
@@ -34,11 +34,11 @@
 # with their parent. The whole run is `go test -timeout 7000s ./cmd/...` of the standard gate, cut in
 # pieces (plus -count=1: a cached pass is never accepted).
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 run="" nshards="" par="${JANUS_GOTEST_PARALLEL:-1}" plan="" outdir="$root/artifacts/gate/gotest"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -47,7 +47,7 @@ while [ $# -gt 0 ]; do
     --plan) plan=1; shift ;;
     --run) run="$2"; shift 2 ;;
     --outdir) outdir="$2"; shift 2 ;;
-    *) echo "usage: scripts/gotest-shards.sh [-n SHARDS] [-p PARALLEL] [--plan] [--outdir DIR]" >&2; exit 2 ;;
+    *) echo "usage: scripts/gate/gotest-shards.sh [-n SHARDS] [-p PARALLEL] [--plan] [--outdir DIR]" >&2; exit 2 ;;
   esac
 done
 if [ -z "$nshards" ]; then
@@ -72,7 +72,7 @@ fi
 grep -ohE '"[A-Za-z0-9_]+": [0-9.]+' cmd/janus/order_test.go | sed -E 's/^"([^"]+)": ([0-9.]+)$/\1\t\2/' > "$outdir/durations.txt" || true
 
 # measured durations of earlier runs (name<TAB>seconds) override the table of order_test.go
-[ ! -f scripts/gotest-durations.tsv ] || grep -vE '^(#|$)' scripts/gotest-durations.tsv >> "$outdir/durations.txt"
+[ ! -f scripts/gate/gotest-durations.tsv ] || grep -vE '^(#|$)' scripts/gate/gotest-durations.tsv >> "$outdir/durations.txt"
 static="${JANUS_GOTEST_STATIC:-}"
 heavy="${JANUS_GOTEST_HEAVY:-15}"
 if [ -z "$static" ]; then
@@ -255,7 +255,7 @@ if [ -z "$static" ]; then
   if ! diff -q <(cut -f2 "$outdir/all.txt" | sort) <(cat "$outdir"/ran-*.txt | sort) >/dev/null; then
     echo "gotest-shards: the tests that ran are not the listed tests (each exactly once):"; diff <(cut -f2 "$outdir/all.txt" | sort) <(cat "$outdir"/ran-*.txt | sort) | head -20; fail=1
   fi
-  # measured wall of the single-test items: the estimates of the next run (copy into scripts/gotest-durations.tsv)
+  # measured wall of the single-test items: the estimates of the next run (copy into scripts/gate/gotest-durations.tsv)
   awk -F'\t' '$3 == 1 { print $1 "\t" $2 }' "$outdir/item-times.tsv" > "$outdir/learned.tsv"
   echo "gotest queue: slowest items (measured):"; sort -t$'\t' -k2,2 -gr "$outdir/item-times.tsv" | head -5 | awk -F'\t' '{ printf "  %ss (est %ss, %s test(s)) %s\n", $2, $4, $3, $1 }'
 fi
@@ -289,7 +289,7 @@ for i in "${!extra_names[@]}"; do
   else echo "gotest-shards: extra $lab did not PASS (exit $erc):"; tail -n 40 "$outdir/extra-$lab.log" | sed 's/^/  | /'; fail=1; fi
 done
 # a SKIPPED test is not a verified one (about ten tests skip when objdump, the aarch64 objdump, lake or bwrap is missing): a run with any SKIP is
-# never recorded as a lane PASS (scripts/lib/incr.sh incr_lane: INCR_NORECORD_FILE), whatever the exit status.
+# never recorded as a lane PASS (scripts/gate/lib/incr.sh incr_lane: INCR_NORECORD_FILE), whatever the exit status.
 # SKIPPED-COVERAGE: every skip is printed with its reason, loudly, once; a skipped test whose extra run PASSED above is listed as
 # covered and does not count.
 cat "$outdir"/shard-*.log | awk '

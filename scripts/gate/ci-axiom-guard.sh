@@ -8,7 +8,7 @@
 # cmd/janus/testdata/, which is not scanned) and the trusted auditor Janus/Tools/Audit.lean,
 # which names these terms in order to detect and reject them. Comments are scanned too.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
 dirs=(Janus test/lean examples/proofs examples/proofs-amd64 examples/asm/proofs examples/proofs-cgo examples/proofs-print)
 existing=()

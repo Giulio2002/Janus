@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate Janus/Contracts/ErrorfRealLoops.lean: the loop lemmas of the arm64 real-format stub, instantiated at the
-label addresses of scripts/errorf/gen_arm64.py. Run from the repo root."""
+label addresses of scripts/dev/errorf/gen_arm64.py. Run from the repo root."""
 import sys
-sys.path.insert(0, "scripts/errorf")
+sys.path.insert(0, "scripts/dev/errorf")
 import gen_arm64
 from loop_templates import HDR, DIG, CPY
 _, lab = gen_arm64.build()

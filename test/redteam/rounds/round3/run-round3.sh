@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Reproduce the round-3 attacks (docs/audit/AUDIT-ROUND3.md) and check the fix for R1 (CRITICAL).
 # Exits 1 if the fixed finding R1 regresses (prints Verified again).
-# Writes only under test/redteam/rounds/round3/work/.  Usage: test/redteam/rounds/round3/run-round3.sh [-j N]  (-j: blocks at once, scripts/lib/parallel.sh)
+# Writes only under test/redteam/rounds/round3/work/.  Usage: test/redteam/rounds/round3/run-round3.sh [-j N]  (-j: blocks at once, scripts/gate/lib/parallel.sh)
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../../../scripts/lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
-# shellcheck source=../../../../scripts/lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+# shellcheck source=../../../../scripts/gate/lib/parallel.sh
+. "$root/scripts/gate/lib/parallel.sh"
+# shellcheck source=../../../../scripts/gate/lib/memguard.sh
+. "$root/scripts/gate/lib/memguard.sh"
 # shellcheck source=../../lib/blocked.sh
 . "$root/test/redteam/lib/blocked.sh"
 memguard_self "$@"
@@ -19,8 +19,8 @@ J="$root/test/redteam/rounds/round3/bin/janus"; mkdir -p "$(dirname "$J")"
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
-[ -f artifacts/examples-amd64 ] || scripts/build-examples-amd64.sh >/dev/null 2>&1
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
+[ -f artifacts/examples-amd64 ] || scripts/build/build-examples-amd64.sh >/dev/null 2>&1
 W=test/redteam/rounds/round3/work; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1
 v() { "$J" verify --janus-root "$root" "$@" 2>&1; }

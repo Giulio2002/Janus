@@ -8,10 +8,10 @@ supplies), proves that `Extracted.program` has the same code as `PrintCode.progr
 proofs about the print functions are built and checked once, in the Fn* and Main* modules; the
 example modules hold only the `decide` and the transport lemmas.
 
-Usage: scripts/gen-print-examples.py [--check] arm64|amd64
+Usage: scripts/dev/gen-print-examples.py [--check] arm64|amd64
   --check   exit 1 if a generated file differs from what the Main modules give."""
 import re, sys, os
-root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 check = "--check" in sys.argv[1:]
 isa = [a for a in sys.argv[1:] if not a.startswith("--")][0]
 bad = 0
@@ -160,7 +160,7 @@ end Proof
     old = open(path, encoding="utf-8").read() if os.path.exists(path) else None
     if old != txt:
         if check:
-            print("stale: " + os.path.relpath(path, root) + " (run scripts/gen-print-examples.py " + isa + ")"); bad = 1
+            print("stale: " + os.path.relpath(path, root) + " (run scripts/dev/gen-print-examples.py " + isa + ")"); bad = 1
         else:
             open(path, "w", encoding="utf-8").write(txt); print("wrote", os.path.relpath(path, root))
 sys.exit(bad)

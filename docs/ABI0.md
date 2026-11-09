@@ -128,9 +128,9 @@ what is extracted or what a theorem means.
 
 ## 6. The examples
 
-`examples/asm` (`scripts/build-examples-asm.sh`, Go 1.26.0, `GOAMD64=v1`), proofs in
-`examples/asm/proofs/{arm64,amd64}/`, verified by `scripts/verify-asm-examples.sh` (and
-`scripts/verify-all-examples.sh`):
+`examples/asm` (`scripts/build/build-examples-asm.sh`, Go 1.26.0, `GOAMD64=v1`), proofs in
+`examples/asm/proofs/{arm64,amd64}/`, verified by `scripts/verify/verify-asm-examples.sh` (and
+`scripts/verify/verify-all-examples.sh`):
 
 | Example | Entry | Statement | Shows |
 |---|---|---|---|

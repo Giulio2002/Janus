@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# The gotest lane's nightly extras (scripts/gotest-shards.sh): the mathlib and pressure extras stay on; the ASL extra is OPT-IN
+# The gotest lane's nightly extras (scripts/gate/gotest-shards.sh): the mathlib and pressure extras stay on; the ASL extra is OPT-IN
 # (JANUS_TEST_ASL_EXTRA=1) until it is private-copy based and heavy-lock aware (QUEUE.md), and its gap stays visible.
-#   scripts/lib/test-gotest-extras.sh      (milliseconds)
+#   scripts/gate/lib/test-gotest-extras.sh      (milliseconds)
 set -uo pipefail
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-f="$here/scripts/gotest-shards.sh"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+f="$here/scripts/gate/gotest-shards.sh"
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
 bash -n "$f" && ok "gotest-shards.sh parses" || bad "gotest-shards.sh syntax"
 grep -qF '[ "$lab" = asl ] && [ "${JANUS_TEST_ASL_EXTRA:-}" != 1 ] && continue' "$f" || grep -qF 'if [ "$lab" = asl ] && [ "${JANUS_TEST_ASL_EXTRA:-}" != 1 ]; then continue; fi' "$f" \

@@ -1355,7 +1355,7 @@ func main() {
 		}
 	}
 	sum.WriteString("gcc-bug: tests excluded as the gcc -O2 arm64 va_arg bug for HFA/HVA of _Float16 or short\n" +
-		"vectors (knownBug in scripts/cabiprobe/main.go; the failures are listed in known-bugs.txt)\n")
+		"vectors (knownBug in scripts/build/cabiprobe/main.go; the failures are listed in known-bugs.txt)\n")
 	if !bad {
 		sum.WriteString("result: 0 mismatches\n")
 	} else {

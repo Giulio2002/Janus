@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the cgo examples (scripts/build-examples-cgo.sh: Go 1.26.0 and gcc 15.2.0 pinned there),
+# Build the cgo examples (scripts/build/build-examples-cgo.sh: Go 1.26.0 and gcc 15.2.0 pinned there),
 # extract every proved C and Go function on both ISAs into artifacts/cgo/<isa>/<Name>/, and verify
 # examples/proofs-cgo/<isa>/<Name>.lean against it with `janus verify` (kernel check, axiom audit,
 # leanchecker replay).
@@ -31,23 +31,23 @@
 #   hold together).
 #
 # Every name maps to a symbol (sym) and, for the C environment, a binary (bin).
-# Usage: scripts/verify-cgo-examples.sh [-j N] [--list] [isa/Name ...]   (default: all, e.g. arm64/GoAdd)
-#   -j N     rows at once (default: $JANUS_JOBS, else see scripts/lib/parallel.sh); the theorems of one
+# Usage: scripts/verify/verify-cgo-examples.sh [-j N] [--list] [isa/Name ...]   (default: all, e.g. arm64/GoAdd)
+#   -j N     rows at once (default: $JANUS_JOBS, else see scripts/gate/lib/parallel.sh); the theorems of one
 #            row (correctness and the non-vacuity witnesses) run up to two at once, each a complete
-#            `janus verify` (scripts/lib/theorems.sh).
-#   --list   print the default rows, one per line, and exit (scripts/verify-all-examples.sh queues them).
-# JANUS_EXAMPLES_PREBUILT=1 (scripts/verify-all-examples.sh, scripts/gate.sh): janus, the example
+#            `janus verify` (scripts/gate/lib/theorems.sh).
+#   --list   print the default rows, one per line, and exit (scripts/verify/verify-all-examples.sh queues them).
+# JANUS_EXAMPLES_PREBUILT=1 (scripts/verify/verify-all-examples.sh, scripts/gate/gate.sh): janus, the example
 # binaries and the framework build exist already.
 # Writes artifacts/cgo/<isa>/<Name>/verified.json and a summary to artifacts/verify-cgo-examples.txt.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
-. "$root/scripts/lib/itemtimeout.sh"
+. "$root/scripts/gate/lib/itemtimeout.sh"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+. "$root/scripts/gate/lib/parallel.sh"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 
 declare -A sym=(
   [CAdd]=c_add [CSum]=c_sum [CStore]=c_store [CCount]=c_count [GoCount]=example.com/cgo/neon.Count
@@ -94,11 +94,11 @@ names=("$@")
 
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
   CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
-  scripts/build-examples-cgo.sh >/dev/null
+  scripts/build/build-examples-cgo.sh >/dev/null
   lake build Janus >/dev/null
 fi
-. scripts/lib/theorems.sh
-. scripts/lib/incr.sh
+. scripts/gate/lib/theorems.sh
+. scripts/gate/lib/incr.sh
 
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-cgo-examples.txt}"
 : > "$summary"
@@ -125,7 +125,7 @@ verify_one() {
     # `returns` only where the proof states it
     ! grep -q '^theorem returns' "$proof" || thms+=(Proof.Witness.returns)
   fi
-  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs
+  # the incremental gate (scripts/gate/lib/incr.sh): skipped only on the record of a PASS with identical inputs
   local -a ispec=(--fw dir:. --proof "$proof" --art "$out" --arg "sym:${sym[$n]}" --arg "bin:$b" --arg "extract:${xargs[$isa/$n]:-${xargs[$n]:-}}")
   local ia
   for ia in "${thms[@]}"; do ispec+=(--arg "thm:$ia"); done

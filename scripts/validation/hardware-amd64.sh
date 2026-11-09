@@ -2,39 +2,39 @@
 # Differential test of the Lean x86-64 model (Janus.Amd64.step) against native execution on
 # the x86-64 host (single-stepped, see validation/hardware-comparison/amd64/cmd/runner). See docs/validation/ORACLE-AMD64.md.
 #
-#   scripts/oracle-amd64.sh selftest   build, then check the native harness on known answers
-#   scripts/oracle-amd64.sh quick      generated cases only (~100k)
-#   scripts/oracle-amd64.sh full       generated + harvested from real Go amd64 binaries (default)
-#   scripts/oracle-amd64.sh fp         SSE floating point only: the FP specs and edge families
+#   scripts/validation/hardware-amd64.sh selftest   build, then check the native harness on known answers
+#   scripts/validation/hardware-amd64.sh quick      generated cases only (~100k)
+#   scripts/validation/hardware-amd64.sh full       generated + harvested from real Go amd64 binaries (default)
+#   scripts/validation/hardware-amd64.sh fp         SSE floating point only: the FP specs and edge families
 #                                      plus every FP instruction harvested from the math,
 #                                      strconv and sort test binaries (K states each, FPK MXCSR
 #                                      settings per state; FP_K states per harvested FP
 #                                      instruction, default 20)
-#   scripts/oracle-amd64.sh v3         the GOAMD64=v3 extensions only (BMI1/BMI2, MOVBE, scalar
+#   scripts/validation/hardware-amd64.sh v3         the GOAMD64=v3 extensions only (BMI1/BMI2, MOVBE, scalar
 #                                      FMA, PSHUFB/PSIGNB): their specs and the FMA edge family,
 #                                      plus every such instruction harvested from GOAMD64=v3 test
 #                                      binaries (V3_K states each, default 12)
-#   scripts/oracle-amd64.sh x87        the x87 FPU and the C-specific encodings (WP-J): every
+#   scripts/validation/hardware-amd64.sh x87        the x87 FPU and the C-specific encodings (WP-J): every
 #                                      escape-opcode form (N per memory form, N/4 per register
 #                                      form) with random x87 states, NOTRACK branches and the
 #                                      padded TLS call, plus every x87 instruction harvested from
 #                                      gcc/clang -O0/-O2/-O3 long double code (X87_K states each,
 #                                      default 40)
-#   scripts/oracle-amd64.sh sse        the SSE packed instructions of WP-D only (SSE2 integer and
+#   scripts/validation/hardware-amd64.sh sse        the SSE packed instructions of WP-D only (SSE2 integer and
 #                                      FP, SSE3, SSSE3, SSE4.1, SSE4.2): their specs and edge
 #                                      families, plus every such instruction harvested from the std
 #                                      test binaries with SSE assembly and from the C corpus compiled
 #                                      by gcc and clang at -O2/-O3 (SSE_K states each, default 12)
-#   scripts/oracle-amd64.sh crypto     the x86 crypto extensions of WP-E only (AES-NI, PCLMULQDQ,
+#   scripts/validation/hardware-amd64.sh crypto     the x86 crypto extensions of WP-E only (AES-NI, PCLMULQDQ,
 #                                      SHA-NI, ADX): their specs and edge families, plus every such
 #                                      instruction harvested from the std test binaries with crypto
 #                                      assembly (CRYPTO_K states each, default 12)
-#   scripts/oracle-amd64.sh avx512     the AVX-512 instructions of WP-G only (EVEX with ZMM0-31 and
+#   scripts/validation/hardware-amd64.sh avx512     the AVX-512 instructions of WP-G only (EVEX with ZMM0-31 and
 #                                      K0-K7, the VEX opmask instructions, VPCLMULQDQ, GFNI): the
 #                                      targeted specs, an EVEX opcode sweep and every distinct
 #                                      EVEX/opmask encoding of the scan/crc32/runtime test binaries
 #                                      (EVEX_K states each, default 24; SWEEP, default 4)
-#   scripts/oracle-amd64.sh avx        the AVX/AVX2/FMA3 instructions of WP-F only (VEX-128/256 on
+#   scripts/validation/hardware-amd64.sh avx        the AVX/AVX2/FMA3 instructions of WP-F only (VEX-128/256 on
 #                                      YMM): their specs and edge families, plus every such
 #                                      instruction harvested from GOAMD64=v3 std test binaries with
 #                                      AVX2 assembly and from the C corpus compiled by gcc and clang
@@ -47,7 +47,7 @@
 # FPK (MXCSR settings per FP state, default 3 gen / 2 harvest),
 # MODEL (default .lake/build/bin/janus-oracle-amd64; e.g. MODEL=validation/hardware-comparison/amd64/bin/fakemodel
 # to exercise the pipeline without the Lean model).
-# KEEP: what the run leaves in OUT (scripts/lib/artifacts.sh). Default: summary.md, repro.*,
+# KEEP: what the run leaves in OUT (scripts/gate/lib/artifacts.sh). Default: summary.md, repro.*,
 # mismatches.jsonl (MISMATCH verdicts, if any) and cases/hw/model/verdicts.jsonl zstd-compressed
 # (.zst); gen.jsonl and harvest.jsonl (whose union is cases.jsonl) are removed. KEEP=zst
 # compresses every dump, KEEP=1 keeps them all raw.
@@ -55,11 +55,11 @@ set -euo pipefail
 # Example binaries (and so every address a proof depends on) are built with exactly this Go
 # release, whatever Go is installed; the go command downloads it on first use.
 export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 # shellcheck source=lib/artifacts.sh
-. "$root/scripts/lib/artifacts.sh"
+. "$root/scripts/gate/lib/artifacts.sh"
 memguard_self "$@"
 mode="${1:-full}"
 export PATH="$PATH:/usr/local/go/bin"
@@ -88,7 +88,7 @@ tail -1 "$bin/selftest.log"
 
 mkdir -p "$OUT"
 # However the run ends: keep the summaries, compressed verdicts and corpus, drop the other dumps
-# (KEEP=1 keeps everything raw; scripts/lib/artifacts.sh).
+# (KEEP=1 keeps everything raw; scripts/gate/lib/artifacts.sh).
 trap 'art_prune "$OUT"' EXIT
 cases=()
 case "$mode" in
@@ -186,7 +186,7 @@ if [ "$mode" = x87 ]; then
     command -v "$cc" >/dev/null || continue
     for opt in -O0 -O2 -O3 "-O2 -march=x86-64-v3"; do
       tag="$cc${opt// /}"
-      for src in "$root/validation/hardware-comparison/amd64/harvest/x87/ld.c" "$root/scripts/coverage/ccorpus/abi.c"; do
+      for src in "$root/validation/hardware-comparison/amd64/harvest/x87/ld.c" "$root/scripts/dev/coverage/ccorpus/abi.c"; do
         # shellcheck disable=SC2086
         $cc $opt -fPIC -pthread -c -o "$corpus/$(basename "$src" .c)-$tag.o" "$src"
       done
@@ -208,7 +208,7 @@ if [ "$mode" = sse ]; then
   for cc in gcc clang; do
     command -v "$cc" >/dev/null || continue
     for o in -O2 -O3; do
-      for f in "$root"/scripts/coverage/ccorpus/*.c "$root"/examples/cgo/ccover.c; do
+      for f in "$root"/scripts/dev/coverage/ccorpus/*.c "$root"/examples/cgo/ccover.c; do
         "$cc" $o -c -fPIC -g -I"$root/examples/cgo" -o "$corpus/c-$cc$o-$(basename "$f" .c).o" "$f"
       done
     done
@@ -242,7 +242,7 @@ if [ "$mode" = avx ]; then
   for cc in gcc clang; do
     command -v "$cc" >/dev/null || continue
     for o in -O2 -O3; do
-      for f in "$root"/scripts/coverage/ccorpus/*.c "$root"/examples/cgo/ccover.c "$root"/examples/cgo/vec/*.c; do
+      for f in "$root"/scripts/dev/coverage/ccorpus/*.c "$root"/examples/cgo/ccover.c "$root"/examples/cgo/vec/*.c; do
         "$cc" $o -march=x86-64-v3 -c -fPIC -g -I"$root/examples/cgo" -I"$root/examples/cgo/vec" \
           -o "$corpus/c-$cc$o-$(basename "$f" .c).o" "$f"
       done

@@ -52,7 +52,7 @@ func ensureFixture(fixture, userSeed, exampleBin string) error {
 	if embeddedOnly {
 		// Only what depends on neither this checkout's build nor the user's cache: the embedded framework's build and its
 		// replay verdict, built cold in the fixture. This is the gate's pre-fixture-emb stage, which starts at t=0 while
-		// pre-lake, pre-stamp and pre-warm still write the checkout's build and the user's cache (scripts/lib/dag.sh).
+		// pre-lake, pre-stamp and pre-warm still write the checkout's build and the user's cache (scripts/gate/lib/dag.sh).
 		userSeed = ""
 	}
 	if err := os.MkdirAll(fixture, 0o755); err != nil {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Print the extra `janus extract` arguments of an examples/basic function, one per line: the
 # dynamic call targets its theorem states, or the runtime contracts it leaves out (docs/PROOFS.md, "Dynamic calls"). Nothing for most
-# functions. Used by scripts/verify-examples.sh and scripts/build-examples-amd64.sh.
+# functions. Used by scripts/verify/verify-examples.sh and scripts/build/build-examples-amd64.sh.
 case "$1" in
   # stack growth (R7, docs/RUNTIME-CONTRACTS.md "Stack growth"): the functions' pclntab frame
   # records (SP deltas, stack maps), which the theorems' frame tables agree with

@@ -20,7 +20,7 @@
 # (go build -buildmode=exe with external linking passes -no-pie), as janus extract requires.
 set -euo pipefail
 export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PATH="$PATH:/usr/local/go/bin"
 cc_amd64="${CC_AMD64:-gcc}"
 cc_arm64="${CC_ARM64:-aarch64-linux-gnu-gcc}"

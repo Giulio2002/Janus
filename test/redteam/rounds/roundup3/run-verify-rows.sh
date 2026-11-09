@@ -13,12 +13,12 @@ export PATH=/usr/local/go/bin:$PATH
 R=test/redteam/rounds/roundup3
 J="${JANUS_AUDIT_BIN:-$root/bin/janus}"
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || { CGO_ENABLED=0 go build -o "$J" ./cmd/janus && lake build Janus Janus.Tools.Audit >/dev/null || { echo "build failed"; exit 1; }; }
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
 W="$(mktemp -d "${TMPDIR:-/tmp}/janus-vrows.XXXXXX")" || exit 1
 trap 'rm -rf "$W"' EXIT
 mkdir -m 700 "$W/cache"; export JANUS_CACHE_DIR="${JANUS_CACHE_DIR:-$W/cache}"
-. scripts/example-contracts.sh
-mapfile -t tg < <(scripts/example-targets.sh Add)
+. scripts/verify/example-contracts.sh
+mapfile -t tg < <(scripts/verify/example-targets.sh Add)
 "$J" extract artifacts/examples-arm64 "$(example_symbol Add)" "$W/Add" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || { echo "extract Add failed"; exit 1; }
 . "$root/test/redteam/lib/blocked.sh"
 RT=/srv/janus-rt-n11/audit/roundn11
@@ -57,7 +57,7 @@ for n in N10 N11 N13 N16 N17 N18 N46 N50 N51 N52 N60 N62 N64 N65; do
 done
 # R01 is a statement about WriteTo (an abstract callee): against the Add artifact it never compiled ("too many variable names provided"),
 # so the row was rejected by Lean and exercised nothing. It needs the WriteTo extraction.
-mapfile -t tgW < <(scripts/example-targets.sh WriteTo)
+mapfile -t tgW < <(scripts/verify/example-targets.sh WriteTo)
 "$J" extract artifacts/examples-arm64 "$(example_symbol WriteTo)" "$W/WriteTo" ${tgW[@]+"${tgW[@]}"} >/dev/null 2>&1 || { echo "extract WriteTo failed"; bad=1; }
 ART="$W/WriteTo" check_rejected $RT/rows2/R01_R_pinned_false_in_pre.lean R01 Proof.correctness
 for f in $R/vrows/PIN*.lean; do check_rejected "$f" "$(basename "$f" .lean)" Proof.correctness; done
@@ -71,7 +71,7 @@ check_rejected $R/pair/PAIR4_witness_name_pairs_no_main.lean PAIR4 Proof.correct
 v=$(vrun "$W/Add" $R/pair/PAIR_ok_control.lean "" Proof.correctness Proof.extra Proof.Witness.nonvacuous Proof.Witness.extra)
 if [ "$v" = verified ]; then printf '%-34s verified ok\n' PAIR_ok_control; else printf '%-34s REJECTED   <-- BROKEN\n' PAIR_ok_control; bad=1; fi
 echo "== Faults / fact-conjunct anchoring (UP3d, on LoadThird)"
-mapfile -t tgL < <(scripts/example-targets.sh LoadThird)
+mapfile -t tgL < <(scripts/verify/example-targets.sh LoadThird)
 "$J" extract artifacts/examples-arm64 "$(example_symbol LoadThird)" "$W/LoadThird" ${tgL[@]+"${tgL[@]}"} >/dev/null 2>&1 || { echo "extract LoadThird failed"; bad=1; }
 FT="Proof.correctness Proof.faults Proof.Witness.nonvacuous Proof.Witness.faults"
 v=$(vrun "$W/LoadThird" $R/pair/FLT_ok_control.lean "" $FT)
@@ -90,7 +90,7 @@ ctlart[W02_d_ok]=MbarTypedmemmove; ctlart[W03_d_var_lower]=MbarTypedmemmove; ctl
 for n in C1_stub_control F01_live_stack4096 F08_newobj_live_ok W02_d_ok W03_d_var_lower V15_control_ok; do
   f=$(ls $RT/icall/$n.lean $RT/icall2/$n.lean 2>/dev/null | head -1); a=${ctlart[$n]}
   if [ "$a" = Add ]; then art="$W/Add"; else
-    art="$W/$a"; [ -d "$art" ] || { mapfile -t tg2 < <(scripts/example-targets.sh "$a"); "$J" extract artifacts/examples-arm64 "$(example_symbol "$a")" "$art" ${tg2[@]+"${tg2[@]}"} >/dev/null 2>&1 || echo "extract $a failed"; }
+    art="$W/$a"; [ -d "$art" ] || { mapfile -t tg2 < <(scripts/verify/example-targets.sh "$a"); "$J" extract artifacts/examples-arm64 "$(example_symbol "$a")" "$art" ${tg2[@]+"${tg2[@]}"} >/dev/null 2>&1 || echo "extract $a failed"; }
   fi
   o="$("$J" verify "$art" --proof "$f" --theorem Proof.correctness --janus-root "$root" --audit-only --no-result-cache 2>&1)"
   if printf '%s' "$o" | grep -q '^Audit-only:'; then printf '%-34s statement audit ok\n' "$n"; else printf '%-34s REJECTED   <-- BROKEN\n' "$n"; printf '%s\n' "$o" | grep -m2 '^Invalid' | cut -c1-300 | sed 's/^/    /'; bad=1; fi

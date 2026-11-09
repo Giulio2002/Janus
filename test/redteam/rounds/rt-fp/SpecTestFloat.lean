@@ -4,7 +4,7 @@ import Janus
 # The specifications themselves against Berkeley SoftFloat (docs/audit/AUDIT-FP.md, row SPEC-TF)
 
 `Janus.Float.add`/`mul`/`fma`/`truncInt` (`Janus/Float/Spec.lean`) are what the example theorems
-state. `scripts/testfloat.sh` checks the *machine models* against SoftFloat; this checks the
+state. `scripts/validation/testfloat.sh` checks the *machine models* against SoftFloat; this checks the
 *specifications* directly, so that "the IEEE sum" in a printed theorem is checked against an
 independent IEEE implementation and not only through the bridge lemmas:
 

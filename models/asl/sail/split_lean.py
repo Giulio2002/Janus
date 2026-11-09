@@ -12,7 +12,7 @@ Functions`, the `open`s), and `ArmASL.lean` becomes `import ArmASL.Part<last>`. 
 their order and their text are unchanged (each part ends with `end ArmASL.Functions`, so the
 namespaces are the same). Lake then caches and reports per part.
 
-With `--bytes B` (what `scripts/asl.sh gen` uses) the parts are filled greedily in order up to B
+With `--bytes B` (what `scripts/build/asl.sh gen` uses) the parts are filled greedily in order up to B
 bytes, and a declaration larger than B gets a part of its own: the memory of elaborating a part
 grows with its size (docs/design/ASL.md, "Memory"), so the few huge decode and system-register
 functions are isolated and the rest is cut into many small parts.

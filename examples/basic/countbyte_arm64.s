@@ -18,7 +18,7 @@ TEXT ·vCount(SB), NOSPLIT, $16-32
 //	size_t v_count(const uint8_t *p, size_t n, uint8_t c)
 //	{ size_t k = 0; for (size_t i = 0; i < n; i++) k += p[i] == c; return k; }
 //
-// (scripts/coverage/ccorpus/vec.c). The comments are objdump's disassembly, offsets from the
+// (scripts/dev/coverage/ccorpus/vec.c). The comments are objdump's disassembly, offsets from the
 // start of vCountC. The vectoriser turns the loop into a 16-byte loop
 // (CMEQ, AND with 1, ZIP1/ZIP2 widening to 64-bit lanes, UADDW/UADDW2 accumulation, ADDP)
 // followed by a scalar loop over the last n mod 16 bytes. Every branch in it is PC-relative

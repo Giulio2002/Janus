@@ -120,12 +120,12 @@ More in [docs/design/ARCHITECTURE.md](docs/design/ARCHITECTURE.md).
 
 ## Break it and watch the proof fail
 
-[`scripts/break-demo.sh`](scripts/break-demo.sh) copies `examples/basic`, changes `x + y` to `x - y`,
+[`scripts/archive/break-demo.sh`](scripts/archive/break-demo.sh) copies `examples/basic`, changes `x + y` to `x - y`,
 rebuilds, re-extracts, and runs the **unchanged** `Add.lean` against the new binary. The only thing
 that changed in the extraction is one word: `0x8b010000` (`add`) became `0xcb010000` (`sub`).
 
 ```console
-$ scripts/break-demo.sh
+$ scripts/archive/break-demo.sh
 == edited Add in a copy of examples/basic:
 6:func Add(x, y uint64) uint64 { return x - y }
 Extracted example.com/basic.Add: 1 function(s), 2 word(s), 0 stub(s), 0 data object(s) (0 bytes) into artifacts/WrongAdd/Extracted.lean
@@ -299,7 +299,7 @@ Go 1.26.0. Proofs:
 Each file starts with a plain-English summary of the theorem (the arm64 ones under **Guarantee** and
 **What it rules out**). Every proof uses only axioms from the allow-list `propext`, `Quot.sound`,
 `Classical.choice`. Reproduce with
-`scripts/verify-examples.sh` and `scripts/build-examples-amd64.sh && scripts/verify-amd64-examples.sh`.
+`scripts/verify/verify-examples.sh` and `scripts/build/build-examples-amd64.sh && scripts/verify/verify-amd64-examples.sh`.
 
 **Go calling C (cgo).** The C functions in [`examples/cgo`](examples/cgo) (gcc 15.2, `-O2`) are
 proved on both ISAs against the C calling conventions (`CEnsures`, [`Janus/CABI.lean`](Janus/CABI.lean),
@@ -307,7 +307,7 @@ proved on both ISAs against the C calling conventions (`CEnsures`, [`Janus/CABI.
 `c_store`. Go → C → Go is proved end to end for `Add` and `Sum`. The Go code, the cgo wrappers and
 the C code are all executed by the model, and only the `runtime.cgocall` stack and scheduler switch
 is a trusted contract, named in the statement (`EnsuresC … (CgoCall Extracted.program) …`). See
-[docs/FFI.md](docs/FFI.md) and `scripts/verify-cgo-examples.sh`.
+[docs/FFI.md](docs/FFI.md) and `scripts/verify/verify-cgo-examples.sh`.
 
 **Go talking to the kernel.** The functions in [`examples/sys`](examples/sys) make system calls,
 read the clocks and trap. Linux is the environment of the theorem (`Kernel.EnsuresK`): a kernel
@@ -318,7 +318,7 @@ with the trace unchanged; `NowNano` (`time.Now().UnixNano()`): the wall-clock re
 in nanoseconds; `Pid` (`syscall.Getpid()`); `MustNonNeg`: the negative path ends in a breakpoint
 trap (`Kernel.Traps`). All four on arm64 and amd64; see
 [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) ("The kernel") and
-`scripts/verify-sys-examples.sh`.
+`scripts/verify/verify-sys-examples.sh`.
 
 **Go assembly (ABI0).** Hand-written `.s` functions are verified like compiled Go, against their
 stack-based calling convention ABI0 (`Ensures0`, [`Janus/GoABI0.lean`](Janus/GoABI0.lean),
@@ -327,12 +327,12 @@ ISAs: `AddAsm` and the loop `XorSlice` (assembly), `Twice` (assembly calling a G
 the compiler's ABI0 → ABIInternal wrapper), `CallXor` (Go with a direct ABI0 call; on amd64 the
 `R14 = g` / `X15 = 0` re-entry is executed) and the ABIInternal → ABI0 wrapper of `XorSlice`.
 Callees compose through `Summary0`; nothing about assembly, wrappers or call sequences is assumed.
-See [docs/ABI0.md](docs/ABI0.md) and `scripts/verify-asm-examples.sh`.
+See [docs/ABI0.md](docs/ABI0.md) and `scripts/verify/verify-asm-examples.sh`.
 
 <!-- TODO(coordinator): the checkmarks come from a re-run on 2026-10-23 (14 arm64 proofs, 17 amd64
-Proof.correctness + Div/Get Proof.panics, and scripts/break-demo.sh: all Verified) with a janus binary
+Proof.correctness + Div/Get Proof.panics, and scripts/archive/break-demo.sh: all Verified) with a janus binary
 whose embedded framework has SHA-256 e9be8cd3…. Other agents were still editing Janus/Arm64/*.lean
-afterwards; re-run scripts/verify-examples.sh and scripts/verify-amd64-examples.sh on the final tree. -->
+afterwards; re-run scripts/verify/verify-examples.sh and scripts/verify/verify-amd64-examples.sh on the final tree. -->
 
 ## How we know the model is right
 
@@ -443,7 +443,7 @@ rejection in binary.go), but the audit doc should get a "Status after fixes" col
 ```sh
 git clone https://github.com/Giulio2002/Janus && cd Janus
 go build -o bin/janus ./cmd/janus                    # the Lean framework is embedded in the binary
-scripts/build-examples.sh                            # builds artifacts/examples-arm64
+scripts/build/build-examples.sh                            # builds artifacts/examples-arm64
 bin/janus list artifacts/examples-arm64 --filter example.com/basic.
 bin/janus extract artifacts/examples-arm64 example.com/basic.Add artifacts/Add
 bin/janus verify artifacts/Add --proof examples/proofs/Add.lean

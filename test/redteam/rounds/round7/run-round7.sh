@@ -7,13 +7,13 @@
 # likewise the consumer row J1a, test/redteam/rounds/round7/run-j1.sh, the lane r7j).
 # Writes only under test/redteam/rounds/round7/work/ and test/redteam/rounds/round7/bin/ (run-cache.sh: test/redteam/rounds/round7/work-cache/ and a temporary cache).
 # Usage: test/redteam/rounds/round7/run-round7.sh [-j N]   (the --fresh verifications, each a cold kernel replay of
-#        the framework, run N at once: scripts/lib/parallel.sh; fixtures are built first, in order)
+#        the framework, run N at once: scripts/gate/lib/parallel.sh; fixtures are built first, in order)
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../../../scripts/lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+# shellcheck source=../../../../scripts/gate/lib/parallel.sh
+. "$root/scripts/gate/lib/parallel.sh"
 par_init "$@"
 tmark "start"
 J="$root/test/redteam/rounds/round7/bin/janus"; mkdir -p "$(dirname "$J")"
@@ -21,7 +21,7 @@ J="$root/test/redteam/rounds/round7/bin/janus"; mkdir -p "$(dirname "$J")"
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
 W=test/redteam/rounds/round7/work; rm -rf "$W"; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1
 broken=()

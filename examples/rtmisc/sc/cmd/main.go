@@ -1,4 +1,4 @@
-// Command cmd links the size-specialised allocation example (scripts/build-examples-rtmisc.sh).
+// Command cmd links the size-specialised allocation example (scripts/build/build-examples-rtmisc.sh).
 package main
 
 import "example.com/rtmisc/sc"

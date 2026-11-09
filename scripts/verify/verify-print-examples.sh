@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the print/println examples (scripts/build-examples-print.sh), extract every proved function
+# Build the print/println examples (scripts/build/build-examples-print.sh), extract every proved function
 # on both ISAs into artifacts/print/<isa>/<Name>/, and verify examples/proofs-print/<isa>/<Name>.lean
 # against it with `janus verify` (kernel check, axiom audit, leanchecker replay). R8: the print
 # path is executed from the binary on top of the kernel model (Janus.Kernel.EnsuresK, fd 2); the
@@ -16,20 +16,20 @@
 # modules once per extraction and the four theorems of an example share that build (and the kernel
 # replay). Every example proves `correctness`, `full_output`, `Witness.nonvacuous` (all hypotheses
 # satisfiable together, with witness code at the contract addresses) and `Witness.returns`.
-# Usage: scripts/verify-print-examples.sh [-j N] [--list] [isa/Name ...]   (default: all, e.g. arm64/PrintX)
-#   -j N     rows at once (default: $JANUS_JOBS, else see scripts/lib/parallel.sh)
-#   --list   print the default rows, one per line, and exit (scripts/verify-all-examples.sh queues them).
+# Usage: scripts/verify/verify-print-examples.sh [-j N] [--list] [isa/Name ...]   (default: all, e.g. arm64/PrintX)
+#   -j N     rows at once (default: $JANUS_JOBS, else see scripts/gate/lib/parallel.sh)
+#   --list   print the default rows, one per line, and exit (scripts/verify/verify-all-examples.sh queues them).
 # Writes artifacts/print/<isa>/<Name>/verified.json and a summary to
 # artifacts/verify-print-examples.txt.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
-. "$root/scripts/lib/itemtimeout.sh"
+. "$root/scripts/gate/lib/itemtimeout.sh"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+. "$root/scripts/gate/lib/parallel.sh"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 
 all=(PrintX PrintBool PrintNeg PrintStr)
 default_rows() {
@@ -51,19 +51,19 @@ names=("$@")
 
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
   CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
-  scripts/build-examples-print.sh >/dev/null
+  scripts/build/build-examples-print.sh >/dev/null
 fi
 # PrintProofs/<Isa>/Code.lean is the code of the binary, and the example modules are generated from
 # the Main modules (a stale file fails the run)
-python3 -I scripts/gen-print-code.py --check
-for i in arm64 amd64; do python3 -I scripts/gen-print-examples.py --check $i; done
+python3 -I scripts/dev/gen-print-code.py --check
+for i in arm64 amd64; do python3 -I scripts/dev/gen-print-examples.py --check $i; done
 extra=()
 [ -n "${JANUS_ROOT:-}" ] && extra=(--janus-root "$JANUS_ROOT")
 
 # verify a snapshot of the proof package (a sibling of examples/proofs-print, so that its path
 # dependency on the framework resolves the same way): editing the sources while a run is in
 # progress does not make it fail with "sources changed during verification"
-# (JANUS_PRINT_SNAPSHOT=DIR: scripts/verify-all-examples.sh made one snapshot for all its print items,
+# (JANUS_PRINT_SNAPSHOT=DIR: scripts/verify/verify-all-examples.sh made one snapshot for all its print items,
 # so that they share the consumer workspace and the lemma modules built in it)
 if [ -n "${JANUS_PRINT_SNAPSHOT:-}" ] && [ -d "$JANUS_PRINT_SNAPSHOT/PrintProofs" ]; then
   snap="$JANUS_PRINT_SNAPSHOT"
@@ -72,7 +72,7 @@ else
   trap 'rm -rf "$snap"' EXIT
   cp -r examples/proofs-print/. "$snap"/
 fi
-. scripts/lib/incr.sh
+. scripts/gate/lib/incr.sh
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-print-examples.txt}"
 : > "$summary"
 lines="$(mktemp -d)"
@@ -88,7 +88,7 @@ verify_one() {
   for m in "${all[@]}"; do [ "$m" = "$n" ] || others="${others:+$others,}example.com/print.$m"; done
   bin/janus extract "artifacts/examples-print-$isa" "example.com/print.$n" "$out" --targets "$others" \
     --contract runtime.lock2 --contract runtime.unlock2 --contract runtime.memmove >/dev/null 2>&1
-  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs.
+  # the incremental gate (scripts/gate/lib/incr.sh): skipped only on the record of a PASS with identical inputs.
   # The package is the consumer workspace of the proof: its sources (the live tree: the snapshot is a copy
   # of it), checked against the embedded framework and the checkout its lakefile depends on.
   local -a ispec=(--fw embedded --fw dir:. --pkg examples/proofs-print --proof "examples/proofs-print/PrintProofs/${isa^}/$n.lean"

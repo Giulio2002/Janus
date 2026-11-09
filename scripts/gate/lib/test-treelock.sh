@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test of the shared-ASL-tree lock discipline (scripts/asl.sh tl_run + scripts/lib/lanelake/lake):
+# Self-test of the shared-ASL-tree lock discipline (scripts/build/asl.sh tl_run + scripts/gate/lib/lanelake/lake):
 #  1. two lanes (asl-verify-like and rtasl-replay-like) run their write phases (a NON-lake module-cache restore that
 #     rewrites a shared file, then a fake `lake build`) CONCURRENTLY in ONE tree: no two writers ever overlap;
 #  2. a fake janus (--janus-root = the tree: holds <tree>/.lake/janus-framework.lock SHARED for its whole run, as
@@ -8,13 +8,13 @@
 #  3. a reader phase (tl_run s) runs beside other readers but not beside a writer.
 set -uo pipefail
 unset POOL_TIMELINE JANUS_POOL_DIR JANUS_GATE_PG
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; repo="$(cd "$here/../.." && pwd)"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; repo="$(cd "$here/../../.." && pwd)"
 t="$(mktemp -d "${TMPDIR:-/tmp}/test-treelock.XXXXXX")"; trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
-tree="$t/tree"; mkdir -p "$tree/models/asl/.lake" "$tree/.lake/build" "$tree/scripts/lib"; : > "$tree/models/asl/lakefile.toml" "$tree/scripts/lib"
-cp -r "$here/lanelake" "$tree/scripts/lib/"; echo v1 > "$tree/.lake/build/Janus.olean"
+tree="$t/tree"; mkdir -p "$tree/models/asl/.lake" "$tree/.lake/build" "$tree/scripts/gate/lib"; : > "$tree/models/asl/lakefile.toml" "$tree/scripts/gate/lib"
+cp -r "$here/lanelake" "$tree/scripts/gate/lib/"; echo v1 > "$tree/.lake/build/Janus.olean"
 # tl_run as asl.sh defines it (extracted, so the test runs the real text)
-sed -n '/^tl_run() {/,/^_TL_SELF=/p' "$repo/scripts/asl.sh" > "$t/tl.sh"; pkg="$tree/models/asl"
+sed -n '/^tl_run() {/,/^_TL_SELF=/p' "$repo/scripts/build/asl.sh" > "$t/tl.sh"; pkg="$tree/models/asl"
 cat > "$t/fakelake" <<'EOS'
 #!/usr/bin/env bash
 # fake lake: "build" rewrites the framework olean slowly (replay does) and logs the interval
@@ -45,7 +45,7 @@ tl_run x phase_w; tl_run s phase_r
 EOS
 chmod +x "$t"/fake* "$t/lane.sh"
 export FAKE_LOG="$t/log" FAKE_TREE="$tree" FAKE_T="$t" FAKE_ROOT="$tree" JANUS_REAL_LAKE="$t/fakelake" \
-       JANUS_LANE_TREE="$tree" JANUS_LANE_LAKE_LOCK=1 PATH="$tree/scripts/lib/lanelake:$PATH"
+       JANUS_LANE_TREE="$tree" JANUS_LANE_LAKE_LOCK=1 PATH="$tree/scripts/gate/lib/lanelake:$PATH"
 cp "$t/fakelake" "$t/lake_real"; ln -sf "$t/fakelake" "$t/lake"   # `lake` resolves to the wrapper first on PATH
 ( cd "$tree/models/asl" && "$t/lane.sh" ) & ( cd "$tree/models/asl" && "$t/lane.sh" ) & ( cd "$tree/models/asl" && "$t/lane.sh" ) &
 ( cd "$tree" && "$t/fakejanus" ) & ( cd "$tree" && "$t/fakejanus" ) &
@@ -83,12 +83,12 @@ PY
 # keyed by the resolved directory, so writers in different trees still serialise
 shared="$t/shared/.lake"; mkdir -p "$shared"
 for n in A B; do
-  mkdir -p "$t/t$n/models/asl" "$t/t$n/.lake/build" "$t/t$n/scripts/lib"; : > "$t/t$n/models/asl/lakefile.toml"
-  ln -sfn "$shared" "$t/t$n/models/asl/.lake"; cp -r "$here/lanelake" "$t/t$n/scripts/lib/"; echo v1 > "$t/t$n/.lake/build/Janus.olean"
+  mkdir -p "$t/t$n/models/asl" "$t/t$n/.lake/build" "$t/t$n/scripts/gate/lib"; : > "$t/t$n/models/asl/lakefile.toml"
+  ln -sfn "$shared" "$t/t$n/models/asl/.lake"; cp -r "$here/lanelake" "$t/t$n/scripts/gate/lib/"; echo v1 > "$t/t$n/.lake/build/Janus.olean"
 done
 : > "$t/log"
 for n in A B A B; do
-  ( export FAKE_TREE="$t/t$n" FAKE_ROOT="$t/t$n" JANUS_LANE_TREE="$t/t$n" PATH="$t/t$n/scripts/lib/lanelake:$PATH"; cd "$t/t$n/models/asl" && "$t/lane.sh" ) &
+  ( export FAKE_TREE="$t/t$n" FAKE_ROOT="$t/t$n" JANUS_LANE_TREE="$t/t$n" PATH="$t/t$n/scripts/gate/lib/lanelake:$PATH"; cd "$t/t$n/models/asl" && "$t/lane.sh" ) &
 done
 wait
 python3 -I - "$t/log" <<'PY' && ok "trees sharing one .lake by symlink: writers of different trees never overlap" || bad "writers of two trees sharing a .lake overlapped"

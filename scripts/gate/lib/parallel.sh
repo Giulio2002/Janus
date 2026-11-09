@@ -70,7 +70,7 @@ par_init() {
     trap "rm -rf '$PAR_DIR'" EXIT
   fi
   declare -p broken >/dev/null 2>&1 || broken=()
-  # With scripts/lib/memguard.sh (cgroup v2 memory limits) loaded, every parallel block runs under
+  # With scripts/gate/lib/memguard.sh (cgroup v2 memory limits) loaded, every parallel block runs under
   # a job limit of $JANUS_JOB_MEM (default 10G, the budget above); janus nests its per-process
   # limits inside it. A block that hits it is OOM-killed inside its cgroup only and counts as
   # broken. Without memguard the blocks run unguarded (the admission check still applies).
@@ -84,7 +84,7 @@ par_init() {
 # Timing (opt-in, JANUS_TIMES_FILE=path): every block appends "<start> <end> <script> <label>" (epoch
 # seconds; the label is the first 60 characters of its code) and `tmark LABEL` appends a section mark
 # "<epoch> - <script> mark: LABEL", so a lane's time can be attributed per block and section
-# (scripts/lib/times-report.sh). Nothing else changes.
+# (scripts/gate/lib/times-report.sh). Nothing else changes.
 tmark() {
   [ -n "${JANUS_TIMES_FILE:-}" ] || return 0
   printf '%s\t-\t%s\tmark: %s\n' "$(date +%s.%N)" "$(basename "$0")" "$*" >> "$JANUS_TIMES_FILE"
@@ -116,7 +116,7 @@ par_run() {
   (
     broken=()
     if [ -n "$PAR_GUARD" ]; then
-      # The block runs in a child bash under the job's memory limit (scripts/lib/memguard.sh);
+      # The block runs in a child bash under the job's memory limit (scripts/gate/lib/memguard.sh);
       # its `broken` rows come back through a file.
       export PAR_BLOCK="$1" PAR_BROKEN_FILE="$PAR_DIR/$__par_i.inner"
       # The child bash gets the caller's functions and its shell variables as they are now.

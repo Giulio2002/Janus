@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cache-vs-cold comparison for the nightly cold gate (scripts/nightly-cold-gate.sh; docs/TESTING.md
+"""Cache-vs-cold comparison for the nightly cold gate (scripts/gate/nightly-cold-gate.sh; docs/TESTING.md
 "Build cache policy").
 
     gate-cachecmp.py hashes WORKTREE OUT.json     SHA-256 of the build artifacts the ASL/Sail caches serve:
@@ -9,7 +9,7 @@
                                                   and the Sail oracle driver binary, plus the build
                                                   configuration the driver depends on (config:SAIL_SPLIT from
                                                   the environment, default 1, and config:SAIL_SPLIT_PARTS from
-                                                  scripts/oracle-sail.sh), which is not part of the digest
+                                                  scripts/validation/sail-arm.sh), which is not part of the digest
     gate-cachecmp.py compare CACHED_OUT COLD_OUT  compare two gate output directories (timeline.jsonl and
                                                   artifact-hashes.json each)
 
@@ -35,7 +35,7 @@ something the inputs do not determine, or a key misses an input); 2 when a run c
 or malformed files, different commits, or DIFFERENT BUILD CONFIGURATION: the cached and the cold run recorded
 another SAIL_SPLIT or parts count, so their drivers differ by construction and a difference between them says nothing
 about the cache; reported as a CONFIGURATION MISMATCH, never as a P0 CACHE BUG, and never a pass. Run both gates with
-the same SAIL_SPLIT set explicitly (scripts/nightly-cold-gate.sh does))."""
+the same SAIL_SPLIT set explicitly (scripts/gate/nightly-cold-gate.sh does))."""
 import hashlib
 import json
 import os
@@ -63,7 +63,7 @@ def sha_file(p):
     return h.hexdigest()
 
 
-TRUSTED_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TRUSTED_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def digest_tool():
@@ -189,7 +189,7 @@ def config(worktree):
     """The build configuration the Sail driver is a function of, recorded next to its hash."""
     parts = "unknown"
     try:
-        m = re.search(r"^SAIL_SPLIT_PARTS=(\d+)\s*$", open(os.path.join(worktree, "scripts", "oracle-sail.sh")).read(), re.M)
+        m = re.search(r"^SAIL_SPLIT_PARTS=(\d+)\s*$", open(os.path.join(worktree, "scripts", "sail-arm.sh")).read(), re.M)
         if m:
             parts = m.group(1)
     except OSError:

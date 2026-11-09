@@ -1,4 +1,4 @@
-# Sourced by scripts/verify-examples.sh and scripts/verify-amd64-examples.sh: verify several
+# Sourced by scripts/verify/verify-examples.sh and scripts/verify/verify-amd64-examples.sh: verify several
 # theorems of one proof file against one extraction in ONE `janus verify` run.
 #
 #   verify_theorems OUTDIR PROOF STATUSDIR THEOREM... [-- JANUS-VERIFY-ARGS...]

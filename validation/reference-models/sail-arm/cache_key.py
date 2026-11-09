@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The key of the Sail oracle driver's build cache (scripts/oracle-sail.sh; docs/SOUNDNESS.md
+"""The key of the Sail oracle driver's build cache (scripts/validation/sail-arm.sh; docs/SOUNDNESS.md
 "Build caches").
 
     python3 -I validation/reference-models/sail-arm/cache_key.py ROOT --pins K=V ... [--model-file F] [--show]

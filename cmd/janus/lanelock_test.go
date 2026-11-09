@@ -8,9 +8,9 @@ import (
 )
 
 // The framework build runs `lake build` as a child while janus holds the framework lock EXCLUSIVELY. A lock-taking lake wrapper
-// (scripts/lib/lanelake/lake) waits for that lock unless the child is told its parent holds it: leanRunner.heldFW puts it in
+// (scripts/gate/lib/lanelake/lake) waits for that lock unless the child is told its parent holds it: leanRunner.heldFW puts it in
 // JANUS_FRAMEWORK_LOCK_HELD_X; without heldFW the variable is absent, even if the caller's own environment has one (a claim is
-// never inherited). scripts/lib/test-lanelake.sh checks the wrapper's side (it hangs without the claim and is not weakened).
+// never inherited). scripts/gate/lib/test-lanelake.sh checks the wrapper's side (it hangs without the claim and is not weakened).
 func TestLeanRunnerClaimsTheFrameworkLockOnlyWhenHeld(t *testing.T) {
 	dir := t.TempDir()
 	fake := filepath.Join(dir, "lake")

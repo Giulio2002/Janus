@@ -3,7 +3,7 @@ import Janus.Spec.String
 /-!
 # Tests for the UTF-8 specifications (`Janus.Spec.String`) against the Go runtime
 
-The vectors below were printed by the Go 1.26.0 runtime itself (`scripts/utf8vectors`,
+The vectors below were printed by the Go 1.26.0 runtime itself (`scripts/dev/utf8vectors`,
 `GOTOOLCHAIN=go1.26.0 go run -ldflags=-checklinkname=0 .` there): `for range` over byte strings (every single byte,
 every lead byte followed by edge bytes, 3- and 4-byte sequences around every boundary, truncated
 and random strings), `runtime.decoderune(s, k)` for every `k ≤ len(s)` (also at ASCII and

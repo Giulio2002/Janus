@@ -1,5 +1,5 @@
 // Package checkptr is built with -gcflags=example.com/rtmisc/checkptr=-d=checkptr
-// (scripts/build-examples-rtmisc.sh): every conversion of an unsafe.Pointer to a pointer type
+// (scripts/build/build-examples-rtmisc.sh): every conversion of an unsafe.Pointer to a pointer type
 // calls runtime.checkptrAlignment.
 package checkptr
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The key of the shared ArmASL build cache (scripts/asl.sh, ASL_CACHE; docs/design/ASL.md "Build cache").
+"""The key of the shared ArmASL build cache (scripts/build/asl.sh, ASL_CACHE; docs/design/ASL.md "Build cache").
 
     python3 -I models/asl/tools/asl_cache_key.py REPO_ROOT          the key (32 hex digits)
     python3 -I models/asl/tools/asl_cache_key.py REPO_ROOT --show   the canonical inputs it hashes
@@ -82,9 +82,9 @@ ENV_KEYS.remove("TMPDIR_NOT_KEYED")
 
 
 # Scheduling-only variable: how many threads Lean/Lake run, never what is computed. It is NOT keyed.
-# scripts/asl.sh sets LEAN_NUM_THREADS itself for every lake call (from its memory budget, ASL_JOBS), so the
+# scripts/build/asl.sh sets LEAN_NUM_THREADS itself for every lake call (from its memory budget, ASL_JOBS), so the
 # ambient value never reaches a build anyway, and the gate's lanes (LEAN_NUM_THREADS=4) must hit the entries a
-# standalone run (unset) published. Outputs are byte-identical across thread counts: scripts/lib/test-thread-identity.sh
+# standalone run (unset) published. Outputs are byte-identical across thread counts: scripts/gate/lib/test-thread-identity.sh
 # builds the same modules with 1 and with 4 threads and compares the SHA-256 of every .olean/.ilean//.c output
 # (docs/SOUNDNESS.md "Build caches"). Any other LEAN_*/LAKE_* variable stays keyed.
 SCHEDULING_ENV = {"LEAN_NUM_THREADS"}

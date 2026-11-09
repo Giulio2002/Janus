@@ -129,7 +129,7 @@ func checkResourceLimit(t *testing.T, out string, report string) {
 
 // TestMemGuardKillsHungryProof runs a deliberately memory-hungry proof in a separate janus
 // process under a 1 GiB limit: directly (the detected mechanism), and nested in a job-level guard
-// of scripts/lib/memguard.sh (janus then limits its jobs with child cgroups of that guard).
+// of scripts/gate/lib/memguard.sh (janus then limits its jobs with child cgroups of that guard).
 func TestMemGuardKillsHungryProof(t *testing.T) {
 	defer parallel(t)()
 	needLean(t)
@@ -168,9 +168,9 @@ func TestMemGuardKillsHungryProof(t *testing.T) {
 		if mech == "cgroup" {
 			t.Skip("already nested")
 		}
-		// A 4 GiB job-level guard (as scripts/lib/parallel.sh gives each slot) around janus,
+		// A 4 GiB job-level guard (as scripts/gate/lib/parallel.sh gives each slot) around janus,
 		// whose per-job limit is 1 GiB: the job is killed by janus's own child cgroup.
-		code, out := verify(base, "bash", filepath.Join(repoRoot, "scripts", "lib", "memguard.sh"), "run", "-l", "4G", "-n", "slot", "--", bin)
+		code, out := verify(base, "bash", filepath.Join(repoRoot, "scripts", "gate", "lib", "memguard.sh"), "run", "-l", "4G", "-n", "slot", "--", bin)
 		if code != 1 {
 			t.Fatalf("exit %d:\n%s", code, out)
 		}
@@ -276,13 +276,13 @@ func TestMemOutcomeSkip(t *testing.T) {
 	}
 }
 
-// TestMemguardShell exercises scripts/lib/memguard.sh as the runner scripts use it (sourced
+// TestMemguardShell exercises scripts/gate/lib/memguard.sh as the runner scripts use it (sourced
 // under set -euo pipefail): a command's status passes through, a command over its limit is
 // OOM-killed (137) with the summary line, nested guards report only their own kills, and no
 // cgroup is left behind. The memory hog is bash holding a 600 MiB string under a 300M limit.
 func TestMemguardShell(t *testing.T) {
 	defer parallel(t)()
-	lib := filepath.Join(repoRoot, "scripts", "lib", "memguard.sh")
+	lib := filepath.Join(repoRoot, "scripts", "gate", "lib", "memguard.sh")
 	mech, err := exec.Command("bash", lib, "mechanism").Output()
 	m := strings.TrimSpace(string(mech))
 	if err != nil || (m != "cgroup" && m != "systemd-user" && m != "systemd-system") {

@@ -2,7 +2,7 @@ import JanusASL.Proofs
 import JanusASL.Verify
 import Lean
 
-/-! Audit of the JanusASL theorems (`scripts/asl.sh prove`).
+/-! Audit of the JanusASL theorems (`scripts/build/asl.sh prove`).
 
 * The audited theorems are an explicit list. Each must exist and be a theorem; a declaration under
   `JanusASL` named `*_agree`, `*_asl` or `*toASL` that is not on the list fails the audit, so a
@@ -99,7 +99,7 @@ def janusAslAudited : List Name := [
 theorem, and every present one is audited like the rest. The four example transfers are either the
 hand-copied `JanusASL.Examples.<X>.correctness_asl` or, once the `janus verify --asl` integration
 is merged (it derives them per run as `JanusASLCorollary.correctness_asl` from the artifacts; see
-`scripts/asl.sh verify`), its soundness theorem `JanusASL.Verify.classify_sound`. On that merge this
+`scripts/build/asl.sh verify`), its soundness theorem `JanusASL.Verify.classify_sound`. On that merge this
 file must also `import JanusASL.Verify`; without it neither name is present and the audit fails. -/
 def janusAslAlternatives : List (List Name) := [
     [`JanusASL.Examples.Add128.correctness_asl, `JanusASL.Verify.classify_sound],

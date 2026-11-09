@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""amd64 K24 call-site upgrade: python3 scripts/jx1_k24amd.py Lookup|Insert"""
+"""amd64 K24 call-site upgrade: python3 scripts/archive/jx1_k24amd.py Lookup|Insert"""
 import sys
 which=sys.argv[1]
 p=f'examples/proofs-amd64/{which}K24/Proof.lean'

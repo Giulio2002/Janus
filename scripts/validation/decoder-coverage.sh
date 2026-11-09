@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Decoder coverage of the arm64 examples (`janus blockers`): every example, extracted as its proof extracts it,
-# must decode fully. Shared by .github/workflows/ci.yml and scripts/gate.sh (lane `decoder`).
+# must decode fully. Shared by .github/workflows/ci.yml and scripts/gate/gate.sh (lane `decoder`).
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 [ -x bin/janus ] || CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
-. scripts/example-contracts.sh
-mapfile -t names < <(sed -n '/^all=(/,/)/p' scripts/verify-examples.sh | tr -d '()' | sed 's/^all=//' | tr ' ' '\n' | grep -v '^$')
+. scripts/verify/example-contracts.sh
+mapfile -t names < <(sed -n '/^all=(/,/)/p' scripts/verify/verify-examples.sh | tr -d '()' | sed 's/^all=//' | tr ' ' '\n' | grep -v '^$')
 [ "${#names[@]}" -gt 0 ] || { echo "no examples found" >&2; exit 1; }
 # Every example, extracted as its proof extracts it (the --contract arguments of
-# scripts/example-targets.sh), must decode fully, including the LL/SC (LDAXR/STLXR)
+# scripts/verify/example-targets.sh), must decode fully, including the LL/SC (LDAXR/STLXR)
 # fallback loops Go emits next to the LSE path of sync/atomic callers: the
 # store-exclusive is modelled (exclusive monitor + environment choice,
 # docs/SOUNDNESS.md). The one exception is MapAccess1Small (runtime.mapaccess1_fast64
@@ -17,7 +17,7 @@ mapfile -t names < <(sed -n '/^all=(/,/)/p' scripts/verify-examples.sh | tr -d '
 bad=0
 bl="${BLOCKERS_OUT:-$(mktemp -d)}"; mkdir -p "$bl"
 for n in "${names[@]}"; do
-  mapfile -t targs < <(scripts/example-targets.sh "$n")
+  mapfile -t targs < <(scripts/verify/example-targets.sh "$n")
   args=()
   for ((k = 0; k < ${#targs[@]}; k++)); do
     [ "${targs[k]}" = --contract ] && args+=(--contract "${targs[k+1]}")

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Read-only guard of the shared framework build (scripts/gate.sh, phase 2). Put first on PATH after the
+# Read-only guard of the shared framework build (scripts/gate/gate.sh, phase 2). Put first on PATH after the
 # prebuild. `lake build` / `lake exe` in the checkout's own package (the one whose .lake holds the framework
 # oleans that verifications pin) never builds: `lake build --no-build` fails with exit 3 when anything is
 # stale, which means the prebuild missed a target (a real bug to fix there), never "build it now" while other

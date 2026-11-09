@@ -12,14 +12,14 @@ J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
 if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; go build -o "$J" ./cmd/janus || exit 1; fi
 if [ "${JANUS_AUDIT_PREBUILT:-}" != 1 ]; then
   lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
-  [ -f artifacts/examples-amd64 ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
+  [ -f artifacts/examples-amd64 ] || bash scripts/build/build-examples-amd64.sh >/dev/null 2>&1
 fi
 W=$R/work; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-roundn9.XXXXXX")" || exit 1
 trap 'rm -rf "$T"' EXIT
 mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"
-. scripts/example-contracts.sh
-mapfile -t tg < <(scripts/example-targets.sh ErrWrap)
+. scripts/verify/example-contracts.sh
+mapfile -t tg < <(scripts/verify/example-targets.sh ErrWrap)
 "$J" extract artifacts/examples-amd64 "$(example_symbol ErrWrap)" "$W/ErrWrap64" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
 broken=()
 P=Proof

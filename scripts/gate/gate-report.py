@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Report of a gate run: python3 -I scripts/gate-report.py artifacts/gate/<run>/timeline.jsonl [--json]
+"""Report of a gate run: python3 -I scripts/gate/gate-report.py artifacts/gate/<run>/timeline.jsonl [--json]
 
-Reads the machine-readable timeline written by scripts/gate.sh (one JSON object per line):
+Reads the machine-readable timeline written by scripts/gate/gate.sh (one JSON object per line):
   {"kind":"gate",...}                     the run (commit, jobs, lanes, host load)
   {"kind":"prebuild"|"stage",...}         prebuild steps and stages (start/end epoch seconds, wall, rc)
   {"kind":"item","pool":P,"id":I,...}     one finished item or lane of pool P (status PASS/FAIL/TIMEOUT/...)

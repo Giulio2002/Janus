@@ -32,7 +32,7 @@ zeroed: **exactly what the contract `MallocgcContract` promises** for such a req
 the inlined `acquirem`, `getMCache`, `nextFreeFast` and `releasem` (281 instructions) are executed
 from the binary: 12 paths (`nextFreeFast`'s two ways past the refill test, `needzero` set or
 not, `m.locks` and pending preemption), merged where they rejoin (`janus.merge`), so 167 steps. Every slow path is a contract (`janus extract --contract`, see
-`scripts/example-contracts.sh`) that `MCacheOK` makes unreachable, so the statement assumes
+`scripts/verify/example-contracts.sh`) that `MCacheOK` makes unreachable, so the statement assumes
 nothing about them: `mallocgcTiny`, `mallocgcSmallScan*`, `mallocgcLarge`, `(*mcache).nextFree`
 (refill from `mcentral`/`mheap`), `memclrNoHeapPointers`, `gcmarknewobject`, `profilealloc`,
 `gcTrigger.test`/`gcStart`, `deductAssistCredit`, `pre/postMallocgcDebug`, `throw`. The addresses

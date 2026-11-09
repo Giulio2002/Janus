@@ -1,5 +1,5 @@
 // Package softf is built with -gcflags=example.com/rtmisc/softf=-d=softfloat
-// (scripts/build-examples-rtmisc.sh): every floating-point operation is a call of the runtime's
+// (scripts/build/build-examples-rtmisc.sh): every floating-point operation is a call of the runtime's
 // software floating point (runtime/softfloat64.go). The functions take and return the IEEE 754
 // encodings, so that their arguments and results are in integer registers. They are the examples
 // of the contracts Janus.Contracts.SoftFloat (docs/RUNTIME-CONTRACTS.md, "Soft float and

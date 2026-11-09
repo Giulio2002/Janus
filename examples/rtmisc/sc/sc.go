@@ -1,4 +1,4 @@
-// Package sc is built with GOEXPERIMENT=sizespecializedmalloc (scripts/build-examples-rtmisc.sh,
+// Package sc is built with GOEXPERIMENT=sizespecializedmalloc (scripts/build/build-examples-rtmisc.sh,
 // a binary of its own): an allocation whose size the compiler knows calls the size-specialised
 // entry point of its size class (runtime/malloc_generated.go) instead of runtime.mallocgc.
 package sc

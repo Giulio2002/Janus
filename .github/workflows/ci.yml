@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: No sorry / native_decide / bv_decide / admit
-        run: scripts/ci-axiom-guard.sh
+        run: scripts/gate/ci-axiom-guard.sh
 
       # Keys of the shared JanusASL build caches (ArmASL entry and per-module entries): edits that
       # cannot change a build keep its key, edits that can change it (seconds; docs/design/ASL.md).
@@ -60,7 +60,7 @@ jobs:
           bwrap --ro-bind / / --unshare-all --dev /dev --proc /proc --tmpfs /tmp true \
             && echo "bubblewrap works" || echo "WARNING: bubblewrap self-test failed"
 
-      # Memory guard: janus and scripts/lib/memguard.sh run every Lean job (lean, leanchecker,
+      # Memory guard: janus and scripts/gate/lib/memguard.sh run every Lean job (lean, leanchecker,
       # lake, go test) inside a cgroup v2 memory limit, through `systemd-run --user --scope`.
       # GitHub's runners have systemd but no user manager for the runner account until it lingers;
       # start one and export its runtime dir. Without it the guard degrades to prlimit (or none)
@@ -75,8 +75,8 @@ jobs:
           echo "XDG_RUNTIME_DIR=/run/user/$uid" >> "$GITHUB_ENV"
           echo "JANUS_MEM_MAX=12G" >> "$GITHUB_ENV"
           export XDG_RUNTIME_DIR="/run/user/$uid" JANUS_MEM_MAX=12G
-          echo "memguard mechanism: $(bash scripts/lib/memguard.sh mechanism)"
-          bash scripts/lib/memguard.sh run -l 1G -n ci-probe -- true
+          echo "memguard mechanism: $(bash scripts/gate/lib/memguard.sh mechanism)"
+          bash scripts/gate/lib/memguard.sh run -l 1G -n ci-probe -- true
           go run ./cmd/janus memguard || true
 
       # elan installs the toolchain pinned in lean-toolchain on first use.
@@ -109,19 +109,19 @@ jobs:
             lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}-
 
       - name: lake build Janus JanusTests
-        run: bash scripts/lib/memguard.sh lake build Janus JanusTests
+        run: bash scripts/gate/lib/memguard.sh lake build Janus JanusTests
 
       - name: go vet
         run: go vet ./...
 
       - name: Build examples
-        run: scripts/build-examples.sh
+        run: scripts/build/build-examples.sh
 
       # The Lean-running tests take longer than go test's default 10-minute timeout. The
       # independent ones are marked parallel; TestMain caps -parallel by memory (min(cores/4,
       # (MemAvailable - 32 GiB)/20 GiB), at least 1), which is 1 on a 4-core 16 GiB runner.
       - name: go test ./cmd/...
-        run: bash scripts/lib/memguard.sh run -n go-test -- go test -timeout 40m ./cmd/...
+        run: bash scripts/gate/lib/memguard.sh run -n go-test -- go test -timeout 40m ./cmd/...
 
   # The arm64 example proofs, decoder coverage, the qemu oracle and the docs/audit/AUDIT.md attacks.
   arm64:
@@ -152,7 +152,7 @@ jobs:
           bwrap --ro-bind / / --unshare-all --dev /dev --proc /proc --tmpfs /tmp true \
             && echo "bubblewrap works" || echo "WARNING: bubblewrap self-test failed"
 
-      # Memory guard: janus and scripts/lib/memguard.sh run every Lean job (lean, leanchecker,
+      # Memory guard: janus and scripts/gate/lib/memguard.sh run every Lean job (lean, leanchecker,
       # lake, go test) inside a cgroup v2 memory limit, through `systemd-run --user --scope`.
       # GitHub's runners have systemd but no user manager for the runner account until it lingers;
       # start one and export its runtime dir. Without it the guard degrades to prlimit (or none)
@@ -167,8 +167,8 @@ jobs:
           echo "XDG_RUNTIME_DIR=/run/user/$uid" >> "$GITHUB_ENV"
           echo "JANUS_MEM_MAX=12G" >> "$GITHUB_ENV"
           export XDG_RUNTIME_DIR="/run/user/$uid" JANUS_MEM_MAX=12G
-          echo "memguard mechanism: $(bash scripts/lib/memguard.sh mechanism)"
-          bash scripts/lib/memguard.sh run -l 1G -n ci-probe -- true
+          echo "memguard mechanism: $(bash scripts/gate/lib/memguard.sh mechanism)"
+          bash scripts/gate/lib/memguard.sh run -l 1G -n ci-probe -- true
           go run ./cmd/janus memguard || true
 
       # elan installs the toolchain pinned in lean-toolchain on first use.
@@ -201,28 +201,28 @@ jobs:
             lake-arm64-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}-
 
       - name: lake build Janus JanusTests
-        run: bash scripts/lib/memguard.sh lake build Janus JanusTests
+        run: bash scripts/gate/lib/memguard.sh lake build Janus JanusTests
 
-      # Builds and extracts the examples itself (scripts/build-examples.sh). JANUS_ROOT: verify
+      # Builds and extracts the examples itself (scripts/build/build-examples.sh). JANUS_ROOT: verify
       # against this checkout's Janus build (made above) instead of building the embedded copy of
       # the same sources a second time in ~/.cache/janus; the checks are the same (the embedded
-      # path is covered by go test). Proofs at once: scripts/lib/parallel.sh (memory-bounded).
+      # path is covered by go test). Proofs at once: scripts/gate/lib/parallel.sh (memory-bounded).
       - name: Verify example proofs
         env:
           JANUS_ROOT: ${{ github.workspace }}
-        run: scripts/verify-examples.sh
+        run: scripts/verify/verify-examples.sh
 
       - name: Decoder coverage of the examples (janus blockers)
         run: |
-          scripts/decoder-coverage.sh
+          scripts/validation/decoder-coverage.sh
 
       - name: Differential oracle vs qemu (quick)
         env:
           OUT: ${{ runner.temp }}/oracle
-          KEEP: "1" # raw verdicts.jsonl for the check below (scripts/lib/artifacts.sh)
+          KEEP: "1" # raw verdicts.jsonl for the check below (scripts/gate/lib/artifacts.sh)
         run: |
-          scripts/oracle.sh quick
-          # oracle.sh exits 1 on a mismatch; check the verdicts too (fail on any soundness mismatch).
+          scripts/validation/hardware-arm64.sh quick
+          # hardware-arm64.sh exits 1 on a mismatch; check the verdicts too (fail on any soundness mismatch).
           if grep -q '"verdict":"MISMATCH"' "$OUT/verdicts.jsonl"; then
             cat "$OUT/repro.md" || true
             exit 1
@@ -273,7 +273,7 @@ jobs:
           bwrap --ro-bind / / --unshare-all --dev /dev --proc /proc --tmpfs /tmp true \
             && echo "bubblewrap works" || echo "WARNING: bubblewrap self-test failed"
 
-      # Memory guard: janus and scripts/lib/memguard.sh run every Lean job (lean, leanchecker,
+      # Memory guard: janus and scripts/gate/lib/memguard.sh run every Lean job (lean, leanchecker,
       # lake, go test) inside a cgroup v2 memory limit, through `systemd-run --user --scope`.
       # GitHub's runners have systemd but no user manager for the runner account until it lingers;
       # start one and export its runtime dir. Without it the guard degrades to prlimit (or none)
@@ -288,8 +288,8 @@ jobs:
           echo "XDG_RUNTIME_DIR=/run/user/$uid" >> "$GITHUB_ENV"
           echo "JANUS_MEM_MAX=12G" >> "$GITHUB_ENV"
           export XDG_RUNTIME_DIR="/run/user/$uid" JANUS_MEM_MAX=12G
-          echo "memguard mechanism: $(bash scripts/lib/memguard.sh mechanism)"
-          bash scripts/lib/memguard.sh run -l 1G -n ci-probe -- true
+          echo "memguard mechanism: $(bash scripts/gate/lib/memguard.sh mechanism)"
+          bash scripts/gate/lib/memguard.sh run -l 1G -n ci-probe -- true
           go run ./cmd/janus memguard || true
 
       # elan installs the toolchain pinned in lean-toolchain on first use.
@@ -322,14 +322,14 @@ jobs:
             lake-amd64-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}-
 
       - name: lake build Janus JanusTests janus-oracle-amd64
-        run: bash scripts/lib/memguard.sh lake build Janus JanusTests janus-oracle-amd64
+        run: bash scripts/gate/lib/memguard.sh lake build Janus JanusTests janus-oracle-amd64
 
-      # verify-amd64-examples.sh first runs scripts/build-examples-amd64.sh (build the linux/amd64
+      # verify-amd64-examples.sh first runs scripts/build/build-examples-amd64.sh (build the linux/amd64
       # examples binary and extract every function into artifacts/amd64/).
       - name: Build, extract and verify the amd64 example proofs
         env:
           JANUS_ROOT: ${{ github.workspace }}
-        run: scripts/verify-amd64-examples.sh
+        run: scripts/verify/verify-amd64-examples.sh
 
       # The native oracle single-steps each case in-process with RFLAGS.TF and a raw SIGTRAP
       # handler, behind a seccomp-BPF filter (no ptrace, no privileges, no perf counters), so it
@@ -342,7 +342,7 @@ jobs:
           JOBS: "4"
         run: |
           grep -m1 'model name' /proc/cpuinfo || true
-          scripts/oracle-amd64.sh quick
+          scripts/validation/hardware-amd64.sh quick
 
       - name: Upload amd64 oracle report
         if: always()

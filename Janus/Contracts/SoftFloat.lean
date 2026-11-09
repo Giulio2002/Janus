@@ -42,7 +42,7 @@ deliver that:
 * Everywhere else (zeros of either sign, infinities, NaNs, overflow, normal results, subnormal
   operands) the runtime's result is the IEEE one (NaN for NaN). That is a claim about the
   runtime, tested against the hardware on random draws that include every one of those classes
-  (`examples/rtmisc/softcheck`, `scripts/softfloat-check.sh`) and pinned to the runtime's code
+  (`examples/rtmisc/softcheck`, `scripts/validation/softfloat-check.sh`) and pinned to the runtime's code
   (`runtimeContractStubs`). It is **not** derived from the code.
 
 The soft-float runtime ignores `FPCR`, `FPSR`; the contracts nevertheless require the Go

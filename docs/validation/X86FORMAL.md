@@ -17,20 +17,20 @@ library lean-sail v7, as JanusASL). The main `Janus` library depends on neither,
 does not use Mathlib.
 
 ```
-scripts/x86formal.sh deps    # pinned toolchain: JanusASL's opam root (Sail 0.20.3 + patches), the slicing plugin, sail-x86-from-acl2
-scripts/x86formal.sh gen     # slice the model, generate Lean, compare with the vendored copy
-scripts/x86formal.sh build   # unpack the vendored model and build the package (X86Sail about 75 s)
-scripts/x86formal.sh check   # build + janus-x86-check on artifacts/oracle-amd64/cases.jsonl
-scripts/x86formal.sh prove   # build JanusX86.Proofs and audit their axioms
+scripts/build/x86formal.sh deps    # pinned toolchain: JanusASL's opam root (Sail 0.20.3 + patches), the slicing plugin, sail-x86-from-acl2
+scripts/build/x86formal.sh gen     # slice the model, generate Lean, compare with the vendored copy
+scripts/build/x86formal.sh build   # unpack the vendored model and build the package (X86Sail about 75 s)
+scripts/build/x86formal.sh check   # build + janus-x86-check on artifacts/oracle-amd64/cases.jsonl
+scripts/build/x86formal.sh prove   # build JanusX86.Proofs and audit their axioms
 ```
 
 The local corpora under `artifacts/oracle-amd64/` and `artifacts/oracle-amd64-fp/` are kept
 zstd-compressed (`*.jsonl.zst`, summaries uncompressed) to save disk. Run `zstd -d` on them
 before rerunning `check`.
 
-Every lake job runs under the memory guard (`scripts/lib/memguard.sh`), with `LEAN_NUM_THREADS`
+Every lake job runs under the memory guard (`scripts/gate/lib/memguard.sh`), with `LEAN_NUM_THREADS`
 set from the budget and a per-job peak of `JANUS_LAKE_JOB_MEM=3G` (measured with
-`scripts/peak-mem.sh`: 2.6 GB for the largest model file, at most 1.9 GB for a proof file).
+`scripts/dev/peak-mem.sh`: 2.6 GB for the largest model file, at most 1.9 GB for a proof file).
 `.github/workflows/x86formal.yml` runs `build` and `prove` weekly, on demand, and on changes to
 the amd64 model or JanusX86.
 
@@ -39,7 +39,7 @@ the amd64 model or JanusX86.
 | | |
 |---|---|
 | model | [rems-project/sail-x86-from-acl2](https://github.com/rems-project/sail-x86-from-acl2) `0c6c023dccc7c20d8d9dbfc481f01d9bb49d62bf` (the commit `validation/reference-models/sail-x86/build.sh` uses) |
-| Sail | 0.20.3 with JanusASL's patches (JanusASL's opam switch `sail-0.20.3-janus`, `scripts/asl.sh deps`) |
+| Sail | 0.20.3 with JanusASL's patches (JanusASL's opam switch `sail-0.20.3-janus`, `scripts/build/asl.sh deps`) |
 | Lean | 4.34.1 (`models/x86/lean-toolchain`, as the main package) |
 | lean-sail | v7, `8fc8e29d7a62f832346cc7548953e44ec17bc271` |
 | vendored model | `models/x86/vendor/X86Sail.tar.gz` (+ `.sha256`); `gen` reproduces it byte for byte |
@@ -76,7 +76,7 @@ refuses a misaligned or unmapped operand where the model runs, or the reverse).
 
 | | |
 |---|---|
-| corpora | `scripts/oracle-amd64.sh full` (505,715 cases) and the class runs `fp` (551,478), `v3` (217,698), `x87` (125,344), `sse` (863,656), `crypto` (98,745), `avx` (797,454) and `avx512` (133,436): 3,293,526 cases in all, each with the hardware results of the same run (`hw.jsonl`; native oracle: 0 MISMATCH) |
+| corpora | `scripts/validation/hardware-amd64.sh full` (505,715 cases) and the class runs `fp` (551,478), `v3` (217,698), `x87` (125,344), `sse` (863,656), `crypto` (98,745), `avx` (797,454) and `avx512` (133,436): 3,293,526 cases in all, each with the hardware results of the same run (`hw.jsonl`; native oracle: 0 MISMATCH) |
 | `janus-x86-check` | **0 MISMATCH on every corpus**; `X86Config` holds on every case's pre- and post-state. Before the slice covered the whole maps: 452,644 `janus decodes, the slice excludes it` verdicts over these corpora (below). After: none |
 | proofs | the audited class theorems listed below (an explicit list in `models/x86/JanusX86/Audit.lean`, every statement printed); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only |
 
@@ -147,7 +147,7 @@ model: sail-x86-from-acl2 leaves every one of these two-byte opcodes (`0F 2A 2C�
 58–5A 5C–5F C2`) as `"Translation error: two-byte opcode … not translated"` (X86isa's
 floating-point specification was not translated to Sail). The slice keeps their arms verbatim,
 so the check reports them as `gap sail-unimplemented`: on the FP corpus of
-`scripts/oracle-amd64.sh fp` (548,874 cases, native oracle 0 MISMATCH),
+`scripts/validation/hardware-amd64.sh fp` (548,874 cases, native oracle 0 MISMATCH),
 `artifacts/x86formal-fp/summary.txt` has **0 agree, 548,874 gap, 0 MISMATCH**. Janus' FP
 semantics (`Janus/Amd64/Float.lean`) is checked against the hardware only.
 
@@ -301,10 +301,10 @@ check also trusts the Lean compiler; the proofs do not.
 ## Regenerating
 
 ```
-scripts/x86formal.sh deps                # once (reuses JanusASL's opam switch)
-scripts/x86formal.sh gen                 # fails if the result differs from vendor/X86Sail.tar.gz
-GEN_UPDATE=1 scripts/x86formal.sh gen    # after changing slice.py/keep.txt/harness: replace it
-scripts/x86formal.sh check && scripts/x86formal.sh prove
+scripts/build/x86formal.sh deps                # once (reuses JanusASL's opam switch)
+scripts/build/x86formal.sh gen                 # fails if the result differs from vendor/X86Sail.tar.gz
+GEN_UPDATE=1 scripts/build/x86formal.sh gen    # after changing slice.py/keep.txt/harness: replace it
+scripts/build/x86formal.sh check && scripts/build/x86formal.sh prove
 ```
 
 `gen` is deterministic (sorted tar members, mtime 0, `gzip -n`). To add an opcode to the slice,

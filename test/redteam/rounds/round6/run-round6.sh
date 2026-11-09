@@ -5,8 +5,8 @@
 # Usage: test/redteam/rounds/round6/run-round6.sh
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-# shellcheck source=../../../../scripts/lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+# shellcheck source=../../../../scripts/gate/lib/memguard.sh
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
@@ -15,7 +15,7 @@ J="$root/test/redteam/rounds/round6/bin/janus"; mkdir -p "$(dirname "$J")"
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
 W=test/redteam/rounds/round6/work; rm -rf "$W"; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1
 "$J" extract artifacts/examples-arm64 example.com/basic.Div $W/Div >/dev/null || exit 1

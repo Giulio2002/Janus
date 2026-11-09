@@ -2,7 +2,7 @@
 # Reproduce every attack in docs/audit/AUDIT.md. Writes only under test/redteam/work/.
 # Usage: test/redteam/run-all.sh [-j N]     (builds test/redteam/bin/janus from the current tree)
 #   -j N   run up to N rows at once (default: $JANUS_JOBS, else the number of cores capped by
-#          memory, scripts/lib/parallel.sh); -j 1 runs them one by one. Output order is the same.
+#          memory, scripts/gate/lib/parallel.sh); -j 1 runs them one by one. Output order is the same.
 # Expected after the F1-F6 fixes: every "blocked" row prints "Invalid" (or "rejected"); every
 # "Verified"/"Verified-honest"/"ok"/"mitigated" row prints "Verified" (or the axioms of a
 # refutation). No row should print "Verified" for a false or misleading claim.
@@ -10,12 +10,12 @@ set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../scripts/lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
-# shellcheck source=../../scripts/lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
-# shellcheck source=../../scripts/lib/verdict.sh
-. "$root/scripts/lib/verdict.sh"
+# shellcheck source=../../scripts/gate/lib/parallel.sh
+. "$root/scripts/gate/lib/parallel.sh"
+# shellcheck source=../../scripts/gate/lib/memguard.sh
+. "$root/scripts/gate/lib/memguard.sh"
+# shellcheck source=../../scripts/gate/lib/verdict.sh
+. "$root/scripts/gate/lib/verdict.sh"
 # shellcheck source=lib/blocked.sh
 . "$root/test/redteam/lib/blocked.sh"
 memguard_self "$@"
@@ -29,12 +29,12 @@ J="$root/test/redteam/bin/janus"
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build Janus failed (fix the Lean library first)"; exit 1; }
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
 
 W=test/redteam/work${ALL_ROWS:+-$ALL_ROWS}   # a row group has its own work dir (the lanes alla..allc run at once)
 mkdir -p $W
 cp artifacts/examples-arm64 $W/examples-arm64
-# Fresh extractions of the attacked functions (independent of scripts/verify-examples.sh).
+# Fresh extractions of the attacked functions (independent of scripts/verify/verify-examples.sh).
 for n in Add Add256 Get; do
   rm -rf "${W:?}/$n" "$W/extract-$n"
   "$J" extract $W/examples-arm64 "example.com/basic.$n" $W/extract-$n >/dev/null || { echo "extract $n failed"; exit 1; }
@@ -55,7 +55,7 @@ row() {
     Verified|Verified-honest|mitigated) case "$3" in Verified*) ;; *) status=BROKEN ;; esac ;;
     ok) case "$3" in *"depends on axioms"*) ;; *) status=BROKEN ;; esac ;;
   esac
-  # no verdict at all, or contradictory verdicts (scripts/lib/verdict.sh): never the expected outcome, whatever the row expects
+  # no verdict at all, or contradictory verdicts (scripts/gate/lib/verdict.sh): never the expected outcome, whatever the row expects
   case "$3" in NOVERDICT*|AMBIGUOUS*) status=BROKEN ;; esac
   printf '%-28s %-8s %s%s\n' "$1" "$2" "$3" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$1")

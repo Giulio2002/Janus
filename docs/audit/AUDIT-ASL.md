@@ -186,13 +186,13 @@ backend (built against the pinned lean-sail), and run on the same inputs:
 | assignments in `if`/`match` branches bound by `let` | (pre-existing case) | 2 × 256 | yes |
 | `RoundTowardsZero(Real(a)/Real(b))` for 64-bit and 80-bit operands, negative cases, `INT_MIN/-1` | 6 (`Rat`) | 7 | yes |
 | `pow_real` with negative and positive exponents, negative base | 6 | 3 | yes |
-| `sqrt_real` (the replacement of models/asl/sail/fakereal_sqrt.py, applied to the probe's `FakeReal.lean` as `scripts/asl.sh gen` does): `⌊√(a/b)·2^80⌋` for squares, non-squares, tiny and huge rationals | 7 (`sqrt_real`) | 30 | yes |
-| `integer_update_subrange` (the replacement of models/asl/sail/sail_int_fix.py, applied to the probe's Lean output as `scripts/asl.sh gen` does; sail-arm's `prelude.sail` definition): bit 0, bits 7..4 and bits 63..60 replaced in 23 integers each (zero, small, 2^22 and 2^23 boundaries, negatives, ±2^63, 2^64 ± 1, ±2^100, a 97-bit value) | 8 (`integer_update_subrange`) | 69 | yes (row A5 ius) |
+| `sqrt_real` (the replacement of models/asl/sail/fakereal_sqrt.py, applied to the probe's `FakeReal.lean` as `scripts/build/asl.sh gen` does): `⌊√(a/b)·2^80⌋` for squares, non-squares, tiny and huge rationals | 7 (`sqrt_real`) | 30 | yes |
+| `integer_update_subrange` (the replacement of models/asl/sail/sail_int_fix.py, applied to the probe's Lean output as `scripts/build/asl.sh gen` does; sail-arm's `prelude.sail` definition): bit 0, bits 7..4 and bits 63..60 replaced in 23 integers each (zero, small, 2^22 and 2^23 boundaries, negatives, ±2^63, 2^64 ± 1, ±2^100, a 97-bit value) | 8 (`integer_update_subrange`) | 69 | yes (row A5 ius) |
 
 `FakeReal.lean` was also read line by line. `round_down`/`round_up` are `Rat.floor`/`Rat.ceil`
 (Sail C: `mpq` floor/ceil). `abs`, comparisons and `to_real` are exact. `real_power x n` is
 `x ^ n` over `Rat` (checked: `2^-3 = 1/8`, `(-2)^3 = -8`). `sqrt_real` is reached by FSQRT
-since the scalar floating-point instructions are in the slice; `scripts/asl.sh gen` replaces the
+since the scalar floating-point instructions are in the slice; `scripts/build/asl.sh gen` replaces the
 toolchain's `Float` version by a round-to-odd approximation at 2^-1100 (docs/design/ASL.md, fix 7).
 It is checked against Sail's C backend twice: the `rsq` probe above (the function itself), and row
 **A5 fsqrt**, which runs about 7,000 FSQRT cases (test/redteam/rounds/rt-asl/sqrt/gen_cases.py: binary32 and
@@ -238,7 +238,7 @@ once the backend translates it correctly. Sent to the ASL agent.
 
 ## A6 (medium, open): the JanusASL audit does not pin what it audits
 
-`scripts/asl.sh prove` runs `models/asl/JanusASL/Audit.lean`. It walks the environment and checks the
+`scripts/build/asl.sh prove` runs `models/asl/JanusASL/Audit.lean`. It walks the environment and checks the
 axioms of every `JanusASL.*` constant whose name ends in `_agree`, `_asl` or `toASL`. The
 JanusASL theorems do **not** go through `janus verify`'s trusted auditor: there is no
 statement identity, no sandbox and no olean pins. Gaps:
@@ -334,5 +334,5 @@ test/redteam/rounds/rt-asl/run.sh            # every row (~10 min; the Go concur
 RT_ASL_SKIP_GO=1 test/redteam/rounds/rt-asl/run.sh
 ```
 
-The Sail rows need the pinned toolchain (`scripts/asl.sh deps`, `DEPS`). Without it they are
+The Sail rows need the pinned toolchain (`scripts/build/asl.sh deps`, `DEPS`). Without it they are
 skipped.

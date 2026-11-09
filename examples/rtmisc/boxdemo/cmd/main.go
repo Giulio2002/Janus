@@ -1,4 +1,4 @@
-// Command cmd links the live boxing example (scripts/build-examples-rtmisc.sh).
+// Command cmd links the live boxing example (scripts/build/build-examples-rtmisc.sh).
 package main
 
 import "example.com/rtmisc/boxdemo"

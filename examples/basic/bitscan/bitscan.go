@@ -2,7 +2,7 @@
 // at GOAMD64=v1 `bits.Len64`, `bits.TrailingZeros64` and friends are BSR/BSF plus a CMOV/SETcc
 // that reads ZF after the scan (ZF = 1 iff the source is zero; the destination of a zero scan is
 // architecturally undefined), at GOAMD64=v3 they are LZCNT/TZCNT. Built twice
-// (scripts/build-examples-amd64.sh): once per level, into binaries of their own so that the
+// (scripts/build/build-examples-amd64.sh): once per level, into binaries of their own so that the
 // other example binaries do not change.
 package bitscan
 

@@ -493,7 +493,7 @@ def main (args : List String) : IO UInt32 := do
     | .ok s => pure s
     | .error e => IO.eprintln s!"janus-asl-check: ASL initialisation failed: {e}"; return 2
   -- DCZID_EL0 is IMPLEMENTATION DEFINED; `State.dczid` is a free parameter of every Janus
-  -- theorem, so Janus runs with the ASL model's value (as scripts/oracle-sail.sh does).
+  -- theorem, so Janus runs with the ASL model's value (as scripts/validation/sail-arm.sh does).
   let dczid ← match runM (readReg Register.DCZID_EL0) base with
     | .ok (v, _) => pure (v.toNat % 32)
     | .error e => IO.eprintln s!"janus-asl-check: DCZID_EL0: {e}"; return 2

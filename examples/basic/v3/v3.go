@@ -1,6 +1,6 @@
 // Package v3 holds the examples that exercise the GOAMD64=v3 instruction-set extensions: the
 // Go compiler emits BMI1/BMI2, MOVBE and FMA3 for them when it may assume an x86-64-v3 CPU.
-// They are built (scripts/build-examples-amd64.sh) only for linux/amd64 with GOAMD64=v3, into
+// They are built (scripts/build/build-examples-amd64.sh) only for linux/amd64 with GOAMD64=v3, into
 // a binary of their own, so that the v1 and arm64 example binaries do not change.
 package v3
 

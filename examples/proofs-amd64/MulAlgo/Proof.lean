@@ -5,7 +5,7 @@ import Extracted
 # `MulAlgo(n int) int` (amd64): a writable threshold global, under `GlobalsInit`
 
 **Guarantee.** Extracted with `--global example.com/basic.karatsubaCut --global
-example.com/basic.mulBias` (`scripts/example-targets.sh`). For every 64-bit `n` and every Go call
+example.com/basic.mulBias` (`scripts/verify/example-targets.sh`). For every 64-bit `n` and every Go call
 state of `example.com/basic.MulAlgo` whose return-address slot `[RSP, RSP+8)` is writable and in
 which both package variables hold their link-time values (`GlobalsInit`: `karatsubaCut = 40`
 from `.noptrdata`, `mulBias = 0` from `.noptrbss`, copied from the ELF image into

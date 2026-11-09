@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test of scripts/lib/itemtimeout.sh (jv), with a stub `bin/janus` that sleeps. Run by go test
+# Self-test of scripts/gate/lib/itemtimeout.sh (jv), with a stub `bin/janus` that sleeps. Run by go test
 # (TestItemTimeoutLib). In a mktemp directory:
 #   1. a verify within the limit passes and its output and status are untouched;
 #   2. one that outlives JANUS_ITEM_TIMEOUT is killed, fails with status 124 and prints TIMEOUT, in

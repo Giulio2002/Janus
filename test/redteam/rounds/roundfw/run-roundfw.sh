@@ -9,8 +9,8 @@ set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../../../scripts/lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+# shellcheck source=../../../../scripts/gate/lib/parallel.sh
+. "$root/scripts/gate/lib/parallel.sh"
 par_init "$@"
 J="$root/test/redteam/rounds/roundfw/work/janus"; mkdir -p "$(dirname "$J")"
 # test/redteam/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
@@ -18,8 +18,8 @@ J="$root/test/redteam/rounds/roundfw/work/janus"; mkdir -p "$(dirname "$J")"
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 export JANUS_AUDIT_BIN="$J"
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
-[ -f artifacts/examples-amd64 ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
+[ -f artifacts/examples-amd64 ] || bash scripts/build/build-examples-amd64.sh >/dev/null 2>&1
 W=test/redteam/rounds/roundfw/work/rows; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-roundfw.XXXXXX")" || exit 1   # 0700: the cache's parent
 trap 'rm -rf "$T"' EXIT
@@ -72,7 +72,7 @@ for arch in arm64 amd64; do
 done
 
 echo "== N6: a statement names only globals the extraction records (janus-audit)"
-mapfile -t tg < <(scripts/example-targets.sh MulAlgo)
+mapfile -t tg < <(scripts/verify/example-targets.sh MulAlgo)
 "$J" extract artifacts/examples-arm64 example.com/basic.MulAlgo "$W/MulAlgo" "${tg[@]}" >/dev/null 2>&1 || exit 1
 par_run 'v $A/G1_misspelt_global.lean $W/MulAlgo;  row G1_misspelt_global blocked "but the extracted program has no writable global"'
 par_run 'v $A/G2_lookalike_global.lean $W/MulAlgo; row G2_lookalike_global blocked "no writable global"'

@@ -1,34 +1,34 @@
 #!/usr/bin/env bash
 # JanusX86: Janus' amd64 model against the Sail x86 model (ACL2 X86isa) inside Lean (docs/validation/X86FORMAL.md).
 #
-#   scripts/x86formal.sh deps    the pinned toolchain: JanusASL's opam root with Sail 0.20.3 and its
-#                                patches (scripts/asl.sh deps), the slicing plugin (JanusASL's, built
+#   scripts/build/x86formal.sh deps    the pinned toolchain: JanusASL's opam root with Sail 0.20.3 and its
+#                                patches (scripts/build/asl.sh deps), the slicing plugin (JanusASL's, built
 #                                into $X86DEPS), sail-x86-from-acl2 at the pin
-#   scripts/x86formal.sh gen     slice the model to the Janus subset and generate Lean (models/x86/X86Sail*),
+#   scripts/build/x86formal.sh gen     slice the model to the Janus subset and generate Lean (models/x86/X86Sail*),
 #                                then compare with the vendored copy (GEN_UPDATE=1 replaces the vendored copy)
-#   scripts/x86formal.sh build   unpack the vendored model (if needed) and build JanusX86 (lake)
-#   scripts/x86formal.sh check   build + `lake exe janus-x86-check` on the amd64 oracle corpus (default)
-#   scripts/x86formal.sh prove   build the proofs (JanusX86.Proofs) and audit their axioms
+#   scripts/build/x86formal.sh build   unpack the vendored model (if needed) and build JanusX86 (lake)
+#   scripts/build/x86formal.sh check   build + `lake exe janus-x86-check` on the amd64 oracle corpus (default)
+#   scripts/build/x86formal.sh prove   build the proofs (JanusX86.Proofs) and audit their axioms
 #
 # Environment:
-#   DEPS     JanusASL's pinned toolchain (default /srv/janus-asl-deps; scripts/asl.sh)
+#   DEPS     JanusASL's pinned toolchain (default /srv/janus-asl-deps; scripts/build/asl.sh)
 #   X86DEPS  sail-x86-from-acl2 checkout, plugin build, generation work dir (default /srv/janus-x86-deps)
-#   CASES    corpus (default artifacts/oracle-amd64/cases.jsonl; made by `scripts/oracle-amd64.sh full`)
+#   CASES    corpus (default artifacts/oracle-amd64/cases.jsonl; made by `scripts/validation/hardware-amd64.sh full`)
 #   HW       hardware results of the corpus (default: hw.jsonl next to CASES)
 #   OUT      output dir for the check (default artifacts/x86formal)
 #   KEEP     1: keep the check's verdicts.jsonl raw (default: compressed to verdicts.jsonl.zst,
-#            MISMATCH verdicts in mismatches.jsonl; scripts/lib/artifacts.sh). CASES and HW may be
+#            MISMATCH verdicts in mismatches.jsonl; scripts/gate/lib/artifacts.sh). CASES and HW may be
 #            compressed (.zst next to the named file).
 #   JOBS     parallel tasks for the check (default nproc)
 #   JANUS_LAKE_JOB_MEM  per-lake-job memory budget (default 3G): lake runs with
-#            LEAN_NUM_THREADS = budget / this (scripts/lib/memguard.sh). Measured peaks
-#            (scripts/peak-mem.sh, one job): X86Sail/Part12 2.6 GB RSS, the proof files <= 1.9 GB.
+#            LEAN_NUM_THREADS = budget / this (scripts/gate/lib/memguard.sh). Measured peaks
+#            (scripts/dev/peak-mem.sh, one job): X86Sail/Part12 2.6 GB RSS, the proof files <= 1.9 GB.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 # shellcheck source=lib/artifacts.sh
-. "$root/scripts/lib/artifacts.sh"
+. "$root/scripts/gate/lib/artifacts.sh"
 memguard_self "$@"
 export JANUS_LAKE_JOB_MEM="${JANUS_LAKE_JOB_MEM:-3G}"
 mode="${1:-check}"
@@ -53,7 +53,7 @@ plugin="$X86DEPS/plugin-build/default/sail_plugin_janus.cmxs"
 
 do_deps() {
   mkdir -p "$X86DEPS"
-  if ! opam switch list 2>/dev/null | grep -q "$SWITCH"; then "$root/scripts/asl.sh" deps; fi
+  if ! opam switch list 2>/dev/null | grep -q "$SWITCH"; then "$root/scripts/build/asl.sh" deps; fi
   if [ ! -d "$X86DEPS/sail-x86-from-acl2-${X86_REV:0:7}" ]; then
     [ -d "$X86DEPS/sail-x86-from-acl2/.git" ] || git clone -q "$X86_URL" "$X86DEPS/sail-x86-from-acl2"
     git -C "$X86DEPS/sail-x86-from-acl2" worktree add -q --detach "$X86DEPS/sail-x86-from-acl2-${X86_REV:0:7}" "$X86_REV"
@@ -114,9 +114,9 @@ do_build() {
 
 do_check() {
   do_build
-  if ! art_exists "$CASES"; then "$root/scripts/oracle-amd64.sh" full; fi
+  if ! art_exists "$CASES"; then "$root/scripts/validation/hardware-amd64.sh" full; fi
   mkdir -p "$OUT"
-  # The corpus may be zstd-compressed (scripts/lib/artifacts.sh): decompressed for the check and
+  # The corpus may be zstd-compressed (scripts/gate/lib/artifacts.sh): decompressed for the check and
   # removed again; the verdicts are compressed afterwards (KEEP=1 keeps them raw).
   trap 'art_cleanup; art_prune "$OUT"' EXIT
   art_input "$CASES" >/dev/null

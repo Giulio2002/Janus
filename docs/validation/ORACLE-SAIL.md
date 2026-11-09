@@ -12,12 +12,12 @@ and the page-table walk all come from Arm's pseudocode.
 ## Running it
 
 ```
-scripts/oracle.sh full           # the qemu oracle: builds the corpus + qemu results (artifacts/oracle)
-scripts/oracle-sail.sh run       # Sail driver + three-way report (artifacts/oracle-sail)
-scripts/oracle-sail.sh smoke     # 18 hand-checked cases only
-QEMU_OUT=artifacts/oracle-neon OUT=artifacts/oracle-sail-neon scripts/oracle-sail.sh run   # any qemu corpus, e.g. `oracle.sh neon`
-scripts/oracle-sail.sh regen     # regenerate the Sail model from pinned sources (provenance)
-scripts/oracle-sail.sh crosscheck  # regenerated model vs vendored model on the whole corpus
+scripts/validation/hardware-arm64.sh full           # the qemu oracle: builds the corpus + qemu results (artifacts/oracle)
+scripts/validation/sail-arm.sh run       # Sail driver + three-way report (artifacts/oracle-sail)
+scripts/validation/sail-arm.sh smoke     # 18 hand-checked cases only
+QEMU_OUT=artifacts/oracle-neon OUT=artifacts/oracle-sail-neon scripts/validation/sail-arm.sh run   # any qemu corpus, e.g. `hardware-arm64.sh neon`
+scripts/validation/sail-arm.sh regen     # regenerate the Sail model from pinned sources (provenance)
+scripts/validation/sail-arm.sh crosscheck  # regenerated model vs vendored model on the whole corpus
 ```
 
 `run` copies `artifacts/oracle/{cases,hw}.jsonl`, runs the Sail model on every case (about 20 s
@@ -35,12 +35,12 @@ C++ translation unit; later builds are incremental.
 | `spalign/` | Sail-only corpus: SP-based loads/stores with a misaligned SP (qemu cannot check that) |
 | `cases.jsonl`, `qemu.jsonl`, `janus.jsonl`, `sail.jsonl` | the frozen inputs and every side's raw results |
 
-When `run` ends, the dumps are pruned (`scripts/lib/artifacts.sh`): the reports, `soundness.jsonl`,
+When `run` ends, the dumps are pruned (`scripts/gate/lib/artifacts.sh`): the reports, `soundness.jsonl`,
 each comparison's `summary.md`, `repro.*` and `mismatches.jsonl` stay; the four files above, every
 `verdicts.jsonl` and `model.jsonl` are zstd-compressed (`.zst`); the comparisons' copies of the
 corpus and the derived `sail-model.jsonl` / `cases.sail-dczid.jsonl` are removed (one full run
 used to leave 8 GB). `KEEP=zst` compresses instead of removing, `KEEP=1` keeps everything raw.
-`QEMU_OUT` may hold the compressed corpus of a pruned `scripts/oracle.sh` run; `crosscheck`
+`QEMU_OUT` may hold the compressed corpus of a pruned `scripts/validation/hardware-arm64.sh` run; `crosscheck`
 decompresses `cases.jsonl` and `sail.jsonl` for its comparison and removes the copies after.
 
 Exit criterion: `soundness.jsonl` is empty, i.e. `janus-vs-sail` has 0 `MISMATCH`.
@@ -55,7 +55,7 @@ Exit criterion: `soundness.jsonl` is empty, i.e. `janus-vs-sail` has 0 `MISMATCH
 | comparator, report, minimiser | the qemu oracle's `oracle run` / `oracle minimize` (`validation/hardware-comparison/arm64/cmd/oracle`), run unchanged. The Sail driver is a drop-in `-runner`, or its results are replayed through `-reuse-native` / `-model` |
 | Lean side | `janus-oracle` (`validation/model-runner/Oracle/Main.lean`); `State.dczid` comes from the case |
 
-New code lives under `validation/reference-models/sail-arm/` and in `scripts/oracle-sail.sh`. No file of the qemu oracle and
+New code lives under `validation/reference-models/sail-arm/` and in `scripts/validation/sail-arm.sh`. No file of the qemu oracle and
 no Lean file is modified.
 
 * `validation/reference-models/sail-arm/src/main.rs`: the driver `janus-oracle-sail`. Supervisor plus worker processes; a
@@ -100,8 +100,8 @@ sail-arm worktree, the opam root, and the unpacked and instrumented model copies
 ## How to rebuild
 
 ```
-scripts/oracle-sail.sh build                       # vendored model (default)
-scripts/oracle-sail.sh regen && SAIL_MODEL=regen scripts/oracle-sail.sh build   # from source
+scripts/validation/sail-arm.sh build                       # vendored model (default)
+scripts/validation/sail-arm.sh regen && SAIL_MODEL=regen scripts/validation/sail-arm.sh build   # from source
 ```
 
 `build` unpacks `vendor/model.cpp.gz` once to a stable path, instruments it, and builds with
@@ -237,7 +237,7 @@ or MISMATCH noise between qemu and Sail, or `error` cases, which are excluded.
 
 ## Results with the exclusive monitor (2026-10-25, 789,635 cases)
 
-The full qemu corpus of `scripts/oracle.sh full` after the store-exclusives were modelled
+The full qemu corpus of `scripts/validation/hardware-arm64.sh full` after the store-exclusives were modelled
 (including the 20,000 `gen/seq.excl` blocks and the 1,752 cases of the harvested LL/SC loops, run
 in sequence mode by the driver), Janus with `--monitor-stub`:
 
@@ -258,8 +258,8 @@ requires, and the stub passes it. Janus agrees with both: with qemu on the failu
 
 ## Results with the Advanced SIMD classes of `NeonInstr` (2026-10-25, 653,793 cases)
 
-`QEMU_OUT=artifacts/oracle-neon OUT=artifacts/oracle-sail-neon scripts/oracle-sail.sh run` on the
-corpus of `scripts/oracle.sh neon` (targeted NEON classes, random groups, the C and Go harvests,
+`QEMU_OUT=artifacts/oracle-neon OUT=artifacts/oracle-sail-neon scripts/validation/sail-arm.sh run` on the
+corpus of `scripts/validation/hardware-arm64.sh neon` (targeted NEON classes, random groups, the C and Go harvests,
 and 50,000 sequence-mode blocks). The driver now runs sequence-mode cases too: with `words`, it
 lays the block out from `TestPC` and steps the model while the PC stays inside it at EL0 (one
 step per word plus one), then reports like a single step.
@@ -281,8 +281,8 @@ pairs are 0 MISMATCH. The Sail-only SP-misalignment corpus (2,680 cases) is 0 MI
 
 ## Results with the crypto extension, CRC32 and permutes (2026-10-25, 389,440 cases)
 
-The crypto corpus of `docs/validation/ORACLE.md` (`scripts/oracle.sh crypto`, then
-`QEMU_OUT=artifacts/oracle-crypto OUT=artifacts/oracle-sail-crypto JOBS=8 scripts/oracle-sail.sh run`):
+The crypto corpus of `docs/validation/ORACLE.md` (`scripts/validation/hardware-arm64.sh crypto`, then
+`QEMU_OUT=artifacts/oracle-crypto OUT=artifacts/oracle-sail-crypto JOBS=8 scripts/validation/sail-arm.sh run`):
 the generated and harvested SHA-1/SHA-256/SHA-512/SHA-3, PMULL, CRC32, permute and scalar-DUP
 classes and 150,000 sequence-mode blocks. The driver now runs sequence cases: a case's `words`
 are laid out in the code page and injected one at a time at the model's PC
@@ -304,8 +304,8 @@ exception is taken or a Sail exception escapes; the final state is reported as f
 
 ## Results with scalar floating point (2026-10-24, 1,131,099 cases)
 
-The floating-point corpus of `docs/validation/ORACLE.md` (`scripts/oracle.sh fp`, then
-`QEMU_OUT=artifacts/oracle-fp OUT=artifacts/oracle-sail-fp scripts/oracle-sail.sh run`). The
+The floating-point corpus of `docs/validation/ORACLE.md` (`scripts/validation/hardware-arm64.sh fp`, then
+`QEMU_OUT=artifacts/oracle-fp OUT=artifacts/oracle-sail-fp scripts/validation/sail-arm.sh run`). The
 driver now writes each case's `FPCR` and `FPSR` by stepping real `MSR FPCR`/`MSR FPSR`
 instructions at EL0 (and refuses a case whose `FPCR` does not read back), and reports both after
 the step; the comparator compares them with the registers. The model implements FEAT_AFP
@@ -327,7 +327,7 @@ the step; the comparator compares them with the registers. The model implements 
   confirmed by both references. The 137,015 cases where both fault agree on the signal
   (`SIGILL`/`ILL_ILLOPC`).
 
-The regression corpus of `scripts/oracle.sh full` with the floating-point model (766,650 cases,
+The regression corpus of `scripts/validation/hardware-arm64.sh full` with the floating-point model (766,650 cases,
 `fp.*` classes included):
 
 | pair (hardware side vs model side) | agree | MISMATCH | model-gap | unobserved | model-error |
@@ -342,7 +342,7 @@ Soundness: 0 cases. Every qemu-vs-Sail non-agreement carries one of the tags bel
 
 ## Results with Advanced SIMD (2026-10-23, 584,412 cases)
 
-Corpus of `scripts/oracle.sh full` after the Advanced SIMD extension (cases carry `V0`–`V31` and
+Corpus of `scripts/validation/hardware-arm64.sh full` after the Advanced SIMD extension (cases carry `V0`–`V31` and
 `TPIDR_EL0`; harvest includes the SIMD&FP words; new classes `vls.*`, `simd.*`). Janus against
 Sail uses `State.dczid` = 8 as before.
 
@@ -389,10 +389,10 @@ Sail uses `State.dczid` = 8 as before.
 
 ## Results with the atomics / DC ZVA extension (2026-10-23, 486,463 cases)
 
-Corpus of `scripts/oracle.sh full` after the single-threaded atomics model was added (harvest
+Corpus of `scripts/validation/hardware-arm64.sh full` after the single-threaded atomics model was added (harvest
 now includes `go test -c` of `sync/atomic` and `runtime`, and the classes `sys.mrs` and `sys.sys`).
 `DCZID_EL0` is IMPLEMENTATION DEFINED and differs between the references (qemu 7, Sail 8):
-`scripts/oracle-sail.sh` reads Sail's value with one `MRS` and runs Janus against Sail with
+`scripts/validation/sail-arm.sh` reads Sail's value with one `MRS` and runs Janus against Sail with
 `State.dczid` = 8 (`cases.sail-dczid.jsonl`), and against qemu with 7.
 
 | pair (hardware side vs model side) | agree | MISMATCH | model-gap | unobserved | model-error |
@@ -435,7 +435,7 @@ now includes `go test -c` of `sync/atomic` and `runtime`, and the classes `sys.m
   rejects them all). The rest as before: `sail-monitor-stub`, `sbo-unpredictable`, `pauth-keys`,
   `qemu-process-memory`, `qemu-lacks-feature`, `mops-impdef`.
 
-## Earlier results (2026-10-23, corpus of `scripts/oracle.sh full`: 427,845 cases)
+## Earlier results (2026-10-23, corpus of `scripts/validation/hardware-arm64.sh full`: 427,845 cases)
 
 Janus = `janus-oracle` built 13:55 (git `665fb69` + working tree); qemu = `artifacts/oracle/hw.jsonl`
 (qemu 10.2.1, `-cpu max`); Sail = vendored model, instrumented.
@@ -472,7 +472,7 @@ Janus = `janus-oracle` built 13:55 (git `665fb69` + working tree); qemu = `artif
 
 * qemu oracle comparator (`validation/hardware-comparison/arm64/cmd/oracle/compare.go:142`): `d[:strings.IndexAny(d, ":[")]`
   panics on the `"... N more bytes"` line that is appended when more than 8 memory bytes
-  differ. It never fires on Janus-vs-qemu, but does on qemu-vs-Sail. `scripts/oracle-sail.sh`
+  differ. It never fires on Janus-vs-qemu, but does on qemu-vs-Sail. `scripts/validation/sail-arm.sh`
   builds the CLI from the unmodified sources with a `go build -overlay` replacement of that one
   line, applied only while the line is present. The proper fix belongs in `compare.go`.
 * sail-aarch64-oracle: (1) the README's regeneration command preserves only 8 of the harness
@@ -485,7 +485,7 @@ Janus = `janus-oracle` built 13:55 (git `665fb69` + working tree); qemu = `artif
 ## Split build (SAIL_SPLIT=1, the default)
 
 The Sail model is one 170 MB C++ translation unit; g++ builds it serially (cold driver build 23-31 min wall, ~1450-1900 CPU s).
-`scripts/oracle-sail.sh build` now cuts the instrumented model at top-level item boundaries into 48 translation units
+`scripts/validation/sail-arm.sh build` now cuts the instrumented model at top-level item boundaries into 48 translation units
 (`validation/reference-models/sail-arm/split_model.py`; every layout assumption is asserted, ghost temporaries stay with their users, the static type
 helpers are replicated per unit) and builds them in parallel through a copy of the pinned crate whose only change is a
 `build.rs` patch (`validation/reference-models/sail-arm/build.rs.patch`, accepts `AARCH64_ORACLE_SAIL_MODEL_PARTS`; `validation/reference-models/sail-arm/split_crate.py` makes
@@ -499,7 +499,7 @@ driver cache key. Measured (box load 20-40): cold build 8m14s wall / 2224 CPU s 
 the single-unit binary (as expected), and its output on the whole 486,460-case oracle corpus is byte-identical to the
 single-unit driver's (sha256 78bb689b...).
 
-Hardening (RTSAIL follow-up, `scripts/lib/test-splitcrate.sh`, `scripts/lib/test-cachecmp.sh`):
+Hardening (RTSAIL follow-up, `scripts/gate/lib/test-splitcrate.sh`, `scripts/gate/lib/test-cachecmp.sh`):
 
 * `split_crate.py` compares the crate copy with the pinned checkout at every depth: `.git` and `target` are ignored only
   directly under the checkout's root (the copy has neither, so there they count), dotted names are compared, the
@@ -515,7 +515,7 @@ Hardening (RTSAIL follow-up, `scripts/lib/test-splitcrate.sh`, `scripts/lib/test
   `nightly-cold-gate.sh` gives both runs the same explicit `SAIL_SPLIT`.
 * The oracle corpus has almost no SVE, Advanced SIMD/FP or SIMD load/store words, so it says little about the Sail
   `__DecodeA64_SVE` and its neighbours. `oracle svegen` (validation/hardware-comparison/arm64/gen/svesimd.go) draws, with a fixed seed, uniformly random
-  words of the SVE, SME, SIMD&FP data-processing and SIMD load/store top-level groups; `scripts/oracle.sh quick|full` adds
+  words of the SVE, SME, SIMD&FP data-processing and SIMD load/store top-level groups; `scripts/validation/hardware-arm64.sh quick|full` adds
   `SVESIMD_N` (default 800) per group, about 3.5k cases with ids from 30000000 (no existing case or expected output
   changes; Janus does not model SVE, so those are model-gaps; 0 MISMATCH on seeds 2, 3, 4, 5 against qemu). RTSAIL's
   131,100-case comparison of the split and single-unit drivers found them byte-identical.

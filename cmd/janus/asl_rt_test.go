@@ -70,7 +70,7 @@ func TestRTConcurrentASLWorkspacesDoNotShareALake(t *testing.T) {
 d=` + shQuote(ws[i]) + `
 pkg=` + shQuote(tree) + `
 root=` + shQuote(root) + `
-# the real seed_copy and seeding block of asl.sh; tl_run (the tree lock, tested by scripts/lib/test-treelock.sh) just runs
+# the real seed_copy and seeding block of asl.sh; tl_run (the tree lock, tested by scripts/gate/lib/test-treelock.sh) just runs
 tl_run() { shift; "$@"; }
 ` + extractSeedFunc(t, root) + `
 ` + extractSeedBlock(t, root) + `
@@ -112,25 +112,25 @@ echo mine > "$d/.lake/build/lib/lean/W` + fmt.Sprint(i) + `.olean"
 	}
 }
 
-// extractSeedFunc returns the seed_copy function of scripts/asl.sh.
+// extractSeedFunc returns the seed_copy function of scripts/build/asl.sh.
 func extractSeedFunc(t *testing.T, root string) string {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(root, "scripts", "asl.sh"))
+	b, err := os.ReadFile(filepath.Join(root, "scripts", "build", "asl.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	i := bytes.Index(b, []byte("seed_copy() {"))
 	j := bytes.Index(b[i:], []byte("\n}\n"))
 	if i < 0 || j < 0 {
-		t.Fatal("cannot find seed_copy in scripts/asl.sh")
+		t.Fatal("cannot find seed_copy in scripts/build/asl.sh")
 	}
 	return string(b[i : i+j+3])
 }
 
-// extractSeedBlock returns the seeding lines of do_verify in scripts/asl.sh.
+// extractSeedBlock returns the seeding lines of do_verify in scripts/build/asl.sh.
 func extractSeedBlock(t *testing.T, root string) string {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(root, "scripts", "asl.sh"))
+	b, err := os.ReadFile(filepath.Join(root, "scripts", "build", "asl.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func extractSeedBlock(t *testing.T, root string) string {
 	i := bytes.Index(b, []byte(`if [ -L "$d/.lake" ]`))
 	j := bytes.Index(b[i:], []byte("  local fail=0 n"))
 	if i < 0 || j < 0 {
-		t.Fatal("cannot find the seeding block in scripts/asl.sh")
+		t.Fatal("cannot find the seeding block in scripts/build/asl.sh")
 	}
 	blk := s[i : i+j]
 	return bytes.NewBufferString(replaceReturn(blk)).String()

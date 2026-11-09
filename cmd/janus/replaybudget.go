@@ -229,7 +229,7 @@ func currentHeadroom() int64 {
 }
 
 // logReplaySizing records the chosen numbers: on stderr with JANUS_MEMGUARD_LOG, and, with JANUS_REPLAY_SIZING_FILE=<path>,
-// as one line appended to that file (scripts/gate.sh: the output is then not mixed into anything a script parses).
+// as one line appended to that file (scripts/gate/gate.sh: the output is then not mixed into anything a script parses).
 func logReplaySizing(workers, threads int, effective, headroom int64) {
 	line := fmt.Sprintf("janus-memguard: framework replay sizing: %d workers x %d threads (effective limit %s, headroom %s)\n",
 		workers, threads, fmtBytes(effective), fmtBytes(headroom))

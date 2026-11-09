@@ -43,7 +43,7 @@ func TestPanicContractExtraction(t *testing.T) {
 }
 
 // runtimePanicContractStubs is exactly the panic/defer/recover entry points the contract library
-// (Janus/Contracts/Panic.lean) describes, and scripts/stubpins links every one so gen-stubpins
+// (Janus/Contracts/Panic.lean) describes, and scripts/dev/stubpins links every one so gen-stubpins
 // measures (pins) it.
 func TestPanicContractStubNames(t *testing.T) {
 	if len(runtimePanicContractStubs) != 9 {

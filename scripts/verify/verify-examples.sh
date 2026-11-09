@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 # Build the example binary, extract every example function into artifacts/<Name>/ and verify
 # examples/proofs/<Name>.lean against it with `janus verify` (kernel check, axiom audit,
-# leanchecker). Then run the "WrongAdd" demonstration (scripts/break-demo.sh), which checks
+# leanchecker). Then run the "WrongAdd" demonstration (scripts/archive/break-demo.sh), which checks
 # that the Add proof is rejected on a binary where `+` was changed to `-`, and verifies the
 # counterexample theorem examples/proofs/WrongAdd.lean on that binary.
 #
-# Usage: scripts/verify-examples.sh [-j N] [Name ...]     (default: all examples)
+# Usage: scripts/verify/verify-examples.sh [-j N] [Name ...]     (default: all examples)
 #   -j N   verify up to N proofs at once (default: $JANUS_JOBS, else the number of cores capped
-#          by memory, see scripts/lib/parallel.sh); -j 1 verifies them one after the other.
+#          by memory, see scripts/gate/lib/parallel.sh); -j 1 verifies them one after the other.
 # Set JANUS_ROOT to verify against another checkout of the Janus Lean library.
 # Writes artifacts/<Name>/verified.json for each verified proof and a summary table to
 # artifacts/verify-examples.txt.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
+. "$root/scripts/gate/lib/parallel.sh"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 par_init "$@"
 set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
@@ -38,17 +38,17 @@ all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimb
      Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
      I64ToF64 F64ToI64 U64ToF64 F64ToF32 F32ToF64 LoadThird SpanSum MinF64 MaxF64 MinStr
      BigLocal SumRec HoldPtr SymPows SymErr ErrWrap)
-. scripts/example-contracts.sh
+. scripts/verify/example-contracts.sh
 # the runtime's equality, hashing and typed-memory functions verified from their code
 all+=($runtime_examples $runtime_examples_arm64_only)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 
-# JANUS_EXAMPLES_PREBUILT=1 (scripts/verify-all-examples.sh): bin/janus and the examples binary
+# JANUS_EXAMPLES_PREBUILT=1 (scripts/verify/verify-all-examples.sh): bin/janus and the examples binary
 # are already built.
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
   CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
-  scripts/build-examples.sh >/dev/null
+  scripts/build/build-examples.sh >/dev/null
 fi
 # The verifier builds the framework it uses itself (the embedded one in the cache, or the
 # JANUS_ROOT checkout in place) under its lock; build a JANUS_ROOT checkout first only so that
@@ -58,9 +58,9 @@ fi
 extra=()
 [ -n "${JANUS_ROOT:-}" ] && extra=(--janus-root "$JANUS_ROOT")
 
-. scripts/example-contracts.sh
-. scripts/lib/theorems.sh
-. scripts/lib/incr.sh
+. scripts/verify/example-contracts.sh
+. scripts/gate/lib/theorems.sh
+. scripts/gate/lib/incr.sh
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-examples.txt}"
 : > "$summary"
 lines="$(mktemp -d)"
@@ -78,8 +78,8 @@ verify_one() {
     if incr_begin "arm64:WrongAdd" arm64 "${wspec[@]}"; then echo "$INCR_MSG" | tee "$lines/$n"; return 0; fi
     local wstart wrc=0
     wstart=$(date +%s.%N)
-    if scripts/break-demo.sh > "$lines/WrongAdd.log" 2>&1; then
-      echo "WrongAdd  ok  (see scripts/break-demo.sh output)" | tee "$lines/$n"
+    if scripts/archive/break-demo.sh > "$lines/WrongAdd.log" 2>&1; then
+      echo "WrongAdd  ok  (see scripts/archive/break-demo.sh output)" | tee "$lines/$n"
     else
       echo "WrongAdd  FAILED" | tee "$lines/$n"; cat "$lines/WrongAdd.log"; broken+=("$n"); wrc=1
     fi
@@ -88,17 +88,17 @@ verify_one() {
   fi
   out="${JANUS_EXAMPLES_ARTIFACTS:-artifacts}/$n"   # JANUS_EXAMPLES_ARTIFACTS: another parent dir for the extraction (the gate's pre-warm)
   mkdir -p "$(dirname "$out")"
-  mapfile -t extract_args < <(scripts/example-targets.sh "$n")
+  mapfile -t extract_args < <(scripts/verify/example-targets.sh "$n")
   bin/janus extract artifacts/examples-arm64 "$(example_symbol "$n")" "$out" "${extract_args[@]}" >/dev/null
   # The theorems of the proof file: correctness, further theorems (F64ToU64's `exact` and
   # `saturation`, ...) and the non-vacuity witnesses (Proof.Witness.nonvacuous / .returns: the
   # theorem's hypotheses hold together for a model of the runtime, and its conclusion is
-  # reached); up to two verified at once (scripts/lib/theorems.sh).
+  # reached); up to two verified at once (scripts/gate/lib/theorems.sh).
   local -a thms=(Proof.correctness)
   local thm i st
   for thm in $(grep -oE '^theorem (exact|saturation|faults|anyCPU|forAllValues)' "examples/proofs/$n.lean" | awk '!seen[$2]++ {print $2}' || true); do thms+=("Proof.$thm" "Proof.Witness.$thm"); done
   if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then thms+=(Proof.Witness.nonvacuous); grep -q '^theorem returns' "examples/proofs/$n.lean" && thms+=(Proof.Witness.returns); fi
-  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs
+  # the incremental gate (scripts/gate/lib/incr.sh): skipped only on the record of a PASS with identical inputs
   local -a ispec=($(incr_fw_embedded) --proof "examples/proofs/$n.lean" --art "$out" --arg "sym:$(example_symbol "$n")")
   local a thm_a
   for a in ${extract_args[@]+"${extract_args[@]}"}; do ispec+=(--arg "extract:$a"); done

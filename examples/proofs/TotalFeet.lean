@@ -14,7 +14,7 @@ import Extracted
 (the same code address), with a different dictionary: `TotalFeet` passes `..dict.total[Feet]`
 in `X0`, whose first word is the code address of `Feet.Scale`. So the two theorems together
 show both instantiations of one generic function, each reaching its own method through its
-dictionary. (`Feet.Scale` is extracted with `--targets`, `scripts/example-targets.sh`.)
+dictionary. (`Feet.Scale` is extracted with `--targets`, `scripts/verify/example-targets.sh`.)
 -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec

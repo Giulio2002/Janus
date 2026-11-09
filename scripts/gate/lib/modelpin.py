@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """The pin of the ISA model artifacts (the ArmASL modules and the Sail driver) for the cold gate
-(scripts/gate.sh --cold; docs/TESTING.md "Cold gate and the model pin").
+(scripts/gate/gate.sh --cold; docs/TESTING.md "Cold gate and the model pin").
 
 The cold gate rebuilds everything except these artifacts, which are treated like the Lean toolchain: pinned by content
 and integrity-checked on EVERY gate. This file adds no new trusted storage code: the pinned artifacts are a
-bcache.py entry (scripts/lib/bcache.py: per-file SHA-256 manifest + HMAC under the per-user key, two-phase verified
+bcache.py entry (scripts/gate/lib/bcache.py: per-file SHA-256 manifest + HMAC under the per-user key, two-phase verified
 copy) in a pin store of their own, and the pin RECORD binds the entry to the exact manifest by its SHA-256.
 
     <PIN>/<key>                       kind armasl entry (models/asl/.lake: ArmASL build + packages/Sail)
@@ -51,7 +51,7 @@ KINDS = ("armasl", "sail")
 
 def is_strict(rel):
     """A difference in these files between two builds of one key is non-reproducibility (the nightly's
-    scripts/gate-cachecmp.py compares the same artifacts)."""
+    scripts/gate/gate-cachecmp.py compares the same artifacts)."""
     return rel.endswith((".olean", ".ilean")) or os.path.basename(rel) == "janus-oracle-sail"
 
 
@@ -207,7 +207,7 @@ def atomic_write(path, data):
 
 def write(kind, root, key, src, rels, commit, evidence):
     if os.environ.get("JANUS_PIN_WRITER") != "nightly-cold-gate" or os.environ.get("JANUS_MODEL_PIN"):
-        print("modelpin: REFUSED: only the nightly truly-cold run (scripts/nightly-cold-gate.sh) may create or update a pin", file=sys.stderr)
+        print("modelpin: REFUSED: only the nightly truly-cold run (scripts/gate/nightly-cold-gate.sh) may create or update a pin", file=sys.stderr)
         return 2
     try:
         bcache.mac("x", "x", b"")

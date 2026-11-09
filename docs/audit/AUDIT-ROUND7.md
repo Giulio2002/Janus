@@ -98,7 +98,7 @@ exactly the binary this note described: `test/redteam/rounds/round8/govers`, lin
 runtime has no `panicSimdImm`), labelled go1.26.0, with a package-lib assembly
 `runtime·panicSimdImm` that returns 0; "every call of Add panics" verified (row G3a). Check 2
 is gone. In its place a listed name is a stub only if its code and pclntab entry are pinned
-(`cmd/janus/stubpin.go`, `cmd/janus/stubpins_gen.go` from `scripts/gen-stubpins.sh`): the
+(`cmd/janus/stubpin.go`, `cmd/janus/stubpins_gen.go` from `scripts/dev/gen-stubpins.sh`): the
 pclntab names it as a function of package runtime whose entry is in the pinned
 `runtime/<file>`, its normalized code (PC-relative fields masked to symbol identities) has a
 pinned SHA-256 for go1.26.0/.5/.8/.10 on that GOARCH, and the functions it calls are stubs or
@@ -323,7 +323,7 @@ There is no verification daemon, so there is no row for one (docs/TESTING.md exp
 ## Regression status
 
 On this branch, merged with main 1d0b147, all of these pass: `test/redteam/rounds/round7/run-round7.sh` (with
-the cache rows of `run-cache.sh`), `scripts/verify-all-examples.sh` (21 arm64 items and 27 amd64
+the cache rows of `run-cache.sh`), `scripts/verify/verify-all-examples.sh` (21 arm64 items and 27 amd64
 functions), `test/redteam/run-all.sh`, `test/redteam/rounds/round2/run-round2.sh` through
 `test/redteam/rounds/round6/run-round6.sh`, and `go test -timeout 50m ./cmd/...`.
 

@@ -3,13 +3,13 @@
 `bench/go` is a small Go module of self-written functions, separate from `examples/basic`, so
 that adding or changing a benchmark never moves an address an example proof mentions. Every
 function is proved on both ISAs (`bench/proofs-arm64/<F>.lean`, `bench/proofs-amd64/<F>.lean`).
-`scripts/bench.sh` builds the module for both ISAs (`GOAMD64=v1`), extracts the functions listed
+`scripts/dev/bench.sh` builds the module for both ISAs (`GOAMD64=v1`), extracts the functions listed
 in `bench/functions.txt`, and times each proof.
 
 ```sh
-scripts/bench.sh                         # examples-arm64 examples-amd64 bench-arm64 bench-amd64
-JOBS=3 scripts/bench.sh bench-arm64 bench-amd64
-FILTER=Chain scripts/bench.sh bench-amd64
+scripts/dev/bench.sh                         # examples-arm64 examples-amd64 bench-arm64 bench-amd64
+JOBS=3 scripts/dev/bench.sh bench-arm64 bench-amd64
+FILTER=Chain scripts/dev/bench.sh bench-amd64
 ```
 
 The time reported is the **CPU time** (user + system) of `lean` on the proof file against a

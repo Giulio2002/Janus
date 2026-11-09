@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # test/redteam/rounds/round10 must fail LOUDLY when the gate's saved decoder is missing, and use exactly the saved one otherwise.
-#   scripts/lib/test-gate-decoder.sh      (milliseconds)
+#   scripts/gate/lib/test-gate-decoder.sh      (milliseconds)
 set -uo pipefail
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 t=$(mktemp -d "$here/artifacts/test-gate-decoder.XXXXXX" 2>/dev/null || { mkdir -p "$here/artifacts"; mktemp -d "$here/artifacts/test-gate-decoder.XXXXXX"; })
 trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
-. "$here/scripts/lib/gate-decoder.sh"
+. "$here/scripts/gate/lib/gate-decoder.sh"
 mkdir -p "$t/r/.lake/build/bin"
 export JANUS_GATE_PREBUILT=1
 out="$(gate_decoder "$t/r" 2>&1)" && bad "no saved decoder: gate_decoder succeeded ($out)" || ok "no saved decoder: fails ($out)"

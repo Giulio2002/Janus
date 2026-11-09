@@ -10,7 +10,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"; cd "$root" || exi
 export PATH=/usr/local/go/bin:$PATH
 J="${1:-$root/janus-up4}"
 CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1   # always built from the current tree
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
 W=test/redteam/up4/work; rm -rf "$W"; mkdir -p "$W"
 # U1/U2 are templates: they name this checkout (__ROOT__, __ROOT_NAME__), generated here so the probes follow the repo they run from
 rootname="$(basename "$root")"

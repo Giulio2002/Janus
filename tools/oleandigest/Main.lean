@@ -2,7 +2,7 @@ import Lean
 open Lean
 
 /-!
-# `janus-olean-digest`: strip the message log from compiled Lean modules (scripts/gate-cachecmp.py, docs/TESTING.md)
+# `janus-olean-digest`: strip the message log from compiled Lean modules (scripts/gate/gate-cachecmp.py, docs/TESTING.md)
 
     janus-olean-digest OUTDIR OLEAN...
 

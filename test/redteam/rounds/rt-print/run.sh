@@ -10,8 +10,8 @@
 # Writes only to a mktemp directory (and the Go build cache). Exits 1 on any mismatch.
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-# shellcheck source=../../../../scripts/lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+# shellcheck source=../../../../scripts/gate/lib/memguard.sh
+. "$root/scripts/gate/lib/memguard.sh"
 here="$root/test/redteam/rounds/rt-print"
 cd "$root" || exit 1
 export PATH="$HOME/.elan/bin:/usr/local/go/bin:$PATH"

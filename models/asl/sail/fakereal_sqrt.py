@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replace `sqrt_real` in the generated ArmASL/FakeReal.lean (scripts/asl.sh gen).
+"""Replace `sqrt_real` in the generated ArmASL/FakeReal.lean (scripts/build/asl.sh gen).
 
     fakereal_sqrt.py FAKEREAL_LEAN
 

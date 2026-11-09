@@ -107,11 +107,11 @@ Where every argument and the result of a prototype go is a pure Lean function of
 `decide` evaluates all of this on concrete prototypes (`sig.passing = … := by decide` in every
 proof), and `#eval` prints it (`test/lean/JanusTests/CABIProbe.lean`).
 
-### 1.3 The differential test against gcc and clang (`scripts/cabi-probe.sh`)
+### 1.3 The differential test against gcc and clang (`scripts/build/cabi-probe.sh`)
 
 The classification is checked against the real compilers, not against a reading of the ABI
-documents. `scripts/cabi-probe.sh` (Go program `scripts/cabiprobe`) takes a corpus of prototypes
-— the ABI functions of the C corpus (`scripts/coverage/ccorpus/abi.c`: `a_stackargs`, `a_fargs`,
+documents. `scripts/build/cabi-probe.sh` (Go program `scripts/build/cabiprobe`) takes a corpus of prototypes
+— the ABI functions of the C corpus (`scripts/dev/coverage/ccorpus/abi.c`: `a_stackargs`, `a_fargs`,
 `a_small`, `a_mixed`, `a_hfa`, `a_big`, `a_varargs`, …), the cgo examples (`k_*`), the classic
 edge cases of both ABIs (HFA/HVA of 1–5 members, `float`/`double` mixes, unions, nested and
 array members, `__int128` alignment, `_Complex`, `long double`, register exhaustion in each class,
@@ -130,7 +130,7 @@ clang, `-O0` and `-O2`, arm64 under qemu and amd64 native) it then compiles, per
    own register save areas must return the values its `va_arg` read;
 3. a **layout** check: `sizeof`, `_Alignof` and the offset of every scalar leaf.
 
-**Results** (gcc 15.2.0, clang 21.1.8; `scripts/cabi-probe.sh -random N -seed S`): 0 mismatches
+**Results** (gcc 15.2.0, clang 21.1.8; `scripts/build/cabi-probe.sh -random N -seed S`): 0 mismatches
 in every configuration, for seed 1 (439 prototypes: 39 curated, 400 random; 9,706 checks per
 arm64 and 9,899 per amd64 configuration), seed 2 (1,037 prototypes, 22,204 / 22,669 checks) and
 seed 7 (1,039 prototypes, 22,053 / 22,525 checks), so about 220,000 checks per seed over the
@@ -142,7 +142,7 @@ before these runs.
 One compiler bug is excluded, not counted as a mismatch: **gcc 15.2 at `-O2` on arm64
 miscompiles `va_arg` of an HFA/HVA of `_Float16` or of short vectors** (it reads the wrong save
 slots; the same source is correct at `-O0` and with clang, and a standalone reproducer outside
-the probe shows the miscompile). `knownBug` in `scripts/cabiprobe/main.go` excludes exactly those
+the probe shows the miscompile). `knownBug` in `scripts/build/cabiprobe/main.go` excludes exactly those
 tests (13, 24 and 35 for seeds 1, 2, 7, listed in `known-bugs.txt`); the caller side of those
 prototypes and every other check still run.
 
@@ -339,7 +339,7 @@ Every trusted contract has a `_satisfiable` witness (audit round 9's SAT row sca
 ones take the hypotheses every real call meets (an admissible return address, a system /
 goroutine stack and a `g` struct disjoint from the other memory, `CbRoom`, the TLS `g` slot). The
 examples of sections 4.1 and 5 with a `Witness` namespace also show their own hypotheses
-satisfiable together (`Proof.Witness.nonvacuous`, verified by `scripts/verify-cgo-examples.sh`).
+satisfiable together (`Proof.Witness.nonvacuous`, verified by `scripts/verify/verify-cgo-examples.sh`).
 
 **Why not a `Summary` hypothesis.** A `Summary p addr pre post` about the extracted program at
 the address of `cgocall`, where there is no code, is false (or only vacuously true), so a theorem
@@ -429,9 +429,9 @@ them through cgo. The package `example.com/cgo/cabi` (`cabi/kabi.c`, `cabi/kvcal
 `k_big`, `k_vsum`, `k_vsum8`) and their Go callers (`Stack10`, `FP`, `PMix`, `Big`, `VSum8`).
 `cx87.c` (WP-J) defines `ld_mul`, `c_ldmul` and `c_switch`, called by `MulLD` and `Switch` in
 `x87.go`. `ccover.c` is a model-coverage corpus (not called).
-`scripts/build-examples-cgo.sh` builds both ISAs with pinned compilers (Go 1.26.0; gcc 15.2.0
+`scripts/build/build-examples-cgo.sh` builds both ISAs with pinned compilers (Go 1.26.0; gcc 15.2.0
 `Ubuntu 15.2.0-16ubuntu1`, native for amd64 and `aarch64-linux-gnu-gcc` for arm64;
-`CGO_CFLAGS=-g -O2`). `scripts/verify-cgo-examples.sh` extracts and verifies every proof.
+`CGO_CFLAGS=-g -O2`). `scripts/verify/verify-cgo-examples.sh` extracts and verifies every proof.
 
 | Proof | Guarantee | arm64 | amd64 |
 |---|---|:-:|:-:|
@@ -476,7 +476,7 @@ their hypotheses.
 
 The C environment examples are in `examples/cgo/cenv` (`cenv.c`, `cenv.go`), built into
 `artifacts/examples-cenv-<isa>` (and `examples-cenv-norelax-amd64`, linked with `-Wl,--no-relax`)
-by `scripts/build-examples-cgo.sh`.
+by `scripts/build/build-examples-cgo.sh`.
 
 The Go-side preconditions are explicit. They include the stack-growth checks of the Go function
 and of its `_Cfunc_` wrapper, the stack window, and the two statically initialised cgo globals

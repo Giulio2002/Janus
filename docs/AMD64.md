@@ -634,7 +634,7 @@ instruction printed in Intel syntax (`Janus.Amd64.Disasm.disasm`), and fault exp
 
 ## Proved (verified end to end by `janus verify`)
 
-Run `scripts/build-examples-amd64.sh`, then `scripts/verify-amd64-examples.sh`. All of these
+Run `scripts/build/build-examples-amd64.sh`, then `scripts/verify/verify-amd64-examples.sh`. All of these
 are about `artifacts/examples-amd64` (`examples/basic`, `GOAMD64=v1`, Go 1.26.0, built
 `-trimpath -buildvcs=false`, so the binary does not depend on the git state). No proof contains
 a hard-coded address (see *Layout independence* above), so adding functions to
@@ -682,7 +682,7 @@ SSE Go assembly functions, ABI0, called directly with their arguments on the sta
 
 The cgo examples `CSum32` (the clang `-O2` SSE2-vectorised loop: two `PADDD` accumulators,
 `PSHUFD`/`PADDD` fold, scalar tail) and `GoSum32` (Go → cgo → that loop → Go, under the trusted
-`CgoCall`) are in `examples/proofs-cgo/amd64` (`scripts/verify-cgo-examples.sh`, binary
+`CgoCall`) are in `examples/proofs-cgo/amd64` (`scripts/verify/verify-cgo-examples.sh`, binary
 `artifacts/examples-cgo-clang-amd64`, built with `CC=clang`).
 
 Two are about `artifacts/examples-amd64-avx`: `examples/basic/avx` (Go functions calling small

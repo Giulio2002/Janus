@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Integrity layer of the content-addressed build caches (scripts/asl.sh, scripts/oracle-sail.sh,
+"""Integrity layer of the content-addressed build caches (scripts/build/asl.sh, scripts/validation/sail-arm.sh,
 models/asl/tools/asl_mod_cache.py; docs/SOUNDNESS.md "Build caches").
 
 A cache entry is a directory
@@ -329,7 +329,7 @@ def parse_manifest(data):
 
 def read_signed_manifest(kind, ident, e, want_sha=None):  # noqa: allowlist applied below
     """The entry's manifest, if its HMAC is valid (and, when want_sha is given, its SHA-256 is exactly that: the
-    pin of scripts/lib/modelpin.py binds an entry to one manifest); CacheError otherwise."""
+    pin of scripts/gate/lib/modelpin.py binds an entry to one manifest); CacheError otherwise."""
     try:
         with open(os.path.join(e, "MANIFEST.sha256"), "rb") as f:
             data = f.read()
@@ -417,11 +417,11 @@ TREE_LOCK = ".bcache-tree.lock"
 
 def tree_lock(dest):
     """Exclusive flock on a materialisation target (a directory such as <pkg>/.lake), held for a whole
-    fetch/verify/materialise sequence: lanes that share a tree (scripts/gate.sh's isolated trees) take turns, and
+    fetch/verify/materialise sequence: lanes that share a tree (scripts/gate/gate.sh's isolated trees) take turns, and
     a later one finds the earlier one's finished work (and verifies it) instead of racing on its files. The lock
     file is never removed. It serialises *fetchers* (this module and asl_mod_cache.py restore) only: it does not
     stop a concurrent `lake` build writing into the same tree. Callers must not run lake and a fetch on one tree
-    at once; scripts/gate.sh keeps the lanes that share an isolated tree from doing so."""
+    at once; scripts/gate/gate.sh keeps the lanes that share an isolated tree from doing so."""
     os.makedirs(dest, exist_ok=True)
     f = open_lock(os.path.join(dest, TREE_LOCK))
     fcntl.flock(f, fcntl.LOCK_EX)

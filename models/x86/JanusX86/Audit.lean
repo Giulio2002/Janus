@@ -1,7 +1,7 @@
 import JanusX86.Proofs
 import Lean
 
-/-! Audit of the JanusX86 theorems (`scripts/x86formal.sh prove`).
+/-! Audit of the JanusX86 theorems (`scripts/build/x86formal.sh prove`).
 
 * The audited theorems are an explicit list. Each must exist and be a theorem; a declaration under
   `JanusX86` named `*_agree` that is not on the list fails the audit, so a renamed, removed or

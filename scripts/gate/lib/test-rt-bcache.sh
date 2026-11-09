@@ -2,7 +2,7 @@
 # Red team of the Sail driver cache key (validation/reference-models/sail-arm/cache_key.py): toolchain swaps that keep the version
 # text, compiler/linker environment, parent cargo config. Each must change the key. mktemp, seconds.
 set -uo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 t=$(mktemp -d "${TMPDIR:-/tmp}/test-rt-bcache.XXXXXX"); trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
 mkdir -p "$t/k/validation/reference-models/sail-arm/src" "$t/bin"
@@ -61,8 +61,8 @@ mk2=$(PATH="$tc/bin:/usr/bin:/bin" python3 -I "$root/models/asl/tools/asl_mod_ca
 # ---- scheduling-only variables are not keyed; everything else is (the gate lanes run LEAN_NUM_THREADS=4) ----
 a=$(akey); b=$(export LEAN_NUM_THREADS=4; akey); [ "$a" = "$b" ] && ok "ASL key: LEAN_NUM_THREADS (the gate sets 4) does not change it" || bad "ASL key depends on LEAN_NUM_THREADS"
 a=$(akey); b=$(export LEAN_NUM_THREADS=1; akey); [ "$a" = "$b" ] && ok "ASL key: LEAN_NUM_THREADS=1 equals unset" || bad "ASL key depends on LEAN_NUM_THREADS=1"
-# the exact environment scripts/gate.sh exports for its lanes, against a bare standalone run
-gate_env=$(sed -n 's/^export \(LEAN_NUM_THREADS\)="\${LEAN_NUM_THREADS:-4}".*/\1/p' "$root/scripts/gate.sh" | head -1)
+# the exact environment scripts/gate/gate.sh exports for its lanes, against a bare standalone run
+gate_env=$(sed -n 's/^export \(LEAN_NUM_THREADS\)="\${LEAN_NUM_THREADS:-4}".*/\1/p' "$root/scripts/gate/gate.sh" | head -1)
 [ "$gate_env" = LEAN_NUM_THREADS ] && ok "gate.sh still exports LEAN_NUM_THREADS (the case under test)" || bad "gate.sh no longer exports LEAN_NUM_THREADS: update this test"
 a=$(env -i PATH="$tc/bin:/usr/bin:/bin" HOME="$HOME" python3 -I "$root/models/asl/tools/asl_cache_key.py" "$t/a")
 b=$(env -i PATH="$tc/bin:/usr/bin:/bin" HOME="$HOME" JANUS_JOBS=2 LEAN_NUM_THREADS=4 JANUS_GATE_PREBUILT=1 JANUS_EXAMPLES_PREBUILT=1 python3 -I "$root/models/asl/tools/asl_cache_key.py" "$t/a")

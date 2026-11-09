@@ -10,7 +10,7 @@ listed below is a gap with a work package in [the plan](#6-work-plan).
 **Update (work package A, agent/stxr).** The arm64 store-exclusives are now modelled (exclusive
 monitor plus an environment outcome stream, [SOUNDNESS.md](SOUNDNESS.md), "Atomics, exclusives and
 system registers"). The arm64 columns of criterion 1 below are re-measured on that branch
-(`CONFIGS=arm64 scripts/coverage.sh insn`, same corpus and toolchain, 2026-10-24): Go-compiled
+(`CONFIGS=arm64 scripts/dev/coverage.sh insn`, same corpus and toolchain, 2026-10-24): Go-compiled
 std, wrappers, test code and the cgo C functions all decode completely, and assembly gains
 `cgoSigtramp`. Every other number on this page is the baseline measurement.
 
@@ -32,11 +32,11 @@ in `Sat`/`SatAmd64`/`RtSat`/`WriteBarrierSat`) and eight examples on both ISAs (
 `ToBytes`, `FromBytes`, `SumRunes`, `RuneLen`, `AppendPoint`, `CopyNodes`, `WriteBarrier`) are not
 yet counted in the numbers below.
 
-**Regenerating.** `scripts/coverage.sh` rebuilds every number on this page. It builds the std
+**Regenerating.** `scripts/dev/coverage.sh` rebuilds every number on this page. It builds the std
 test binaries in a fresh `mktemp -d` under `/var/tmp` and removes it at the end (about 4.2 GB;
 `KEEP=1` keeps it). It writes the raw tables to `artifacts/coverage/`. The stages are `build`,
 `insn` (criteria 1 and 4), `runtime` (criterion 2) and `cc` (criterion 5). The measuring program
-is `scripts/coverage/` (Go; see [Method](#method)). It runs at most one heavy job, waits while
+is `scripts/dev/coverage/` (Go; see [Method](#method)). It runs at most one heavy job, waits while
 MemAvailable is below 40 GiB, and caches decoder verdicts per decoder executable. The first amd64
 pass decodes about 10.6 M distinct encodings, which takes roughly 25 minutes; later passes reuse
 the cache.
@@ -162,7 +162,7 @@ Main findings:
   although v1 code never takes it). Second, it says nothing about the semantics proofs need beyond
   decoding (for example the dynamic-call hypotheses or the runtime contracts of criterion 2).
   Rejected encodings are named by `arm64asm`/`x86asm` mnemonic and grouped into ISA families
-  (`scripts/coverage/decode.go`). The naming is informational; the verdict is always the Lean
+  (`scripts/dev/coverage/decode.go`). The naming is informational; the verdict is always the Lean
   decoder's.
 * **Rankings.** "Functions blocked" counts the functions in which a class or family occurs at
   least once among the rejected encodings. "Sole" counts those in which it is the only one. The
@@ -232,7 +232,7 @@ the arm64 rows are closed by package A and the amd64 v3 rows are all modelled si
 **Update (WP-H, agent/armcrypto, 2026-10-25).** The arm64 crypto extensions (`SHA1*`, `SHA256*`,
 `SHA512*`, `EOR3`/`RAX1`/`XAR`/`BCAX`, `PMULL`/`PMULL2`), `CRC32*`/`CRC32C*`, the permutes
 (`ZIP`/`UZP`/`TRN`) and scalar `DUP` (`MOV Sd, Vn.S[0]`) now decode (`Janus/Arm64/DecodeCrypto.lean`).
-`scripts/coverage.sh insn` (arm64, same corpus) gives **151 / 207 (72.95%)** assembly functions
+`scripts/dev/coverage.sh insn` (arm64, same corpus) gives **151 / 207 (72.95%)** assembly functions
 fully decoded, up from 139, and 99.228% of assembly instructions accepted (94.566% before). The 12
 functions gained are the 5 GCM kernels, `sha1block`, `blockSHA2`, `blockSHA512`,
 `keccakF1600NEON`, `castagnoliUpdate`, `ieeeUpdate` and chacha20's `xorKeyStreamVX`. The remaining
@@ -383,7 +383,7 @@ Package A closed it (exclusive monitor and environment choice); the `anyCPU` the
 
 ### 1.5 Independent formal cross-check of the amd64 model (JanusX86, 2026-10-27)
 
-`scripts/x86formal.sh check` runs Janus' `step` and the Sail x86 model (ACL2 X86isa) side by side
+`scripts/build/x86formal.sh check` runs Janus' `step` and the Sail x86 model (ACL2 X86isa) side by side
 (`docs/validation/X86FORMAL.md`). The vendored Sail slice used to keep only the opcodes of the first,
 integer decoder, so every SSE, SSSE3, SSE4, x87, crypto, BMI and AVX-512 case that the current
 decoder accepts was reported as "janus decodes, the slice excludes it": 452,644 such verdicts over
@@ -420,7 +420,7 @@ what each branch has:
 * a Lean contract mentioning it (`Janus/Contracts/*.lean`, `Janus/FFI.lean`,
   `Janus/Amd64/FFI.lean`);
 * a stub in `cmd/janus/extract.go` (`.panic`, `.morestack`);
-* a `--contract` in `scripts/example-contracts.sh`;
+* a `--contract` in `scripts/verify/example-contracts.sh`;
 * real code executed by a proved example.
 
 Full table: `artifacts/coverage/runtime.tsv`.
@@ -538,8 +538,8 @@ zeroing and copying is inline or `memmove`/`memclrNoHeapPointers`.
 For each construct of the Go spec: the proved example that exercises it in compiled code, per
 architecture and branch, and what it rests on. A construct counts as covered only when a proof
 (no `sorry`) about a function whose compiled code path uses it exists. Lists read from
-`scripts/verify-examples.sh`, `examples/proofs*/`, `scripts/example-contracts.sh` and
-`scripts/verify-cgo-examples.sh` on each branch (`git show`). main has 28 arm64 proofs (plus the
+`scripts/verify/verify-examples.sh`, `examples/proofs*/`, `scripts/verify/example-contracts.sh` and
+`scripts/verify/verify-cgo-examples.sh` on each branch (`git show`). main has 28 arm64 proofs (plus the
 `WrongAdd` counterexample) and 31 amd64 proofs; agent/alloc adds 5+4, agent/maps 10+10,
 agent/ffi 5+5 (cgo), agent/iface-alloc none (mechanism and allocation contracts only),
 agent/rtiface 4+4 (interfaces: `Box`, `AsHasher`, `Classify`, `Equal`).
@@ -732,7 +732,7 @@ needing SIMD encodings, by hot callee:
 
 ### 5.1 Decoder coverage of compiled C
 
-The corpus has 110 functions: 79 in `scripts/coverage/ccorpus/*.c` plus agent/ffi's
+The corpus has 110 functions: 79 in `scripts/dev/coverage/ccorpus/*.c` plus agent/ffi's
 `examples/cgo/ccover.c` (28) and `cfuncs.c` (3), read with `git show`:
 
 * `vec.c`: 21 loops that compilers auto-vectorise: sums, element-wise add/xor/mul/shift, saxpy,
@@ -813,8 +813,8 @@ on amd64. On amd64 there is also one `PUNPCKLQDQ`.
 ### 5.3 Advanced SIMD in compiled C and Go assembly (package I, agent/neon)
 
 Measured on agent/neon (main 987d96d plus `Janus/Arm64/NeonInstr.lean`, `DecodeNeon.lean`, `Neon.lean`, `NeonFP.lean`, `ExecNeon.lean`),
-same toolchains. Rerun with `scripts/coverage.sh cc` (the official corpus) and
-`validation/hardware-comparison/arm64/harvest/neon/build.sh` plus `scripts/coverage/` `insn -c` (the supplementary corpus).
+same toolchains. Rerun with `scripts/dev/coverage.sh cc` (the official corpus) and
+`validation/hardware-comparison/arm64/harvest/neon/build.sh` plus `scripts/dev/coverage/` `insn -c` (the supplementary corpus).
 
 | corpus | arm64 config | before (main) | after (agent/neon) |
 |---|---|---:|---:|
@@ -902,7 +902,7 @@ Greedy order (the class that makes the most functions fully decodable next):
 | 24 | `FDIV` | +12 | 2282 (79.7%) |
 | 25 | `FSUB` | +14 | 2296 (80.2%) |
 
-and so on down to the last of 112 classes (`RADDHN`); `scripts/coverage/rank-classes.py` prints
+and so on down to the last of 112 classes (`RADDHN`); `scripts/dev/coverage/rank-classes.py` prints
 the full tables from the `insn -c -json` outputs (computed with the decoder of main). On the official corpus alone the
 greedy order is:
 
@@ -943,7 +943,7 @@ model covered integer arguments in registers (`X0`–`X7`; `RDI RSI RDX RCX R8 R
 integer results, the callee-saved general registers, stack alignment, the red zone, `DF`, and the
 cgo boundary contract (`CgoCall`, `TopOfStack`). K1 (agent/cabi) added the classified call for
 every argument and result class (`Janus/CABI/{CType,AAPCS64,SysV}.lean`, `CCallA`, `CEnsuresR`;
-docs/FFI.md § 1), checked against gcc and clang by `scripts/cabi-probe.sh`, with ten proved
+docs/FFI.md § 1), checked against gcc and clang by `scripts/build/cabi-probe.sh`, with ten proved
 examples per ISA. Measured against the corpus:
 
 | ABI feature | corpus function | decodes today (arm64 / amd64 gcc -O2) | agent/ffi model | missing |
@@ -1008,7 +1008,7 @@ They merge in the order **alloc → maps → ffi → iface-alloc**. So:
 | 9 | **H. arm64 crypto extensions, CRC32, permutes** (done on agent/armcrypto: 151/207 assembly, `A64Crc32` proved; see 1.3): `PMULL`/`PMULL2` (1Q), `SHA1C/H/M/P/SU0/SU1`, `SHA256H/H2/SU0/SU1`, `SHA512H/H2/SU0/SU1`, SHA3 `EOR3`/`RAX1`/`XAR`/`BCAX`, `CRC32{B,H,W,X}`, `CRC32C{B,H,W,X}`, `ZIP1`/`ZIP2` on 2D, `MOV` element | arm64 assembly +12 (GCM ×5, SHA-1/256/512, SHA3, CRC32 ×2, chacha20); with C 206/207, the last being A's `cgoSigtramp` | new `Janus/Arm64/Crypto.lean` (hook in `Decode.lean`) | M | none (I for the shared `ZIP1`) |
 | 10 | **F. AVX/AVX2 (VEX-128/256, YMM)** (**done**, agent/avx: C `-march=x86-64-v3` gcc 59.1% → 96.4%, clang 58.7% → 98.2%, i.e. no VEX blocker left; assembly v1 160 → 166 (`math.archExp`, SHA-1/256/512 AVX2, chacha20poly1305 Open/Seal); also packed FMA3, F16C, masked moves, gathers; oracle 0 MISMATCH; `CDot32`/`GoDot32`, `Index64`, `MaxU32x8` proved; `docs/AMD64.md`) beyond the moves and compares `memmove`/`memequal` use: integer and FP arithmetic, shuffles and permutes (`VPSHUFB`, `VPALIGNR`, `VPERM2I128`, `VPERMD`, `VPBLENDD`, `VINSERTI128`, `VEXTRACTI128`, `VPBROADCAST*`), packed FMA, the `V*SD/SS` scalar forms | C `-march=x86-64-v3`: gcc 52.7%, clang 50.5% → ≈ 99%; assembly: `math.archExp`, SHA-1/256/512 AVX2, chacha20poly1305 (+7 in the greedy table) | new `Janus/Amd64/{DecodeAVX,ExecAVX}.lean` | L | D (lane semantics generalised to 256 bits) |
 | 11 | **G. AVX-512** (**done**, agent/avx512: assembly v1 166 → 195, v3 163 → 192, all 29 `internal/runtime/gc/scan` functions; oracle 0 MISMATCH on 922,808 native cases; `expandAVX512_2` and `Search64` proved; `docs/AMD64.md`): EVEX decoding (`disp8*N`, broadcast, masking, zeroing), ZMM state, `K0`–`K7` and `KMOV*`, `VMOVDQU64`, `VPERMB`/`VPERMI2B` (VBMI), `VGF2P8AFFINEQB` (GFNI), `VPOPCNTB`, `VPCOMPRESSQ`, `VPTERNLOGD`, `VPCLMULQDQ`, `VEXTRACTF32X4`, `VPCMPUQ`, the `asyncPreempt` state save | assembly +29 (`internal/runtime/gc/scan.expandAVX512_*`, the GC's span scanning), `ieeeCLMUL`, `asyncPreempt` → amd64 assembly 100% (with C, D, E, F) | new `Janus/Amd64/{DecodeEVEX,ExecEVEX}.lean`, ZMM/K fields in `Janus/Amd64/State.lean` | XL | F |
-| 12 | **K1. C ABI: arguments and results** (**done**, agent/cabi: docs/FFI.md § 1, `scripts/cabi-probe.sh`): stack arguments, FP/SIMD arguments and results, callee-saved `V8`–`V15` low halves, FPCR/MXCSR/x87-CW preservation, SysV classification (INTEGER/SSE/MEMORY), AAPCS64 HFA/HVA, indirect results (`X8`, hidden `RDI`), varargs (`AL`, register save area, `va_list` for both ABIs), `long double`/`_Complex` returns | rows 2–6 and 15 of the table in 5.2 | `Janus/CABI.lean`, `Janus/Amd64/CABI.lean`, docs/FFI.md § 1 | L | ffi |
+| 12 | **K1. C ABI: arguments and results** (**done**, agent/cabi: docs/FFI.md § 1, `scripts/build/cabi-probe.sh`): stack arguments, FP/SIMD arguments and results, callee-saved `V8`–`V15` low halves, FPCR/MXCSR/x87-CW preservation, SysV classification (INTEGER/SSE/MEMORY), AAPCS64 HFA/HVA, indirect results (`X8`, hidden `RDI`), varargs (`AL`, register save area, `va_list` for both ABIs), `long double`/`_Complex` returns | rows 2–6 and 15 of the table in 5.2 | `Janus/CABI.lean`, `Janus/Amd64/CABI.lean`, docs/FFI.md § 1 | L | ffi |
 | 13 | **K2. C ABI: environment** (**done**, agent/cenv: docs/FFI.md §§ 2–4, nine proved examples per ISA): `//export` callbacks (`crosscall2` → `cgocallback` contract and the reverse composition theorem), function-pointer hypotheses, writable C globals and `-fPIC` GOT access as data objects, TLS (initial-exec, general-dynamic, TLSDESC), PLT stubs and libc contracts (`memcpy`, `memset`, `strlen`, `malloc`/`free`, outline atomics), `setjmp`/`longjmp` (non-local return), `alloca` frame lemmas; agent/cenv2: the `cgocallback` re-entry with `g` and a goroutine stack size under a readiness (`ECallBox`, `ECallLarge`), dynamic GOT slots as `GotBound` (`EEnv`), the outline-atomics LL/SC path under the store-exclusive progress hypothesis (`EAtomic`) | rows 7–13 of 5.2 | `Janus/FFI.lean`, `Janus/Amd64/FFI.lean`, new `Janus/Contracts/Libc.lean`, the cgo part of `cmd/janus/extract.go`, docs/FFI.md §§ 2–4 | L | K1, iface-alloc |
 | 14 | **R1. String runtime contracts** (done on agent/rtstr: `Janus/Contracts/String.lean` as `RtSpec`s for both ISAs, `Janus/Spec/String.lean` checked against the Go runtime, `decoderune`/`countrunes` proved from their code; `cmpstring` and `strmin`/`strmax` are not covered): `concatstring2..5`/`concatstrings`, `concatbyte2..5`/`concatbytes`, `slicebytetostring`, `slicebytetostringtmp`, `stringtoslicebyte`, `stringtoslicerune`, `slicerunetostring`, `intstring`, `cmpstring` (executed: decodes), `decoderune`, `countrunes`, `strmin`/`strmax`, `gostring`, `gostringn`, `gobytes` | 20 linked + 3 | `Janus/Contracts/String.lean` (+`Amd64`), `Janus/Spec/String.lean` | M | iface-alloc (alloc contracts) |
 | 15 | **R2. Interface runtime contracts** (done on agent/rtiface): `convT`, `convTnoptr`, `convT16/32/64`, `convTstring`, `convTslice`, `assertE2I`, `assertE2I2`, `typeAssert`, `interfaceSwitch` (+ `emptyTypeAssertCache`, `emptyInterfaceSwitchCache`), `ifaceeq`, `efaceeq` | 12 linked + 1 + 2 caches; unlocks type switches and assertions (criterion 3) | `Janus/Contracts/Iface.lean` (+`Amd64`), `Janus/Spec/Type.lean` | M | iface-alloc |
@@ -1034,5 +1034,5 @@ They merge in the order **alloc → maps → ffi → iface-alloc**. So:
 Nothing in scope. Concurrency stays excluded: the 12 linked and 3 defined channel, select and
 goroutine entry points, the `race*` instrumentation, `sync` and the multi-threaded parts of the
 runtime. Single-threaded `sync/atomic` is in scope and covered by A and B. The two numbers to
-re-measure after each package are the `insn` summary of `scripts/coverage.sh` (criteria 1, 4, 5)
+re-measure after each package are the `insn` summary of `scripts/dev/coverage.sh` (criteria 1, 4, 5)
 and the `runtime` table (criterion 2).

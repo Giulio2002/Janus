@@ -843,50 +843,50 @@ func TestCacheGCConcurrentVerify(t *testing.T) {
 	}
 }
 
-// TestArtifactsLib runs the self-test of scripts/lib/artifacts.sh, the pruning of oracle dumps
+// TestArtifactsLib runs the self-test of scripts/gate/lib/artifacts.sh, the pruning of oracle dumps
 // shared by the oracle drivers (needs bash and zstd).
 func TestArtifactsLib(t *testing.T) {
 	if _, err := exec.LookPath("zstd"); err != nil {
 		t.Skip("zstd not installed")
 	}
-	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "lib", "test-artifacts.sh"))
+	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "gate", "lib", "test-artifacts.sh"))
 	cmd.Env = append(os.Environ(), "KEEP=")
 	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "all checks passed") {
-		t.Fatalf("scripts/lib/test-artifacts.sh: %v\n%s", err, out)
+		t.Fatalf("scripts/gate/lib/test-artifacts.sh: %v\n%s", err, out)
 	}
 }
 
-// TestTheoremsLib runs the self-test of scripts/lib/theorems.sh (the example scripts' verify of
+// TestTheoremsLib runs the self-test of scripts/gate/lib/theorems.sh (the example scripts' verify of
 // several theorems of one proof at once): concurrent items do not share copies, and a second run
 // on the same extraction in the same tree fails loudly instead of racing the first.
 func TestTheoremsLib(t *testing.T) {
 	if _, err := exec.LookPath("flock"); err != nil {
 		t.Skip("flock not installed")
 	}
-	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "lib", "test-theorems.sh"))
+	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "gate", "lib", "test-theorems.sh"))
 	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
 	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "all checks passed") {
-		t.Fatalf("scripts/lib/test-theorems.sh: %v\n%s", err, out)
+		t.Fatalf("scripts/gate/lib/test-theorems.sh: %v\n%s", err, out)
 	}
 }
 
-// TestItemTimeoutLib runs the self-test of scripts/lib/itemtimeout.sh (jv, the per-item wall-clock
+// TestItemTimeoutLib runs the self-test of scripts/gate/lib/itemtimeout.sh (jv, the per-item wall-clock
 // limit of the verify-* scripts): a hung `janus verify` is killed, fails with status 124 and
 // prints TIMEOUT, and the other theorems of the example are not affected.
 func TestItemTimeoutLib(t *testing.T) {
 	if _, err := exec.LookPath("flock"); err != nil {
 		t.Skip("flock not installed")
 	}
-	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "lib", "test-itemtimeout.sh"))
+	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "gate", "lib", "test-itemtimeout.sh"))
 	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
 	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "all checks passed") {
-		t.Fatalf("scripts/lib/test-itemtimeout.sh: %v\n%s", err, out)
+		t.Fatalf("scripts/gate/lib/test-itemtimeout.sh: %v\n%s", err, out)
 	}
 }
 
-// TestPoolLib and TestSpeedcheckLib run the self-tests of the gate's work queue (scripts/lib/pool.sh:
+// TestPoolLib and TestSpeedcheckLib run the self-tests of the gate's work queue (scripts/gate/lib/pool.sh:
 // longest first, streamed PASS/FAIL/TIMEOUT lines, failure and missing results fail the pool, needs)
-// and of the speed-regression check (scripts/gate-speedcheck.py).
+// and of the speed-regression check (scripts/gate/gate-speedcheck.py).
 func TestPoolLib(t *testing.T) { runLibSelfTest(t, "test-pool.sh") }
 
 func TestSpeedcheckLib(t *testing.T) { runLibSelfTest(t, "test-speedcheck.sh") }
@@ -896,7 +896,7 @@ func TestGateCancelLib(t *testing.T) { runLibSelfTest(t, "test-pgcancel.sh") }
 
 func runLibSelfTest(t *testing.T, name string) {
 	t.Helper()
-	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "lib", name))
+	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "gate", "lib", name))
 	// never the running gate's out dir or timeline (the gotest lane runs inside a gate that exports them)
 	var env []string
 	for _, e := range os.Environ() {
@@ -906,7 +906,7 @@ func runLibSelfTest(t *testing.T, name string) {
 	}
 	cmd.Env = append(env, "TMPDIR="+t.TempDir())
 	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "all checks passed") {
-		t.Fatalf("scripts/lib/%s: %v\n%s", name, err, out)
+		t.Fatalf("scripts/gate/lib/%s: %v\n%s", name, err, out)
 	}
 }
 

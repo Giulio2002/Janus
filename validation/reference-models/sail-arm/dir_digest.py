@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Integrity records of the Sail model directories (scripts/oracle-sail.sh model_dir / split_parts).
+"""Integrity records of the Sail model directories (scripts/validation/sail-arm.sh model_dir / split_parts).
 
     dir_digest.py digest PATH...                      print the SHA-256 over PATH... (see below)
     dir_digest.py record OUT PATH... [-- K=V ...]     write OUT: the digest of PATH... and the K=V pairs

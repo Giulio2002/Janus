@@ -14,7 +14,7 @@ the single body `total[go.shape.uint64]` (`TotalMeters` and `TotalFeet` call the
 each caller passes its own dictionary in `RAX`. The shape code loads the dictionary's first word
 (the code address of `Feet.Scale`) and calls it (`CALL CX`, the dictionary in `DX`), twice. The
 executor reads that word from the extracted dictionary, so the call target is a literal.
-(`Feet.Scale` is extracted with `--targets`, `scripts/example-targets.sh`.) -/
+(`Feet.Scale` is extracted with `--targets`, `scripts/verify/example-targets.sh`.) -/
 
 namespace Proof
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Speed-regression check of a gate run (on top of every other check, never instead of one).
 
-  python3 -I scripts/gate-speedcheck.py check  TIMELINE BASELINE [LOGDIR]
-  python3 -I scripts/gate-speedcheck.py seed   TIMES OUT   (provisional baseline from artifacts/verify-all-examples.times)
-  python3 -I scripts/gate-speedcheck.py update TIMELINE BASELINE [LOGDIR]   (rewrite BASELINE from a run)
+  python3 -I scripts/gate/gate-speedcheck.py check  TIMELINE BASELINE [LOGDIR]
+  python3 -I scripts/gate/gate-speedcheck.py seed   TIMES OUT   (provisional baseline from artifacts/verify-all-examples.times)
+  python3 -I scripts/gate/gate-speedcheck.py update TIMELINE BASELINE [LOGDIR]   (rewrite BASELINE from a run)
 
 TIMELINE is <gate out>/timeline.jsonl; BASELINE is the committed scripts/speed-baseline.tsv
 ("id<TAB>wall seconds<TAB>peak GiB", one line per item of the verify pool and per lane); LOGDIR (default
@@ -142,7 +142,7 @@ def main():
     gate = next((r for r in rows if r["kind"] == "gate"), {})
     if mode == "update":
         with open(base, "w") as f:
-            f.write("# speed baseline (scripts/gate-speedcheck.py): id, wall seconds, peak GiB; commit %s, -j %s, load %s\n" % (
+            f.write("# speed baseline (scripts/gate/gate-speedcheck.py): id, wall seconds, peak GiB; commit %s, -j %s, load %s\n" % (
                 gate.get("commit"), gate.get("jobs"), gate.get("load1")))
             for k in sorted(got):
                 f.write("%s\t%.1f\t%.2f\n" % (k, got[k][0], got[k][1]))

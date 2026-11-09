@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests of the ASL cache collector (models/asl/tools/asl_mod_cache.py gc; scripts/asl.sh cache_gc).
+# Tests of the ASL cache collector (models/asl/tools/asl_mod_cache.py gc; scripts/build/asl.sh cache_gc).
 #
 #   models/asl/tools/test_asl_mod_cache_gc.sh               fixture tests (seconds)
 #   models/asl/tools/test_asl_mod_cache_gc.sh --sample CACHE   also a stress test on a COPY (in mktemp)

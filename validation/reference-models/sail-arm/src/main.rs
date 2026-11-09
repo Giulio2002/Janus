@@ -919,7 +919,7 @@ fn main() {
         return;
     }
     // Default: JANUS_SAIL_JOBS, else every core. (`oracle run` shards in parallel itself, so
-    // scripts/oracle-sail.sh sets JANUS_SAIL_JOBS=1 when this binary stands in for the runner.)
+    // scripts/validation/sail-arm.sh sets JANUS_SAIL_JOBS=1 when this binary stands in for the runner.)
     let mut jobs = std::env::var("JANUS_SAIL_JOBS")
         .ok()
         .and_then(|s| s.parse().ok())

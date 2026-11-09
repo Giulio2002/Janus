@@ -1,7 +1,7 @@
 // Package live holds the examples of the live allocation contracts (Janus/Contracts/Live.lean):
 // functions that allocate several times, or a data-dependent number of times, and keep every
 // object they allocated. It is built into a binary of its own
-// (scripts/build-examples-rtmisc.sh), so that no other example's addresses change.
+// (scripts/build/build-examples-rtmisc.sh), so that no other example's addresses change.
 package live
 
 // Cell is a heap object with a pointer field: a store into P goes through the GC write barrier

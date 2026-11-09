@@ -281,8 +281,8 @@ No model file was changed.
 
 ## Regression status
 
-With this branch's changes, all of these pass: `scripts/verify-examples.sh`,
-`scripts/verify-amd64-examples.sh`, `test/redteam/run-all.sh`, `test/redteam/rounds/round2/run-round2.sh`,
+With this branch's changes, all of these pass: `scripts/verify/verify-examples.sh`,
+`scripts/verify/verify-amd64-examples.sh`, `test/redteam/run-all.sh`, `test/redteam/rounds/round2/run-round2.sh`,
 `test/redteam/rounds/round3/run-round3.sh`, `test/redteam/rounds/round4/run-round4.sh`, `test/redteam/rounds/round5/run-round5.sh` and
 `go test -timeout 50m ./cmd/...`.
 

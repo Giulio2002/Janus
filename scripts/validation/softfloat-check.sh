@@ -7,12 +7,12 @@
 # NaN), and inside them Go's addition is known not to be (it is checked that it differs).
 #
 #   SOFTCHECK_N   operand pairs per operation (default 400000; the measurement in the docs used 5000000)
-#   GOTOOLCHAIN   default go1.26.0 (the release of scripts/build-examples*.sh)
+#   GOTOOLCHAIN   default go1.26.0 (the release of scripts/build/build-examples*.sh)
 #
 # The functions are the runtime's own, reached by //go:linkname (-ldflags=-checklinkname=0).
-# Usage: scripts/softfloat-check.sh
+# Usage: scripts/validation/softfloat-check.sh
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export GOTOOLCHAIN="${GOTOOLCHAIN:-${JANUS_GO_TOOLCHAIN:-go1.26.0}}"
 export PATH="$PATH:/usr/local/go/bin"
 cd "$root/examples/rtmisc"

@@ -88,7 +88,7 @@ where the count ran past the buffer and both sides fault). The runner also recor
 rejects, so the invariant `DF = 0` that the string instructions rely on held in every case
 the model executes.
 
-**Kernel, trap, environment and flag-image instructions (WP-C, 2026-10-25, `scripts/oracle-amd64.sh quick`,
+**Kernel, trap, environment and flag-image instructions (WP-C, 2026-10-25, `scripts/validation/hardware-amd64.sh quick`,
 `JOBS=8`).** 446,024 cases: **0 MISMATCH**, 340,275 agree, 105,749 model-gap, 0 unobserved. The
 exact forms of `INT3`, `UD2`, `HLT` (targeted specs, `edge/sys` and random strings) all agree as
 traps (`SIGTRAP`, `SIGILL`, `SIGSEGV` / `Fault.trap`, 1,425 cases); `CPUID` and `RDTSC` (1,365 cases)
@@ -179,7 +179,7 @@ AES/SHA, AVX-512 (`VMOVDQU64`, `VPERMB`, ...), `CPUID`/`XGETBV` and `PCMPESTRI`.
 
 ## Results with SSE scalar floating point (2026-10-24)
 
-`OUT=artifacts/oracle-amd64-fp JOBS=16 N=1200 scripts/oracle-amd64.sh fp`: the targeted
+`OUT=artifacts/oracle-amd64-fp JOBS=16 N=1200 scripts/validation/hardware-amd64.sh fp`: the targeted
 floating-point specs (`ADD SUB MUL DIV SQRT MIN MAX` `SD`/`SS`, `UCOMIS*`/`COMIS*`, `CMPSD`/`CMPSS`
 with every predicate, the `CVT*` conversions with 32/64-bit integers, `CVTSD2SS`/`CVTSS2SD`,
 `ROUNDSD`/`ROUNDSS` with every `imm8` low nibble, the bitwise `AND(N)/OR PS/PD`; register and
@@ -244,7 +244,7 @@ The C code of cgo programs ([FFI.md](../FFI.md)) needed one decoder addition, `E
 
 The harvested classes include `cmov`, `setcc`, `lea`, `imul`, `mul`, `div`/`idiv`,
 `movsx`/`movzx`/`movsxd`, `cqo`/`cdqe`, `bswap`, `bsr`, `ror`, `leave`, `push`/`pop` and the
-`ENDBR64`/`nopw` forms. `scripts/oracle-amd64.sh full` now adds this C corpus to the harvest.
+`ENDBR64`/`nopw` forms. `scripts/validation/hardware-amd64.sh full` now adds this C corpus to the harvest.
 
 ### `REP RET` and `BND RET` (2026-10-26)
 
@@ -266,12 +266,12 @@ pointer at the ends of the buffer, and with every other prefix before or after t
 The model-gap rows are conservative: the decoder refuses the form. `F0 F3 C3` (`LOCK` with `REP RET`)
 is `SIGILL` on both sides.
 
-**Against the Sail x86 model** (`scripts/x86formal.sh`, [X86FORMAL.md](X86FORMAL.md)): the proof
+**Against the Sail x86 model** (`scripts/build/x86formal.sh`, [X86FORMAL.md](X86FORMAL.md)): the proof
 `JanusX86.Proofs.Call.ret_agree` (Janus' `RET`/`RET imm16` against Sail's `x86_ret`, for every
 prefix list the decoder accepts) no longer needs `p.rep = 0`: the Sail `x86_ret` does not look at
-the repeat prefix, so `F3 C3` agrees with it exactly as `C3` does. `scripts/x86formal.sh prove`
+the repeat prefix, so `F3 C3` agrees with it exactly as `C3` does. `scripts/build/x86formal.sh prove`
 passes (46 audited theorems; axioms `propext`, `Classical.choice`, `Quot.sound` only).
-`scripts/x86formal.sh check` on the corpus above gives, for the 20,000 `edge/repret` cases: 8,440
+`scripts/build/x86formal.sh check` on the corpus above gives, for the 20,000 `edge/repret` cases: 8,440
 agree (4,702 decoded or plain returns, state for state; 2,840 both reject; 532 bad targets and 366
 unmapped stacks that fault on both sides), 11,560 gaps (Janus refuses a prefix combination that the
 model executes: `janus-undecodable/sail-ok` 10,709, `/sail-memory` 851), and **0 MISMATCH**. (The same run reports 162,406 `MISMATCH` over the whole corpus, all
@@ -283,7 +283,7 @@ the corpus: that check was written for the integer corpus of the first decoder.)
 ### GOAMD64=v3 extensions (2026-10-25)
 
 BMI1 (`ANDN BLSR BLSMSK BLSI BEXTR`), BMI2 (`SHLX SHRX SARX RORX MULX BZHI PDEP PEXT`), `MOVBE`,
-the 48 scalar FMA3 forms and SSSE3 `PSHUFB`/`PSIGNB` (WP-B). `scripts/oracle-amd64.sh v3` runs
+the 48 scalar FMA3 forms and SSSE3 `PSHUFB`/`PSIGNB` (WP-B). `scripts/validation/hardware-amd64.sh v3` runs
 the targeted specs (`gen.V3Specs`: `MOVBE` load/store/16-bit with the `CRC32` and `F3`
 neighbours and the `#UD` register forms, `PSHUFB`/`PSIGNB` with their MMX forms and the other
 SSSE3 opcodes; `gen.V3VexSpecs`: every BMI opcode/`pp` pair, the `#UD` neighbours, and the
@@ -320,7 +320,7 @@ model faults in the two vendor-dependent cases (see `FP.fma`).
 
 ### x87, `NOTRACK` and the padded TLS call (WP-J, 2026-10-25)
 
-`scripts/oracle-amd64.sh x87` (`gen -x87-only`, `gen.X87Cases`): every memory form (`/0`–`/7`
+`scripts/validation/hardware-amd64.sh x87` (`gen -x87-only`, `gen.X87Cases`): every memory form (`/0`–`/7`
 of `D8`–`DF`, random `mod`/`rm`/SIB/displacement, the operand planted in the buffer in the
 instruction's format: binary32/64 and double-extended edge values, integers, control words
 including raw reserved bits) `N` times and each of the 512 register forms `N/4` times, `FWAIT`
@@ -371,7 +371,7 @@ undefined).
 ### SSE packed instructions (WP-D, 2026-10-25)
 
 The SSE2/SSE3/SSSE3/SSE4.1/SSE4.2 packed instructions of `Janus/Amd64/ExecSSE.lean`.
-`scripts/oracle-amd64.sh sse` runs the targeted specs (`gen.SSESpecs`, `validation/hardware-comparison/amd64/gen/sse.go`:
+`scripts/validation/hardware-amd64.sh sse` runs the targeted specs (`gen.SSESpecs`, `validation/hardware-comparison/amd64/gen/sse.go`:
 every modelled `66 0F xx` packed-integer opcode in register and memory forms with its MMX and
 `F3` neighbours, the shift groups `66 0F 71/72/73` with every `/r`, the `MOVLPS`/`MOVHLPS`/
 `MOVHPS`/`MOVLHPS`/`MOVDDUP`/`MOVSLDUP`/`MOVSHDUP` opcodes under every mandatory prefix, the
@@ -387,7 +387,7 @@ boundary elements; every packed floating-point operation on IEEE edge values in 
 the 16 `RC` × `FTZ` × `DAZ` settings and with each exception unmasked alone; `CRC32` at every
 width); and every WP-D-class instruction harvested from the `GOAMD64=v1` test binaries of
 `internal/chacha8rand hash/crc32 bytes strings crypto/internal/fips140/nistec crypto/aes
-crypto/sha256 crypto/sha1 crypto/cipher math` and from the C corpus (`scripts/coverage/ccorpus`,
+crypto/sha256 crypto/sha1 crypto/cipher math` and from the C corpus (`scripts/dev/coverage/ccorpus`,
 `examples/cgo/ccover.c`) compiled by gcc and clang at `-O2` and `-O3`. States: element edge
 values in every XMM register and in the memory operand, 16-byte memory operands mostly aligned,
 shift counts with high garbage bits, `XMM0` blend masks, integer lanes for `CVTDQ2PS/PD`.
@@ -418,7 +418,7 @@ for `PTEST`, `PALIGNR`, `PMULLD`, `ROUNDPS` (aligned) and `PCMPESTRI`, `PMOVSX` 
 ### x86 crypto extensions (WP-E, 2026-10-25)
 
 AES-NI, `PCLMULQDQ`, SHA-NI and ADX (`Janus/Amd64/ExecCrypto.lean`), on a host with all four
-features (`grep -o 'aes\|pclmulqdq\|sha_ni\|adx' /proc/cpuinfo`). `scripts/oracle-amd64.sh
+features (`grep -o 'aes\|pclmulqdq\|sha_ni\|adx' /proc/cpuinfo`). `scripts/validation/hardware-amd64.sh
 crypto` runs the targeted specs (`gen.CryptoSpecs`, `validation/hardware-comparison/amd64/gen/crypto.go`: every AES-NI
 opcode `66 0F 38 DB..DF` and `66 0F 3A DF`, `PCLMULQDQ`, the SHA-NI opcodes `NP 0F 38 C8..CD` and
 `NP 0F 3A CC`, register and memory forms with random `REX` (`REX.W` is ignored), and their
@@ -454,7 +454,7 @@ mismatch. Independently of the host, `test/lean/JanusTests/X86Crypto.lean` check
 FIPS 180-4 vectors and the Intel AES-NI white paper examples in the kernel.
 ### AVX, AVX2, FMA3 and F16C (WP-F, 2026-10-25)
 
-The VEX-encoded instructions of `Janus/Amd64/ExecAVX.lean`. `scripts/oracle-amd64.sh avx` runs
+The VEX-encoded instructions of `Janus/Amd64/ExecAVX.lean`. `scripts/validation/hardware-amd64.sh avx` runs
 the targeted specs (`gen.AVXSpecs`, `validation/hardware-comparison/amd64/gen/avx.go`: every map-`0F`, `0F38` and `0F3A`
 opcode of WP-F under every implied prefix it exists with, in register and memory forms, with
 `VEX.L`, `VEX.W` and the register fields uniform, `VEX.vvvv` uniform for the three-operand forms
@@ -504,7 +504,7 @@ host success at `TestPC`; the model faults. The self-test checks `VPADDD ymm` (b
 The EVEX instructions of `Janus/Amd64/ExecEVEX.lean`, with the ZMM/opmask state, the VEX opmask
 instructions and the VEX forms of `VPCLMULQDQ` and GFNI. **Reference: the host CPU, natively** (an
 Intel Xeon Gold 5412U, Sapphire Rapids, with AVX512F/BW/DQ/VL/CD, VBMI, VBMI2, BITALG,
-VPOPCNTDQ, IFMA, VNNI, BF16, FP16, GFNI, VAES and VPCLMULQDQ); no emulator. `scripts/oracle-amd64.sh
+VPOPCNTDQ, IFMA, VNNI, BF16, FP16, GFNI, VAES and VPCLMULQDQ); no emulator. `scripts/validation/hardware-amd64.sh
 avx512` runs:
 
 * the targeted specs (`gen.Evex512Specs`, `validation/hardware-comparison/amd64/gen/avx512.go`): every opcode of the
@@ -564,15 +564,15 @@ shift groups, `VCMPPS/PD` with `imm8 ≥ 32`); they are accepted now. No run had
 ## Running it
 
 ```
-scripts/oracle-amd64.sh selftest   # build, check the native harness on known answers (126 checks)
-scripts/oracle-amd64.sh quick      # generated cases only (~100k)
-scripts/oracle-amd64.sh full       # generated + edge + harvested from real Go binaries (default)
-scripts/oracle-amd64.sh fp         # SSE scalar floating point only
-scripts/oracle-amd64.sh v3         # the GOAMD64=v3 extensions only (BMI1/BMI2, MOVBE, FMA, PSHUFB/PSIGNB)
-scripts/oracle-amd64.sh sse        # the SSE packed instructions of WP-D only (SSE2..SSE4.2)
-scripts/oracle-amd64.sh crypto     # the x86 crypto extensions of WP-E only (AES-NI, PCLMULQDQ, SHA-NI, ADX)
-scripts/oracle-amd64.sh avx        # the AVX/AVX2/FMA3/F16C instructions of WP-F only (VEX-128/256, YMM)
-scripts/oracle-amd64.sh avx512     # the AVX-512 instructions of WP-G only (EVEX, ZMM0-31, K0-K7)
+scripts/validation/hardware-amd64.sh selftest   # build, check the native harness on known answers (126 checks)
+scripts/validation/hardware-amd64.sh quick      # generated cases only (~100k)
+scripts/validation/hardware-amd64.sh full       # generated + edge + harvested from real Go binaries (default)
+scripts/validation/hardware-amd64.sh fp         # SSE scalar floating point only
+scripts/validation/hardware-amd64.sh v3         # the GOAMD64=v3 extensions only (BMI1/BMI2, MOVBE, FMA, PSHUFB/PSIGNB)
+scripts/validation/hardware-amd64.sh sse        # the SSE packed instructions of WP-D only (SSE2..SSE4.2)
+scripts/validation/hardware-amd64.sh crypto     # the x86 crypto extensions of WP-E only (AES-NI, PCLMULQDQ, SHA-NI, ADX)
+scripts/validation/hardware-amd64.sh avx        # the AVX/AVX2/FMA3/F16C instructions of WP-F only (VEX-128/256, YMM)
+scripts/validation/hardware-amd64.sh avx512     # the AVX-512 instructions of WP-G only (EVEX, ZMM0-31, K0-K7)
 ```
 
 Knobs: `OUT` (default `artifacts/oracle-amd64`), `JOBS` (default 16, capped at 24), `N`
@@ -581,7 +581,7 @@ instruction), `PER_CLASS`, `SEED`, `MODEL` (`MODEL=validation/hardware-compariso
 pipeline without Lean), `KEEP` (what the run leaves in `OUT`: by default `summary.md`,
 `repro.*`, `mismatches.jsonl` and the cases, hardware, model and verdict dumps zstd-compressed,
 with the generated and harvested inputs removed; `KEEP=zst` compresses everything, `KEEP=1`
-keeps everything raw; see docs/validation/ORACLE.md and `scripts/lib/artifacts.sh`). After a model change
+keeps everything raw; see docs/validation/ORACLE.md and `scripts/gate/lib/artifacts.sh`). After a model change
 the native side can be reused (decompress `hw.jsonl.zst` in `DIR` first):
 `validation/hardware-comparison/amd64/bin/oracle run -reuse-native -runner validation/hardware-comparison/amd64/bin/runner -model .lake/build/bin/janus-oracle-amd64 -cases A,B -out DIR`.
 `oracle minimize -out DIR` shrinks mismatching cases into `repro.md`/`repro.jsonl`. A full run

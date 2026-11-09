@@ -1,4 +1,4 @@
-// Command cmd links the live-stub examples (scripts/build-examples-rtmisc.sh).
+// Command cmd links the live-stub examples (scripts/build/build-examples-rtmisc.sh).
 package main
 
 import "example.com/rtmisc/stubdemo"

@@ -1,4 +1,4 @@
-module github.com/Giulio2002/Janus/scripts/coverage
+module github.com/Giulio2002/Janus/scripts/dev/coverage
 
 go 1.26.0
 

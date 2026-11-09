@@ -5,11 +5,11 @@
 # .olean/.ilean/.c/.c.o.export under .lake/build. Heavy-ish (the lean-sail package and ArmASL's first modules:
 # a few minutes with 4 threads, longer with 1): run it under memcap, one heavy job.
 #
-#   scripts/lib/test-thread-identity.sh [TARGET...]    default targets: ArmASL.Defs ArmASL.FakeReal ArmASL.SpecializationV1
+#   scripts/gate/lib/test-thread-identity.sh [TARGET...]    default targets: ArmASL.Defs ArmASL.FakeReal ArmASL.SpecializationV1
 #                                                       ArmASL.JanusExtras (plus their Sail dependencies)
 # Exit 0 when every output file is byte-identical across the two runs, 1 otherwise.
 set -uo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 targets=("$@"); [ ${#targets[@]} -gt 0 ] || targets=(ArmASL.Defs ArmASL.FakeReal ArmASL.SpecializationV1 ArmASL.JanusExtras)
 work=$(mktemp -d /srv/janus-ops/work.XXXX); trap 'rm -rf "$work"' EXIT
 co="$work/co"; tree="$co/models/asl"   # the package requires the framework by path (..): a full checkout layout
@@ -40,7 +40,7 @@ proofs=(${IDENT_PROOF_MODULES:-JanusASL.Proofs.Madd JanusASL.Proofs.Rel})
 cache="${ASL_CACHE:-/srv/janus-asl-cache}"
 prun() { # prun THREADS OUTFILE
   rm -rf "$tree/.lake"
-  (cd "$co" && ASL_CACHE="$cache" scripts/asl.sh restore) > "$work/prestore-$1.log" 2>&1 || return 2
+  (cd "$co" && ASL_CACHE="$cache" scripts/build/asl.sh restore) > "$work/prestore-$1.log" 2>&1 || return 2
   [ -f "$tree/.lake/build/lib/lean/ArmASL.olean" ] || return 2
   python3 -I "$co/models/asl/tools/asl_mod_cache.py" restore "$co" "$cache" >> "$work/prestore-$1.log" 2>&1
   local m f
@@ -57,7 +57,7 @@ prun() { # prun THREADS OUTFILE
 rc2=0
 prun 1 "$work/p1"; rc2=$?
 if [ "$rc2" = 2 ]; then
-  echo "SKIP phase 2: no usable cache entry for this checkout in $cache (run scripts/asl.sh build with that cache first)"
+  echo "SKIP phase 2: no usable cache entry for this checkout in $cache (run scripts/build/asl.sh build with that cache first)"
   exit 0
 fi
 [ "$rc2" = 0 ] || exit 1

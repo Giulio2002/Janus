@@ -301,7 +301,7 @@ func randSig(r *rand.Rand, id string) *Sig {
 	return s
 }
 
-// curated: the ABI functions of the C corpus (scripts/coverage/ccorpus/abi.c) and of the cgo
+// curated: the ABI functions of the C corpus (scripts/dev/coverage/ccorpus/abi.c) and of the cgo
 // examples (examples/cgo/cabi/kabi.c), with the prototypes those files declare, and the
 // classic edge cases of both ABIs.
 func curated() []*Sig {

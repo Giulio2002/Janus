@@ -6,7 +6,7 @@ import Janus.CABI.CType
 The classification of the *System V Application Binary Interface, AMD64 Architecture Processor
 Supplement* (§3.2.3 "Parameter Passing", §3.5.7 "Variable Argument Lists"), as gcc and clang
 implement it on Linux. It is a function of the C types only, checked against both compilers by
-the differential probe (`scripts/cabi-probe.sh`, docs/FFI.md § 1.3).
+the differential probe (`scripts/build/cabi-probe.sh`, docs/FFI.md § 1.3).
 
 **Classification** (`classify`, `cls`). Every eightbyte (8-byte chunk) of a type gets a class
 (`Cls`). Scalars: integers and pointers are INTEGER (`__int128`: two INTEGER eightbytes),

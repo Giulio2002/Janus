@@ -1,6 +1,6 @@
 # NAME<TAB>reason. The variables the gate's scripts export that ARE part of the item and lane keys (cmd/janus incrEnvRelevant), each with the
 # reason that is sound. Read by cmd/janus/incr2_test.go (TestIncr2EveryGateExportIsClassified: a NEW relevant export fails until it is
-# listed here or added to incrEnvSkip) and by scripts/lib/test-incr-liveness.sh (the gate-side liveness check leaves these alone and
+# listed here or added to incrEnvSkip) and by scripts/gate/lib/test-incr-liveness.sh (the gate-side liveness check leaves these alone and
 # perturbs every other variable the gate added). It is test input only: nothing here is read by a key or a verdict.
 LEAN_NUM_THREADS	a constant of the gate (4, capped); a different thread count is a different run
 JANUS_REAL_LAKE	the lake the gate found on PATH: a constant of the host, and the toolchain is keyed by its bytes anyway

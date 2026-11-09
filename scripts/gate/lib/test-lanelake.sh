@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test of scripts/lib/lanelake/lake: two lanes share one isolated tree; a fake `lake` (JANUS_REAL_LAKE) records
+# Self-test of scripts/gate/lib/lanelake/lake: two lanes share one isolated tree; a fake `lake` (JANUS_REAL_LAKE) records
 # when each call starts and ends, and a call "build" REWRITES a shared file (as a dependency re-resolution that
 # deletes packages/Sail does) while a call "env" reads it. Run concurrently, no rewrite may overlap any other lake
 # call of the tree, two `env` calls may overlap each other, and a call outside the tree is not serialised.

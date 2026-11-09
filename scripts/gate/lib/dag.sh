@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# The gate's dependency graph (scripts/gate.sh): prebuild stages and lanes are items of ONE pool (scripts/lib/pool.sh,
+# The gate's dependency graph (scripts/gate/gate.sh): prebuild stages and lanes are items of ONE pool (scripts/gate/lib/pool.sh,
 # `needs`), and each starts as soon as ITS inputs are ready, not after the whole prebuild. A stage that fails blocks only
 # its dependents (reported BLOCKED, a gate failure); independent stages keep running.
 #
@@ -83,7 +83,7 @@ dag_check() {
 # Resources the stages touch, and how (w = writes or replaces it, r = reads/executes it). Two stages that touch the same
 # resource, at least one of them as a writer, must be ORDERED (one in the other's closure): that is what the structure
 # alone does not show (pre-stamp and pre-warm both verify artifacts/Add and collided on its theorems lock; pre-ex-amd64
-# replaces bin/janus while others run it). scripts/lib/test-dag.sh asserts it for every pair.
+# replaces bin/janus while others run it). scripts/gate/lib/test-dag.sh asserts it for every pair.
 declare -gA DAG_RES
 DAG_RES=(
   [artifact:Add]="w:pre-stamp w:verify"

@@ -3,41 +3,41 @@
 # model (Arm's ASL, via rems-project/sail-arm and the sail-aarch64-oracle crate) and report
 # three-way agreement Janus vs Sail vs qemu. See docs/validation/ORACLE-SAIL.md.
 #
-#   scripts/oracle-sail.sh build     build the Sail driver (the 166 MB model is built as SAIL_SPLIT_PARTS parallel C++ TUs, see SAIL_SPLIT)
-#   scripts/oracle-sail.sh smoke     build + hand-written sanity cases
-#   scripts/oracle-sail.sh run       build + three-way run on the qemu oracle's corpus (default)
-#   scripts/oracle-sail.sh key       print the driver's cache/pin key (32 hex digits)
-#   scripts/oracle-sail.sh regen     regenerate the Sail model from pinned sources (opam + Sail
+#   scripts/validation/sail-arm.sh build     build the Sail driver (the 166 MB model is built as SAIL_SPLIT_PARTS parallel C++ TUs, see SAIL_SPLIT)
+#   scripts/validation/sail-arm.sh smoke     build + hand-written sanity cases
+#   scripts/validation/sail-arm.sh run       build + three-way run on the qemu oracle's corpus (default)
+#   scripts/validation/sail-arm.sh key       print the driver's cache/pin key (32 hex digits)
+#   scripts/validation/sail-arm.sh regen     regenerate the Sail model from pinned sources (opam + Sail
 #                                    0.20.1 + sail-arm) and diff it against the vendored model
-#   scripts/oracle-sail.sh crosscheck  build a second driver on the regenerated model (separate
+#   scripts/validation/sail-arm.sh crosscheck  build a second driver on the regenerated model (separate
 #                                    target dir) and diff its results with the vendored one on
 #                                    the corpus (semantic provenance check; needs regen + run)
 #
 # Environment:
 #   QEMU_OUT  qemu oracle output dir with cases.jsonl + hw.jsonl (default artifacts/oracle,
-#             written by `scripts/oracle.sh full`; run that first)
+#             written by `scripts/validation/hardware-arm64.sh full`; run that first)
 #   OUT       output dir (default artifacts/oracle-sail)
 #   JOBS      parallelism (default nproc)
 #   DEPS      where pinned external sources/toolchains live (default /srv/janus-sail-deps)
 #   SAIL_MODEL  vendored | regen  (which model.cpp to build against; default vendored)
-#   JANUS_MODEL_PIN=1  the cold gate (scripts/gate.sh --cold): the driver comes ONLY from the model pin
-#             (scripts/lib/modelpin.py, docs/TESTING.md "Cold gate and the model pin"), never from the build cache and
+#   JANUS_MODEL_PIN=1  the cold gate (scripts/gate/gate.sh --cold): the driver comes ONLY from the model pin
+#             (scripts/gate/lib/modelpin.py, docs/TESTING.md "Cold gate and the model pin"), never from the build cache and
 #             never built-and-published: a missing, tampered or corrupt pin FAILS (a stale one is rebuilt inside the run unless JANUS_MODEL_PIN_STALE=fail:
 #             the driver is built from source inside the run, loudly, publishing nothing). Only
-#             scripts/nightly-cold-gate.sh writes the pin.
+#             scripts/gate/nightly-cold-gate.sh writes the pin.
 #   SAIL_SPLIT  1 (default): build the model as SAIL_SPLIT_PARTS (48) translation units in parallel
 #             (validation/reference-models/sail-arm/split_model.py + a patched copy of the pinned crate, validation/reference-models/sail-arm/split_crate.py);
 #             0: the original single translation unit (serial, ~24 min). Part of the driver cache key.
-#   KEEP      what `run` leaves in OUT (scripts/lib/artifacts.sh): by default the reports, the
+#   KEEP      what `run` leaves in OUT (scripts/gate/lib/artifacts.sh): by default the reports, the
 #             compressed corpus, results and verdicts, the MISMATCH verdicts; the per-comparison
 #             copies of the corpus and the derived dumps are removed. KEEP=zst compresses
 #             everything, KEEP=1 keeps every dump raw. QEMU_OUT may hold compressed (.zst) files.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 # shellcheck source=lib/artifacts.sh
-. "$root/scripts/lib/artifacts.sh"
+. "$root/scripts/gate/lib/artifacts.sh"
 memguard_self "$@"
 mode="${1:-run}"
 export PATH="$PATH:/usr/local/go/bin:$HOME/.cargo/bin"
@@ -130,7 +130,7 @@ split_crate_cfg() {
 # ---- build cache for the driver (docs/SOUNDNESS.md "Build caches") ----
 # The driver is a pure function of the pinned crate and model, the instrumenter, oracle-sail's
 # sources and lockfile, the Rust and C++ toolchains and their environment (validation/reference-models/sail-arm/cache_key.py).
-# Its cache entry (scripts/lib/bcache.py kind "sail") holds the one binary, a SHA-256 manifest and an
+# Its cache entry (scripts/gate/lib/bcache.py kind "sail") holds the one binary, a SHA-256 manifest and an
 # HMAC of it under the per-user key; both are checked on every use, and an entry that fails either is
 # ignored and replaced by a rebuild. SAIL_CACHE=<dir> picks the directory (default: $ASL_CACHE, else
 # /srv/janus-asl-cache if it exists, else ~/.cache/janus/asl); SAIL_CACHE=off disables it;
@@ -150,7 +150,7 @@ case "${JANUS_ASL_CACHE:-}" in 0|off|no|false) SAIL_CACHE="" ;; esac
 # The cold gate's model pin (see above): the build cache is not used at all.
 MODEL_PIN="${JANUS_MODEL_PIN:-}"
 PIN_DIR=""
-if [ -n "$MODEL_PIN" ]; then SAIL_CACHE=""; PIN_DIR="$(python3 -I "$root/scripts/lib/modelpin.py" dir)"; fi
+if [ -n "$MODEL_PIN" ]; then SAIL_CACHE=""; PIN_DIR="$(python3 -I "$root/scripts/gate/lib/modelpin.py" dir)"; fi
 
 sail_cache_key() {  # sail_cache_key MODEL_CPP_OR_EMPTY
   local mf=()
@@ -166,7 +166,7 @@ pin_step() {
   [ "$SAIL_MODEL" = vendored ] || { echo "sail pin: FAIL: the cold gate pins the vendored model only (SAIL_MODEL=$SAIL_MODEL)" >&2; exit 1; }
   key=$(sail_cache_key "") || { echo "sail pin: FAIL: cannot compute the driver key" >&2; exit 1; }
   mkdir -p "$here/target/release"
-  out=$(python3 -I "$root/scripts/lib/modelpin.py" "$1" sail "$PIN_DIR" "$key" "$here") || rc=$?
+  out=$(python3 -I "$root/scripts/gate/lib/modelpin.py" "$1" sail "$PIN_DIR" "$key" "$here") || rc=$?
   case $rc in
     0) echo "sail pin: driver $key: $out" ;;
     2) if [ "${JANUS_MODEL_PIN_STALE:-rebuild}" = rebuild ]; then
@@ -197,7 +197,7 @@ do_build() {
   fi
   if [ -n "$ckey" ]; then
     mkdir -p "$here/target/release"
-    cout=$(python3 -I "$root/scripts/lib/bcache.py" fetch sail "$SAIL_CACHE" "$ckey" "$here") || crc=$?
+    cout=$(python3 -I "$root/scripts/gate/lib/bcache.py" fetch sail "$SAIL_CACHE" "$ckey" "$here") || crc=$?
     case $crc in
       0) echo "sail cache: driver $ckey: $cout ($SAIL_CACHE)" ;;
       2) echo "sail cache: no entry for driver $ckey ($SAIL_CACHE); building" ;;
@@ -211,7 +211,7 @@ do_build() {
       mkdir -p "$SAIL_CACHE"
       inp=$(mktemp "${TMPDIR:-/tmp}/sail-cache-inputs.XXXXXX")
       python3 -I "$here/cache_key.py" "$root" --show --pins "crate_rev=$CRATE_REV" "sail_model=$SAIL_MODEL" > "$inp" || true
-      cout=$(printf '%s\0' "$SAIL_DRIVER_REL" | python3 -I "$root/scripts/lib/bcache.py" store sail "$SAIL_CACHE" "$ckey" "$here" --inputs "$inp") &&
+      cout=$(printf '%s\0' "$SAIL_DRIVER_REL" | python3 -I "$root/scripts/gate/lib/bcache.py" store sail "$SAIL_CACHE" "$ckey" "$here" --inputs "$inp") &&
         echo "sail cache: driver $ckey: $cout" || echo "sail cache: not stored"
       rm -f "$inp"
     fi
@@ -278,7 +278,7 @@ prune_run() {
 
 do_run() {
   art_exists "$QEMU_OUT/cases.jsonl" && art_exists "$QEMU_OUT/hw.jsonl" ||
-    { echo "no qemu corpus in $QEMU_OUT: run scripts/oracle.sh full first" >&2; exit 2; }
+    { echo "no qemu corpus in $QEMU_OUT: run scripts/validation/hardware-arm64.sh full first" >&2; exit 2; }
   mkdir -p "$OUT"/{janus-vs-sail,qemu-vs-sail,janus-vs-qemu}
   # However the run ends, the multi-GB dumps are pruned (KEEP=1 keeps them).
   trap prune_run EXIT
@@ -390,7 +390,7 @@ do_regen() {
 
 do_crosscheck() {
   art_exists "$OUT/cases.jsonl" && art_exists "$OUT/sail.jsonl" || { echo "run '$0 run' first" >&2; exit 2; }
-  # The corpus and Sail's results may be compressed (scripts/lib/artifacts.sh): decompressed for
+  # The corpus and Sail's results may be compressed (scripts/gate/lib/artifacts.sh): decompressed for
   # the comparison, removed again afterwards.
   trap art_cleanup EXIT
   art_input "$OUT/cases.jsonl" >/dev/null

@@ -42,7 +42,7 @@ func rtRecord(t *testing.T, dir string, rec map[string]string, signed bool) stri
 		writeBytes(t, rf, b)
 		return rf
 	}
-	c := exec.Command("python3", "-I", "-c", rtSignPy, filepath.Join(repoRoot, "scripts", "lib", "bcache.py"), dir, rf)
+	c := exec.Command("python3", "-I", "-c", rtSignPy, filepath.Join(repoRoot, "scripts", "gate", "lib", "bcache.py"), dir, rf)
 	c.Stdin = bytes.NewReader(b)
 	if out, err := c.CombinedOutput(); err != nil {
 		t.Fatalf("sign: %v %s", err, out)
@@ -52,7 +52,7 @@ func rtRecord(t *testing.T, dir string, rec map[string]string, signed bool) stri
 
 func rtRun(t *testing.T, dir, rf string) error {
 	t.Helper()
-	out, err := exec.Command("python3", "-I", filepath.Join(repoRoot, "scripts", "lib", "restamp.py"), dir, rf).CombinedOutput()
+	out, err := exec.Command("python3", "-I", filepath.Join(repoRoot, "scripts", "gate", "lib", "restamp.py"), dir, rf).CombinedOutput()
 	t.Logf("%s", out)
 	return err
 }

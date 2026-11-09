@@ -19,7 +19,7 @@ the readable range), so both loops terminate and nothing is read outside the sli
 **What this covers.** `A64CountByte` calls `vCount` (an ABI0 assembly shim, `countbyte_arm64.s`),
 which loads the arguments into `X0`–`X2` and calls `vCountC`: the 53 instruction words that
 gcc 15.2.0 emits at cgo's default `-O2` (`-fPIC -pthread -g`) for `v_count` of
-`scripts/coverage/ccorpus/vec.c`, copied verbatim (`WORD`). The proof executes all three
+`scripts/dev/coverage/ccorpus/vec.c`, copied verbatim (`WORD`). The proof executes all three
 functions instruction by instruction from the extracted words. gcc vectorises the loop into a
 16-byte block loop — `LDR Q` with post-increment, `CMEQ .16B` against `DUP`ed `c`, `AND` with
 `MOVI .16B, #1`, the widening ladder `ZIP1`/`ZIP2` with a zero vector (`.16B` → `.8H` → `.4S`),

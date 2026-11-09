@@ -10,7 +10,7 @@
 #   gate_decoder ROOT             print the path of the decoder to use; rc 1 + message on stderr if there is none
 # The copy is bound to the build and to the run: gate_save_decoder first REMOVES any earlier copy (and its stamp), copies, and
 # writes test/redteam/bin/janus-decode-gate.stamp = "<sha256 of the copy> <JANUS_GATE_RUN_ID>". gate_decoder (PREBUILT) accepts the copy only if
-# the stamp's sha256 is the file's, the stamp's run id is this run's (JANUS_GATE_RUN_ID, exported by scripts/gate.sh; a copy left by an
+# the stamp's sha256 is the file's, the stamp's run id is this run's (JANUS_GATE_RUN_ID, exported by scripts/gate/gate.sh; a copy left by an
 # earlier gate run, of this or another commit, in the same tree has another id), and, while .lake/build/bin/janus-decode exists, it
 # is byte-identical to it (janus runs may drop that file: then the stamp alone binds).
 _gd_sha() { sha256sum "$1" | cut -d' ' -f1; }

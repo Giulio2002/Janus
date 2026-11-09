@@ -476,7 +476,7 @@ func mountinfoEscape(p string) string {
 	return strings.NewReplacer(`\`, `\134`, " ", `\040`, "\t", `\011`, "\n", `\012`).Replace(p)
 }
 
-// hiddenKeyFiles are the HMAC key files of the build caches (scripts/lib/bcache.py: asl-cache.key in
+// hiddenKeyFiles are the HMAC key files of the build caches (scripts/gate/lib/bcache.py: asl-cache.key in
 // $JANUS_CACHE_KEY_DIR or the cache root). They are outside v1/result but inside the cache root that the
 // sandbox exposes read-only, so a proof could read the key; they are covered by /dev/null.
 func hiddenKeyFiles() []string {

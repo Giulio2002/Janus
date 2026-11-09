@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Self-test: test/redteam/rounds/rt-asl/run.sh keeps its logs on a failure and removes them on success.
 set -u
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 T="$(mktemp -d "${TMPDIR:-/tmp}/rtasl-keep-test.XXXXXX")"; trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/tmp" "$T/keep"
 fail=0

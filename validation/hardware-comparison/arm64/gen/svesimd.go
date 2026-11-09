@@ -2,7 +2,7 @@ package gen
 
 import "math/rand/v2"
 
-// The SVE / SME / Advanced SIMD&FP / SIMD load-store slice of the corpus (`oracle svegen`, scripts/oracle.sh).
+// The SVE / SME / Advanced SIMD&FP / SIMD load-store slice of the corpus (`oracle svegen`, scripts/validation/hardware-arm64.sh).
 // The targeted classes and the random groups of gen.go cover the base ISA and the NEON classes the Janus model
 // executes; the corpus has almost no words of the top-level groups below, so it says nothing about the
 // decoders of those groups (e.g. the Sail model's __DecodeA64_SVE). Each generator draws a uniformly random

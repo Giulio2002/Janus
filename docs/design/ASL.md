@@ -16,14 +16,14 @@ and on the Sail Lean library (`lean-sail`). The main `Janus` library depends on 
 neither package uses Mathlib.
 
 ```
-scripts/asl.sh deps     # pinned toolchain (opam + Sail 0.20.3 + patches, sail-arm, slicing plugin)
-scripts/asl.sh gen      # slice sail-arm, generate Lean, compare with the vendored copy
-scripts/asl.sh model    # unpack the vendored model and build only ArmASL (ASL_CACHE: restore/publish it)
-scripts/asl.sh build    # unpack the vendored model and build the package (about 75 min at 3 jobs, once)
-scripts/asl.sh check    # build + janus-asl-check on artifacts/oracle/cases.jsonl
-scripts/asl.sh prove    # build JanusASL.Proofs and audit their axioms
-scripts/asl.sh replay   # kernel-replay JanusASL.Proofs with leanchecker, in batches
-scripts/asl.sh verify   # janus verify --asl on the shipped Add, Max, Mul64, Add128 proofs
+scripts/build/asl.sh deps     # pinned toolchain (opam + Sail 0.20.3 + patches, sail-arm, slicing plugin)
+scripts/build/asl.sh gen      # slice sail-arm, generate Lean, compare with the vendored copy
+scripts/build/asl.sh model    # unpack the vendored model and build only ArmASL (ASL_CACHE: restore/publish it)
+scripts/build/asl.sh build    # unpack the vendored model and build the package (about 75 min at 3 jobs, once)
+scripts/build/asl.sh check    # build + janus-asl-check on artifacts/oracle/cases.jsonl
+scripts/build/asl.sh prove    # build JanusASL.Proofs and audit their axioms
+scripts/build/asl.sh replay   # kernel-replay JanusASL.Proofs with leanchecker, in batches
+scripts/build/asl.sh verify   # janus verify --asl on the shipped Add, Max, Mul64, Add128 proofs
 ```
 
 The build runs as many Lean processes at once as fit a 24 GiB budget (see "Memory" below).
@@ -35,11 +35,11 @@ about the ASL, bound to the binary ([below](#janus-verify---asl-the-corollary-of
 
 | | |
 |---|---|
-| corpus | `artifacts/oracle/cases.jsonl` from `scripts/oracle.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
+| corpus | `artifacts/oracle/cases.jsonl` from `scripts/validation/hardware-arm64.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
 | `janus-asl-check` | **566,027 agree, 17,729 gap, 0 MISMATCH** (slice with the scalar floating-point, crypto, CRC and permute decoders, vendored sha256 `cd26b412…`; FPCR/FPSR set from the case and FPSR compared after the step); `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 1 h with 12 tasks |
 | `janus-asl-check`, slice round 2 | **927,078 agree, 38,443 gap, 0 MISMATCH** on 965,521 cases of the corpus of agent/asl + agent/stxr (96833af, with main 4a75ac7) + agent/syscall + agent/neonfix (Advanced SIMD, exclusives, SVC/BRK/UDF, MRS/MSR of NZCV/FPSR/FPCR/DIT and the environment registers); vendored sha256 `fd9e1885…`; `LinuxEL0Config`/`FPConfig` and `UserMapped` hold on every case; 2 h 15 min with 12 tasks |
 | proofs | **84 audited theorems** (an explicit list in models/asl/JanusASL/Audit.lean; test/redteam/rounds/rt-asl/AuditStrict.lean prints the statements of 81 of them, plus `JanusASL.Verify.classify_sound`): the encoding-class `*_agree` theorems, the 4 FP rounding theorems (`rb32Of_eq`, `rb64Of_eq`, `run_FPRoundBase32`, `run_FPRoundBase64`), the 16 scalar floating-point encoding-class theorems (`fcmp_agree`, `fadd_agree`, `fsub_agree`, `fmul_agree`, `fdiv_agree`, `fmadd_agree`, `fmsub_agree`, `fnmadd_agree`, `fnmsub_agree`, `fsqrt_agree`, `fccmp_agree`, `scvtf_agree`, `ucvtf_agree`, `fcvtzs_agree`, `fcvtzu_agree`, `fcvt_agree`), `run_agree_fp`, `fpClassify_sound`, `classify_sound_fp`, `classifyAll_sound`, `Ensures.toASL_fp`, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
-| `janus verify --asl` | the ASL corollaries of the shipped `Add`, `Max`, `Mul64` and `Add128` proofs, derived from their artifacts, audited and kernel-replayed (`scripts/asl.sh verify`, `TestASLExamples`) |
+| `janus verify --asl` | the ASL corollaries of the shipped `Add`, `Max`, `Mul64` and `Add128` proofs, derived from their artifacts, audited and kernel-replayed (`scripts/build/asl.sh verify`, `TestASLExamples`) |
 
 Agreement by corpus class (`agree` / `gap`):
 
@@ -378,10 +378,10 @@ evaluates it symbolically with `simp`, using one run lemma per primitive (`model
 4. **Assembly.** `step_agree` (Step.lean) combines these with Janus' `decode` lemmas
    (JanusDecode.lean) and with the PC update of `janus_step`.
 
-`scripts/asl.sh prove` builds the proofs and runs `models/asl/JanusASL/Audit.lean`. That file walks the
+`scripts/build/asl.sh prove` builds the proofs and runs `models/asl/JanusASL/Audit.lean`. That file walks the
 environment and fails if any `JanusASL.Proofs.*_agree` theorem depends on an axiom other than
 `propext`, `Classical.choice` and `Quot.sound`. This rules out `sorryAx`, and also
-`Lean.ofReduceBool`, so no `native_decide` or `bv_decide`. Once the model is built (`scripts/asl.sh
+`Lean.ofReduceBool`, so no `native_decide` or `bv_decide`. Once the model is built (`scripts/build/asl.sh
 build`), the proofs take about 80 CPU-minutes, about 30 min at 3 jobs. Most of that is the 22
 decode-chain parts, at 2–5 min each.
 
@@ -433,7 +433,7 @@ The steps, each with its own stage:
    second). `janus framework` shows the build directory and whether it is built. Builds are
    kept for `$JANUS_ASL_RETENTION_DAYS` (default 30) after their last use. Lake reuses modules
    by content hash, so a build directory can be seeded from an in-tree build
-   (`scripts/asl.sh verify` does so from `models/asl/.lake`). The compiled modules of the build
+   (`scripts/build/asl.sh verify` does so from `models/asl/.lake`). The compiled modules of the build
    (JanusASL, ArmASL and lean-sail) are then **pinned** like the framework and re-checked after
    every later step.
 2. **`ASL coverage`.** janus compiles, trusted (it imports only `Extracted` and
@@ -542,7 +542,7 @@ upstream (none has been filed):
    64-bit UDIV/SDIV (`RoundTowardsZero(Real(a)/Real(b))`) lost precision, and `round_down` was
    `toUInt64`, which mapped negative values to 0.
 7. **Square root.** The toolchain's `sqrt_real` goes through `Float`, which FSQRT reaches once
-   the scalar floating-point instructions are in the slice. `scripts/asl.sh gen` replaces it
+   the scalar floating-point instructions are in the slice. `scripts/build/asl.sh gen` replaces it
    mechanically (models/asl/sail/fakereal_sqrt.py) by the round-to-odd approximation at absolute
    precision 2^-1100: `m/2^1100` when `m = ⌊√x·2^1100⌋` is exact, `(2m+1)/2^1101` otherwise.
    Every boundary FPRound tests for binary16/32/64 is a multiple of 2^-1100, so FPRound of it
@@ -551,7 +551,7 @@ upstream (none has been filed):
 8. **`integer_update_subrange`.** The Lean library's `set_slice_int` converts the integer to a bit
    vector of the field's width before the update, so every bit outside the field was lost (Sail's
    C and OCaml libraries update the integer in place). FPRoundBase's round-to-odd (FCVTXN) is the
-   one use in the slice. `scripts/asl.sh gen` replaces the generated definition mechanically
+   one use in the slice. `scripts/build/asl.sh gen` replaces the generated definition mechanically
    (models/asl/sail/sail_int_fix.py) by `i - ((i / 2^lo) % 2^len) * 2^lo + x * 2^lo`; rt-asl row
    A5 ius checks it against Sail's C backend, and the corpus FCVTXN cases agree.
 
@@ -610,11 +610,11 @@ Janus decodes reaches one, the check reports a MISMATCH.
 
 ### Build cache
 
-`ASL_CACHE=<dir>` (see `scripts/asl.sh`) shares one build of the model between worktrees and
+`ASL_CACHE=<dir>` (see `scripts/build/asl.sh`) shares one build of the model between worktrees and
 runners: before building, the ArmASL outputs (oleans, ileans, C, objects, Lake traces) and the
 lean-sail package are copied from `<dir>/<key>`, checked against the entry's SHA-256 manifest;
 after a build they are published there atomically if the entry is missing.
-`scripts/asl.sh model` builds (or restores) only the model.
+`scripts/build/asl.sh model` builds (or restores) only the model.
 
 The key (`models/asl/tools/asl_cache_key.py`, `--show` prints its inputs) covers exactly what the
 ArmASL outputs are a function of, so a branch that edits only JanusASL's proofs, its other
@@ -658,7 +658,7 @@ second restore recopies the entry (about a second); nothing else differs.
 
 The same `ASL_CACHE` also holds **one entry per Lean module** of the JanusASL package
 (`JanusASL.*`) and of the janus package (`Janus.*`), so the ~45 min proof build is shared too
-(`models/asl/tools/asl_mod_cache.py`; `scripts/asl.sh build`, `prove` and `replay` restore before
+(`models/asl/tools/asl_mod_cache.py`; `scripts/build/asl.sh build`, `prove` and `replay` restore before
 `lake build` and publish after it). A module's key is the SHA-256 of exactly the inputs Lake 4.34
 hashes into its trace, each by content (`asl_mod_cache.py show ROOT MODULE` prints them):
 
@@ -686,13 +686,13 @@ them here; it never makes a stale entry hit.
 
 The trust story is the ArmASL entry's: the cache must be writable only by users you trust, since a
 restored `.olean` is what later modules (and `janus verify --asl`) are checked against. The
-manifest catches corruption, not a malicious writer; the kernel replay (`scripts/asl.sh replay`,
+manifest catches corruption, not a malicious writer; the kernel replay (`scripts/build/asl.sh replay`,
 and the closure replay of `janus verify --asl`) re-checks every declaration. `janus verify --asl`
 itself does not read `ASL_CACHE`: it builds in its own trusted cache (`<cache>/v1/asl`), seeded from
-a sibling build or, by `scripts/asl.sh verify`, from the in-tree build, which the module cache now
+a sibling build or, by `scripts/build/asl.sh verify`, from the in-tree build, which the module cache now
 makes cheap. The module cache restores Janus modules whose `.olean`s embed another tree's source path, so
-`scripts/asl.sh verify` then moves the tree's framework stamp (`.lake/janus-framework.ready`) to exactly those
-restored, HMAC-verified files (`scripts/lib/restamp.py`, `asl_mod_cache.py restore --record`); without it janus
+`scripts/build/asl.sh verify` then moves the tree's framework stamp (`.lake/janus-framework.ready`) to exactly those
+restored, HMAC-verified files (`scripts/gate/lib/restamp.py`, `asl_mod_cache.py restore --record`); without it janus
 removed and rebuilt them and every restored JanusASL module after them (79 min). `verify` builds the JanusASL
 library only (not `janus-asl-check`, whose uncached ArmASL `.c.o` objects cost ~10 min of serial clang) and verifies
 its examples up to `ASL_VERIFY_JOBS` (default 4) at once after the first has been through alone.
@@ -714,13 +714,13 @@ under a loaded host), and a fresh copy of that commit then restored 137 modules 
 in **5 s**, and the Madd edit rebuilt it and its 4 dependents (17 s).
 
 **Compiled objects** (`CACHE/armobj/<id>`, `asl_mod_cache.py objrestore|objpublish|objkey|objstage|objfiles`, `asl.sh` `objcache_*`;
-tested by `models/asl/tools/test_asl_obj_cache.sh` and `scripts/lib/test-cachecmp.sh`). The ArmASL entry is stored
+tested by `models/asl/tools/test_asl_obj_cache.sh` and `scripts/gate/lib/test-cachecmp.sh`). The ArmASL entry is stored
 after `lake build ArmASL`, before the `janus-asl-check` link compiles each emitted C file (`ir/ArmASL/PartNN.c`,
 `ir/Sail/*.c`, `ir/JanusASL/**.c` of the modules the executable links) to `.c.o.export`; a warm `asl-build` still
 ran clang over them (the largest parts take 2-3 min each at -O3, `JanusASL.Proofs.Config` alone ~10 min).
 Three scopes: `arm` (ArmASL parts + lean-sail: ONE entry, they all change together with the model), `jasl` (the JanusASL library) and `janus` (the root package's `Janus.*` objects, linked into `janus-asl-check`, `janus-audit`, `janus-decode`, `janus-oracle`): the last two ONE ENTRY PER OBJECT, so a changed module recompiles only its own C, never `Proofs.Config`'s ~10 min unless Config itself changed. MODULE ENTRIES NO LONGER CARRY OBJECTS: a `mod` entry is protected by the HMAC and file hashes only (no staging checks, no recompile, no tombstone), so no `*.c.o.*` file is stored in or restored from one, wherever it sits (legacy entries that hold them are read with those files ignored, a decoy under `lib/lean/` included; tested); objects travel only as `armobj` entries.
 
-**Setting.** ON BY DEFAULT (`OBJ_CACHE_DEFAULT` in `scripts/asl.sh`); `ASL_OBJ_CACHE=0|off|no|false` turns it off (an EMPTY value is the default, ON, and the state line says so; an unrecognised value is OFF, never silently ON); `JANUS_ASL_CACHE=0` (the cold gate, the pre-push gate, the nightly's cold run) blanks the whole build cache, so a cold tree compiles every object from source (tested). `scripts/asl.sh objcache-state` prints `ON` or `OFF (reason)`; the gate banner, every lane log, the asl build log, the `GATE PASS/FAIL` line and the nightly summary print it. **The trusted auditor is never cached.** The Janus modules linked into `janus-audit` (the import closure of its lean_exe root `Janus.Tools.AuditMain`: `Janus.Tools.Audit`, `Janus.Tools.AuditMain`; `asl_mod_cache.py tcb_modules`) are excluded from the `janus` scope: never restored, never published, always compiled from source (a validly signed entry for one is ignored; if the closure cannot be determined the scope caches nothing). Their C is 1.9 MB and would never be recompiled at publish, and `janus-audit` is what `janus verify` trusts. Measured cost of compiling them from source: 6.6 s (clang -O3, load 28). `janus-decode`, `janus-oracle*` and `janus-asl-check` are test/oracle tools whose outputs the gate cross-checks, so their objects stay cacheable. **With the cache ON a cached gate is NOT merge evidence by itself.** The controls are the pre-push cold gate (`JANUS_ASL_CACHE=0`) and the nightly cold-vs-cached comparison and audit (below); the residual below remains while the cache is on. Clang puts no path
+**Setting.** ON BY DEFAULT (`OBJ_CACHE_DEFAULT` in `scripts/build/asl.sh`); `ASL_OBJ_CACHE=0|off|no|false` turns it off (an EMPTY value is the default, ON, and the state line says so; an unrecognised value is OFF, never silently ON); `JANUS_ASL_CACHE=0` (the cold gate, the pre-push gate, the nightly's cold run) blanks the whole build cache, so a cold tree compiles every object from source (tested). `scripts/build/asl.sh objcache-state` prints `ON` or `OFF (reason)`; the gate banner, every lane log, the asl build log, the `GATE PASS/FAIL` line and the nightly summary print it. **The trusted auditor is never cached.** The Janus modules linked into `janus-audit` (the import closure of its lean_exe root `Janus.Tools.AuditMain`: `Janus.Tools.Audit`, `Janus.Tools.AuditMain`; `asl_mod_cache.py tcb_modules`) are excluded from the `janus` scope: never restored, never published, always compiled from source (a validly signed entry for one is ignored; if the closure cannot be determined the scope caches nothing). Their C is 1.9 MB and would never be recompiled at publish, and `janus-audit` is what `janus verify` trusts. Measured cost of compiling them from source: 6.6 s (clang -O3, load 28). `janus-decode`, `janus-oracle*` and `janus-asl-check` are test/oracle tools whose outputs the gate cross-checks, so their objects stay cacheable. **With the cache ON a cached gate is NOT merge evidence by itself.** The controls are the pre-push cold gate (`JANUS_ASL_CACHE=0`) and the nightly cold-vs-cached comparison and audit (below); the residual below remains while the cache is on. Clang puts no path
 into an object (a part compiled in two directories is bit-identical), so no `-ffile-prefix-map` is needed.
 
 *What an id binds.* SHA-256 of: the ArmASL cache key (toolchain by content, flags, environment, model), the machine,
@@ -779,14 +779,14 @@ moved entry, foreign path = rejection and a rebuild.
 *Nightly cold-side audit.* The nightly cold gate links in its own worktree under the same cache setting as its run (the
 cached run restores objects; the cold run, JANUS_ASL_CACHE=0, compiles every object from source: the cache is blanked, a
 test checks a cold run does not restore from a populated cache). `gate-cachecmp.py` compares the SHA-256 of every
-`armobj:` object between the two runs, and `scripts/lib/nightly-objaudit.sh` compares EVERY object of every cache entry
+`armobj:` object between the two runs, and `scripts/gate/lib/nightly-objaudit.sh` compares EVERY object of every cache entry
 of the commit's ids (the >1 MB ones included, so this is a full independent recompile) with the cold tree's
 (`asl_mod_cache.py objaudit`, arm and jasl), printing the coverage ratio. A differing entry is quarantined stickily: a
 signed tombstone (HMAC) records its poisoned object hashes, then the directory is renamed `.poisoned-<id>`; fetch, verify
 and store refuse those bytes whatever directory they come back in (an attacker renaming it back does not revive it, and
 the same forged bytes cannot be republished; honest bytes for the id can). Everything FAILS CLOSED: a run with no hashed
 object, an audit that compared nothing, an object of the commit's entries that could not be compared (coverage under
-100%), a missing armobj directory, or a tombstone with a bad MAC. The nightly sets `rc_final=1` on any of them; its CACHED run keeps the object cache ON (that is what it audits) and its COLD run is OFF (stub-repository test: `scripts/lib/test-nightly-objcache.sh`). `gate-cachecmp.py` hashes EVERY `ir/*.c` and `ir/*.c.o.*` (not the `.trace` files, which hold worktree paths) of the janus, janusasl (ArmASL included) and Sail trees, so the module-cache `.c` files and the `Janus.*` objects are compared cached-vs-cold too. An
+100%), a missing armobj directory, or a tombstone with a bad MAC. The nightly sets `rc_final=1` on any of them; its CACHED run keeps the object cache ON (that is what it audits) and its COLD run is OFF (stub-repository test: `scripts/gate/lib/test-nightly-objcache.sh`). `gate-cachecmp.py` hashes EVERY `ir/*.c` and `ir/*.c.o.*` (not the `.trace` files, which hold worktree paths) of the janus, janusasl (ArmASL included) and Sail trees, so the module-cache `.c` files and the `Janus.*` objects are compared cached-vs-cold too. An
 asynchronous background audit queue for large objects at publish time was considered and NOT built: the nightly is the
 backstop.
 
@@ -801,7 +801,7 @@ objects are not published or recompiled (the command must name the toolchain's c
 can write the cache directory; that is the same residual as the key holder's.
 
 **Eviction** (`asl_mod_cache.py gc CACHE --max SIZE [--root REPO] [--grace S] [--dry-run]`). The
-module entries and the ArmASL entries had no eviction (a shared cache reached 42 GB). `scripts/asl.sh`
+module entries and the ArmASL entries had no eviction (a shared cache reached 42 GB). `scripts/build/asl.sh`
 now runs the collector after every publish with `--max $ASL_CACHE_MAX` (default `15G`; `off`
 disables it) and `--root` the checkout. It removes, in order: every ArmASL entry that no module
 entry references (an `armasl:<key>` import in its `INPUTS.json`) and that is not the checkout's
@@ -809,7 +809,7 @@ current or legacy key; then, while the cache is over budget, the least recently 
 use stamp `<key>.use` that every restore touches, else the entry's publication time), modules and
 ArmASL entries alike, never the checkout's ArmASL entry; then the ArmASL entries the evicted
 modules were the last to reference. Nothing used or published within `--grace` (default 1 h) is
-removed. Concurrency: restore (both the module restore and `scripts/asl.sh`'s ArmASL restore) now
+removed. Concurrency: restore (both the module restore and `scripts/build/asl.sh`'s ArmASL restore) now
 holds the entry's lock (`<key>.lock`) shared while it copies, publish holds it exclusively, and the
 collector removes an entry only under it, taken exclusively without waiting (an entry being read is
 skipped). An entry is renamed into a fresh `CACHE/.gc-trash-*` directory in one step (a reader sees
@@ -835,8 +835,8 @@ alignment fault, DFSC 0x21, counts as agreeing with Janus' `unaligned`.
 
 ## Memory
 
-Each Lean process of the pipeline must stay under 12 GiB, and `scripts/asl.sh build` followed by
-`scripts/asl.sh prove` must fit in 24 GiB. Every number below is measured with
+Each Lean process of the pipeline must stay under 12 GiB, and `scripts/build/asl.sh build` followed by
+`scripts/build/asl.sh prove` must fit in 24 GiB. Every number below is measured with
 `models/asl/tools/memprof.py`. It samples `/proc` every 0.2 s and reports each process's peak
 resident set (`VmHWM`) and the peak of the whole process tree. With `--cap GB` it also runs the
 command in a systemd scope with `MemoryMax=GB` and no swap, so the kernel kills a runaway build
@@ -848,24 +848,24 @@ cache) is the better total.
 
 | run | before | after |
 |---|---|---|
-| `scripts/asl.sh build`: largest Lean process | **16.7 GiB** (`LdStDecode9`, 1148 s) | **8.3 GiB** (`ArmASL.Part49` = `__DecodeA64_DataProcFPSIMD` alone, 243 s) |
-| `scripts/asl.sh build`: other processes over 5 GiB | `ArmASL.Part24` 9.0, `Part22` 7.4, `LdStDecodeR` 7.3, `LdStDecodeP` 7.0, `LdStDecode` 6.8, `Bitmask` 5.6, `Part15` 5.3, `Part17` 5.2, `Part19` 5.0 | `Part38` (`AArch64_AutoGen_SysRegWrite`) 6.6, `Bitmask` 5.6, `Part12` (`AArch32_AutoGen_ArchitectureReset`) 5.2 |
-| `scripts/asl.sh build`: decode-chain proofs | 6.8–16.7 GiB per file (4 files) | 3.0–3.7 GiB per part (22 parts) |
-| `scripts/asl.sh build`: whole tree | 48 Lake jobs; summed RSS 34.6 GiB, scope 35.6 GiB; 59 min (Janus library already built) | 3 Lake jobs; summed RSS 11.0 GiB, scope **9.8 GiB** under `MemoryMax=24G`; 75 min (Janus library included) |
+| `scripts/build/asl.sh build`: largest Lean process | **16.7 GiB** (`LdStDecode9`, 1148 s) | **8.3 GiB** (`ArmASL.Part49` = `__DecodeA64_DataProcFPSIMD` alone, 243 s) |
+| `scripts/build/asl.sh build`: other processes over 5 GiB | `ArmASL.Part24` 9.0, `Part22` 7.4, `LdStDecodeR` 7.3, `LdStDecodeP` 7.0, `LdStDecode` 6.8, `Bitmask` 5.6, `Part15` 5.3, `Part17` 5.2, `Part19` 5.0 | `Part38` (`AArch64_AutoGen_SysRegWrite`) 6.6, `Bitmask` 5.6, `Part12` (`AArch32_AutoGen_ArchitectureReset`) 5.2 |
+| `scripts/build/asl.sh build`: decode-chain proofs | 6.8–16.7 GiB per file (4 files) | 3.0–3.7 GiB per part (22 parts) |
+| `scripts/build/asl.sh build`: whole tree | 48 Lake jobs; summed RSS 34.6 GiB, scope 35.6 GiB; 59 min (Janus library already built) | 3 Lake jobs; summed RSS 11.0 GiB, scope **9.8 GiB** under `MemoryMax=24G`; 75 min (Janus library included) |
 | clang (C of the model, for the check executable) | 2.4 GiB | 2.4 GiB |
-| `scripts/asl.sh prove` (Audit.lean) | 1.8 GiB, 2 s | 1.9 GiB, 2 s (same 44 theorems, same axioms, same statements) |
-| kernel replay | `leanchecker JanusASL.Proofs`, `LEAN_NUM_THREADS=4`: **14.8 GiB**, 362 s | `scripts/asl.sh replay` (4 modules per process, `LEAN_NUM_THREADS=4`): **10.0 GiB**, 406 s |
+| `scripts/build/asl.sh prove` (Audit.lean) | 1.8 GiB, 2 s | 1.9 GiB, 2 s (same 44 theorems, same axioms, same statements) |
+| kernel replay | `leanchecker JanusASL.Proofs`, `LEAN_NUM_THREADS=4`: **14.8 GiB**, 362 s | `scripts/build/asl.sh replay` (4 modules per process, `LEAN_NUM_THREADS=4`): **10.0 GiB**, 406 s |
 | `janus-asl-check` on the 583,756-case corpus | 2.4 GiB, 551 s | **0.45 GiB**, 461 s (same verdicts file, byte for byte) |
-| `scripts/asl.sh gen` (Sail, not Lean) | | 8.2 GiB, 748 s |
+| `scripts/build/asl.sh gen` (Sail, not Lean) | | 8.2 GiB, 748 s |
 
 So `build` followed by `prove` peaks at 9.8 GiB (scope), and no Lean process exceeds 8.3 GiB.
 On the after layout, the old monolithic `leanchecker JanusASL.Proofs` still takes 16.0 GiB,
-because it imports one environment per module and runs 4 at a time. Use `scripts/asl.sh replay`
+because it imports one environment per module and runs 4 at a time. Use `scripts/build/asl.sh replay`
 instead.
 
 What was changed:
 
-* **The model is split by size** (`split_lean.py --bytes 150000`, called by `scripts/asl.sh gen`).
+* **The model is split by size** (`split_lean.py --bytes 150000`, called by `scripts/build/asl.sh gen`).
   It now has 50 chained parts of at most 150 kB each, except that a larger declaration gets a
   part of its own. Elaboration memory follows the largest declarations, not the file size: the
   981 kB `ImpDefBool` takes 2.2 GiB, while the 157 kB `AArch64_AutoGen_ArchitectureReset` takes
@@ -873,7 +873,7 @@ What was changed:
   `__DecodeA64_DataProcFPSIMD`, `__DecodeA64_LoadStore` and the other decoders in one 10 MB part
   (9.0 GiB). The declarations, their order and their text are unchanged. Joining the 50 parts
   gives back, byte for byte, the single file that joining the 24 old parts gives, and
-  `scripts/asl.sh gen` regenerates the new tarball byte for byte (sha256
+  `scripts/build/asl.sh gen` regenerates the new tarball byte for byte (sha256
   `aa1fa24372907b2785607f738191355818a3c193f49efe471faed16ddcfad60f`).
 * **The decode-chain proofs are split** (`models/asl/tools/split_proofs.py FILE 4`). `LdStDecode`,
   `LdStDecode9`, `LdStDecodeP` and `LdStDecodeR` are now import lists of `<File>/PartNN` modules
@@ -882,7 +882,7 @@ What was changed:
   module, a file keeps every finished proof until it ends, so its peak grew with its length
   (about 0.4 GiB per lemma). The parts also build in parallel. Split new generated chain files
   the same way.
-* **Lake's job count comes from memory.** `scripts/asl.sh build`/`prove`/`replay` run Lake with
+* **Lake's job count comes from memory.** `scripts/build/asl.sh build`/`prove`/`replay` run Lake with
   `LEAN_NUM_THREADS=ASL_JOBS`. Lake has no `-j`. Its thread pool bounds the number of Lean
   processes it runs at once, and each Lean process then elaborates with as many threads. The
   default is `ASL_MEM_GB / ASL_JOB_GB`, with the budget the smaller of 24 GiB and 60% of
@@ -891,7 +891,7 @@ What was changed:
 * **`janus-asl-check` streams the corpus.** It reads, runs and writes batches of `48 × 256` cases,
   with one batch running while the next is read. It no longer holds the 1 GB corpus and every
   verdict at once.
-* **The replay is batched** (`scripts/asl.sh replay`). It replays every module in the import
+* **The replay is batched** (`scripts/build/asl.sh replay`). It replays every module in the import
   closure of `JanusASL.Proofs` with `leanchecker`, `REPLAY_BATCH` (default 4) modules per
   process, up to `JANUS_REPLAY_PAR` (default 4) processes at once (they only read the built package;
   one process at a time took 15m56, four 5m49, peak memory 11 -> 41 GiB). Import lists that declare nothing are skipped: leanchecker
@@ -1158,10 +1158,10 @@ check compares against compiled code, so it also trusts the Lean compiler. The p
 ## Regenerating
 
 ```
-scripts/asl.sh deps        # once: about 20 min (opam switch, Sail build)
-scripts/asl.sh gen         # about 15 min; fails if the result differs from vendor/ArmASL.tar.gz
-GEN_UPDATE=1 scripts/asl.sh gen   # after changing slice.py/keep.txt/splices/harness: replace it
-scripts/asl.sh check && scripts/asl.sh prove
+scripts/build/asl.sh deps        # once: about 20 min (opam switch, Sail build)
+scripts/build/asl.sh gen         # about 15 min; fails if the result differs from vendor/ArmASL.tar.gz
+GEN_UPDATE=1 scripts/build/asl.sh gen   # after changing slice.py/keep.txt/splices/harness: replace it
+scripts/build/asl.sh check && scripts/build/asl.sh prove
 ```
 
 `gen` is deterministic. The tarball is written with sorted names, mtime 0 and `gzip -n`, and the

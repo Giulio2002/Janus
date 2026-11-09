@@ -694,7 +694,7 @@ func TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_Amd64Tactic(t
 }
 
 func realForgeryCheck(t *testing.T, mod string) {
-	// The nightly cold/cached gates (scripts/nightly-cold-gate.sh sets JANUS_NIGHTLY=1) run this on the
+	// The nightly cold/cached gates (scripts/gate/nightly-cold-gate.sh sets JANUS_NIGHTLY=1) run this on the
 	// real framework; the merge gates run the mini-framework variant above, which proves the same
 	// property for the partition kinds in seconds. With JANUS_NIGHTLY=1 a missing fixture is a failure.
 	if os.Getenv("JANUS_NIGHTLY") != "1" {

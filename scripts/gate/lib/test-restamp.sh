@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test of scripts/lib/restamp.py (the framework stamp's pins follow ONLY cache-restored, verified files) and of the
+# Self-test of scripts/gate/lib/restamp.py (the framework stamp's pins follow ONLY cache-restored, verified files) and of the
 # `--record` output of models/asl/tools/asl_mod_cache.py restore.
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -121,9 +121,9 @@ sign "$t/j" "$t/recj.json" "$t/j/.lake/build/lib/lean/Janus/../Janus/A.olean=$sh
 rs "$t/j" "$t/recj.json" > "$t/out" 2>&1
 python3 -I -c 'import json,sys; assert json.load(open(sys.argv[1]))["pins"]["Janus/../Janus/A.olean"]=="0"*64' "$t/j/.lake/janus-framework.ready" && ok "a '..' pin path is refused" || bad "dotdot pin followed"
 # ---- the record is written safely by `asl_mod_cache.py restore --record` ----
-grep -q 'O_EXCL | os.O_NOFOLLOW' "$here/../../models/asl/tools/asl_mod_cache.py" && ok "restore --record opens its temp file O_CREAT|O_EXCL|O_NOFOLLOW at 0600" || bad "record temp open not exclusive"
-grep -q 'mktemp -d "\${TMPDIR:-/var/tmp}/asl-restored' "$here/../asl.sh" && ok "asl.sh keeps the record in a private (0700) mktemp -d directory" || bad "asl.sh record dir"
+grep -q 'O_EXCL | os.O_NOFOLLOW' "$here/../../../models/asl/tools/asl_mod_cache.py" && ok "restore --record opens its temp file O_CREAT|O_EXCL|O_NOFOLLOW at 0600" || bad "record temp open not exclusive"
+grep -q 'mktemp -d "\${TMPDIR:-/var/tmp}/asl-restored' "$here/../../build/asl.sh" && ok "asl.sh keeps the record in a private (0700) mktemp -d directory" || bad "asl.sh record dir"
 # the restore's --record output: a signed entry restores and is recorded; see models/asl/tools/test_asl_mod_cache.sh for the cache itself
-grep -q -- '--record' "$here/../../models/asl/tools/asl_mod_cache.py" && grep -q 'RESTORED\[dst\] = h' "$here/../../models/asl/tools/asl_mod_cache.py" && ok "asl_mod_cache.py restore records exactly the files it copied from verified entries" || bad "restore --record missing"
+grep -q -- '--record' "$here/../../../models/asl/tools/asl_mod_cache.py" && grep -q 'RESTORED\[dst\] = h' "$here/../../../models/asl/tools/asl_mod_cache.py" && ok "asl_mod_cache.py restore records exactly the files it copied from verified entries" || bad "restore --record missing"
 [ "$fail" = 0 ] && echo "all checks passed"
 exit $fail

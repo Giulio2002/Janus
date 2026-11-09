@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Round-4 regression rows (docs/audit/AUDIT-ROUND4.md). Exits 1 if a fixed finding regresses.
-# Writes only under test/redteam/rounds/round4/work/ and test/redteam/rounds/round4/bin/.  Usage: test/redteam/rounds/round4/run-round4.sh [-j N]  (-j: blocks at once, scripts/lib/parallel.sh)
+# Writes only under test/redteam/rounds/round4/work/ and test/redteam/rounds/round4/bin/.  Usage: test/redteam/rounds/round4/run-round4.sh [-j N]  (-j: blocks at once, scripts/gate/lib/parallel.sh)
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../../../scripts/lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
-# shellcheck source=../../../../scripts/lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+# shellcheck source=../../../../scripts/gate/lib/parallel.sh
+. "$root/scripts/gate/lib/parallel.sh"
+# shellcheck source=../../../../scripts/gate/lib/memguard.sh
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 par_init "$@"
 J="$root/test/redteam/rounds/round4/bin/janus"; mkdir -p "$(dirname "$J")"
@@ -16,7 +16,7 @@ J="$root/test/redteam/rounds/round4/bin/janus"; mkdir -p "$(dirname "$J")"
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
 W=test/redteam/rounds/round4/work; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1
 broken=()

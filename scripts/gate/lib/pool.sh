@@ -1,8 +1,8 @@
 # shellcheck shell=bash
-# One global work queue with streamed results, shared by the gate (scripts/gate.sh), the example
-# runner (scripts/verify-all-examples.sh) and anything else that has a list of independent items.
-# Source it AFTER scripts/lib/parallel.sh (admission by memory) and, for per-item cgroup memory
-# limits, scripts/lib/memguard.sh.
+# One global work queue with streamed results, shared by the gate (scripts/gate/gate.sh), the example
+# runner (scripts/verify/verify-all-examples.sh) and anything else that has a list of independent items.
+# Source it AFTER scripts/gate/lib/parallel.sh (admission by memory) and, for per-item cgroup memory
+# limits, scripts/gate/lib/memguard.sh.
 #
 #   pool_init NAME JOBS STATEDIR   NAME labels the pool in progress lines and the timeline; JOBS is the
 #                                  number of items at once; STATEDIR receives <id>.log / .rc / .secs
@@ -29,7 +29,7 @@
 # is admitted only if the reservations of the running ones plus its own fit the budget (the first is always admitted),
 # so small items run POOL_JOBS wide and heavy ones limit themselves. POOL_DEBUG=1 logs each deferral. The pool line
 # of the timeline gets peakConcurrency and peakReservedGiB.
-# A finished item whose log has a line starting "TIMEOUT:" (scripts/lib/itemtimeout.sh) or whose status
+# A finished item whose log has a line starting "TIMEOUT:" (scripts/gate/lib/itemtimeout.sh) or whose status
 # is 124 is reported as TIMEOUT. An item whose log contains " skipped (unchanged" is reported SKIP
 # (a pass that did not run: --changed) and does not update the times.
 
@@ -83,7 +83,7 @@ _pool_spawn() { # INDEX
     s=$(_pool_now)
     st=0
     if [ "${POOL_GUARD:-1}" != 0 ] && type memguard_run >/dev/null 2>&1; then
-      # the item runs in a child bash under a cgroup memory limit (scripts/lib/memguard.sh);
+      # the item runs in a child bash under a cgroup memory limit (scripts/gate/lib/memguard.sh);
       # functions and shell variables are handed over as parallel.sh's par_run does
       export POOL_BLOCK="${POOL_CODES[$i]}"
       POOL_PRELUDE="$(declare -f); $(declare -p 2>/dev/null | grep -vE '^declare -[a-zA-Z]*[rx]')"

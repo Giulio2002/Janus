@@ -146,7 +146,7 @@ statements and can be round-tripped like the theorem type.
 
 ## Regression status
 
-With this branch's changes: `scripts/verify-examples.sh` ✓, `scripts/verify-amd64-examples.sh` ✓,
+With this branch's changes: `scripts/verify/verify-examples.sh` ✓, `scripts/verify/verify-amd64-examples.sh` ✓,
 `test/redteam/run-all.sh` ✓, `test/redteam/rounds/round3/run-round3.sh` ✓, `test/redteam/rounds/round4/run-round4.sh` ✓,
 `go test ./cmd/janus` ✓ (about 18 min; it needs `-timeout` above the 10-minute default).
 

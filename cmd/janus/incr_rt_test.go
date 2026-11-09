@@ -7,7 +7,7 @@ package main
 //	 1 stale entries              TestRT01Stale*
 //	 2 deep / auditor-only edits  TestRT02*
 //	 3 toolchain, checker, auditor TestRT03*
-//	 4 script, lib and env swaps  TestRT04* (and scripts/lib/test-rt-incr.sh)
+//	 4 script, lib and env swaps  TestRT04* (and scripts/gate/lib/test-rt-incr.sh)
 //	 5 key-design collisions      TestRT05*
 //	 6 cache-file tampering       TestRT06*
 //	 7 dependency / build inputs  TestRT07* (verifierid_rt_test.go)
@@ -15,7 +15,7 @@ package main
 //	 9 a proof poisoning caches   TestRT09* (incr_rt_sandbox_test.go)
 //	10 races                      TestRT10*
 //	11 --fresh verdict store      (verdictstore_rt_test.go, branch agent/speed-j1)
-//	12 failed / timed-out runs    TestRT12* and scripts/lib/test-rt-incr.sh
+//	12 failed / timed-out runs    TestRT12* and scripts/gate/lib/test-rt-incr.sh
 
 import (
 	"bytes"
@@ -386,7 +386,7 @@ func TestRT04EnvSkipListIsPinned(t *testing.T) {
 		}
 	}
 	// the three that change what gets executed or how results are interpreted are handled elsewhere:
-	// JANUS_INCR_EXPLAIN (scripts/lib/test-rt-incr.sh: cleared by gate.sh), GOENV and GOMODCACHE (lane arguments).
+	// JANUS_INCR_EXPLAIN (scripts/gate/lib/test-rt-incr.sh: cleared by gate.sh), GOENV and GOMODCACHE (lane arguments).
 }
 
 func TestRT04ScriptSwapsAreMisses(t *testing.T) {
@@ -879,18 +879,18 @@ func TestRT12PartialLaneArgumentsAreInTheKey(t *testing.T) {
 	x.wantRun()
 }
 
-// the shell side of the red team: scripts/lib/test-rt-incr.sh (explain/pre-check variables, the tree pin,
+// the shell side of the red team: scripts/gate/lib/test-rt-incr.sh (explain/pre-check variables, the tree pin,
 // failed items, script coverage, the go configuration of lanes)
 func TestRTIncrScripts(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", filepath.Join(root, "scripts", "lib", "test-rt-incr.sh"))
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "gate", "lib", "test-rt-incr.sh"))
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil || bytes.Contains(out, []byte("\nFAIL ")) || bytes.HasPrefix(out, []byte("FAIL ")) {
-		t.Fatalf("scripts/lib/test-rt-incr.sh: %v\n%s", err, out)
+		t.Fatalf("scripts/gate/lib/test-rt-incr.sh: %v\n%s", err, out)
 	}
 }
 
@@ -899,7 +899,7 @@ func TestRTIncrScripts(t *testing.T) {
 func TestRTBuildCacheScripts(t *testing.T) {
 	root, _ := filepath.Abs("../..")
 	for _, s := range []string{"test-rt-bcache.sh", "test-bcache.sh"} {
-		cmd := exec.Command("bash", filepath.Join(root, "scripts", "lib", s))
+		cmd := exec.Command("bash", filepath.Join(root, "scripts", "gate", "lib", s))
 		cmd.Dir = root
 		out, err := cmd.CombinedOutput()
 		if err != nil || bytes.Contains(out, []byte("\nFAIL ")) || bytes.HasPrefix(out, []byte("FAIL ")) {

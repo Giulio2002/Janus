@@ -5,7 +5,7 @@ Run everything from a COPY of the repo (never inside /srv worktrees):
 
   cp -a /srv/janus-rt2 $X/j && cd $X/j
   lake build Janus
-  PATH=$PATH:/usr/local/go/bin scripts/build-examples-amd64.sh     # artifacts/amd64/*
+  PATH=$PATH:/usr/local/go/bin scripts/build/build-examples-amd64.sh     # artifacts/amd64/*
 
 Files
 -----

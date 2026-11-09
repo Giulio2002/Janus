@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Self-test of the Sail split hardening (small fixtures, no Sail build, seconds):
 #   validation/reference-models/sail-arm/split_crate.py  the patched crate copy is verified against the pinned checkout at every depth
-#   validation/reference-models/sail-arm/dir_digest.py   + the model_dir / split_parts functions of scripts/oracle-sail.sh: a tampered part,
+#   validation/reference-models/sail-arm/dir_digest.py   + the model_dir / split_parts functions of scripts/validation/sail-arm.sh: a tampered part,
 #                               model.h, model_missing.cpp or instrumented model is regenerated, never reused
 set -uo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 t=$(mktemp -d "${TMPDIR:-/tmp}/test-splitcrate.XXXXXX"); trap 'rm -rf "$t"' EXIT
 fail=0
 ok() { echo "ok   $1"; }
@@ -62,7 +62,7 @@ chk_bad "a planted subdirectory" 'mkdir "$p/sub"' 'rmdir "$p/sub"'
 dd check "$p/.complete" "$p" -- inst=J 2>/dev/null && bad "dir_digest accepted another recorded value" || ok "dir_digest detects a changed recorded value (inst)"
 dd check "$p/.complete" "$p" -- inst=I 2>/dev/null && ok "dir_digest: accepted again after every tamper is undone" || bad "after undo"
 
-# ---------- model_dir / split_parts of scripts/oracle-sail.sh (fake instrumenter and splitter) ----------
+# ---------- model_dir / split_parts of scripts/validation/sail-arm.sh (fake instrumenter and splitter) ----------
 here="$t/here"; mkdir -p "$here"; cp "$root/validation/reference-models/sail-arm/dir_digest.py" "$here/"
 cat > "$here/instrument_model.py" <<'PY'
 import sys
@@ -78,7 +78,7 @@ open("/dev/null", "w")
 PY
 fn="$t/fn.sh"
 { echo 'here="'$here'"; SAIL_SPLIT_PARTS=4'
-  for f in sha256_of model_dir split_parts; do awk -v n="$f" '$0 ~ "^"n"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' "$root/scripts/oracle-sail.sh"; done; } > "$fn"
+  for f in sha256_of model_dir split_parts; do awk -v n="$f" '$0 ~ "^"n"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' "$root/scripts/validation/sail-arm.sh"; done; } > "$fn"
 src="$t/src"; mkdir -p "$src"; echo "MODEL" > "$src/model.cpp"; echo H > "$src/model.h"; echo M > "$src/model_missing.cpp"
 inst="$t/inst"
 run() { bash -c 'set -euo pipefail; . "$1"; shift; "$@"' _ "$fn" "$@" 2>"$t/err"; }

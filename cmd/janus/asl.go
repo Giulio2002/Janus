@@ -168,7 +168,7 @@ func loadASL(fw *framework) (*aslPackage, error) {
 	pkg.ModelSha256 = sha256Hex(pkg.Files["vendor/ArmASL.tar.gz"])
 	if want := strings.TrimSpace(string(pkg.Files["vendor/ArmASL.tar.gz.sha256"])); want != pkg.ModelSha256 {
 		return nil, aslDiag(fmt.Sprintf("The vendored ASL model models/asl/vendor/ArmASL.tar.gz has SHA-256 %s, not the recorded %s.", pkg.ModelSha256, want),
-			"Restore the vendored model (git checkout models/asl/vendor), or regenerate it with scripts/asl.sh gen.")
+			"Restore the vendored model (git checkout models/asl/vendor), or regenerate it with scripts/build/asl.sh gen.")
 	}
 	pkg.Version = map[string]string{}
 	for _, l := range strings.Split(string(pkg.Files["vendor/ArmASL.version"]), "\n") {
@@ -311,7 +311,7 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 		return nil, aslDiag("Cannot write the JanusASL package to the cache: "+err.Error(), "Set JANUS_CACHE_DIR to a writable directory.")
 	}
 	// The cache directory is private to this verification. A symlinked .lake (an earlier seeding that
-	// copied a link, as scripts/asl.sh verify once did with `cp -a`) would let Lake and the override file
+	// copied a link, as scripts/build/asl.sh verify once did with `cp -a`) would let Lake and the override file
 	// below write into someone else's build: replace the link, never touching its target.
 	if err := ensurePrivateDir(filepath.Join(dir, ".lake")); err != nil {
 		return nil, aslDiag("Cannot make the JanusASL build directory private: "+err.Error(), "Remove "+displayPath(dir)+" and retry.")

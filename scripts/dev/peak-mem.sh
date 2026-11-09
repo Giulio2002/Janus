@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Measure the peak memory of a command and everything it starts (sandboxed lean processes
-# included): scripts/peak-mem.sh CMD [ARG ...]
+# included): scripts/dev/peak-mem.sh CMD [ARG ...]
 #
 # The command runs in a transient systemd user scope (its own cgroup). Printed on stderr when it
 # ends, as one line starting "peak-mem:":

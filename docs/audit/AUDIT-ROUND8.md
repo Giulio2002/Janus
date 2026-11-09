@@ -77,7 +77,7 @@ but the extracted program has no data object of that name, so the lookup silentl
 **Controls** (must verify): `examples/proofs/HashWith.lean` (the itab names through
 `abbrev mulItab`/`rotItab`), `Proof.add_summary` of `examples/proofs/AddThree.lean` (`segAddr` of
 a real callee in the statement) and amd64 `HexDigit` (`dataBase Extracted.program 0`). Every
-shipped example verifies with the check (`scripts/verify-all-examples.sh`, below).
+shipped example verifies with the check (`scripts/verify/verify-all-examples.sh`, below).
 
 **verify-all-examples.sh gap.** Its arm64 list predated the dynamic-call examples and omitted
 `HashWith`, `HashTwice`, `MapSum` and `DeferAdd`, the four arm64 examples whose statements use
@@ -187,7 +187,7 @@ build info"), now demonstrated.
 **Fix.** The build-info version plays no part any more: a listed name is a stub only if its
 normalized code matches a pin measured from the real go1.26.x runtimes and the pclntab places it
 in package `runtime` at the pinned source file (docs/SOUNDNESS.md item 3, `cmd/janus/stubpin.go`,
-`scripts/gen-stubpins.sh`). The fixture's `runtime.panicSimdImm` sits in
+`scripts/dev/gen-stubpins.sh`). The fixture's `runtime.panicSimdImm` sits in
 `example.com/govers/lib/zero_arm64.s` and its hash is not pinned, so extraction fails;
 `run-round8.sh` requires that, and test/redteam/rounds/round7 has rows for the committed extraction and qemu.
 
@@ -198,7 +198,7 @@ Run one suite at a time on this branch (host shared with other agents):
 | Suite | Result |
 |---|---|
 | `test/redteam/rounds/round8/run-round8.sh` | all rows as expected (I1a–f, N1a blocked; controls, M1, C1 and unit rows ok; G3a open at the time; blocked since the stub-pin merge), 368 s |
-| `scripts/verify-all-examples.sh` | all ok: 25 arm64 items (with HashWith, HashTwice, MapSum, DeferAdd) and 27 amd64 functions, 590 s at -j 2 |
+| `scripts/verify/verify-all-examples.sh` | all ok: 25 arm64 items (with HashWith, HashTwice, MapSum, DeferAdd) and 27 amd64 functions, 590 s at -j 2 |
 | `test/redteam/run-all.sh` | no BROKEN row, 282 s |
 | `test/redteam/rounds/round2…7` | all as expected: 68, 11, 10, 225, 81, 639 s (round 7 with its cache rows) |
 | `go vet ./...`, `go test -timeout 60m ./cmd/...` | clean; `ok github.com/Giulio2002/Janus/cmd/janus` 622 s |

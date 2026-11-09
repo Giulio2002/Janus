@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Shared per-module build cache for the JanusASL proofs and the Janus framework modules they
-import (scripts/asl.sh, ASL_CACHE; docs/design/ASL.md "Build cache").
+import (scripts/build/asl.sh, ASL_CACHE; docs/design/ASL.md "Build cache").
 
     python3 -I models/asl/tools/asl_mod_cache.py restore REPO_ROOT CACHE [--record FILE]   copy cached builds in
     python3 -I models/asl/tools/asl_mod_cache.py publish REPO_ROOT CACHE [--exe]
@@ -57,9 +57,9 @@ restore holds it shared while it copies the entry's files and then touches the e
 (`<key>.use`, its last restore), and the collector removes an entry only under it, taken
 exclusively without waiting. A lock file can be removed by the collector while held, so a lock is
 retried until the path still names the locked file (as cmd/janus does). The ArmASL entries of
-scripts/asl.sh (`CACHE/<32 hex>`, `.lock`, `.use`) follow the same protocol.
+scripts/build/asl.sh (`CACHE/<32 hex>`, `.lock`, `.use`) follow the same protocol.
 
-**Eviction** (`gc`; scripts/asl.sh runs it after every publish with `--max $ASL_CACHE_MAX`, default
+**Eviction** (`gc`; scripts/build/asl.sh runs it after every publish with `--max $ASL_CACHE_MAX`, default
 15G): first every ArmASL entry that no module entry references (an `armasl:<key>` import in its
 INPUTS.json) and that is not the checkout's own key (`--root`; both the current and the legacy
 key); then, while the cache is larger than SIZE, the least recently used entry (by its use stamp,
@@ -73,7 +73,7 @@ then deleted; its use stamp and lock file are removed while the lock is held. Co
 ever deletes: a missing entry is a miss, never a different result. Leftover `.gc-trash-*` and
 publish `.tmp-*` directories older than a day are removed too.
 
-**Compiled objects** (`CACHE/armobj/<id>`, kind `armobj` of scripts/lib/bcache.py; two scopes, `arm` and `jasl`).
+**Compiled objects** (`CACHE/armobj/<id>`, kind `armobj` of scripts/gate/lib/bcache.py; two scopes, `arm` and `jasl`).
 The id binds the C content of the scope, the keyed compiler BINARY's content, the ArmASL key (toolchain, flags,
 environment incl. CCC_*), the machine and (jasl) the JanusASL lib/exe tables; a store checks that each object's
 trace/hash bind to the current C and the keyed compiler (objstage) and recompiles a sample; Lake does not re-check a
@@ -82,7 +82,7 @@ restored object, so there is no second check at use time and no kernel replay: s
 
 **Trust.** As for the ArmASL entry: the cache must be writable only by users you trust, since a
 restored `.olean` is what later modules (and `janus verify --asl`) are checked against; the kernel
-replay (`scripts/asl.sh replay`, the replay of `janus verify --asl`) re-checks every declaration,
+replay (`scripts/build/asl.sh replay`, the replay of `janus verify --asl`) re-checks every declaration,
 and the manifest catches corruption, not a malicious writer.
 """
 import fcntl
@@ -102,7 +102,7 @@ CORE = {"Init", "Std", "Lean", "Lake"}
 
 
 def load_bcache(root):
-    """scripts/lib/bcache.py: the integrity layer (per-user HMAC key, signed manifests)."""
+    """scripts/gate/lib/bcache.py: the integrity layer (per-user HMAC key, signed manifests)."""
     sys.dont_write_bytecode = True
     spec = importlib.util.spec_from_file_location("bcache", os.path.join(root, "scripts", "lib", "bcache.py"))
     mod = importlib.util.module_from_spec(spec)
@@ -304,7 +304,7 @@ def outputs(p, mod, objects=True):
 
 def open_lock(path):
     """Open (creating, 0600) a lock file without following a symlink; refuse a non-regular or foreign file
-    (scripts/lib/bcache.py open_lock; duplicated because the collector runs without a checkout's bcache)."""
+    (scripts/gate/lib/bcache.py open_lock; duplicated because the collector runs without a checkout's bcache)."""
     import stat
     try:
         fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
@@ -368,8 +368,8 @@ def restore(ks, cache):
     except ks.bc.CacheError as ex:
         print("asl module cache: %s; not using the cache (Lake builds everything)" % ex, file=sys.stderr)
         return
-    # one restorer at a time per tree (lanes of scripts/gate.sh share an isolated tree): the same lock as
-    # scripts/lib/bcache.py's fetch, taken in a fixed order, held for the whole restore
+    # one restorer at a time per tree (lanes of scripts/gate/gate.sh share an isolated tree): the same lock as
+    # scripts/gate/lib/bcache.py's fetch, taken in a fixed order, held for the whole restore
     tls = [ks.bc.tree_lock(os.path.join(p.dir, ".lake")) for p in ks.pkgs]
     try:
         hit, miss, same, bad = restore_locked(ks, cache)
@@ -1297,7 +1297,7 @@ def main():
     elif cmd == "restore":
         restore(ks, sys.argv[3])
         # --record FILE: the files restored (or found current) from HMAC-verified entries, with their SHA-256, for
-        # scripts/lib/restamp.py (a record is written even when empty)
+        # scripts/gate/lib/restamp.py (a record is written even when empty)
         if "--record" in sys.argv[4:]:
             rec = sys.argv[sys.argv.index("--record") + 1]
             # signed (HMAC, domain "restamp", bound to this tree) so restamp.py cannot be fed a forged record; written
@@ -1319,7 +1319,7 @@ def main():
                 raise
     elif cmd == "publish":
         # the roots of the JanusASL library (and with --exe, of its executables): the targets
-        # `scripts/asl.sh` has just built; their closure is up to date
+        # `scripts/build/asl.sh` has just built; their closure is up to date
         roots = [a for a in sys.argv[4:] if not a.startswith("--")]
         cfg = ks.pkgs[0].cfg
         for lib in cfg.get("lean_lib", []):

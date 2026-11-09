@@ -20,7 +20,7 @@ From the repository root:
 
 ```sh
 go build -o bin/janus ./cmd/janus
-scripts/build-examples.sh                                   # artifacts/examples-arm64
+scripts/build/build-examples.sh                                   # artifacts/examples-arm64
 bin/janus extract artifacts/examples-arm64 example.com/basic.Add artifacts/Add
 bin/janus extract artifacts/examples-arm64 example.com/basic.Max artifacts/Max
 bin/janus verify artifacts/Add --proof examples/consumer/ConsumerExample/Add.lean \

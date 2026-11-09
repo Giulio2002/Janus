@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Compile Extracted + Proof for the given amd64 examples into test/redteam/rounds/round2/amd64/work/<E>/, then
 # check test/redteam/rounds/round2/amd64/controls/<E>_witness.lean against them.
-# Needs artifacts/amd64 (scripts/build-examples-amd64.sh) and `lake build Janus`.
+# Needs artifacts/amd64 (scripts/build/build-examples-amd64.sh) and `lake build Janus`.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"; cd "$root"
 for e in "${@:-AtomicAdd AtomicMax CopyWords CopyBlock ClearWords}"; do

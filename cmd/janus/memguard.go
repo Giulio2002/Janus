@@ -14,7 +14,7 @@ package main
 // Mechanisms, strongest first (JANUS_MEMGUARD=<mechanism> forces one, for tests):
 //
 //	cgroup          a child cgroup of $JANUS_MEMGUARD_CGROUP, a delegated cgroup set up by
-//	                scripts/lib/memguard.sh (nested guards: a job-level limit around per-process
+//	                scripts/gate/lib/memguard.sh (nested guards: a job-level limit around per-process
 //	                limits); or of janus's own cgroup when it is delegated and the memory
 //	                controller can be enabled for a child
 //	systemd-user    `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0`, with janus

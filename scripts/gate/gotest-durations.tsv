@@ -1,4 +1,4 @@
-# name<TAB>seconds: estimates of scripts/gotest-shards.sh (queue mode), overriding cmd/janus/order_test.go.
+# name<TAB>seconds: estimates of scripts/gate/gotest-shards.sh (queue mode), overriding cmd/janus/order_test.go.
 # The tests below call t.Parallel(): `go test -v` reports their wall including the pause, so the table of order_test.go has no
 # usable figure for them. 150 s is a middle guess (a shard of 11 of them took ~3400 s in the gate of 10104e01); a run writes
 # the measured wall of every single-test item to artifacts/gate/gotest/learned.tsv: paste it here.

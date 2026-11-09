@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 # JanusASL: Janus' AArch64 model against Arm's ASL inside Lean (docs/design/ASL.md).
 #
-#   scripts/asl.sh deps    install the pinned toolchain into $DEPS: an opam root with Sail 0.20.3
+#   scripts/build/asl.sh deps    install the pinned toolchain into $DEPS: an opam root with Sail 0.20.3
 #                          plus 8 upstream Lean-backend commits and JanusASL's backend fixes (models/asl/sail/*.patch),
 #                          the slicing plugin, sail-arm at the pin, lean-sail at the pin
-#   scripts/asl.sh gen     slice sail-arm to the Janus subset and generate Lean (models/asl/ArmASL*),
+#   scripts/build/asl.sh gen     slice sail-arm to the Janus subset and generate Lean (models/asl/ArmASL*),
 #                          then compare with the vendored copy (GEN_UPDATE=1 replaces the vendored copy)
-#   scripts/asl.sh restore unpack the vendored model (if needed) and copy its build from ASL_CACHE (no build)
-#   scripts/asl.sh model   unpack the vendored model (if needed) and build only ArmASL (lake; uses ASL_CACHE)
-#   scripts/asl.sh build   unpack the vendored model (if needed) and build JanusASL (lake)
-#   scripts/asl.sh check   build + `lake exe janus-asl-check` on the oracle corpus (default)
-#   scripts/asl.sh prove   build the proofs (JanusASL.Proofs) and audit their axioms
-#   scripts/asl.sh replay  kernel-replay every JanusASL module with leanchecker, in batches
-#   scripts/asl.sh verify  build + `janus verify --asl` on the shipped Add, Max, Mul64 and Add128
+#   scripts/build/asl.sh restore unpack the vendored model (if needed) and copy its build from ASL_CACHE (no build)
+#   scripts/build/asl.sh model   unpack the vendored model (if needed) and build only ArmASL (lake; uses ASL_CACHE)
+#   scripts/build/asl.sh build   unpack the vendored model (if needed) and build JanusASL (lake)
+#   scripts/build/asl.sh check   build + `lake exe janus-asl-check` on the oracle corpus (default)
+#   scripts/build/asl.sh prove   build the proofs (JanusASL.Proofs) and audit their axioms
+#   scripts/build/asl.sh replay  kernel-replay every JanusASL module with leanchecker, in batches
+#   scripts/build/asl.sh verify  build + `janus verify --asl` on the shipped Add, Max, Mul64 and Add128
 #                          proofs: their ASL corollaries, derived from the artifacts (docs/design/ASL.md)
 #
 # Environment:
 #   DEPS     pinned external sources/toolchains (default /srv/janus-asl-deps)
-#   CASES    corpus (default artifacts/oracle/cases.jsonl; made by `scripts/oracle.sh full` if missing)
+#   CASES    corpus (default artifacts/oracle/cases.jsonl; made by `scripts/validation/hardware-arm64.sh full` if missing)
 #   OUT      output dir for the check (default artifacts/asl)
 #   KEEP     1: keep the check's verdicts.jsonl raw (default: compressed to verdicts.jsonl.zst,
-#            MISMATCH verdicts in mismatches.jsonl; scripts/lib/artifacts.sh). CASES may be
+#            MISMATCH verdicts in mismatches.jsonl; scripts/gate/lib/artifacts.sh). CASES may be
 #            compressed (.zst next to the named file).
 #   JOBS     parallel tasks for the check (default nproc)
 #   ASL_CACHE          the shared build cache (a directory; default /srv/janus-asl-cache if it exists,
@@ -32,7 +32,7 @@
 #                      toolchain by content, the lean-sail manifest entry, the lakefile settings that
 #                      reach ArmASL's modules, the compiler environment, the machine), carry a
 #                      SHA-256 manifest AND an HMAC of it under a per-user key
-#                      (scripts/lib/bcache.py; ~/.cache/janus/asl-cache-key/asl-cache.key), both checked on every
+#                      (scripts/gate/lib/bcache.py; ~/.cache/janus/asl-cache-key/asl-cache.key), both checked on every
 #                      copy, and are published atomically under a per-key lock, so worktrees and CI
 #                      runners share one build of the ~45 min model. A missing, unsigned, tampered
 #                      or incomplete entry is rebuilt from source, never used.
@@ -41,13 +41,13 @@
 #                      keyed by what Lake traces (source, imports' keys, package settings,
 #                      toolchain), restored before and published after the JanusASL build.
 #   JANUS_ASL_CACHE=0  force a cold build: neither reads nor writes the cache (also off/no/false)
-#   JANUS_MODEL_PIN=1  the cold gate (scripts/gate.sh --cold): the ArmASL build and lean-sail come ONLY from the model
-#                      pin (scripts/lib/modelpin.py, docs/TESTING.md "Cold gate and the model pin"), never from the build
+#   JANUS_MODEL_PIN=1  the cold gate (scripts/gate/gate.sh --cold): the ArmASL build and lean-sail come ONLY from the model
+#                      pin (scripts/gate/lib/modelpin.py, docs/TESTING.md "Cold gate and the model pin"), never from the build
 #                      cache and never built-and-published: a missing, tampered or corrupt pin FAILS (a stale pin = a model
 #                      input changed; by default (JANUS_MODEL_PIN_STALE=rebuild; =fail to refuse) it builds the model from source inside this run instead,
 #                      loudly, publishing nothing). The models/asl/JanusASL/Janus module cache is off. After the build every pinned file
-#                      is hashed again. Only scripts/nightly-cold-gate.sh writes the pin.
-#   scripts/asl.sh key  print the model cache/pin key (32 hex digits)
+#                      is hashed again. Only scripts/gate/nightly-cold-gate.sh writes the pin.
+#   scripts/build/asl.sh key  print the model cache/pin key (32 hex digits)
 #   ASL_CACHE_READONLY=1   use the cache but never write to it
 #   ASL_CACHE_MAX      size budget of ASL_CACHE (default 15G; off: none), kept after every publish
 #                      by `asl_mod_cache.py gc` (least recently restored first; unreferenced
@@ -61,11 +61,11 @@
 #   ASL_EXAMPLES  examples for `verify` (default "Add Max Mul64 Add128")
 #   ASL_VERIFY_JOBS  examples of `verify` verified at once (default 4)
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 # shellcheck source=lib/artifacts.sh
-. "$root/scripts/lib/artifacts.sh"
+. "$root/scripts/gate/lib/artifacts.sh"
 memguard_self "$@"
 mode="${1:-check}"
 DEPS="${DEPS:-/srv/janus-asl-deps}"
@@ -78,7 +78,7 @@ here="$pkg/sail"
 # The build cache is on by default (docs/SOUNDNESS.md "Build caches"): ASL_CACHE=<dir> picks it,
 # ASL_CACHE=off (or empty) disables it, unset means /srv/janus-asl-cache if that exists, else
 # ~/.cache/janus/asl. Entries are content-keyed, HMAC-signed and hash-checked on every use.
-# JANUS_ASL_CACHE=<dir> is an alias of ASL_CACHE (scripts/gate.sh forwards it); 0/off/no/false is the opt-out below.
+# JANUS_ASL_CACHE=<dir> is an alias of ASL_CACHE (scripts/gate/gate.sh forwards it); 0/off/no/false is the opt-out below.
 case "${JANUS_ASL_CACHE:-}" in ''|0|off|no|false) ;; *) : "${ASL_CACHE:=$JANUS_ASL_CACHE}" ;; esac
 if [ "${ASL_CACHE-unset}" = unset ]; then
   if [ -d /srv/janus-asl-cache ]; then ASL_CACHE=/srv/janus-asl-cache
@@ -91,7 +91,7 @@ case "${JANUS_ASL_CACHE:-}" in 0|off|no|false) ASL_CACHE="" ;; esac
 # The cold gate's model pin (above): the build cache is not used at all.
 MODEL_PIN="${JANUS_MODEL_PIN:-}"
 PIN_DIR=""
-if [ -n "$MODEL_PIN" ]; then ASL_CACHE=""; PIN_DIR="$(python3 -I "$root/scripts/lib/modelpin.py" dir)"; fi
+if [ -n "$MODEL_PIN" ]; then ASL_CACHE=""; PIN_DIR="$(python3 -I "$root/scripts/gate/lib/modelpin.py" dir)"; fi
 export ASL_CACHE
 
 # ---- pins (keep in sync with docs/design/ASL.md) ----
@@ -191,7 +191,7 @@ asl_cache_files() {
 }
 
 # Restore the entry for this model and toolchain into $pkg/.lake: the entry's HMAC (under the
-# per-user key, scripts/lib/bcache.py) and the SHA-256 of every copied file are checked; anything
+# per-user key, scripts/gate/lib/bcache.py) and the SHA-256 of every copied file are checked; anything
 # wrong (no entry, unsigned or tampered entry, missing file, no usable key) leaves nothing copied
 # and the model is built from source by the lake call that follows. A rejected entry is replaced by
 # the publish after that build.
@@ -201,7 +201,7 @@ cache_restore() {
   local key rc=0 out
   key=$(asl_cache_key)
   mkdir -p "$pkg/.lake"
-  out=$(python3 -I "$root/scripts/lib/bcache.py" fetch armasl "$ASL_CACHE" "$key" "$pkg/.lake") || rc=$?
+  out=$(python3 -I "$root/scripts/gate/lib/bcache.py" fetch armasl "$ASL_CACHE" "$key" "$pkg/.lake") || rc=$?
   case $rc in
     0) echo "asl cache: ArmASL $key: $out ($ASL_CACHE)" ;;
     2) echo "asl cache: no entry for ArmASL $key ($ASL_CACHE); building" ;;
@@ -219,7 +219,7 @@ cache_publish() {
   mkdir -p "$ASL_CACHE" || return 0
   inp=$(mktemp "${TMPDIR:-/tmp}/asl-cache-inputs.XXXXXX")
   python3 -I "$pkg/tools/asl_cache_key.py" "$root" --show > "$inp"
-  out=$(asl_cache_files | python3 -I "$root/scripts/lib/bcache.py" store armasl "$ASL_CACHE" "$key" "$pkg/.lake" --inputs "$inp") || rc=$?
+  out=$(asl_cache_files | python3 -I "$root/scripts/gate/lib/bcache.py" store armasl "$ASL_CACHE" "$key" "$pkg/.lake" --inputs "$inp") || rc=$?
   rm -f "$inp"
   [ $rc = 0 ] && echo "asl cache: ArmASL $key: $out" || echo "asl cache: not stored (rc $rc)"
   cache_gc
@@ -234,7 +234,7 @@ pin_step() { # restore | verify-tree
   local key rc=0 out
   key=$(asl_cache_key) || { echo "asl pin: FAIL: cannot compute the model key" >&2; return 1; }
   mkdir -p "$pkg/.lake"
-  out=$(python3 -I "$root/scripts/lib/modelpin.py" "$1" armasl "$PIN_DIR" "$key" "$pkg/.lake") || rc=$?
+  out=$(python3 -I "$root/scripts/gate/lib/modelpin.py" "$1" armasl "$PIN_DIR" "$key" "$pkg/.lake") || rc=$?
   case $rc in
     0) echo "asl pin: ArmASL $key: $out" ;;
     2) if [ "${JANUS_MODEL_PIN_STALE:-rebuild}" = rebuild ]; then
@@ -328,7 +328,7 @@ lake_asl() {
   (cd "$pkg" && LEAN_NUM_THREADS="$ASL_JOBS" memguard_lake "$@")
 }
 
-# ---- the per-tree lock (scripts/gate.sh lanes sharing a tree; scripts/lib/lanelake/lake) ----
+# ---- the per-tree lock (scripts/gate/gate.sh lanes sharing a tree; scripts/gate/lib/lanelake/lake) ----
 # Every WRITER of the JanusASL package holds the tree's lock: not only each `lake` call (the lanelake wrapper) but the
 # whole write phase, because the module-cache restore / publish, the ArmASL cache copy and the janus seed copy write
 # the same .lake outside any lake call (and their bcache lock is another lock). tl_run MODE FUNC ARGS...: run the
@@ -342,7 +342,7 @@ tl_run() {
   if [ -z "${JANUS_LANE_LAKE_LOCK:-}" ] || [ -z "$tree" ] || case "$(pwd -P)/" in "$tree"/*) false ;; *) true ;; esac; then
     "$@"; return
   fi
-  . "$root/scripts/lib/lanelake/keys.sh"
+  . "$root/scripts/gate/lib/lanelake/keys.sh"
   lock="$(lane_lake_lock "$pkg")"   # keyed by the resolved models/asl/.lake: trees sharing it by symlink share the lock
   if [ "${JANUS_LANE_LOCK_HELD:-}" = "$lock" ]; then "$@"; return; fi
   # An exclusive phase nested in a SHARED hold of the same lock would wait for itself (flock on a new descriptor of the
@@ -357,7 +357,7 @@ tl_run() {
   # (lockexec.py leaves the lock descriptors inheritable: every child, and any background process it starts, keeps the
   # lock until it exits, so no phase may leave a daemon behind)
   JANUS_LANE_LOCK_SHARED="$([ "$mode" = s ] && echo "$lock")" JANUS_LANE_LOCK_HELD="$([ "$mode" = x ] && echo "$lock")" \
-    python3 -I "$root/scripts/lib/lanelake/lockexec.py" "$mode" "$lock" ${extra[@]+"${extra[@]}"} bash "$_TL_SELF" __call "$@"
+    python3 -I "$root/scripts/gate/lib/lanelake/lockexec.py" "$mode" "$lock" ${extra[@]+"${extra[@]}"} bash "$_TL_SELF" __call "$@"
 }
 _TL_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
@@ -384,7 +384,7 @@ build_phase() {
 do_cached() {
   [ -z "$MODEL_PIN" ] || return 1
   [ -n "${ASL_CACHE:-}" ] || return 1
-  python3 -I "$root/scripts/lib/bcache.py" verify armasl "$ASL_CACHE" "$(asl_cache_key)" > /dev/null
+  python3 -I "$root/scripts/gate/lib/bcache.py" verify armasl "$ASL_CACHE" "$(asl_cache_key)" > /dev/null
 }
 
 # Only the cache restore (models/asl/tools/test_asl_cache.sh).
@@ -405,9 +405,9 @@ model_phase() {
 
 do_check() {
   do_build
-  if ! art_exists "$CASES"; then "$root/scripts/oracle.sh" full; fi
+  if ! art_exists "$CASES"; then "$root/scripts/validation/hardware-arm64.sh" full; fi
   mkdir -p "$OUT"
-  # The corpus may be zstd-compressed (scripts/lib/artifacts.sh): decompressed for the check and
+  # The corpus may be zstd-compressed (scripts/gate/lib/artifacts.sh): decompressed for the check and
   # removed again; the verdicts are compressed afterwards (KEEP=1 keeps them raw).
   trap 'art_cleanup; art_prune "$OUT"' EXIT
   art_input "$CASES" >/dev/null
@@ -510,8 +510,8 @@ verify_build_phase() {
   # The restored Janus modules embed another tree's source paths, so they differ from the files this tree's framework
   # stamp was taken of: without this, `janus verify --janus-root` removes and rebuilds them, and every restored JanusASL
   # module (traced against the restored bytes) rebuilds after it. Move the stamp's pins of exactly the files the cache
-  # restored from verified entries (scripts/lib/restamp.py); every other difference is still janus's to reject.
-  python3 -I "$root/scripts/lib/restamp.py" "$root" "$rec" || echo "verify: restamp refused the module-cache record; janus rebuilds the restored framework modules" >&2
+  # restored from verified entries (scripts/gate/lib/restamp.py); every other difference is still janus's to reject.
+  python3 -I "$root/scripts/gate/lib/restamp.py" "$root" "$rec" || echo "verify: restamp refused the module-cache record; janus rebuilds the restored framework modules" >&2
   rm -rf "$recd"
 }
 # One example: extract its artifact, verify it with --asl, and write its report lines to $OUT/verify-$n.result (printed in
@@ -533,7 +533,7 @@ verify_one() { # N
 verify_main() {
   export PATH=/usr/local/go/bin:$PATH
   (cd "$root" && CGO_ENABLED=0 go build -o bin/janus ./cmd/janus)
-  "$root/scripts/build-examples.sh" >/dev/null
+  "$root/scripts/build/build-examples.sh" >/dev/null
   local d
   d=$("$root/bin/janus" framework --janus-root "$root" --json |
     python3 -I -c 'import json, sys; print(json.load(sys.stdin)["asl"]["cacheDir"])')
@@ -548,7 +548,7 @@ verify_main() {
   fi
   # a seed from a long-lived .lake can hold modules of an older model split (ArmASL.Part37.. next to the current
   # parts): the kernel replay enumerates the directory and would load both. Keep only the current model's modules.
-  [ ! -d "$d/.lake" ] || python3 -I "$root/scripts/lib/bcache.py" prune-armasl "$d/.lake" "$pkg/ArmASL"
+  [ ! -d "$d/.lake" ] || python3 -I "$root/scripts/gate/lib/bcache.py" prune-armasl "$d/.lake" "$pkg/ArmASL"
   local fail=0 n pids=() names=() njobs="${ASL_VERIFY_JOBS:-4}" i
   mkdir -p "$OUT"
   [ "$njobs" -ge 1 ] 2>/dev/null || njobs=1
@@ -584,6 +584,6 @@ case "$mode" in
   replay) do_replay ;;
   verify) do_verify ;;
   objcache-state) obj_cache_state ;;   # ON or OFF (reason): printed by the gate banner, lane logs and the nightly
-  cached) do_cached ;;   # exit 0 iff the verified build cache holds this model (scripts/gate.sh: asl-verify then need not wait for asl-build)
+  cached) do_cached ;;   # exit 0 iff the verified build cache holds this model (scripts/gate/gate.sh: asl-verify then need not wait for asl-build)
   *) echo "usage: $0 deps|gen|key|files|restore|model|build|check|prove|replay|verify|cached" >&2; exit 2 ;;
 esac

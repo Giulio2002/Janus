@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replace `integer_update_subrange` in the generated ArmASL.lean (scripts/asl.sh gen).
+"""Replace `integer_update_subrange` in the generated ArmASL.lean (scripts/build/asl.sh gen).
 
     sail_int_fix.py ARMASL_LEAN
 

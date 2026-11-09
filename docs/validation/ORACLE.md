@@ -9,9 +9,9 @@ reference (or bare metal, on an arm64 Linux host).
 ## Running it
 
 ```
-scripts/oracle.sh selftest   # build everything, check the native harness on known answers
-scripts/oracle.sh quick      # ~60k generated cases, a few seconds
-scripts/oracle.sh full       # generated + harvested from real Go arm64 binaries (default)
+scripts/validation/hardware-arm64.sh selftest   # build everything, check the native harness on known answers
+scripts/validation/hardware-arm64.sh quick      # ~60k generated cases, a few seconds
+scripts/validation/hardware-arm64.sh full       # generated + harvested from real Go arm64 binaries (default)
 ```
 
 Results land in `artifacts/oracle/` (override with `OUT=`):
@@ -26,9 +26,9 @@ Results land in `artifacts/oracle/` (override with `OUT=`):
 
 A full run writes several GB of JSON lines. When the script ends (however it ends) it keeps the
 summaries and compresses the dumps with zstd (`zstd -dc verdicts.jsonl.zst | …` reads one;
-`scripts/lib/artifacts.sh`); `gen.jsonl` and `harvest.jsonl`, whose union is `cases.jsonl`, are
+`scripts/gate/lib/artifacts.sh`); `gen.jsonl` and `harvest.jsonl`, whose union is `cases.jsonl`, are
 removed. `KEEP=zst` compresses those too, `KEEP=1` keeps every file raw, as before. The drivers
-that read the corpus (`scripts/oracle-sail.sh`, `scripts/asl.sh check`, `scripts/x86formal.sh
+that read the corpus (`scripts/validation/sail-arm.sh`, `scripts/build/asl.sh check`, `scripts/build/x86formal.sh
 check`, `validation/reference-models/sail-x86/compare.py`, `models/asl/tools/evidence.py`) accept the compressed
 files.
 
@@ -56,7 +56,7 @@ A case (`validation/hardware-comparison/arm64/layout/layout.go`, `Case`) is one 
 initial state: `X0`–`X30`, `SP`, `NZCV`, `V0`–`V31` (field `v`, 128-bit hex; absent = zero),
 `TPIDR_EL0` (field `tpidr`), a seed for the contents of a 4 KiB data
 buffer, and `dczid`, the reference CPU's `DCZID_EL0`. That register is IMPLEMENTATION DEFINED
-and read-only, so it cannot be set per case: `scripts/oracle.sh` asks the runner for its CPU's
+and read-only, so it cannot be set per case: `scripts/validation/hardware-arm64.sh` asks the runner for its CPU's
 value (`runner -dczid`; qemu `-cpu max` reports 7) and writes it into every case
 (`oracle gen/harvest/selftest -dczid N`), the runner refuses a case whose value differs from its
 own, and the Lean side uses it as `State.dczid`. Everything is at fixed addresses, so a case is closed and deterministic:
@@ -240,7 +240,7 @@ model has only the failing outcome, so a hardware pass would be a `MISMATCH`. Bo
 enumeration only removes outcomes (a store-exclusive beyond the bound sees "fail" in every run),
 so it can turn an agreement into a reported mismatch but never hide one.
 
-## Results with exclusives (2026-10-24, `scripts/oracle.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
+## Results with exclusives (2026-10-24, `scripts/validation/hardware-arm64.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
 
 789,222 cases (the full corpus: generated, `gen/seq.excl` 20,000 blocks, harvested, and the
 1,752 cases of the 219 distinct LL/SC loops of the harvested binaries, `harvest/seq.excl`):
@@ -266,9 +266,9 @@ field). A separate 64,728-case run of the exclusive classes alone (`-only '^ls\.
 -excl-seq 40000` and the harvested loops of `sync`, `sync/atomic`, `runtime`,
 `internal/runtime/atomic`) also gave 0 MISMATCH.
 
-## Results with the Advanced SIMD classes of `NeonInstr` (2026-10-25, `scripts/oracle.sh neon`, qemu 10.2.1 `-cpu max`)
+## Results with the Advanced SIMD classes of `NeonInstr` (2026-10-25, `scripts/validation/hardware-arm64.sh neon`, qemu 10.2.1 `-cpu max`)
 
-`OUT=artifacts/oracle-neon JOBS=8 SEED=1 scripts/oracle.sh neon` runs:
+`OUT=artifacts/oracle-neon JOBS=8 SEED=1 scripts/validation/hardware-arm64.sh neon` runs:
 
 * **targeted** (`gen/`): the classes `neon.3same`, `neon.3samefp`, `neon.s3same`, `neon.3diff`,
   `neon.s3diff`, `neon.2misc`, `neon.s2misc`, `neon.across`, `neon.spair`, `neon.perm`,
@@ -327,9 +327,9 @@ those words are now in `simd.permute`/`simd.dupscalar`), the same mode with `SEE
 (`OUT=artifacts/oracle-neon-final`): 616,007 cases, **0 MISMATCH**, 600,490 agree, 15,517
 model-gap, 0 unobserved (targeted 300,000, random 120,000, harvested 146,007, sequences 50,000).
 
-## Results with the crypto extension, CRC32 and permutes (2026-10-25, `scripts/oracle.sh crypto`, qemu 10.2.1 `-cpu max`)
+## Results with the crypto extension, CRC32 and permutes (2026-10-25, `scripts/validation/hardware-arm64.sh crypto`, qemu 10.2.1 `-cpu max`)
 
-The crypto corpus (`OUT=artifacts/oracle-crypto JOBS=8 scripts/oracle.sh crypto`, defaults
+The crypto corpus (`OUT=artifacts/oracle-crypto JOBS=8 scripts/validation/hardware-arm64.sh crypto`, defaults
 `N=20000`, `CRYPTO_HARVEST_K=40`, `SEQ_N=10000`, `SEQ_WINDOWS=20000`):
 
 * **generated** (`gen/<class>`): the classes of `validation/hardware-comparison/arm64/gen/crypto.go`, each the whole encoding
@@ -351,7 +351,7 @@ The crypto corpus (`OUT=artifacts/oracle-crypto JOBS=8 scripts/oracle.sh crypto`
   `seq/harvest`: windows of 2–16 consecutive non-branch, non-memory words of the real crypto
   kernels (symbols matching `crypto/`, `hash/crc32`, `vendor/golang.org/x/crypto/`), each under
   4 states. Case field `words` (`validation/hardware-comparison/arm64/layout/layout.go`); the format is the one of
-  `test/redteam/rounds/rt-model`'s sequence oracle. `scripts/oracle.sh full` now also runs a smaller sequence
+  `test/redteam/rounds/rt-model`'s sequence oracle. `scripts/validation/hardware-arm64.sh full` now also runs a smaller sequence
   corpus (`SEQ_N=500`, `SEQ_WINDOWS=2000`).
 
 389,440 cases: **0 MISMATCH**, 385,790 agree (40,278 of them both faulting), 3,650 model-gap, 0
@@ -377,7 +377,7 @@ unobserved. Every gap is `undecodable` SM3/SM4 (`sm3ss1` 1,375, `sm4e` 820, `sm3
 | seq/harvest (real kernel windows) | 80,000 | 80,000 | 0 | 0 | 0 |
 | **total** | 389,440 | 385,790 | 40,278 | 3,650 | **0** |
 
-The whole-ISA regression with the crypto model (`scripts/oracle.sh full`, `SEED=1`, default
+The whole-ISA regression with the crypto model (`scripts/validation/hardware-arm64.sh full`, `SEED=1`, default
 knobs; the harvest now includes the crypto test binaries and the run includes 11,500 sequence
 cases): 867,719 cases, **0 MISMATCH**, 832,639 agree, 35,079 model-gap (34,572 `undecodable`,
 354 `unaligned`, 106 `noCode`, 47 `outsideAllocation`), 1 unobserved.
@@ -389,9 +389,9 @@ SHA256H/H2/SU0/SU1 the way Go's kernels compose them, the CRC-32 and CRC-32C che
 "123456789" with CRC32B/H/W/X and CRC32CB/CX, and PMULL/PMULL2 against independently computed
 carry-less products.
 
-## Results with scalar floating point (2026-10-24, `scripts/oracle.sh fp`, qemu 10.2.1 `-cpu max`)
+## Results with scalar floating point (2026-10-24, `scripts/validation/hardware-arm64.sh fp`, qemu 10.2.1 `-cpu max`)
 
-The FP corpus (`OUT=artifacts/oracle-fp JOBS=16 N=25000 FP_HARVEST_K=40 scripts/oracle.sh fp`):
+The FP corpus (`OUT=artifacts/oracle-fp JOBS=16 N=25000 FP_HARVEST_K=40 scripts/validation/hardware-arm64.sh fp`):
 every scalar floating-point encoding class of the A64 tables (`fp.dp1` 1-source, `fp.dp2`
 2-source, `fp.dp3` FMADD family, `fp.cmp`, `fp.ccmp` and `fp.csel` under all 16 NZCV values,
 `fp.imm`, `fp.cvtint`, and the rejected fixed-point conversions `fp.cvtfix` as neighbours), plus
@@ -435,14 +435,14 @@ frame's `fpsimd_context`. The comparator treats a difference in `FPSR` or `FPCR`
 register. The model was right the first time on this corpus.
 
 The whole-ISA regression run with the floating-point model and the new `fp.*` classes
-(`scripts/oracle.sh full`, `SEED=1`, default knobs, harvest now including `math`): 766,650 cases
+(`scripts/validation/hardware-arm64.sh full`, `SEED=1`, default knobs, harvest now including `math`): 766,650 cases
 (436,177 generated, 330,473 harvested): **0 MISMATCH**, 730,803 agree, 35,846 model-gap
 (35,272 `undecodable`, 416 `unaligned`, 105 `noCode`, 53 `outsideAllocation`), 1 unobserved.
 Together with the FP corpus: 1,897,749 arm64 cases against qemu, 0 MISMATCH.
 
 ### TestFloat (Berkeley TestFloat 3e / SoftFloat 3e)
 
-`scripts/testfloat.sh` builds SoftFloat three times, with the specializations that match the
+`scripts/validation/testfloat.sh` builds SoftFloat three times, with the specializations that match the
 architectures (`ARM-VFPv2` for `FPCR.DN = 0` with tininess before rounding, `ARM-VFPv2-defaultNaN`
 for `DN = 1`, `8086-SSE` with tininess after rounding), generates TestFloat's level-1 vectors for
 every operation and rounding mode, and runs each through the model (`janus-testfloat`,
@@ -475,10 +475,10 @@ with the C runtime: 205 words, `K=200`, 37,136 cases) is in the decoded subset a
 36,720 agree, 416 model-gap, **0 MISMATCH**. The gaps are `paciasp`/`autiasp` from the C start
 files (not in compiled functions) and branches leaving the code page. In the Sail three-way run
 on the same cases, Janus never produced a result that Sail does not (0 soundness cases).
-`scripts/oracle.sh full` now adds this corpus to the harvest when `aarch64-linux-gnu-gcc` is
+`scripts/validation/hardware-arm64.sh full` now adds this corpus to the harvest when `aarch64-linux-gnu-gcc` is
 installed.
 
-## Results with Advanced SIMD (2026-10-23, `scripts/oracle.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
+## Results with Advanced SIMD (2026-10-23, `scripts/validation/hardware-arm64.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
 
 584,412 cases (260,000 generated, 324,412 harvested): **0 MISMATCH**, 568,770 agree, 15,639
 model-gap (15,175 `undecodable`, 334 `unaligned`, 87 `noCode`, 43 `outsideAllocation`), 3
@@ -515,7 +515,7 @@ of `simd.other`/`vls.other` are not in the table):
 
 Before the extension (486,463 cases) the SIMD&FP words were not tested at all.
 
-## Earlier results: atomics (2026-10-23, `scripts/oracle.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
+## Earlier results: atomics (2026-10-23, `scripts/validation/hardware-arm64.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
 
 486,463 cases (172,000 generated, 314,463 harvested): **0 MISMATCH**, 475,022 agree, 11,440
 model-gap (10,902 `undecodable`, 385 `unaligned`, 107 `noCode`, 46 `outsideAllocation`), 1
@@ -560,7 +560,7 @@ harvest sample (`ls.uimm` is capped at `PER_CLASS`); the generated ones cover ev
 * **qemu, not silicon.** qemu's AArch64 user-mode emulation is the reference; with the default
   `-cpu max` it implements recent extensions (LSE atomics, CSSC `ABS/CNT/CTZ/SMAX`, MTE `STG*`,
   PAuth, `BC.cond`, ...). A model that rejects those is merely conservative. Running
-  `QEMU= scripts/oracle.sh` on an arm64 Linux machine uses real hardware instead.
+  `QEMU= scripts/validation/hardware-arm64.sh` on an arm64 Linux machine uses real hardware instead.
 * **SP alignment.** Linux sets `SCTLR_EL1.SA0`, so an SP-based access with a misaligned SP
   faults on hardware, and the model faults with `spMisaligned`; qemu user mode does not check
   SP alignment, so such cases appear as model-gaps. The oracle therefore cannot confirm the

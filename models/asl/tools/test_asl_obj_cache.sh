@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Tests of the compiled-object cache (kind armobj: asl_mod_cache.py objkey/objfiles, scripts/lib/bcache.py;
-# scripts/asl.sh objcache_*; asl_mod_cache.py "Compiled objects"): the C objects of ArmASL and lean-sail are reused
+# Tests of the compiled-object cache (kind armobj: asl_mod_cache.py objkey/objfiles, scripts/gate/lib/bcache.py;
+# scripts/build/asl.sh objcache_*; asl_mod_cache.py "Compiled objects"): the C objects of ArmASL and lean-sail are reused
 # across checkout paths, and a tampered object, a wrong HMAC key, a changed C file or an incomplete set is a miss
 # or a rejection (rebuild), never a silent pass. Seconds; everything happens in mktemp directories.
 #
@@ -43,7 +43,7 @@ export JANUS_CACHE_KEY_DIR="$t/keys"
 fail=0
 ok() { echo "ok   $*"; }
 bad() { echo "FAIL $*"; fail=1; }
-B() { python3 -I "$root/scripts/lib/bcache.py" "$@"; }
+B() { python3 -I "$root/scripts/gate/lib/bcache.py" "$@"; }
 M() { python3 -I "$root/models/asl/tools/asl_mod_cache.py" "$@"; }
 expect() {  # expect RC DESCRIPTION CMD...
   local want=$1 d=$2 rc=0; shift 2
@@ -61,14 +61,14 @@ copy() {  # copy DIR: a copy of the checkout without builds
 prefix=$(cd "$root/models/asl" && lean --print-prefix); clang="$prefix/bin/clang"
 [ -x "$clang" ] || { echo "FAIL: no toolchain clang at $clang"; exit 1; }
 lh() {  # lh FILE TEXT: Lake's own file hash (bcache.lake_hash), as Lake writes it into .hash and the trace
-  python3 -I -c 'import importlib.util,sys;sp=importlib.util.spec_from_file_location("b",sys.argv[1]);m=importlib.util.module_from_spec(sp);sp.loader.exec_module(m);print(m.lake_hash(open(sys.argv[2],"rb").read(),sys.argv[3]=="1"))' "$root/scripts/lib/bcache.py" "$1" "$2"
+  python3 -I -c 'import importlib.util,sys;sp=importlib.util.spec_from_file_location("b",sys.argv[1]);m=importlib.util.module_from_spec(sp);sp.loader.exec_module(m);print(m.lake_hash(open(sys.argv[2],"rb").read(),sys.argv[3]=="1"))' "$root/scripts/gate/lib/bcache.py" "$1" "$2"
 }
 mkobj() {  # mkobj LAKE CFILE [CLANG]: compile CFILE exactly as Lake logs it for the keyed toolchain (and write .hash/.trace/.c.hash)
   local lake="$1" f="$2" cc="${3:-$clang}" oh ch
   python3 -I - "$root" "$lake" "$f" "$cc" "$prefix" <<'PY'
 import importlib.util, json, os, subprocess, sys
 root, lake, f, cc, prefix = sys.argv[1:]
-spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 rel = os.path.relpath(f, lake)
 argv = b.expected_argv(cc, prefix, f, f + ".o.export", rel)
 if os.environ.get("MKOBJ_EXTRA"): argv = argv[:-1] + os.environ["MKOBJ_EXTRA"].split() + argv[-1:]
@@ -255,7 +255,7 @@ expect 4 "store refuses an .olean in an armobj entry" B store armobj "$cache" "$
 # a correctly signed entry that contains an .olean: fetch rejects it and writes nothing
 python3 -I - "$root" "$cache" "$t/p" <<'PY'
 import os, sys, importlib.util
-spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 cache, ident = sys.argv[2], "b" * 40
 e = b.entry_dir("armobj", cache, ident); os.makedirs(e + "/tree/build/lib/lean"); open(e + "/tree/build/lib/lean/Foo.olean", "w").write("evil")
 data = ("%s  build/lib/lean/Foo.olean\n" % b.sha_file(e + "/tree/build/lib/lean/Foo.olean")).encode()
@@ -409,7 +409,7 @@ rm -rf "$t/st"; mkdir "$t/st"; expect 1 "objstage refuses a C whose .hash (even 
 # ======== sandbox, Inconclusive, size-bounded draw, cold-side audit (RTOBJ3) ========
 python3 -I - "$root" "$t" <<'PY' && ok "the recompile sandbox: work dir writable, nothing else, no network namespace shared" || bad "sandbox"
 import importlib.util, os, subprocess, sys
-spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 t = sys.argv[2]; work = os.path.join(t, "sbwork"); os.makedirs(work, exist_ok=True)
 pre = b._sandbox_prefix(work, work)
 assert pre and os.path.basename(pre[0]) == "bwrap", "no bubblewrap here: %r" % pre
@@ -423,7 +423,7 @@ PY
 # command ignores SIGTERM; afterwards no process of the sandbox may be left
 cat > "$t/holder.py" <<'PY'
 import importlib.util, os, sys
-spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 work, mark, timeout = sys.argv[2], sys.argv[3], int(sys.argv[4])
 pre = b._sandbox_prefix(work, work)
 try:
@@ -474,7 +474,7 @@ B verify armobj "$cache" "$idg" > /dev/null && ok "  ... the entry is still ther
 # a missing .cin (a signed entry without its record)
 python3 -I - "$root" "$cache" "$idg" <<'PY'
 import importlib.util, os, sys, shutil
-spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 cache, ident = sys.argv[2], sys.argv[3]
 e = b.entry_dir("armobj", cache, ident); man = b.parse_manifest(open(e + "/MANIFEST.sha256", "rb").read())
 keep = {k: v for k, v in man.items() if not k.endswith(".cin")}
@@ -494,7 +494,7 @@ grep -q Traceback "$t/err" && bad "timeout crashed: $(tail -3 "$t/err")" || ok "
 # the random draw is bounded by C size
 python3 -I - "$root" <<'PY' && ok "draw_random only picks objects whose C is within ASL_OBJ_RECOMPILE_MAXC" || bad "draw_random bound"
 import importlib.util, os, sys
-spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 os.environ["ASL_OBJ_RECOMPILE_MAXC"] = "1000"
 c = [(10, "a", None), (999, "b", None), (5000, "huge", None), (4000000, "config", None)]
 for _ in range(200):
@@ -505,26 +505,26 @@ PY
 # the cold-side audit: end to end through the nightly's own script
 copy "$t/cold"; build "$t/cold"; build_jasl "$t/cold"; ac="$t/auditcache"; rm -rf "$ac"; mkdir -p "$ac"
 M objpublish "$t/cold" arm "$ac" 1 > /dev/null; M objpublish "$t/cold" jasl "$ac" all > /dev/null
-expect 0 "nightly-objaudit: a cache that agrees with the cold tree passes" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
+expect 0 "nightly-objaudit: a cache that agrees with the cold tree passes" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/gate/lib/nightly-objaudit.sh" "$t/cold" "$ac"
 grep -q "objaudit \[arm\]: .*coverage [1-9][0-9]* of [1-9][0-9]* objects compared (100%)" "$t/out" && ok "  ... and compared objects" || bad "nothing compared: $(cat "$t/out")"
-expect 2 "nightly-objaudit: the scope override without the test marker is refused" env NIGHTLY_OBJAUDIT_SCOPES="arm" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
-expect 2 "nightly-cold-gate: refuses to run with NIGHTLY_OBJAUDIT_SCOPES set" env NIGHTLY_OBJAUDIT_SCOPES="arm" "$root/scripts/nightly-cold-gate.sh"
+expect 2 "nightly-objaudit: the scope override without the test marker is refused" env NIGHTLY_OBJAUDIT_SCOPES="arm" "$root/scripts/gate/lib/nightly-objaudit.sh" "$t/cold" "$ac"
+expect 2 "nightly-cold-gate: refuses to run with NIGHTLY_OBJAUDIT_SCOPES set" env NIGHTLY_OBJAUDIT_SCOPES="arm" "$root/scripts/gate/nightly-cold-gate.sh"
 co="$t/cold/models/asl/.lake/build/ir/ArmASL/Part02.c.o.export"; cp "$co" "$t/co.bak"; printf 'X' >> "$co"
-expect 1 "nightly-objaudit: a cold object that differs from the cached one is P0" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
+expect 1 "nightly-objaudit: a cold object that differs from the cached one is P0" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/gate/lib/nightly-objaudit.sh" "$t/cold" "$ac"
 grep -q "POISONED" "$t/out" && ok "  ... names it POISONED" || bad "no POISONED"
 ls "$ac/armobj"/.poisoned-* > /dev/null 2>&1 && ok "  ... and the entry was quarantined" || bad "not quarantined"
 expect 2 "  ... a quarantined entry is a miss for every later fetch" B fetch armobj "$ac" "$(M objkey "$t/cold")" "$t/audfetch/.lake"
 cp "$t/co.bak" "$co"
 copy "$t/cold2"; mkdir -p "$t/cold2/models/asl/.lake/build/ir/ArmASL"; cp "$t/cold/models/asl/.lake/build/ir/ArmASL.c" "$t/cold2/models/asl/.lake/build/ir/" 2>/dev/null
-expect 1 "nightly-objaudit fails closed when the cold tree has no objects (nothing compared)" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold2" "$ac"
-expect 1 "nightly-objaudit fails closed when the cache has no armobj directory" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$t/emptycache"
+expect 1 "nightly-objaudit fails closed when the cold tree has no objects (nothing compared)" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/gate/lib/nightly-objaudit.sh" "$t/cold2" "$ac"
+expect 1 "nightly-objaudit fails closed when the cache has no armobj directory" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/gate/lib/nightly-objaudit.sh" "$t/cold" "$t/emptycache"
 
 # ======== RTOBJ4: exact expected argv, keyed prefix, id-bound file set, sandbox gating, sticky quarantine ========
 forge() {  # forge LAKE CFILE: a CONSISTENT forgery: other object bytes, honest log, .hash and trace outputs recomputed
   python3 -I - "$root" "$1" "$2" "$clang" "$prefix" <<'PY'
 import importlib.util, json, os, subprocess, sys
 root, lake, f, cc, prefix = sys.argv[1:]
-spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 argv = b.expected_argv(cc, prefix, f, f + ".o.export", os.path.relpath(f, lake))
 argv = argv[:-1] + ["-fno-asynchronous-unwind-tables", argv[-1]]
 subprocess.run([cc] + argv[1:], check=True, cwd=os.path.dirname(f))
@@ -572,7 +572,7 @@ fp="$t/fakep"; mkdir -p "$fp/bin" "$fp/include"; ln -s "$clang" "$fp/bin/clang";
 fresh fp1; python3 -I - "$root" "$(L fp1)" "$fp" "$clang" <<'PY'
 import importlib.util, json, os, subprocess, sys
 root, lake, fp, cc = sys.argv[1:]
-spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 f = lake + "/build/ir/ArmASL/Part01.c"
 argv = b.expected_argv(fp + "/bin/clang", fp, f, f + ".o.export", "build/ir/ArmASL/Part01.c")
 subprocess.run(argv, check=True, cwd=os.path.dirname(f))
@@ -586,7 +586,7 @@ expect 1 "a command through a symlink to the real prefix (realpath equal) is ref
 stage "$t/p" arm > /dev/null; idp=$(M objkey "$t/p"); rm -rf "$cache/armobj"; B store armobj "$cache" "$idp" "$t/st" < "$t/st.list" > /dev/null
 python3 -I - "$root" "$cache" "$idp" <<'PY'
 import importlib.util, os, shutil, sys
-spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 cache, ident = sys.argv[2], sys.argv[3]
 e = b.entry_dir("armobj", cache, ident); man = b.parse_manifest(open(e + "/MANIFEST.sha256", "rb").read())
 z = e + "/tree/build/ir/Other/Zed.c.o.export"; os.makedirs(os.path.dirname(z)); open(z, "w").write("smuggled")
@@ -598,11 +598,11 @@ rm -rf "$t/restz"; mkdir -p "$t/restz"; cp -a "$t/p" "$t/restz/"; rm -rf "$t/res
 expect 0 "objrestore with a signed entry that smuggles a path outside the id's C set" M objrestore "$t/p" arm "$cache"
 grep -q REJECTED "$t/out" && [ ! -e "$t/p/models/asl/.lake/build/ir/Other/Zed.c.o.export" ] && ok "  ... REJECTED, nothing smuggled into the tree" || bad "smuggled path accepted: $(cat "$t/out")"
 expect 3 "bcache verify of the smuggling entry is invalid" B verify armobj "$cache" "$idp"
-expect 4 "store refuses a stage with an extra object path" bash -c "cp -a '$t/st' '$t/st9'; mkdir -p '$t/st9/build/ir/Other'; echo x > '$t/st9/build/ir/Other/Zed.c.o.export'; (cat '$t/st.list'; printf 'build/ir/Other/Zed.c.o.export\0') | python3 -I '$root/scripts/lib/bcache.py' store armobj '$cache' '$idp' '$t/st9'"
+expect 4 "store refuses a stage with an extra object path" bash -c "cp -a '$t/st' '$t/st9'; mkdir -p '$t/st9/build/ir/Other'; echo x > '$t/st9/build/ir/Other/Zed.c.o.export'; (cat '$t/st.list'; printf 'build/ir/Other/Zed.c.o.export\0') | python3 -I '$root/scripts/gate/lib/bcache.py' store armobj '$cache' '$idp' '$t/st9'"
 # --- sandbox gating
 python3 -I - "$root" "$t" <<'PY' && ok "sandbox: a PATH shim named bwrap is never used; a missing bwrap is Inconclusive; the opt-in warns; the key dir is masked" || bad "sandbox gating"
 import importlib.util, os, stat, subprocess, sys, io, contextlib
-spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 t = sys.argv[2]; shim = t + "/shimbin"; os.makedirs(shim, exist_ok=True)
 open(shim + "/bwrap", "w").write("#!/bin/sh\ntouch %s/SHIM-RAN\nexit 1\n" % t); os.chmod(shim + "/bwrap", 0o755)
 os.environ["PATH"] = shim + ":" + os.environ["PATH"]
@@ -633,7 +633,7 @@ PY
 rm -rf "$cache/armobj"; stage "$t/p" arm > /dev/null; B store armobj "$cache" "$idp" "$t/st" < "$t/st.list" > /dev/null
 python3 -I - "$root" "$t" "$cache" "$idp" <<'PY' && ok "OSError on the work directory is Inconclusive (verify --recompile and objpublish)" || bad "OSError handling"
 import importlib.util, os, sys, tempfile
-spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 t, cache, idp = sys.argv[2:]
 def boom(*a, **k): raise OSError(28, "No space left on device")
 orig = tempfile.mkdtemp; tempfile.mkdtemp = boom
@@ -689,7 +689,7 @@ found=0; for i in 1 2 3 4 5 6; do smp 1 3 1000000000 > /dev/null 2>&1 || found=$
 found=0; for i in 1 2 3 4; do smp 1 3 1000 > /dev/null 2>&1 || found=$((found+1)); done
 [ "$found" = 0 ] && ok "the random draw never picks an object whose C exceeds ASL_OBJ_RECOMPILE_MAXC" || bad "draw ignored the cap ($found)"
 fresh sm3; lk3="$(L sm3)"; forge "$lk3" "$lk3/build/ir/ArmASL/Part01.c"; c3="$t/sm3cache"; mkdir -p "$c3"; M objpublish "$t/sm3" arm "$c3" 0 > /dev/null
-expect 3 "a forged object among the N smallest is found without any random draw" env ASL_OBJ_RECOMPILE_RANDOM=0 python3 -I "$root/scripts/lib/bcache.py" verify armobj "$c3" "$(M objkey "$t/sm3")" --c-root "$lk3" --recompile 4
+expect 3 "a forged object among the N smallest is found without any random draw" env ASL_OBJ_RECOMPILE_RANDOM=0 python3 -I "$root/scripts/gate/lib/bcache.py" verify armobj "$c3" "$(M objkey "$t/sm3")" --c-root "$lk3" --recompile 4
 
 # --- sticky quarantine: a signed tombstone, not just a renamed directory
 fresh q1; lq="$(L q1)"; forge "$lq" "$lq/build/ir/ArmASL/Part01.c"; qc="$t/qcache"; mkdir -p "$qc"
@@ -719,26 +719,26 @@ grep -q "coverage 3 of 4 objects compared (75%)" "$t/out" && ok "  ... printing 
 grep -q INCOMPLETE "$t/out" && ok "  ... INCOMPLETE, not a pass" || bad "no INCOMPLETE"
 
 # --- the nightly's shell wiring
-grep -q 'nightly-objaudit.sh" "$work/tree-cold" "$cache_dir" || rc_final=1' "$root/scripts/nightly-cold-gate.sh" && ok "nightly-cold-gate.sh: a failing object audit sets rc_final=1" || bad "audit result not wired to rc_final"
-grep -q 'run_gate cold JANUS_ASL_CACHE=0 ASL_OBJ_CACHE=0' "$root/scripts/nightly-cold-gate.sh" && grep -q '"\$@" LEAN_NUM_THREADS=4 JANUS_JOBS=2 memcap -m 48G scripts/asl.sh build' "$root/scripts/nightly-cold-gate.sh" && ok "the cold run passes JANUS_ASL_CACHE=0 to the gate AND to its own link step" || bad "cold run wiring"
+grep -q 'nightly-objaudit.sh" "$work/tree-cold" "$cache_dir" || rc_final=1' "$root/scripts/gate/nightly-cold-gate.sh" && ok "nightly-cold-gate.sh: a failing object audit sets rc_final=1" || bad "audit result not wired to rc_final"
+grep -q 'run_gate cold JANUS_ASL_CACHE=0 ASL_OBJ_CACHE=0' "$root/scripts/gate/nightly-cold-gate.sh" && grep -q '"\$@" LEAN_NUM_THREADS=4 JANUS_JOBS=2 memcap -m 48G scripts/build/asl.sh build' "$root/scripts/gate/nightly-cold-gate.sh" && ok "the cold run passes JANUS_ASL_CACHE=0 to the gate AND to its own link step" || bad "cold run wiring"
 cdir="$t/coldcache"; mkdir -p "$cdir"; M objpublish "$t/p" arm "$cdir" 0 > /dev/null
 rm -rf "$t/cr"; copy "$t/cr"; mkdir -p "$t/cr/models/asl/.lake"; rsync -a --include='*/' --include='*.c' --include='*.c.hash' --exclude='*' "$t/p/models/asl/.lake/" "$t/cr/models/asl/.lake/"
-JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
+JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/build/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
 [ ! -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "a cold run (JANUS_ASL_CACHE=0, no ASL_OBJ_CACHE set) does NOT restore objects from a populated cache" || bad "cold run restored from the cache: $(cat "$t/out")"
-ASL_OBJ_CACHE=1 JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
+ASL_OBJ_CACHE=1 JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/build/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
 [ ! -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... not even with ASL_OBJ_CACHE=1 (JANUS_ASL_CACHE=0 wins)" || bad "cold run restored with ASL_OBJ_CACHE=1"
-ASL_OBJ_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
+ASL_OBJ_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/build/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
 [ ! -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "ASL_OBJ_CACHE=0 opts out: nothing restored" || bad "restored despite ASL_OBJ_CACHE=0"
-def=$(sed -n 's/^OBJ_CACHE_DEFAULT=\([01]\).*/\1/p' "$root/scripts/asl.sh")   # the default is one constant: the tests follow it
+def=$(sed -n 's/^OBJ_CACHE_DEFAULT=\([01]\).*/\1/p' "$root/scripts/build/asl.sh")   # the default is one constant: the tests follow it
 # (the nightly's cached run exports ASL_OBJ_CACHE=1 and a gate may carry other cache variables: each probe starts from a clean slate)
-st() { env -u ASL_OBJ_CACHE -u JANUS_ASL_CACHE -u ASL_CACHE "$@" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -v -E '^(memguard|janus: memory guard|janus-memguard)' | tail -n 1; }
+st() { env -u ASL_OBJ_CACHE -u JANUS_ASL_CACHE -u ASL_CACHE "$@" "$t/cr/scripts/build/asl.sh" objcache-state 2>/dev/null | grep -v -E '^(memguard|janus: memory guard|janus-memguard)' | tail -n 1; }
 [ "$(st ASL_CACHE="$cdir")" = "$([ "$def" = 1 ] && echo ON || echo "OFF (default)")" ] && [ "$(st ASL_OBJ_CACHE=0 ASL_CACHE="$cdir")" = "OFF (ASL_OBJ_CACHE=0)" ] && st JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" | grep -q "$([ "$def" = 1 ] && echo '^OFF (no build cache' || echo '^OFF (default)')" && ok "objcache-state: ON by default, OFF with ASL_OBJ_CACHE=0, OFF with JANUS_ASL_CACHE=0" || bad "objcache-state: $(st ASL_CACHE="$cdir") / $(st ASL_OBJ_CACHE=0 ASL_CACHE="$cdir") / $(st JANUS_ASL_CACHE=0 ASL_CACHE="$cdir")"
-ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
+ASL_CACHE="$cdir" "$t/cr/scripts/build/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
 if [ "$def" = 1 ]; then
   [ -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "the object cache is ON by default (the same call without opt-out restores: the test discriminates)" || bad "default restore failed: $(cat "$t/out")"
 else
   [ ! -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "the object cache is OFF by default (OBJ_CACHE_DEFAULT=0)" || bad "restored by default despite OBJ_CACHE_DEFAULT=0"
-  ASL_OBJ_CACHE=1 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
+  ASL_OBJ_CACHE=1 ASL_CACHE="$cdir" "$t/cr/scripts/build/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
   [ -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... and ASL_OBJ_CACHE=1 turns it on" || bad "opt-in restore failed"
 fi
 
@@ -748,7 +748,7 @@ import importlib.util, os, subprocess, sys, json, tempfile, shutil, stat
 root, t = sys.argv[1], sys.argv[2]
 def load(name, rel):
     spec = importlib.util.spec_from_file_location(name, root + "/" + rel); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
-b = load("bcache", "scripts/lib/bcache.py"); m = load("amc", "models/asl/tools/asl_mod_cache.py")
+b = load("bcache", "scripts/gate/lib/bcache.py"); m = load("amc", "models/asl/tools/asl_mod_cache.py")
 def raises(exc, f, *a, **k):
     try: f(*a, **k)
     except exc: return True
@@ -859,7 +859,7 @@ resign() {  # resign CACHE ID PYTHON-EDIT(e, man): edit an entry's tree/manifest
   python3 -I - "$root" "$1" "$2" "$3" <<'PY'
 import importlib.util, os, sys
 root, cache, ident, edit = sys.argv[1:]
-spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 e = b.entry_dir("armobj", cache, ident); man = b.parse_manifest(open(e + "/MANIFEST.sha256", "rb").read())
 os.system("chmod -R u+w " + e)
 exec(edit)
@@ -890,7 +890,7 @@ tomb() {  # tomb CACHE ID DATAID MACKIND MACID: write a tombstone document for I
   python3 -I - "$root" "$@" <<'PY'
 import importlib.util, json, os, sys
 root, cache, ident, dataid, mkind, macid = sys.argv[1:]
-spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 data = json.dumps({"id": dataid, "objects": {"build/ir/ArmASL/Part01.c.o.export": "9" * 64}}, sort_keys=True, separators=(",", ":")).encode()
 mac = "0" * 64 if mkind == "bad" else b.mac(mkind, macid, data)
 open(b.tomb_path(cache, ident), "w").write(json.dumps({"data": data.decode(), "mac": mac}))
@@ -910,8 +910,8 @@ stage "$t/st1" arm > /dev/null; expect 4 "store with a garbage tombstone is refu
 [ -f "$s1c/armobj/$ids1/MANIFEST.sha256" ] && ok "  ... and the valid entry is untouched" || bad "store destroyed a valid entry because of a garbage tombstone"
 M objaudit "$t/st1" arm "$s1c" > "$t/out" 2>&1; rc=$?
 [ -f "$s1c/armobj/$ids1/MANIFEST.sha256" ] && [ "$rc" = 4 ] && grep -q LOUD "$t/out" && ok "objaudit with a garbage tombstone: LOUD, entry untouched, not a pass (exit 4)" || bad "objaudit vs garbage tombstone rc $rc: $(cat "$t/out")"
-expect 2 "clear-tombstone without --yes does nothing" bash -c "python3 -I '$root/scripts/lib/bcache.py' clear-tombstone '$s1c' '$ids1' >/dev/null; [ -f '$s1c/armobj/.tombstone-$ids1' ] && exit 2"
-python3 -I "$root/scripts/lib/bcache.py" clear-tombstone "$s1c" "$ids1" --yes > /dev/null; [ ! -e "$s1c/armobj/.tombstone-$ids1" ] && ok "clear-tombstone --yes removes it" || bad "not cleared"
+expect 2 "clear-tombstone without --yes does nothing" bash -c "python3 -I '$root/scripts/gate/lib/bcache.py' clear-tombstone '$s1c' '$ids1' >/dev/null; [ -f '$s1c/armobj/.tombstone-$ids1' ] && exit 2"
+python3 -I "$root/scripts/gate/lib/bcache.py" clear-tombstone "$s1c" "$ids1" --yes > /dev/null; [ ! -e "$s1c/armobj/.tombstone-$ids1" ] && ok "clear-tombstone --yes removes it" || bad "not cleared"
 B fetch armobj "$s1c" "$ids1" "$t/dtb3/.lake" > /dev/null && ok "  ... and the entry is served again" || bad "entry not served after clearing"
 # objaudit flags an entry that fails verification (tampered cached bytes) and quarantines it
 fresh_entry; chmod -R u+w "$s1c/armobj/$ids1/tree"; printf X >> "$s1c/armobj/$ids1/tree/build/ir/ArmASL/Part01.c.o.export"
@@ -928,7 +928,7 @@ M objaudit "$t/st1" arm "$s1c" > /dev/null 2>&1
 fresh_entry
 ( python3 -I - "$root" "$s1c" "$ids1" <<'PY'
 import importlib.util, sys, time
-spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 lk = b.lock_path(b.entry_dir("armobj", sys.argv[2], sys.argv[3]) + ".lock", shared=False); open(sys.argv[2] + "/locked", "w").write("1"); time.sleep(4)
 PY
 ) &
@@ -1073,7 +1073,7 @@ fresh lk1; forge "$(L lk1)" "$(L lk1)/build/ir/ArmASL/Part01.c"; lkc="$t/lkcache
 lid=$(M objkey "$t/lk1"); fresh lk2; hc="$t/lkhonest"; mkdir -p "$hc"; M objpublish "$t/lk2" arm "$hc" 0 > /dev/null 2>&1; [ "$(M objkey "$t/lk2")" = "$lid" ] || bad "fixture: ids differ"
 ( python3 -I - "$root" "$lkc" "$lid" "$hc" <<'PY'
 import importlib.util, shutil, sys, time, os
-spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/gate/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
 cache, ident, hc = sys.argv[2:]
 e = b.entry_dir("armobj", cache, ident); lk = b.lock_path(e + ".lock", shared=False); open(cache + "/lk-held", "w").write("1")
 time.sleep(2.5)
@@ -1155,11 +1155,11 @@ python3 -I "$t/m17imp.py" "$root" "$t/m17imp" > "$t/out" 2>&1 && ok "M17: an imp
 
 # opt-out values: 0|off|no|false switch it off, an empty value is the default (ON) and is printed, junk is OFF
 for v in 0 off no false; do
-  ASL_OBJ_CACHE=$v ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -q "^OFF (ASL_OBJ_CACHE=$v)" && ok "ASL_OBJ_CACHE=$v turns the object cache OFF" || bad "ASL_OBJ_CACHE=$v not OFF"
-  rm -f "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export"; ASL_OBJ_CACHE=$v ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > /dev/null 2>&1
+  ASL_OBJ_CACHE=$v ASL_CACHE="$cdir" "$t/cr/scripts/build/asl.sh" objcache-state 2>/dev/null | grep -q "^OFF (ASL_OBJ_CACHE=$v)" && ok "ASL_OBJ_CACHE=$v turns the object cache OFF" || bad "ASL_OBJ_CACHE=$v not OFF"
+  rm -f "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export"; ASL_OBJ_CACHE=$v ASL_CACHE="$cdir" "$t/cr/scripts/build/asl.sh" __call objcache_restore arm > /dev/null 2>&1
   [ ! -e "$t/cr/models/asl/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... and nothing is restored" || bad "restored with ASL_OBJ_CACHE=$v"
 done
-ASL_OBJ_CACHE= ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -q "$([ "$def" = 1 ] && echo '^ON (ASL_OBJ_CACHE=<empty>, the default)' || echo '^OFF (default)')" && ok "an EMPTY ASL_OBJ_CACHE is the default (ON) and says so" || bad "empty value"
-ASL_OBJ_CACHE=banana ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -q "^OFF (ASL_OBJ_CACHE=banana: unrecognised" && ok "an unrecognised value is OFF, not silently ON" || bad "junk value"
+ASL_OBJ_CACHE= ASL_CACHE="$cdir" "$t/cr/scripts/build/asl.sh" objcache-state 2>/dev/null | grep -q "$([ "$def" = 1 ] && echo '^ON (ASL_OBJ_CACHE=<empty>, the default)' || echo '^OFF (default)')" && ok "an EMPTY ASL_OBJ_CACHE is the default (ON) and says so" || bad "empty value"
+ASL_OBJ_CACHE=banana ASL_CACHE="$cdir" "$t/cr/scripts/build/asl.sh" objcache-state 2>/dev/null | grep -q "^OFF (ASL_OBJ_CACHE=banana: unrecognised" && ok "an unrecognised value is OFF, not silently ON" || bad "junk value"
 
 [ $fail = 0 ] && echo "test_asl_obj_cache: all passed" || { echo "test_asl_obj_cache: FAILED"; exit 1; }

@@ -4,7 +4,7 @@ import Janus.Arm64.Exec
 # Crypto extension, CRC32 and permutes: decoding and known-answer tests
 
 * **Decoding.** Every crypto/CRC32/permute/scalar-DUP encoding of the Go 1.26 std assembly that
-  the decoder rejected before (`scripts/coverage.sh insn`, arm64), with its `CryptoInstr`, and
+  the decoder rejected before (`scripts/dev/coverage.sh insn`, arm64), with its `CryptoInstr`, and
   reserved or unallocated neighbours that must stay rejected.
 * **Known answers, against the standards, not against qemu.** The operations of
   `Janus.Arm64.Crypto`, composed the way Go's (and Arm's reference) kernels compose the

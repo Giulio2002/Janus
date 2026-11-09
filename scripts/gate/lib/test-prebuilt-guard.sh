@@ -3,7 +3,7 @@
 # JANUS_AUDIT_PREBUILT guard (same line, or inside an `if [ "${JANUS_AUDIT_PREBUILT..." ... fi` block / an
 # `elif` branch of one). test/redteam/run-rounds.sh builds once and exports JANUS_AUDIT_PREBUILT=1; a lane that builds
 # anyway rewrites .lake/build/lib/lean under the other lanes. Usage: test-prebuilt-guard.sh [ROOT]
-root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 fail=0
 check() {
   awk -v F="$1" '
@@ -19,7 +19,7 @@ check() {
     END { exit bad }
   ' "$1" || return 1
 }
-for f in "$root"/test/redteam/rounds/round*/run-*.sh "$root/scripts/lib/gate-decoder.sh"; do
+for f in "$root"/test/redteam/rounds/round*/run-*.sh "$root/scripts/gate/lib/gate-decoder.sh"; do
   [ -f "$f" ] || continue
   check "$f" || fail=1
 done

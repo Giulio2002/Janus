@@ -5,14 +5,14 @@
 
 For every MISMATCH whose reason is a register difference ("X: janus [...] asl [...]"), print the
 differing registers with the value of Janus, the generated Lean ASL model, qemu (hw.jsonl of
-scripts/oracle.sh) and the Sail C++ model of the same ASL (sail.jsonl of scripts/oracle-sail.sh).
+scripts/validation/hardware-arm64.sh) and the Sail C++ model of the same ASL (sail.jsonl of scripts/validation/sail-arm.sh).
 A row where qemu or C++ Sail disagrees with Janus is flagged JANUS? (a potential Janus bug).
 """
 import json, os, re, subprocess, sys
 
 def open_jsonl(path):
     """path, or its zstd-compressed copy path.zst (the oracle drivers keep their dumps compressed
-    unless KEEP=1, scripts/lib/artifacts.sh)."""
+    unless KEEP=1, scripts/gate/lib/artifacts.sh)."""
     if os.path.exists(path) or not os.path.exists(path + ".zst"):
         return open(path)
     return subprocess.Popen(["zstd", "-q", "-dc", path + ".zst"], stdout=subprocess.PIPE, text=True).stdout

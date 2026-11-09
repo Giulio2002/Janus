@@ -9,22 +9,22 @@ instance check and kernel replay still runs with the same strength.
 
 | Suite | Command | What it checks |
 |---|---|---|
-| arm64 examples | `scripts/verify-examples.sh [-j N] [Name …]` | the 20 arm64 example proofs and the WrongAdd demo, through `janus verify` |
-| amd64 examples | `scripts/verify-amd64-examples.sh [-j N]` | the 25 amd64 theorems |
-| all examples | `scripts/verify-all-examples.sh [-j N] [--changed]` | the arm64, amd64 and assembly examples in one pool, longest first by measured time (`--changed`: development only, unchanged items skipped) |
+| arm64 examples | `scripts/verify/verify-examples.sh [-j N] [Name …]` | the 20 arm64 example proofs and the WrongAdd demo, through `janus verify` |
+| amd64 examples | `scripts/verify/verify-amd64-examples.sh [-j N]` | the 25 amd64 theorems |
+| all examples | `scripts/verify/verify-all-examples.sh [-j N] [--changed]` | the arm64, amd64 and assembly examples in one pool, longest first by measured time (`--changed`: development only, unchanged items skipped) |
 | soundness audit | `test/redteam/run-rounds.sh [-j LANES]` (all of them as parallel lanes), or each: `test/redteam/run-all.sh [-j N]`, `test/redteam/rounds/round{2,3,4,5,7,8}/run-round*.sh [-j N]`, `test/redteam/rounds/round6/run-round6.sh` | every documented attack is rejected, every control verifies (round 7: the result cache) |
 | Go tests | `go test -timeout 60m ./cmd/...` (`-short`: no Lake builds) | the CLI, the extractor, the verifier end to end, the cache collector |
-| JanusASL | `scripts/asl.sh prove` | the Arm-ASL equivalence theorems (39) and their axiom audit |
+| JanusASL | `scripts/build/asl.sh prove` | the Arm-ASL equivalence theorems (39) and their axiom audit |
 | ASL build cache | `models/asl/tools/test_asl_cache.sh [--e2e CACHE]` | the `ASL_CACHE` key ignores lakefile edits that cannot reach the ArmASL build and changes on every input that can (31 cases, seconds); with `--e2e`, a restore into a copy with an edited JanusASL lakefile leaves `lake build ArmASL` nothing to do (docs/design/ASL.md "Build cache") |
 
-`-j N` runs up to `N` independent rows/proofs at once (`scripts/lib/parallel.sh`); output is
+`-j N` runs up to `N` independent rows/proofs at once (`scripts/gate/lib/parallel.sh`); output is
 printed in the original order, and a failure in any block fails the run. The default is
 **bounded by memory and cores**: `min(cores/6, (MemAvailable − 40 GiB)/10 GiB, 8)`, at least 1
 (8 on the 48-core development host, 1 on a 4-core 16 GiB CI runner), and before each block starts
 `MemAvailable` is checked again (a block waits for a running one while less than 10 GiB is free
 above the 40 GiB headroom). The 10 GiB per block is twice the largest measured verification
 (ClearWords, 4.8 GiB; a cold framework replay 3.0 GiB; "Measured peaks" below). `JANUS_JOBS` or
-`-j` override it; `-j 1` is the plain serial run. When `scripts/lib/memguard.sh` is loaded, every
+`-j` override it; `-j 1` is the plain serial run. When `scripts/gate/lib/memguard.sh` is loaded, every
 block runs under a cgroup memory limit of `$JANUS_JOB_MEM` (default 10G) that janus' own
 per-process limits nest in (see "Memory guard" below). `go test` uses the same formula for its
 number of test slots (see "Gate speed" below).
@@ -32,13 +32,13 @@ number of test slots (see "Gate speed" below).
 Tools for measuring:
 
 * `JANUS_TIMINGS=1 janus verify …` prints the duration of every verification stage on stderr.
-* `scripts/peak-mem.sh CMD …` runs `CMD` in a transient cgroup and reports its peak memory
+* `scripts/dev/peak-mem.sh CMD …` runs `CMD` in a transient cgroup and reports its peak memory
   (cgroup `memory.peak`, the peak sum of the resident sets of all its processes, and the largest
   single process).
 
-## The gate driver (`scripts/gate.sh`)
+## The gate driver (`scripts/gate/gate.sh`)
 
-One command runs every check of the gate: `scripts/gate.sh [-j N] [--lanes N]` (under `memcap`). It
+One command runs every check of the gate: `scripts/gate/gate.sh [-j N] [--lanes N]` (under `memcap`). It
 prebuilds once, then runs every stage as a parallel lane that reads the prebuilt outputs.
 
 **Phase 1, prebuild (once).** `go build bin/janus` (and `test/redteam/bin/janus-rounds`, the audit lanes'
@@ -53,17 +53,17 @@ and `-j` others):
 
 | lane | what it runs |
 |---|---|
-| `verify` | `scripts/verify-all-examples.sh --cgo`: ONE queue (`scripts/lib/pool.sh`) of every arm64, amd64, asm, rtmisc, sys, print and cgo item, longest first by the recorded `.times` (unknown items first) |
-| `gotest` | `scripts/gotest-shards.sh`: `go test -count=1 -timeout 7000s ./cmd/...` in duration-balanced shards |
+| `verify` | `scripts/verify/verify-all-examples.sh --cgo`: ONE queue (`scripts/gate/lib/pool.sh`) of every arm64, amd64, asm, rtmisc, sys, print and cgo item, longest first by the recorded `.times` (unknown items first) |
+| `gotest` | `scripts/gate/gotest-shards.sh`: `go test -count=1 -timeout 7000s ./cmd/...` in duration-balanced shards |
 | `rounds` | `test/redteam/run-rounds.sh` (all audit rounds) |
-| `axiom` | `scripts/ci-axiom-guard.sh` |
-| `x86` | `scripts/x86formal.sh prove` |
-| `asl-build`, `sail-build` | `scripts/asl.sh build` (set `ASL_CACHE`), `scripts/oracle-sail.sh build` |
+| `axiom` | `scripts/gate/ci-axiom-guard.sh` |
+| `x86` | `scripts/build/x86formal.sh prove` |
+| `asl-build`, `sail-build` | `scripts/build/asl.sh build` (set `ASL_CACHE`), `scripts/validation/sail-arm.sh build` |
 | `rtasl-prove`, `-rel`, `-strict`, `-replay`, `-btf`, `-probes`, `-fsqrt`, `-go` | `test/redteam/rounds/rt-asl/run.sh GROUP`: the red-team round ASL, one lane per group (`run.sh` without arguments still runs them all, in order) |
 
 **Dependency-driven prebuild.** The prebuild stages (`pre-gobin`, `pre-lake`, `pre-ex-*`, `pre-rounds-bin`, `pre-warm`,
 `pre-fixture`, `pre-pin`) and the private tree copies (`tree-*`) are items of the same pool as the lanes, with the graph of
-`scripts/lib/dag.sh`; each starts as soon as ITS inputs are ready (`verify` after `pre-pin`, `pre-warm` and the example
+`scripts/gate/lib/dag.sh`; each starts as soon as ITS inputs are ready (`verify` after `pre-pin`, `pre-warm` and the example
 binaries; `gotest` after the fixture; the lake lanes after their tree copy; `decoder` after `pre-pin` and `pre-gobin`;
 `axiom`, `govet`, `cachekeys` at once; the fixture builds beside the verify pool). `pre-pin` follows `pre-lake`, the only
 writer of the shared framework build, and `pre-stamp` (one `--janus-root <checkout>` verification of Add: janus stamps the checkout's framework build and may delete and rebuild modules that no longer match an OLD stamp, so every write janus can make precedes the hash; later `--janus-root` verifications find a fresh stamp and only read), hashes the finished build and switches the lakeguard on (its marker file); every
@@ -71,29 +71,29 @@ reader needs it, so none starts before the build it reads has finished and been 
 closure of the selected lanes. A failing stage blocks exactly its dependents (BLOCKED, a gate failure); independent stages
 keep running. Expected cold-gate saving: the framework build stays the critical path (763 s), but the verify pool no longer
 waits for the go-test fixture, the rounds binary or the slowest example build, and the cheap lanes run during the build
-(`scripts/lib/test-dag.sh`, fake stages through the real pool).
+(`scripts/gate/lib/test-dag.sh`, fake stages through the real pool).
 
 **Automatic sizing.** Without `-j` / `--lanes` (and without `JANUS_JOBS` / `JANUS_LANES`), `gate.sh` chooses them
-from the host (`scripts/lib/autojobs.sh`, tested by `scripts/lib/test-autojobs.sh` with fake nproc / MemAvailable /
+from the host (`scripts/gate/lib/autojobs.sh`, tested by `scripts/gate/lib/test-autojobs.sh` with fake nproc / MemAvailable /
 load inputs): `jobs = min(cap, (free cores - 16 reserved for the other lanes) / 2.1 cores per item, (MemAvailable -
 30 GiB floor - 40 GiB reserved) / item GiB)`, at least 2, where free cores = nproc - 1-minute load and item GiB = the
 largest recorded per-item peak of `scripts/speed-baseline.tsv` (6.1 without one) x 1.5, at least 4; `lanes =
 min(jobs + 3, 15)`. (Before the joint budget an idle 48-core / 170 GiB box got `-j 10`.) Fewer than 8 free cores or a 1-minute
 load of 60 or more (RULES.md) falls back to `-j 2`. `JANUS_GATE_MAX_JOBS` (default 12), `JANUS_GATE_MEM_FLOOR_GIB`,
 `JANUS_GATE_LANE_CORES`, `JANUS_GATE_LANE_GIB`, `JANUS_GATE_CORES_PER_ITEM` tune it. The choice and its reason are
-printed and recorded in the timeline's `gate` line (`auto`, `why`, `roundsLanes`). The audit-round lane count (`JANUS_ROUNDS_LANES`, read by `test/redteam/run-rounds.sh` where it supports it, exported to the rounds lane only) is min(6, free cores / 8), at least 2, and 2 on a busy host. The memory is a budget, not a charge per slot: the verify pool gets MemAvailable - floor (30) - other lanes (25) - round lanes x 15 GiB, shared by its running items through per-item admission (`pool.sh`): a running item reserves its own recorded peak x 1.3 (baseline or `.times`-side peaks; 9.15 GiB when unknown), a new item starts only if the reservations plus its own fit (the first always starts), so small items run `-j` wide and heavy ones limit themselves (`POOL_DEBUG=1` logs each deferral; the timeline's pool line has `peakConcurrency` and `peakReservedGiB`; `scripts/lib/test-poolmem.sh`). Round lanes are cut only to keep room for two worst-case items. The split is logged (`mem budget: verify X GiB (per-item admission, N slots) + rounds Y GiB + lanes Z GiB + floor F GiB of M`, timeline `memBudget`). An idle 48-core / 170 GiB box gets `-j 12` with a 40 GiB verify budget and 5 round lanes. Admission: every pool (`pool.sh`) starts no new
+printed and recorded in the timeline's `gate` line (`auto`, `why`, `roundsLanes`). The audit-round lane count (`JANUS_ROUNDS_LANES`, read by `test/redteam/run-rounds.sh` where it supports it, exported to the rounds lane only) is min(6, free cores / 8), at least 2, and 2 on a busy host. The memory is a budget, not a charge per slot: the verify pool gets MemAvailable - floor (30) - other lanes (25) - round lanes x 15 GiB, shared by its running items through per-item admission (`pool.sh`): a running item reserves its own recorded peak x 1.3 (baseline or `.times`-side peaks; 9.15 GiB when unknown), a new item starts only if the reservations plus its own fit (the first always starts), so small items run `-j` wide and heavy ones limit themselves (`POOL_DEBUG=1` logs each deferral; the timeline's pool line has `peakConcurrency` and `peakReservedGiB`; `scripts/gate/lib/test-poolmem.sh`). Round lanes are cut only to keep room for two worst-case items. The split is logged (`mem budget: verify X GiB (per-item admission, N slots) + rounds Y GiB + lanes Z GiB + floor F GiB of M`, timeline `memBudget`). An idle 48-core / 170 GiB box gets `-j 12` with a 40 GiB verify budget and 5 round lanes. Admission: every pool (`pool.sh`) starts no new
 item while MemAvailable is below the floor plus one item's estimate. An explicit `-j` or `JANUS_JOBS` (the shared-box
 rule of RULES.md) is used as given; memguard's per-job limits are unchanged.
 
 **Concurrency.** `-j N` / `JANUS_JOBS` (default **2**, the shared-box rule; `auto` uses the formula of
-`scripts/lib/parallel.sh`) is the number of verify items at once; the go test shards (`max(2, N)`, one
+`scripts/gate/lib/parallel.sh`) is the number of verify items at once; the go test shards (`max(2, N)`, one
 test slot each) and the audit lanes (`N`) scale with it. `--lanes` / `JANUS_LANES` caps the lanes.
 `LEAN_NUM_THREADS` is capped at 4. The gate refuses to start at load >= 70, MemAvailable < 40 GiB or
 < 60 GiB free (`JANUS_GATE_FORCE=1` overrides). `--only/--skip` and `--changed` give a PARTIAL run.
 
 **One queue.** `verify-all-examples.sh` queues arm64, amd64, asm, rtmisc, sys, print (and with `--cgo`
 the cgo) items in one pool; the cgo, sys and print scripts take `-j` and `--list` and still run
-standalone. Their theorems go through `verify_theorems` (`scripts/lib/theorems.sh`), like arm64/amd64.
+standalone. Their theorems go through `verify_theorems` (`scripts/gate/lib/theorems.sh`), like arm64/amd64.
 
 **Streamed output.** Each item prints `[done/total] PASS|FAIL|TIMEOUT|SKIP|BLOCKED  id  wall` the moment it
 finishes (with the last 30 log lines on a failure), a `-- pool ...: done/total, running [id elapsed, ...]`
@@ -104,7 +104,7 @@ line every minute, and the verify lane's lines are echoed live. Every item's ful
 before; item timeouts (`JANUS_ITEM_TIMEOUT`), the audit, kernel replay, pins and sandbox are those of the
 scripts being run.
 
-**go test shards.** `scripts/gotest-shards.sh` lists every test (`go test -list`), deals them to the shards
+**go test shards.** `scripts/gate/gotest-shards.sh` lists every test (`go test -list`), deals them to the shards
 longest first using `testDurations` in `cmd/janus/order_test.go`, and checks that the shards partition the
 list (fails if a test is unassigned or twice); afterwards it checks from the `-v` output that each
 shard reported a result for exactly its tests. The durations are the time a test HELD its slot, not its `-v` duration
@@ -119,7 +119,7 @@ lemma and the late replay that reports it, `TestResultCache`, `TestConcurrentVer
 
 **gotest lane speed and coverage (2026-11-01, `agent/speed-gotestcp3`).** The 2953 s of the old nightly-env lane were two things: only
 2 shards (`-j 2` set the shard count; the package is ~3700 s of work on an idle box) and a `-v` time that, with `-parallel 1`, includes
-the wait for a slot (TestConsumerMathlib "took 2152 s" while it SKIPPED at once). Now: `gotest_shards_n` in `scripts/gate.sh` uses
+the wait for a slot (TestConsumerMathlib "took 2152 s" while it SKIPPED at once). Now: `gotest_shards_n` in `scripts/gate/gate.sh` uses
 6 shards (`JANUS_GATE_GOTEST_SHARDS`; never fewer than `-j N`), capped by (MemAvailable - 40 GiB host reserve - 20 GiB nightly extras) / 12 GiB and by (free room of the enclosing cgroup chain, i.e. the memcap budget, with no reserve - 20 GiB) / 12 GiB, so a lane run alone under a large cap uses all six; the ASL extra is not counted because it runs alone after the shards; measured shard peaks 8.3-13.8 GiB, 66 GiB for six);
 the real-framework forgery check is four tests (`..._Janus`, `_GoABI`, `_Tactic`, `_Amd64Tactic`, same assertions, one module each);
 `testDurations` was remeasured. The kernel replays are the floor: `TestCacheGCConcurrentVerify`, `TestR1ForgedFrameworkLemma`,
@@ -144,7 +144,7 @@ Now: `TestParallelFrameworkReplayCatchesForgeryInEveryPartition` and the new `..
 a few lines each, compiled by the real `lean`, replayed by the real `leanchecker`, so a forged declaration is still a real kernel
 rejection; the honest mini framework is a control). The real-framework variant is kept as the four tests `TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_{Janus,GoABI,Tactic,Amd64Tactic}` (one per module, so that the gate shards run them side by side; the original test: real `Janus`,
 `Janus.GoABI`, `Janus.Tactic`, `Janus.Amd64.Tactic` forged, four full replays): it runs only when `JANUS_NIGHTLY=1`, which
-`scripts/nightly-cold-gate.sh` sets for both its gates, and then a missing fixture is a failure, not a skip; elsewhere it skips. So
+`scripts/gate/nightly-cold-gate.sh` sets for both its gates, and then a missing fixture is a failure, not a skip; elsewhere it skips. So
 the merge gates run the mini variant, every nightly (cold and cached) proves it on the real framework. The same forgery on the real framework is also covered where it is a real module
 of it: the forged root through `janus verify` (`TestParallelReplayE2EForgedRootNoVerdict`, with its honest control and the planted
 `JanusReplayRoot` case now separate tests so that the shards run them at once) and a forged `Janus.GoABI` (`TestR1ForgedFrameworkLemma`).
@@ -178,55 +178,55 @@ inside it. At a higher `-j` the verify pool adds ~10 GiB per slot (the admission
 40 GiB free).
 
 **Lake serialisation inside a shared tree.** Lanes that share the ASL tree (`asl-build`, `rtasl-*`, `asl-verify`,
-`oracle`, `sail-build`) call `lake` through `scripts/lib/lanelake/lake`: every call in the tree holds a flock on it,
+`oracle`, `sail-build`) call `lake` through `scripts/gate/lib/lanelake/lake`: every call in the tree holds a flock on it,
 exclusive for anything that can rewrite the package (build, update, exe, ...), shared for `lake env`. A dependency
 re-resolution ("URL has changed; deleting packages/Sail and cloning") or a rebuild by one lane therefore never
 overlaps another lane's lake call, while read-only lanes (replay, strict, rel) still run side by side
-(`scripts/lib/test-lanelake.sh`, with a fake `lake` that rewrites a shared file). I chose the lock over a tree per lane
+(`scripts/gate/lib/test-lanelake.sh`, with a fake `lake` that rewrites a shared file). I chose the lock over a tree per lane
 because models/asl/.lake (5.8 GB, with `packages/Sail`) is shared by symlink and a copy per lane would cost that much
 each; the lock covers it. Tree reuse on failure and lakeguard are unchanged.
 
 **Lock order for a shared tree.** Every WRITER of a tree that lanes share holds the tree's locks, in this fixed
-order: (1) the package lake lock, KEYED BY THE RESOLVED DIRECTORY BEING WRITTEN: `realpath(<package>/.lake)/.gate-lake.lock` (`scripts/lib/lanelake/keys.sh`), so every tree and the checkout that share one `.lake` by symlink (the gate's lake trees share the checkout's `models/asl/.lake`) serialise on ONE lock; (2) the janus framework lock `realpath(<tree>/.lake)/janus-framework.lock`
+order: (1) the package lake lock, KEYED BY THE RESOLVED DIRECTORY BEING WRITTEN: `realpath(<package>/.lake)/.gate-lake.lock` (`scripts/gate/lib/lanelake/keys.sh`), so every tree and the checkout that share one `.lake` by symlink (the gate's lake trees share the checkout's `models/asl/.lake`) serialise on ONE lock; (2) the janus framework lock `realpath(<tree>/.lake)/janus-framework.lock`
 (the lock a `janus ... --janus-root <tree>` holds SHARED for a whole verification; a writer takes it exclusive, because
 `lake build JanusASL` replays and rewrites `Janus/*.olean` in the tree's framework build, which a running janus must
 not see, and which made janus rebuild or loop: the 2400 s `rtasl-go` hang); (3) inside the command, the cache locks
 (bcache tree lock, module-cache locks). janus itself takes only (2), shared, so there is no cycle. Not only each `lake`
-call but each whole write PHASE of `scripts/asl.sh` (unpack, ArmASL cache restore, module-cache restore, `lake build`,
+call but each whole write PHASE of `scripts/build/asl.sh` (unpack, ArmASL cache restore, module-cache restore, `lake build`,
 publish; `build`, `prove`, `replay`, `model`, `restore`, the first half of `verify`) runs under (1)+(2) exclusive
 (`tl_run x`, re-entrant through `JANUS_LANE_LOCK_HELD`, which the lake wrapper honours); the read halves (the audit of
 `prove`, the leanchecker loop of `replay`, the seed copy of `verify`) run under (1) shared. The restore/publish
 writers used to run outside the lake lock, so `asl-verify` and `rtasl-replay` overlapped for 972 s in one tree.
 `rtasl-go` additionally has a tree of its own. `RT_ASL_KEEP_DIR` (`<out>/lanes/rtasl-<group>.keep`) is exported to the
-rt-asl lanes for their failure logs. Tested by `scripts/lib/test-treelock.sh`.
+rt-asl lanes for their failure logs. Tested by `scripts/gate/lib/test-treelock.sh`.
 
 **Speed of the ASL lanes** (2026-10-30, `agent/speed-lanes2`). `asl-verify` took 97 min because the module-cache restore
 rewrote Janus modules (path-dependent `.olean`s), the tree's framework stamp then failed, and `janus verify --janus-root`
 rebuilt the framework and every JanusASL module (79 min for the first example; the other three took 30 s each): the
-restore now records the verified files it wrote and `scripts/lib/restamp.py` moves only those pins (self-test
-`scripts/lib/test-restamp.sh`). `rtasl-replay` runs 4 leanchecker batches at once (`JANUS_REPLAY_PAR`), `rtasl-fsqrt`
+restore now records the verified files it wrote and `scripts/gate/lib/restamp.py` moves only those pins (self-test
+`scripts/gate/lib/test-restamp.sh`). `rtasl-replay` runs 4 leanchecker batches at once (`JANUS_REPLAY_PAR`), `rtasl-fsqrt`
 splits its Lean `--dump-asl` run into `RT_ASL_FSQRT_PAR` (8) processes (6m02 -> 54 s, byte-identical output).
 
 **Kept trees.** The isolated lake-lane trees are `artifacts/gate/trees/<hash of HEAD tree + uncommitted diff>/{x86,asl}`.
 They are removed when the gate passes, kept (path reported) when it fails or is cancelled, and reused by a
-rerun of the same sources (`scripts/lib/test-gatelanes.sh` tests limits, keep, reuse, removal). A second run on the
-same sources waits (flock). `ASL_CACHE`, or `JANUS_ASL_CACHE` as an alias, is forwarded to `scripts/asl.sh`; the
+rerun of the same sources (`scripts/gate/lib/test-gatelanes.sh` tests limits, keep, reuse, removal). A second run on the
+same sources waits (flock). `ASL_CACHE`, or `JANUS_ASL_CACHE` as an alias, is forwarded to `scripts/build/asl.sh`; the
 content-addressed cache of `agent/speed-asl` is not final, so this is only the hook.
 
 **Cancel.** A gate run is its own process group (`setsid`); `<out>/pgid` holds the id. Cancel one run with
 `kill -- -$(cat <out>/pgid)` (or stop its memcap scope) and nothing else; never kill by name or pattern, other
-gates share the host (`scripts/lib/test-pgcancel.sh`). The Lake-writing lanes (x86, asl, oracle, rt-asl) work in
+gates share the host (`scripts/gate/lib/test-pgcancel.sh`). The Lake-writing lanes (x86, asl, oracle, rt-asl) work in
 private source copies (`artifacts/gate/trees/<hash>/x86` and `/asl`, about 0.85 GiB each, see "Kept trees"),
 because a `lake` in models/x86/JanusX86/JanusASL replays the framework's `.olean` files it depends on by path; the verify,
 go test and audit lanes read the prebuilt framework build, which is never written after the prebuild.
 
 **Speed baseline.** `scripts/speed-baseline.tsv` (id, wall seconds, peak GiB per verify item and lane) is recorded
-by a green full gate: `scripts/gate.sh --speed-baseline record` (only items that PASSED; header has commit, -j, host
+by a green full gate: `scripts/gate/gate.sh --speed-baseline record` (only items that PASSED; header has commit, -j, host
 load), reviewed and committed. Enforced by default (`--speed-baseline enforce`): an item that PASSED but took more
 than max(1.5 x baseline, baseline + 10 s), or a total pool work above 1.5 x, fails the gate with the item,
 baseline, measured time and ratio; new items are listed, not failed; peak-memory growth is a warning. The host
 load is printed with the verdict but never excuses a regression. Without the file the summary says
-`speed check NOT enforced: no baseline`. `python3 -I scripts/gate-speedcheck.py seed artifacts/verify-all-examples.times OUT`
+`speed check NOT enforced: no baseline`. `python3 -I scripts/gate/gate-speedcheck.py seed artifacts/verify-all-examples.times OUT`
 derives a provisional file from a times file (not enforced). Update procedure: after an intended speed change,
 re-record on a green full gate and say why in the commit message.
 
@@ -236,38 +236,38 @@ re-record on a green full gate and say why in the commit message.
 |---|---|
 | `lake build` | prebuild `lake` (`lake build`, then `lake build Janus Janus.Tools.Audit janus-audit`) |
 | `go test -timeout 7000s -parallel 2 ./cmd/...` | lane `gotest`: same tests, `-count=1 -timeout 7000s`, sharded; partition checked before and after |
-| `scripts/ci-axiom-guard.sh` | lane `axiom` |
-| `scripts/verify-all-examples.sh` (arm64, amd64, asm, rtmisc, sys, print) | lane `verify` (same items, same theorems, same Witness theorems) |
-| `scripts/verify-cgo-examples.sh` (64 rows, correctness and Witness) | lane `verify`, `--cgo` items |
-| `scripts/verify-sys-examples.sh` (10 rows) | lane `verify`, sys items (the full default list, 2 more rows than the old verify-all had) |
-| `scripts/verify-print-examples.sh` | lane `verify`, print items |
+| `scripts/gate/ci-axiom-guard.sh` | lane `axiom` |
+| `scripts/verify/verify-all-examples.sh` (arm64, amd64, asm, rtmisc, sys, print) | lane `verify` (same items, same theorems, same Witness theorems) |
+| `scripts/verify/verify-cgo-examples.sh` (64 rows, correctness and Witness) | lane `verify`, `--cgo` items |
+| `scripts/verify/verify-sys-examples.sh` (10 rows) | lane `verify`, sys items (the full default list, 2 more rows than the old verify-all had) |
+| `scripts/verify/verify-print-examples.sh` | lane `verify`, print items |
 | `test/redteam/run-rounds.sh` | lane `rounds` |
 | `test/redteam/rounds/rt-asl/run.sh` (asl prove, A1-A3, A6, A7, A8, A5/C2, fsqrt, C1) | lanes `asl-build` + `rtasl-*` (one per group; same rows, same expectations) |
-| `scripts/x86formal.sh prove` | lane `x86` |
+| `scripts/build/x86formal.sh prove` | lane `x86` |
 | item timeouts (`JANUS_ITEM_TIMEOUT`), audit, kernel replay, pins, sandbox, Witness theorems | unchanged: the same scripts and `janus verify` run them |
 | `x86formal.sh prove` "twice" (profile A.1) | pgate.sh and pg3.sh contain ONE `x86formal.sh prove` step (the profile's two entries are two runs of it, not two targets; there is no x86b step in either script) |
-| anything else in pgate.sh / pg3.sh (oracle.sh, oracle-sail.sh as a step, `asl.sh` check/oracle, coverage.sh, cabi-probe.sh, build-examples checks) | not steps of either script. Their builds that the covered checks need are in the prebuild (`oracle-sail.sh build` for `rtasl-fsqrt`, `asl.sh build`); the standalone corpora checks (`oracle*.sh full`, `asl.sh check`, `coverage.sh`, `cabi-probe.sh`) were not in the old gate and are not added |
+| anything else in pgate.sh / pg3.sh (hardware-arm64.sh, sail-arm.sh as a step, `asl.sh` check/oracle, coverage.sh, cabi-probe.sh, build-examples checks) | not steps of either script. Their builds that the covered checks need are in the prebuild (`sail-arm.sh build` for `rtasl-fsqrt`, `asl.sh build`); the standalone corpora checks (`oracle*.sh full`, `asl.sh check`, `coverage.sh`, `cabi-probe.sh`) were not in the old gate and are not added |
 | (new) speed regression check, timeline, streamed results | on top of the above |
 | CI `lake build Janus JanusTests` and `... janus-oracle-amd64` (not default Lake targets) | prebuild `lake`: `lake build JanusTests janus-oracle-amd64` |
 | CI `go vet ./...` | lane `govet` |
-| (new) `scripts/lint-example-addresses.sh`: no hard-coded address of the example binaries (a literal in [0x400000, 0x600000), not a multiple of 0x10000) in `examples/**/*.lean`; take it from the extraction (`janus_eval% (Extracted.entry + k)`, `segAddr`, `Extracted.dataAddr.«…»`) or mark a genuine constant `-- addr-ok: <why>`. Why: adding one example to the shared binary moved code by 64 bytes and data by 128 and broke StackGrow/ScratchSum | runs in lane `axiom`, after `ci-axiom-guard.sh` |
+| (new) `scripts/verify/lint-example-addresses.sh`: no hard-coded address of the example binaries (a literal in [0x400000, 0x600000), not a multiple of 0x10000) in `examples/**/*.lean`; take it from the extraction (`janus_eval% (Extracted.entry + k)`, `segAddr`, `Extracted.dataAddr.«…»`) or mark a genuine constant `-- addr-ok: <why>`. Why: adding one example to the shared binary moved code by 64 bytes and data by 128 and broke StackGrow/ScratchSum | runs in lane `axiom`, after `ci-axiom-guard.sh` |
 | CI `models/asl/tools/test_asl_cache.sh`, `test_asl_mod_cache.sh` | lane `cachekeys` |
-| CI decoder coverage of the arm64 examples (`janus blockers`) | lane `decoder` (`scripts/decoder-coverage.sh`, also called by ci.yml) |
-| CI `scripts/oracle.sh quick` (qemu) and `scripts/oracle-amd64.sh quick` (native), MISMATCH check | lane `oracle` (in the lake tree, after `rtasl-prove`) |
-| asl.yml `scripts/asl.sh verify` (4 ASL corollaries) | lane `asl-verify` (after `rtasl-prove`) |
+| CI decoder coverage of the arm64 examples (`janus blockers`) | lane `decoder` (`scripts/validation/decoder-coverage.sh`, also called by ci.yml) |
+| CI `scripts/validation/hardware-arm64.sh quick` (qemu) and `scripts/validation/hardware-amd64.sh quick` (native), MISMATCH check | lane `oracle` (in the lake tree, after `rtasl-prove`) |
+| asl.yml `scripts/build/asl.sh verify` (4 ASL corollaries) | lane `asl-verify` (after `rtasl-prove`) |
 | CI `test/redteam/run-all.sh`, `verify-examples.sh`, `verify-amd64-examples.sh`, `ci-axiom-guard.sh`, `x86formal.sh` build/prove, `asl.sh build/prove` | already covered: lanes `rounds`, `verify`, `axiom`, `x86`, `asl-build`, `rtasl-prove` |
 
 **Peak memory in the baseline.** Column 3 of `scripts/speed-baseline.tsv` is read from janus's own records, not from a per-item cgroup: the largest `memoryGuard.peakBytes` in the item's `verified.json` and `verified/*.json` written during the run (a stale report from an earlier run is ignored; the log's `memguard[...]: peak` lines are the fallback). An item without a report (a failed one) records 0, which the pool's admission treats as unknown (the conservative estimate). Checked on the vbatch gate's artifacts: 461 of 463 pool items have a nonzero peak (arm64 MallocFast 5.63 GiB, amd64 RuneLen 3.53, arm64 Add 0.03).
 
 **Timeline.** `<out>/timeline.jsonl` (default `artifacts/gate/<UTC time>/`, linked as `artifacts/gate/latest`)
 has one JSON object per prebuild step, stage, pool, lane and item (start/end epoch seconds, wall, status);
-`python3 -I scripts/gate-report.py <timeline>` prints the stages, pool utilisation, lanes and critical path.
+`python3 -I scripts/gate/gate-report.py <timeline>` prints the stages, pool utilisation, lanes and critical path.
 
-## Merge check (`scripts/check-merge.sh`) and where its time goes (2026-11-05)
+## Merge check (`scripts/gate/check-merge.sh`) and where its time goes (2026-11-05)
 
-`scripts/check-merge.sh [-j N]` runs the checks of an integration merge (lake build with JanusTests and the auditor, axiom
+`scripts/gate/check-merge.sh [-j N]` runs the checks of an integration merge (lake build with JanusTests and the auditor, axiom
 guard and address lint, go vet/build, `go test ./cmd/...`, every audit round, the example sweep with cgo) as ONE
-`scripts/gate.sh --only verify,gotest,rounds,axiom,govet`: the same lanes with the same checks, started by the dependency graph
+`scripts/gate/gate.sh --only verify,gotest,rounds,axiom,govet`: the same lanes with the same checks, started by the dependency graph
 instead of one after the other. It is a partial gate (no ISA-model lanes) and does not replace the full gate before a push.
 Smoke run on this checkout (`-j 2`, filters on every lane, host load 21): PASS in 11m16s, critical path = the cold embedded
 fixture (501 s of kernel replay), `rounds` (r12 + rbig) 164 s, `gotest` 35 s, `verify` 3 s, 18% slot utilisation.
@@ -290,7 +290,7 @@ cached per architecture). What was a duplicate: the rbig round (above). What the
 (go test, rounds and examples are independent once the framework is built) and the sharding of `go test`. What remains is real
 proof elaboration and kernel replay, which only more slots or faster engines (speed batches) reduce; the pool's `-j` is the knob.
 
-## Red team of the caches (`cmd/janus/*_rt_test.go`, `scripts/lib/test-rt-incr.sh`)
+## Red team of the caches (`cmd/janus/*_rt_test.go`, `scripts/gate/lib/test-rt-incr.sh`)
 
 An authorized audit of the result cache, the incremental records, the framework verdict store and the build-cache
 key. Every attack is a test that must end in a miss or a refusal: stale edits with restored mtimes, deep and
@@ -304,14 +304,14 @@ kind runs. Findings fixed on the way: see `git log agent/speed-rt`.
 
 ## Incremental gate (`--incremental`)
 
-**The default is a FULL run.** `scripts/gate.sh` and `scripts/verify-all-examples.sh` skip nothing unless asked; the
-full cold gate stays **mandatory before every push to main and nightly**. `scripts/gate.sh --incremental` (or
+**The default is a FULL run.** `scripts/gate/gate.sh` and `scripts/verify/verify-all-examples.sh` skip nothing unless asked; the
+full cold gate stays **mandatory before every push to main and nightly**. `scripts/gate/gate.sh --incremental` (or
 `JANUS_GATE_INCREMENTAL=1`; `verify-all-examples.sh --incremental`, `--changed` is an alias) is for the merge gate of a
 branch: it skips an item or lane only on the record of a PASS whose key is identical. Every item that runs is checked
 in full, and the prebuild, the build lanes and the axiom guard always run. Every full run (and every incremental run)
 records the passes it sees, so a full gate feeds the next incremental one. Design and trust argument:
 docs/SOUNDNESS.md "Incremental gate records"; code: `cmd/janus/incr.go` (`janus incr check|record|explain`),
-`scripts/lib/incr.sh`.
+`scripts/gate/lib/incr.sh`.
 
 **What an item's key hashes** (all by content): the item and its arguments; the relevant environment
 (`JANUS_*` except output/parallelism variables, `LEAN*`, `LAKE*`, `GO*`, `CGO_*`, memory limits, ...); the verifier
@@ -327,7 +327,7 @@ gate scripts and libraries. Lanes (`gotest`, `rounds`, `x86`, `rtasl-*`) hash th
 every item, totals) and the gate report prints `RAN / SKIPPED` for every item and lane. The verdict says `GATE PASS
 (INCREMENTAL: ...)`.
 
-**Debugging a miss.** `scripts/gate.sh --explain arm64:Add` (also `cgo:amd64/CAdd`, `lane:gotest`) prints every key
+**Debugging a miss.** `scripts/gate/gate.sh --explain arm64:Add` (also `cgo:amd64/CAdd`, `lane:gotest`) prints every key
 component with its hash, the key, and whether a record exists; run it before and after a change and diff the two
 outputs (`bin/janus incr explain ... --verbose` also lists the closure module by module). It reads the state of an
 earlier run and runs and records nothing.
@@ -345,8 +345,8 @@ input that cannot be hashed makes the item always run; key framings do not colli
 ### Miss analysis and the run-specific environment (INCR2)
 
 **Why the incremental gate skipped nothing across commits.** `janus incr` keys the environment (`JANUS_*`, `LEAN*`, `GO*`, ...)
-except a pinned skip list (`incrEnvSkip`). `scripts/gate.sh` exports bookkeeping variables whose values differ from one gate run to the next:
-`JANUS_GATE_TREE0` (stamp of HEAD and of every file's mtime/inode, `scripts/lib/incr.sh`), `JANUS_LAKEGUARD_PIN` (a path inside the
+except a pinned skip list (`incrEnvSkip`). `scripts/gate/gate.sh` exports bookkeeping variables whose values differ from one gate run to the next:
+`JANUS_GATE_TREE0` (stamp of HEAD and of every file's mtime/inode, `scripts/gate/lib/incr.sh`), `JANUS_LAKEGUARD_PIN` (a path inside the
 timestamped output directory), `JANUS_LAKEGUARD_ROOT`, the load-derived sizing (`JANUS_GATE_AUTO_WHY`, `JANUS_GATE_ROUNDS_LANES`,
 `JANUS_GATE_AUTO_BUDGET`, `JANUS_VERIFY_MEM_BUDGET_GIB`, `JANUS_ROUNDS_LANES`). They were part of every item's and lane's key (since the tree pin
 of cfca64d8 and the lakeguard/autojobs of the speed batch), so a record written by one gate run could never match the key of the next
@@ -354,9 +354,9 @@ of cfca64d8 and the lakeguard/autojobs of the speed batch), so a record written 
 `verify-all-examples.sh` directly, without these exports. They are now in `incrEnvSkip`, each with its reason; every other relevant variable stays keyed.
 `TestIncr2GateRunsShareKeys` and `TestIncr2EachBookkeepingVariableIsNotKeyed` fail on the old list (mutation-checked);
 `TestIncr2EveryGateExportIsClassified` scans the gate scripts' exports and fails when a new relevant one is neither skipped nor justified as keyed
-(`scripts/lib/incr-keyed-exports.txt`, one `NAME<TAB>reason` per line), so the bug cannot return unnoticed.
+(`scripts/gate/lib/incr-keyed-exports.txt`, one `NAME<TAB>reason` per line), so the bug cannot return unnoticed.
 
-**The export scan** (`scanExports` in `cmd/janus/incr2_test.go`) reads `scripts/gate.sh`, `scripts/verify-*.sh`, `build-examples*.sh`, `example-*.sh`, `scripts/lib/*.sh` and every
+**The export scan** (`scanExports` in `cmd/janus/incr2_test.go`) reads `scripts/gate/gate.sh`, `scripts/verify/verify-*.sh`, `build-examples*.sh`, `example-*.sh`, `scripts/gate/lib/*.sh` and every
 `test/redteam/**/*.sh` (to depth five: the same files as `audit/**/*.sh` to depth four before the v0.2 layout) and finds an export in each of these forms: `export NAME[=v]`, `declare|typeset|local ... -x NAME` (any flag cluster with an `x`: `-x`, `-gx`, `-xg`, `-rx`),
 every plain assignment while allexport is on (`set -a` / `set -o allexport` ... `set +a`, also in one line: `set -a; JANUS_X=5; set +a`), after `then`, `||`, `&&`, `;` or a function opening, and an `export` inside a
 quoted string (gate.sh's `laneenv` echoes `export JANUS_LANE_TREE=...` into lane code). `TestIncr2ExportScanCatchesEveryForm` is the mutation test: it copies the scripts into a temp
@@ -364,25 +364,25 @@ root, adds a fake script exporting a run-specific `JANUS_` variable in each form
 negative cases (comments, a plain assignment, `declare -r`, `set +a` first, `VAR=1 cmd`) must not be found. The audit scripts export a few keyed variables (`JANUS_CACHE_DIR`, `JANUS_VERDICT_CACHE`, `GODEBUG`, `LEAN_PATH`, ...)
 inside a lane, after the lane's key was computed; `TestIncr2AuditScriptsComputeNoKeys` asserts that no audit script computes a key, which is why those entries are sound.
 
-**Liveness check** (`scripts/lib/incr-liveness.sh`, selftest `scripts/lib/test-incr-liveness.sh`, run by lane `cachekeys`; nothing is built in the shared tree, so the lane still needs nothing and
-touches no resource of `DAG_RES`: it builds its own `janus` and uses its own result cache in an `artifacts/` mktemp directory; `scripts/lib/test-dag.sh` asserts both). The static scan only finds exports it can read;
+**Liveness check** (`scripts/gate/lib/incr-liveness.sh`, selftest `scripts/gate/lib/test-incr-liveness.sh`, run by lane `cachekeys`; nothing is built in the shared tree, so the lane still needs nothing and
+touches no resource of `DAG_RES`: it builds its own `janus` and uses its own result cache in an `artifacts/` mktemp directory; `scripts/gate/lib/test-dag.sh` asserts both). The static scan only finds exports it can read;
 the liveness check finds a run-specific variable however it got into the environment (eval, a computed name, a sourced file, a tool). It runs `janus incr explain` on one item (`arm64:Add`, `--no-fw`) and on a lane
 (`incr_lane_spec`, the real lane arguments) in three invocations of identical content: A as it is; B1 and B2 with a different value for every variable the gate ADDED to the environment
-(`scripts/gate.sh` records the names present at its start in `GATE_ENV0_NAMES`, deliberately not a key prefix), except the keyed constants of `scripts/lib/incr-keyed-exports.txt`. The keys must be identical;
+(`scripts/gate/gate.sh` records the names present at its start in `GATE_ENV0_NAMES`, deliberately not a key prefix), except the keyed constants of `scripts/gate/lib/incr-keyed-exports.txt`. The keys must be identical;
 a failure names each keyed run-specific variable. A control invocation changes `JANUS_ITEM_TIMEOUT`: the key must differ, so the check cannot pass because explain ignores the environment. Run standalone it
 uses the original bug (the eight bookkeeping variables of `gateRunEnv` with other values). About 2.5 s (the selftest, with mutations, about 7 s); the first real run found no variable of the gate that is run-specific and keyed.
 It also found and fixed a second bug of the same kind: `incr_lane` passed `go env -json` (several lines) as an `--arg`, which `janus incr` refuses ("--arg must not contain a newline"), so
 `janus incr check` failed for EVERY lane and no lane (`gotest`, `rounds`, `x86`, `rtasl-*`) was ever skipped or recorded; multi-line values now have each newline replaced by `\001` (`incr_lane_spec`).
 
-**`JANUS_GATE_TREE0` has one writer.** It is the stamp of the tree at the start of a gate run; `incr_tree_ok` compares it to the live tree before a PASS is recorded. Only `scripts/gate.sh` (through `incr_tree_pin`) sets it.
-`scripts/verify-all-examples.sh` drops a value it did not inherit from the gate (`incr_under_gate`: `gate.sh` must be an ancestor PROCESS, which an environment variable cannot fake; the first non-option argument of a shell without `-c` must be `gate.sh`, so naming it inside a `bash -c` string or later on the command line does not count: red-team found while testing), so an operator with a dirty tree
-cannot export a matching stamp and get records for content that was never verified; run alone it pins the tree itself (a dirty tree pins `dirty`: nothing recorded). `scripts/lib/test-rt-incr.sh` S7.
+**`JANUS_GATE_TREE0` has one writer.** It is the stamp of the tree at the start of a gate run; `incr_tree_ok` compares it to the live tree before a PASS is recorded. Only `scripts/gate/gate.sh` (through `incr_tree_pin`) sets it.
+`scripts/verify/verify-all-examples.sh` drops a value it did not inherit from the gate (`incr_under_gate`: `gate.sh` must be an ancestor PROCESS, which an environment variable cannot fake; the first non-option argument of a shell without `-c` must be `gate.sh`, so naming it inside a `bash -c` string or later on the command line does not count: red-team found while testing), so an operator with a dirty tree
+cannot export a matching stamp and get records for content that was never verified; run alone it pins the tree itself (a dirty tree pins `dirty`: nothing recorded). `scripts/gate/lib/test-rt-incr.sh` S7.
 
-**Scope of the ancestry check.** `incr_under_gate` answers "is this process a descendant of THIS checkout's real `scripts/gate.sh`, run by the same user". A descendant of the real gate is trusted by definition: it already runs with the gate's
+**Scope of the ancestry check.** `incr_under_gate` answers "is this process a descendant of THIS checkout's real `scripts/gate/gate.sh`, run by the same user". A descendant of the real gate is trusted by definition: it already runs with the gate's
 user, tree and write access (it could equally write a record through `janus incr record` or replace `bin/janus`), so an extra token or `JANUS_GATE_PID` owned by the gate would be forgeable by exactly the processes it is meant to exclude (an environment variable is inherited by every
-descendant) and is not added. What the check excludes is an operator or process OUTSIDE a gate run exporting a stamp. Consequence for tests: a test that runs inside the gotest lane is itself below the real gate, so `scripts/lib/test-rt-incr.sh` S7
+descendant) and is not added. What the check excludes is an operator or process OUTSIDE a gate run exporting a stamp. Consequence for tests: a test that runs inside the gotest lane is itself below the real gate, so `scripts/gate/lib/test-rt-incr.sh` S7
 runs every probe isolated (double-forked under `setsid`, re-parented to init) and unsets the gate-exported stamp; without that the fake `gate.sh` probes and the "forged stamp is dropped" probe correctly answer "under the gate" and the test's premise (not under a gate) fails
-(seen in the nightly gotest shard: 12 S7 lines; reproduced with `scripts/gate.sh --only gotest --gotest-run '^TestRTIncrScripts$'`).
+(seen in the nightly gotest shard: 12 S7 lines; reproduced with `scripts/gate/gate.sh --only gotest --gotest-run '^TestRTIncrScripts$'`).
 
 **Unkeyed environment, on purpose.** The key covers `JANUS_*`, `LEAN*`, `LAKE*`, `ELAN*`, `GO*`, `CGO_*`, `MEMCAP*`, `MEMGUARD*`, `ASL_*`, `KEEP*`, `SAIL*`, `QEMU*`, `TMPDIR` minus the skip list. These are not keyed:
 
@@ -396,12 +396,12 @@ runs every probe isolated (double-forked under `setsid`, re-parented to init) an
 
 **Lane-level skipping is OFF by default.** `incr_lane` runs a lane's code, reads and writes no record unless `JANUS_INCR_LANES=1` is set; the gate banner states the setting.
 The lane key below is a candidate that a further red team must clear before the default changes. (`go vet`/item-level skipping, with the fixes below for the items that compile, is unchanged.)
-`scripts/lib/test-incr-hosttools.sh` proves that with the default setting a lane that is asked to run three times runs three times.
+`scripts/gate/lib/test-incr-hosttools.sh` proves that with the default setting a lane that is asked to run three times runs three times.
 
 **Keyed and unkeyed inputs of a lane (honest list).** Keyed: the working tree (non-documentation), `artifacts/<Name>` extractions (every file but `artifacts/gate` and private temp files; they are read by the rounds and
 are not re-derived by the verifier), the Lean toolchain, the full verifier identity, the machine, the environment prefixes (`JANUS_*`, `LEAN*`, `LAKE*`, `ELAN*`, `GO*`, `CGO_*`, `MEMCAP*`, `MEMGUARD*`, `ASL_*`, `KEEP*`,
 `SAIL*`, `QEMU*`, `TMPDIR`; minus the skip list), the lane arguments, `go version`, `go env -json` (only the value of `GOGCCFLAGS` is normalised), the GOENV file, go.work, and the host digest `hosttools:` of
-`scripts/lib/incr-host.sh` (`incr_hosttools`), which contains, with symlinks followed everywhere:
+`scripts/gate/lib/incr-host.sh` (`incr_hosttools`), which contains, with symlinks followed everywhere:
 
 | input | how |
 |---|---|
@@ -420,8 +420,8 @@ unreadable preload, a malformed digest, a `ccache`/`distcc`/`icecc`/`sccache` la
 too large to hash per gate run; what the lanes build from them is verified by the model pin and the cold gate), `bash`/`sort`/`find`/`sha256sum`/`awk` and the other coreutils the scripts use (they do not compile or link code that is verified).
 A mid-run change is caught as well: the digest is cached for the run in `INCR_HOSTTOOLS_CACHE` only while its STAMP (path, inode, size, mtime and ctime in nanoseconds of every hashed binary, plus the strings of PATH, CC, CXX, DEPS, X86DEPS and the environment digest) is unchanged,
 a malformed cache line is ignored, and `incr_end` recomputes the whole digest from scratch (no cache) and records nothing if it differs from the digest the lane started with. A cgo item (`incr_begin` kind `cgo`) is keyed by the same digest.
-Cost, measured: about 4 s once per gate run (cold computation, 5 compiler drivers in parallel), 0.25 s for a cache hit, plus the same 4 s at the end of each recorded lane (the uncached recheck); `scripts/lib/incr-liveness.sh` takes about 7 s.
-A lane run with a SKIPPED test is never recorded (`scripts/gotest-shards.sh` writes `INCR_NORECORD_FILE`; any lane may; set `JANUS_REQUIRE_NO_SKIP=1` to make a skip a failure).
+Cost, measured: about 4 s once per gate run (cold computation, 5 compiler drivers in parallel), 0.25 s for a cache hit, plus the same 4 s at the end of each recorded lane (the uncached recheck); `scripts/gate/lib/incr-liveness.sh` takes about 7 s.
+A lane run with a SKIPPED test is never recorded (`scripts/gate/gotest-shards.sh` writes `INCR_NORECORD_FILE`; any lane may; set `JANUS_REQUIRE_NO_SKIP=1` to make a skip a failure).
 `one-line` normalisation is injective (`_incr_oneline`: `\002` -> `\002 2`, `\001` -> `\002 1`, newline -> `\001`). A kept `artifacts/gate/trees/<hash>` is reused only when its sources still equal the checkout (`rsync -c` dry run; otherwise re-synchronised).
 
 *Soundness argument.* A recorded lane PASS is replayed only if the lane key is equal and `JANUS_INCR_LANES=1`. The lane's output is a function of (a) the tree, (b) the Go and Lean toolchains, (c) the machine, (d) the keyed environment, (e) the prebuilt binaries and extractions,
@@ -432,14 +432,14 @@ so a wrong skip needs a lane input that is outside this list. Residual, stated: 
 **What still misses, by design.** An item re-runs when any of these changes: the Go sources of the verifier (`cmd/janus`, root `.go`/`.s`/`.h`, `go.mod`, `go.sum`:
 the whole identity of the one executable that audits and replays), any module of the `import Janus` closure (the auditor's clean environment imports it,
 so every verdict depends on all of it) and its compiled data, `lakefile.toml`/`lake-manifest.json`/`lean-toolchain`, the toolchain, a gate script the item runs
-(`scripts/gate.sh`, `verify-all-examples.sh`, the pool/memguard/theorems libraries, the kind's scripts), the pins, the shared example binary of its suite
+(`scripts/gate/gate.sh`, `verify-all-examples.sh`, the pool/memguard/theorems libraries, the kind's scripts), the pins, the shared example binary of its suite
 (every `examples/basic` Go change moves all arm64/amd64 addresses), its own proof file and extraction. A leaf proof edit re-runs exactly that item
 (`TestIncr2LeafChangeInvalidatesOnlyThatItem`), a shared module every dependent (`TestIncr2SharedModuleChangeInvalidatesEveryDependent`).
 Docs, `test/redteam/`, `JanusASL/`, `oracle*`, the other suites' sources and unrelated scripts never touch an item. Lanes (`gotest`, `rounds`, `x86`, `rtasl-*`) key the whole
 non-documentation tree on purpose: their read sets are not known (the go tests read `examples/`, `test/redteam/`, `scripts/`, `JanusASL/`, `docs/SOUNDNESS.md`, ...);
 `axiom`, `govet`, `cachekeys`, `decoder`, `oracle`, `asl-*`, `sail-build` always run.
 
-**Measured** (`scripts/incr-sample.py`: for each first-parent commit of main, the files it changes against its first parent, run through the key rules of this tree; 461 items;
+**Measured** (`scripts/archive/incr-sample.py`: for each first-parent commit of main, the files it changes against its first parent, run through the key rules of this tree; 461 items;
 "before" is the gate as shipped in ad264a2, where the exports above make every gate run miss every item; the model follows incr.go and incr.sh, a file it cannot classify invalidates all):
 
 Latest 30 first-parent commits of main (76554ae and before; mostly gate/verifier infrastructure): 0/13830 before, 5993/13830 (43%) after.
@@ -448,17 +448,17 @@ Latest 30 first-parent commits of main (76554ae and before; mostly gate/verifier
 |---|---|---|---|---|
 | 76554aeb | untrack the generated asl_mod_cache .pyc again (index-only;  | 0/461 | 461/461 | no item input changed |
 | a3ffde95 | verify --asl: a symlinked cache .lake is replaced by a priva | 0/461 | 0/461 | verifier (Go source: cmd/janus/asl.go) -> 461 |
-| c0d42e38 | Merge commit '7569497' into integ/speed1 | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| c0d42e38 | Merge commit '7569497' into integ/speed1 | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
 | 12d9408c | lock hygiene: O_NOFOLLOW/0600 lock and .use files, refuse no | 0/461 | 461/461 | no item input changed |
 | c2a9d070 | keep the tracked asl_mod_cache .pyc from main (again) | 0/461 | 461/461 | no item input changed |
 | 9d94c13c | bcache: per-tree exclusive lock, two-phase fetch (stage+veri | 0/461 | 461/461 | no item input changed |
 | 394336c4 | Merge commit 'd99f2d1' into integ/speed1 | 0/461 | 461/461 | no item input changed |
 | e0f424ac | untrack __pycache__, ignore it and *.pyc | 0/461 | 461/461 | no item input changed |
 | fceba612 | Merge commit '8d71ea8' into integ/speed1 | 0/461 | 461/461 | no item input changed |
-| 69c7fc30 | Merge gotest2 020f44a; gate: build the go-test fixture in th | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 69c7fc30 | Merge gotest2 020f44a; gate: build the go-test fixture in th | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
 | 1d09f216 | Merge commit '020f44a' into integ/speed1 | 0/461 | 461/461 | no item input changed |
-| c7e44d61 | gate: lakeguard shim (no lake build/exe in the shared checko | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
-| aa5eb61c | gate: cover what CI runs and the gate did not (JanusTests, j | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| c7e44d61 | gate: lakeguard shim (no lake build/exe in the shared checko | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
+| aa5eb61c | gate: cover what CI runs and the gate did not (JanusTests, j | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
 | 975874d9 | Merge commit '204126a' into integ/speed1 | 0/461 | 461/461 | no item input changed |
 | 06e17eee | Merge commit '08d319b' into integ/speed1 | 0/461 | 0/461 | framework closure (Janus/Tactic/Basic.lean) -> 461 |
 | e46974c1 | Merge commit 'fd982da' into integ/speed1 | 0/461 | 461/461 | no item input changed |
@@ -467,39 +467,39 @@ Latest 30 first-parent commits of main (76554ae and before; mostly gate/verifier
 | 969d47a1 | Merge commit '539105d' into integ/speed1 | 0/461 | 0/461 | framework closure (Janus/Contracts/Alloc.lean) -> 461 |
 | 40d0b85e | Sail driver key: hash rustc/cargo/c++/cc/ld binaries, parent | 0/461 | 461/461 | no item input changed |
 | 920eb785 | Merge branch 'agent/speed-asl' into agent/speed-rt | 0/461 | 461/461 | no item input changed |
-| 1d58a4e4 | Merge main (wave 2, 3579070) into agent/speed-rt | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 1d58a4e4 | Merge main (wave 2, 3579070) into agent/speed-rt | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
 | 5cba6181 | docs: red-team tests | 0/461 | 461/461 | no item input changed |
 | 0ddee85c | sandbox: cover the build-cache (ASL/Sail) HMAC key with /dev | 0/461 | 0/461 | verifier (Go source: cmd/janus/sandbox.go) -> 461 |
 | aca7993a | RT 11: verdict store tests; frame the pins digest | 0/461 | 0/461 | verifier (Go source: cmd/janus/speed.go) -> 461 |
 | c63476f3 | Merge branch 'agent/speed-j1' into agent/speed-rt | 0/461 | 0/461 | verifier (Go source: cmd/janus/auditserve.go) -> 461 |
 | cdbb4d9f | sandbox(unshare): drop all capabilities before exec so a pro | 0/461 | 0/461 | verifier (Go source: cmd/janus/sandbox.go) -> 461 |
 | 314efadb | verifier identity: hash every file of cmd/janus (assembly, h | 0/461 | 0/461 | verifier (Go source: cmd/janus/verifierid.go) -> 461 |
-| cfca64d8 | incr gate: clear explain/precheck env at the entry points; r | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| cfca64d8 | incr gate: clear explain/precheck env at the entry points; r | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
 | 2450e81c | incr: parse the Lean module header; hash what symlinks in pa | 0/461 | 0/461 | verifier (Go source: cmd/janus/incr.go) -> 461 |
 
 The 30 before them (wave-2 period): 0/13830 before, 4987/13830 (36%) after.
 
 | commit | subject | items skipped before | items skipped after | why the rest still runs |
 |---|---|---|---|---|
-| 1380cea5 | gate: print rows are pool items again (later rows wait for P | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
-| 1cb00f2b | gate: keep the original arguments across the setsid re-exec | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
-| 48b31e3a | gate: restore pool init lines | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 1380cea5 | gate: print rows are pool items again (later rows wait for P | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
+| 1cb00f2b | gate: keep the original arguments across the setsid re-exec | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
+| 48b31e3a | gate: restore pool init lines | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
 | 6f1afcee | remove a stray print snapshot, ignore examples/.print-proofs | 0/461 | 461/461 | no item input changed |
-| eed411cd | gate: own process group + pgid cancel, two isolated trees wi | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
-| 27655bec | gate: isolated source copy for the lake-writing lanes (x86,  | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
-| 10fbcd15 | gate: speed check wired in, filters, self-tests as go tests | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| eed411cd | gate: own process group + pgid cancel, two isolated trees wi | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
+| 27655bec | gate: isolated source copy for the lake-writing lanes (x86,  | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
+| 10fbcd15 | gate: speed check wired in, filters, self-tests as go tests | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
 | 1193bf3e | gate: speed-regression check (gate-speedcheck.py) | 0/461 | 461/461 | no item input changed |
-| 0374dce7 | verify-all: no per-item cgroup (as before) | 0/461 | 0/461 | common gate script (scripts/verify-all-examples.sh) -> 461 |
-| 4d85a303 | verify-all: one print item per ISA in a shared snapshot, 24G | 0/461 | 0/461 | common gate script (scripts/verify-all-examples.sh) -> 461 |
+| 0374dce7 | verify-all: no per-item cgroup (as before) | 0/461 | 0/461 | common gate script (scripts/verify/verify-all-examples.sh) -> 461 |
+| 4d85a303 | verify-all: one print item per ISA in a shared snapshot, 24G | 0/461 | 0/461 | common gate script (scripts/verify/verify-all-examples.sh) -> 461 |
 | cf4fade8 | docs: gate driver | 0/461 | 461/461 | no item input changed |
-| b144e5ac | gate: df fix | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
-| ccdb8db8 | verify-all: --filter (development) | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
-| 505b4401 | gate: scripts/gate.sh driver, gate-report.py | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
-| 538cdc14 | gate: pool needs, rt-asl groups, go test shards, run-rounds  | 0/461 | 0/461 | common gate script (scripts/lib/pool.sh) -> 461 |
-| 154d5595 | gate: shared pool library (scripts/lib/pool.sh), cgo/sys/pri | 0/461 | 0/461 | common gate script (scripts/lib/pool.sh) -> 461 |
+| b144e5ac | gate: df fix | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
+| ccdb8db8 | verify-all: --filter (development) | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
+| 505b4401 | gate: scripts/gate/gate.sh driver, gate-report.py | 0/461 | 0/461 | common gate script (scripts/gate/gate.sh) -> 461 |
+| 538cdc14 | gate: pool needs, rt-asl groups, go test shards, run-rounds  | 0/461 | 0/461 | common gate script (scripts/gate/lib/pool.sh) -> 461 |
+| 154d5595 | gate: shared pool library (scripts/gate/lib/pool.sh), cgo/sys/pri | 0/461 | 0/461 | common gate script (scripts/gate/lib/pool.sh) -> 461 |
 | 294e5175 | auditor: Extracted.funcs (the extraction's own function meta | 0/461 | 461/461 | no item input changed |
 | 33e1bb19 | Merge origin/main d2cab06 (round-11 auditor rule); RecoverSe | 0/461 | 459/461 | proof file (examples/proofs-amd64/RecoverSet/Proof.lean) -> 1 |
-| 0a29a60c | Merge agent/panic3 f2714c8; per-item wall-clock limit (JANUS | 0/461 | 0/461 | common gate script (scripts/lib/itemtimeout.sh) -> 461 |
+| 0a29a60c | Merge agent/panic3 f2714c8; per-item wall-clock limit (JANUS | 0/461 | 0/461 | common gate script (scripts/gate/lib/itemtimeout.sh) -> 461 |
 | 22cc9b79 | Merge branch 'agent/panic3' into preview/wave2 | 0/461 | 0/461 | framework closure (Janus/Contracts/Panic.lean) -> 461 |
 | c133b2ea | Merge origin/main 1c13152 (ELF loader-view fix) into wave-2  | 0/461 | 0/461 | verifier (Go source: cmd/janus/binary.go) -> 461 |
 | 087beb74 | Merge branch 'agent/alloc2' into preview/wave2 | 0/461 | 461/461 | no item input changed |
@@ -509,10 +509,10 @@ The 30 before them (wave-2 period): 0/13830 before, 4987/13830 (36%) after.
 | 1c23c2ac | Merge agent/alloc2 8363faa (final) into wave-2 preview; allo | 0/461 | 0/461 | framework closure (Janus/Contracts/LiveSat.lean) -> 461 |
 | 665dc661 | print examples: excl/exclPass (arm64) and zmmHi/kreg/x87/fpu | 0/461 | 453/461 | proof file (examples/proofs-print/PrintProofs/Amd64/FnFmtArith.lean) -> 8 |
 | c8b0b31f | CCount: heartbeats for vloop | 0/461 | 460/461 | proof file (examples/proofs-cgo/arm64/CCount.lean) -> 1 |
-| 8703fff6 | cgo examples: amd64 cgo hash after CRepRet, CCount heartbeat | 0/461 | 397/461 | cgo script (scripts/verify-cgo-examples.sh) -> 64 |
+| 8703fff6 | cgo examples: amd64 cgo hash after CRepRet, CCount heartbeat | 0/461 | 397/461 | cgo script (scripts/verify/verify-cgo-examples.sh) -> 64 |
 | a316ece9 | docs/SOUNDNESS.md: x86 classes cross-checked against hardwar | 0/461 | 461/461 | no item input changed |
 
-Remaining misses in these samples: `scripts/gate.sh` / `verify-all-examples.sh` / pool libraries (gate infrastructure), `cmd/janus` Go (verifier identity),
+Remaining misses in these samples: `scripts/gate/gate.sh` / `verify-all-examples.sh` / pool libraries (gate infrastructure), `cmd/janus` Go (verifier identity),
 `Janus/**` (shared framework), and leaf proofs. A commit that changes only proofs, docs, `test/redteam/`, `JanusASL/` or unrelated scripts skips everything else.
 Not done (the keys stay conservative): narrowing the Go identity below the whole `cmd/janus` package (one package `main`: needs the verify path moved to an internal package so
 `go list -deps` can scope it), per-lane read sets (needs a traced read set per lane), the shared example binary hash.
@@ -521,7 +521,7 @@ Not done (the keys stay conservative): narrowing the Go identity below the whole
 ## Gate speed (2026-10-25): profile, changes, before/after
 
 The merge gate and every agent's regression run are `go test ./cmd/...`,
-`scripts/verify-all-examples.sh` and the audit rounds, often run by several agents at once on the
+`scripts/verify/verify-all-examples.sh` and the audit rounds, often run by several agents at once on the
 same host. Measured on the 48-core, 251 GB development host under the usual load of other agents
 (load average 35–60), `LEAN_NUM_THREADS=4`, Lean 4.34.1. Every number is one run; the host's load
 moves absolute times by ±30%, not the ratios.
@@ -558,7 +558,7 @@ checkout, `warm` = the same cache and checkout again, `-count=1`):
 * **Low parallelism, random order.** `-parallel` defaulted to 2, and the testing package starts
   released parallel tests in no particular order, so a 2–4 minute test could start last.
 
-**`scripts/verify-all-examples.sh`** (166 items) and the audit rounds: see the tables below.
+**`scripts/verify/verify-all-examples.sh`** (166 items) and the audit rounds: see the tables below.
 
 ### Changes
 
@@ -613,7 +613,7 @@ cache's, which every Lean test needs).
 ### Go tests, 2026-10-29: per-run cache, prebuilt fixture (no check removed)
 
 * **A cache of its own per run.** `TestMain` creates `<cache dir>/janus-test-run-*` (on disk, never a RAM
-  `/tmp`) as the test cache and removes it when the run ends; `scripts/gotest-shards.sh` gives every shard one
+  `/tmp`) as the test cache and removes it when the run ends; `scripts/gate/gotest-shards.sh` gives every shard one
   and removes them in a trap. `JANUS_TEST_CACHE_DIR=<dir>` names one explicitly (kept), `=shared` selects the old
   shared `~/.cache/janus-test` (which every run had refilled, 22-32 GB). A run killed by `go test -timeout`
   leaves its directory behind; `rm -rf ~/.cache/janus-test-run-*` when no test is running.
@@ -676,7 +676,7 @@ the fix all four failed with exactly that message (12 s); after, all verify. `go
   the verdict when it builds the framework; the test now skips exactly those leading notices
   (`withoutProgress`, unit-tested) and still requires `Invalid:` to be the first other line.
 
-### Example suite (`scripts/verify-all-examples.sh`, 166 items)
+### Example suite (`scripts/verify/verify-all-examples.sh`, 166 items)
 
 Profile (before, fresh private cache, the default `-j 2`): **2800 s**. The per-item times (now
 printed for every item and kept in `artifacts/verify-all-examples.times`) are dominated by a few
@@ -693,10 +693,10 @@ same proof again (Classify: 3 x ~170 s).
 Changes:
 
 * default `-j`: `min(cores/6, (MemAvailable − 40 GiB)/10 GiB, 8)` with a 10 GiB slot limit
-  (`scripts/lib/parallel.sh`; 8 here, unchanged 1 on a CI runner);
+  (`scripts/gate/lib/parallel.sh`; 8 here, unchanged 1 on a CI runner);
 * the pool is ordered **longest first by the last run's measured times** (an item without a time
   goes first; the built-in order before the first run);
-* **one compile per proof file** (`scripts/lib/theorems.sh`): all theorems of a proof file (correctness,
+* **one compile per proof file** (`scripts/gate/lib/theorems.sh`): all theorems of a proof file (correctness,
   the extra ones, the non-vacuity witnesses) are verified by ONE `janus verify --theorem A --theorem B ...`
   run. The proof is compiled once (before, once per theorem: 654 compiles for 332 files), and the extraction check,
   the trusted compile, the pins and the framework replay verdict are done once; each theorem still gets
@@ -846,7 +846,7 @@ ones (consumer packages, dependencies, Mathlib, install, concurrency, framework 
 
 ## Where the memory went (before / after)
 
-Peak memory is measured with `scripts/peak-mem.sh`: cgroup = `memory.peak` of the whole process
+Peak memory is measured with `scripts/dev/peak-mem.sh`: cgroup = `memory.peak` of the whole process
 tree (anonymous memory plus the page cache it brings in), RSS-sum = peak sum of the resident
 sets of its processes (shared mapped pages counted once per process), and the largest single
 process.
@@ -895,14 +895,14 @@ per framework version and cannot overlap anything, because every later stage nee
 
 ### Per suite (fresh cache each; before = main, serial; after = the default -j, 2 here)
 
-Measured with `scripts/peak-mem.sh` around the whole suite. The host was shared with other agents
+Measured with `scripts/dev/peak-mem.sh` around the whole suite. The host was shared with other agents
 (load average 10–40), so the times are indicative; the memory numbers are not affected.
 
 | Suite | before: time, peak cgroup / RSS-sum | after: time, peak cgroup / RSS-sum |
 |---|---|---|
-| `scripts/verify-examples.sh` | 1295 s, 29.8 / 29.7 GB | 321 s, 6.2 / 14.3 GB |
-| `scripts/verify-amd64-examples.sh` | 1113 s, 29.3 / 29.6 GB | 312 s, 5.9 / 10.8 GB |
-| `scripts/verify-all-examples.sh` (both, one pool), cold | 2408 s (the two above, in sequence) | 357 s, 8.5 / 16.1 GB |
+| `scripts/verify/verify-examples.sh` | 1295 s, 29.8 / 29.7 GB | 321 s, 6.2 / 14.3 GB |
+| `scripts/verify/verify-amd64-examples.sh` | 1113 s, 29.3 / 29.6 GB | 312 s, 5.9 / 10.8 GB |
+| `scripts/verify/verify-all-examples.sh` (both, one pool), cold | 2408 s (the two above, in sequence) | 357 s, 8.5 / 16.1 GB |
 | the same, warm, result cache off | | **282 s**, 5.2 / 7.6 GB |
 | the same, nothing changed | | **12 s**, 0.3 / 1.8 GB |
 | `test/redteam/run-all.sh` | 602 s, 43.2 / 42.7 GB | 190 s, 7.5 / 11.3 GB |
@@ -981,12 +981,12 @@ modules are dominated by code generation, not elaboration: one declaration,
 `AArch64_AutoGen_ArchitectureReset`, spends 820 s in the compiler (630 s in its LCNF `simp`
 pass).
 
-`scripts/asl.sh` therefore gets a **shared build cache** (`ASL_CACHE=<dir>`): the ArmASL build
+`scripts/build/asl.sh` therefore gets a **shared build cache** (`ASL_CACHE=<dir>`): the ArmASL build
 and the lean-sail package are copied from `<dir>/<key>` before building and stored there after a
 build (key: SHA-256 of the vendored tarball, the toolchain, the lean-sail manifest entry, the
 splitter and the lakefile settings that reach ArmASL's modules; docs/design/ASL.md "Build cache"). Entries carry a SHA-256 manifest that is checked after every copy and are
 published atomically under a lock; `ASL_CACHE_READONLY=1` only reads. With an entry,
-`scripts/asl.sh prove` takes 3 min 56 s (Lake replays the copied modules; only the proofs
+`scripts/build/asl.sh prove` takes 3 min 56 s (Lake replays the copied modules; only the proofs
 build) instead of ~54 min; "audited 39 theorems: only propext, Classical.choice, Quot.sound".
 The cache must be writable only by trusted users: its oleans are what the JanusASL proofs are
 checked against.
@@ -1016,21 +1016,21 @@ cold replay swap or be killed) to under 15 GB.
 
 The ASL/Sail build outputs (the ArmASL model, the JanusASL and Janus module builds, the Sail oracle
 driver) are served from a content-addressed, HMAC-signed, hash-checked cache (docs/SOUNDNESS.md
-"Build caches"; `scripts/asl.sh`, `scripts/oracle-sail.sh`). It caches build outputs only: every
+"Build caches"; `scripts/build/asl.sh`, `scripts/validation/sail-arm.sh`). It caches build outputs only: every
 check still runs. The policy:
 
 * **Merge gates and pre-push gates may use the cache** (it is on by default; entries that fail
   their HMAC or a file hash are rebuilt, never used).
 * **A nightly gate runs truly cold**: `JANUS_ASL_CACHE=0` (neither reads nor writes the cache; also
   `off`/`no`/`false`; `ASL_CACHE=off` is the older spelling) in a fresh worktree with no builds,
-  to catch any gap in the key coverage. `scripts/nightly-cold-gate.sh` does it and compares the
+  to catch any gap in the key coverage. `scripts/gate/nightly-cold-gate.sh` does it and compares the
   result with a cached run of the same commit.
 * **A disagreement is a P0 cache bug.** If a cold run and a cached run of the same commit differ in
-  any lane's pass/fail, or in any ASL/Sail artifact hash (`scripts/gate-cachecmp.py`: every
+  any lane's pass/fail, or in any ASL/Sail artifact hash (`scripts/gate/gate-cachecmp.py`: every
   ArmASL/JanusASL `.olean` and the Sail driver), the cache served something its inputs do not
   determine, or a key misses an input. Treat every cached result since the last agreeing nightly as
   unproven, fix the key (`models/asl/tools/asl_cache_key.py`, `asl_mod_cache.py`,
-  `validation/reference-models/sail-arm/cache_key.py`), and add a case to `scripts/lib/test-bcache.sh`. (If a build step is
+  `validation/reference-models/sail-arm/cache_key.py`), and add a case to `scripts/gate/lib/test-bcache.sh`. (If a build step is
   not reproducible bit for bit, the artifact comparison will say so on the first nightly: fix the
   non-determinism or drop that artifact from `gate-cachecmp.py hashes`, with a note here; never
   loosen the lane comparison.)
@@ -1053,37 +1053,37 @@ check still runs. The policy:
   a line that is not exactly the expected shape, a module missing or reported twice) is P0 / fail-closed. The digest
   executable is built ONCE from the trusted checkout that runs the comparison and the same executable digests both trees;
   its source and binary SHA-256 are recorded as `config:oleandigest-*` (a difference is a configuration mismatch, rc 2).
-  NOT covered: the message log itself (warnings, no declarations). Tests: `scripts/lib/test-olean-digest.sh` (real builds:
+  NOT covered: the message log itself (warnings, no declarations). Tests: `scripts/gate/lib/test-olean-digest.sh` (real builds:
   same module at two absolute paths equal, a same-size one-character mutation, proof, simp, instance and compiled-code
   mutations each detected; compare rejects an ArmASL / Janus module with differing bytes, an empty message log, trailing
   garbage, a header change, a one-sided module, a missing digest, another digest executable, non-object JSON; the runner
-  fails closed on a failing tool, a truncated olean and unexpected output) and `scripts/lib/test-cachecmp.sh`.
+  fails closed on a failing tool, a truncated olean and unexpected output) and `scripts/gate/lib/test-cachecmp.sh`.
 * **Owner: the main session.**
 
 ```
-scripts/nightly-cold-gate.sh [--commit REV] [--cached-out DIR] [-- gate.sh args]
+scripts/gate/nightly-cold-gate.sh [--commit REV] [--cached-out DIR] [-- gate.sh args]
 # example crontab line (not installed): 02:30 every night, on the commit main points to
-# 30 2 * * *  cd /srv/janus && scripts/nightly-cold-gate.sh --commit main -- -j 2 >> /srv/janus-ops/nightly-cold.log 2>&1
+# 30 2 * * *  cd /srv/janus && scripts/gate/nightly-cold-gate.sh --commit main -- -j 2 >> /srv/janus-ops/nightly-cold.log 2>&1
 ```
 
-It makes a cached gate run and a cold gate run (each `memcap -m 80G scripts/gate.sh`, in its own
+It makes a cached gate run and a cold gate run (each `memcap -m 80G scripts/gate/gate.sh`, in its own
 fresh worktree) unless `--cached-out` names the output of an earlier cached run of that commit,
 and exits 1 with a `P0 CACHE BUG` report on any disagreement, 2 if the runs cannot be compared.
-The comparison logic is tested with fake results by `scripts/lib/test-cachecmp.sh`; the cache's
-integrity and key tests are `scripts/lib/test-bcache.sh`.
+The comparison logic is tested with fake results by `scripts/gate/lib/test-cachecmp.sh`; the cache's
+integrity and key tests are `scripts/gate/lib/test-bcache.sh`.
 
 ## Cold gate and the model pin
 
-`scripts/gate.sh --cold` is the cold gate (user decision 2026-10-30, option B). It rebuilds everything from scratch (a fresh
+`scripts/gate/gate.sh --cold` is the cold gate (user decision 2026-10-30, option B). It rebuilds everything from scratch (a fresh
 framework `.lake`, empty result / verdict / test-fixture caches in a private `<out>/cold-cache` that replaces `XDG_CACHE_HOME`,
 no models/asl/JanusASL/Janus module cache) **except the ISA model artifacts**: the ArmASL build with lean-sail and the Sail oracle driver.
 Those are treated like the Lean toolchain:
 
 * **Pinned by content.** The pin store (`$JANUS_MODEL_PIN_DIR`, default `/srv/janus-model-pin`; not the build cache, so no
   collector touches it) holds, per model key, a `bcache.py` entry (SHA-256 of every file, HMAC-signed manifest, per-user key)
-  and a signed *pin record* that binds the entry to the SHA-256 of its exact manifest (`scripts/lib/modelpin.py`; no new storage
+  and a signed *pin record* that binds the entry to the SHA-256 of its exact manifest (`scripts/gate/lib/modelpin.py`; no new storage
   code, no python inside janus). The key is the existing build-cache key (`asl_cache_key.py`, `validation/reference-models/sail-arm/cache_key.py`).
-* **Checked on every cold gate.** First, in seconds and before anything is built (`scripts/model-pin.sh check`: record HMAC,
+* **Checked on every cold gate.** First, in seconds and before anything is built (`scripts/gate/model-pin.sh check`: record HMAC,
   manifest HMAC and hash, every file); again by each restore (two-phase verified copy) and after each build (every pinned file
   hashed again in the tree); once more after the lanes. A **tampered, corrupt, missing or incomplete** pin FAILS the gate, always (never rebuilt around).
 * **Stale pin = a model input changed** (sources, toolchain, environment, key scheme: the key changes, so no pin exists for it).
@@ -1091,18 +1091,18 @@ Those are treated like the Lean toolchain:
   verified by the build itself; it publishes and pins nothing (a model change does not fail the merge gate). `--no-rebuild-stale-model`
   makes a stale pin FAIL instead. A tampered, corrupt, missing, unsigned or re-signed pin, a manifest that does not match its record,
   or a pin under another HMAC key ALWAYS fails and is never rebuilt around.
-* **Written only by the nightly truly-cold run.** `scripts/nightly-cold-gate.sh` (`JANUS_ASL_CACHE=0`, fresh worktree, builds the
+* **Written only by the nightly truly-cold run.** `scripts/gate/nightly-cold-gate.sh` (`JANUS_ASL_CACHE=0`, fresh worktree, builds the
   model from source) writes or confirms the pin after its cold gate PASSED and agreed with the cached run
-  (`scripts/model-pin.sh write`: under a lock, entry then one atomically replaced record). If a pin for the same inputs exists
+  (`scripts/gate/model-pin.sh write`: under a lock, entry then one atomically replaced record). If a pin for the same inputs exists
   and the new cold build differs in any `.olean`/`.ilean`/driver byte it exits 1 `NOT REPRODUCED` and keeps the old pin.
   `modelpin.py write` refuses without the nightly's `JANUS_PIN_WRITER` and inside a cold gate.
 * A cold gate refuses to start on a checkout that already has a build (`.lake/build`, `models/asl/.lake/build`, `models/x86/.lake/build`,
   `validation/reference-models/sail-arm/target`): use a fresh worktree, or `--wipe`. It cannot be `--incremental`. Everything else (all lanes, the axiom
   guard, the speed check) is unchanged.
 
-Self-test: `scripts/lib/test-modelpin.sh` (lane `cachekeys`): tampered artifact, missing artifact, stale pin, corrupt manifest,
+Self-test: `scripts/gate/lib/test-modelpin.sh` (lane `cachekeys`): tampered artifact, missing artifact, stale pin, corrupt manifest,
 re-signed manifest, corrupt / edited / forged record, wrong HMAC key, writer refusal and lock, at the unit level, through
-`gate.sh --cold`, `asl.sh` and `oracle-sail.sh`: every one fails, none passes.
+`gate.sh --cold`, `asl.sh` and `sail-arm.sh`: every one fails, none passes.
 
 ## Disk use
 
@@ -1122,14 +1122,14 @@ worktree held 69 GB). Three changes bound them:
   bounded by the collector like it. `TestMain` seeds it from `~/.cache/janus`
   (`$JANUS_TEST_SEED_CACHE`) when that has a ready build of the same framework (hash-checked, see
   "Gate speed"); `JANUS_TEST_ASL_SEED` seeds the JanusASL build.
-* **The ASL build cache is bounded** (`ASL_CACHE`, `asl_mod_cache.py gc`, run by `scripts/asl.sh`
+* **The ASL build cache is bounded** (`ASL_CACHE`, `asl_mod_cache.py gc`, run by `scripts/build/asl.sh`
   after every publish with `ASL_CACHE_MAX`, default 15G; docs/design/ASL.md "Build cache", "Eviction").
-* **Oracle dumps are pruned** when a driver ends (`scripts/lib/artifacts.sh`, used by
-  `scripts/oracle.sh`, `oracle-amd64.sh`, `oracle-sail.sh`, `asl.sh check`, `x86formal.sh check`
+* **Oracle dumps are pruned** when a driver ends (`scripts/gate/lib/artifacts.sh`, used by
+  `scripts/validation/hardware-arm64.sh`, `hardware-amd64.sh`, `sail-arm.sh`, `asl.sh check`, `x86formal.sh check`
   and `test/redteam/rounds/round5/model/run-model.sh`): summaries, reproductions and `mismatches.jsonl` stay,
   the corpus, results and verdicts are zstd-compressed (about 5x, verdicts 15x), duplicates and
   cheaply derived dumps are removed. `KEEP=zst` compresses everything, `KEEP=1` keeps it all raw.
-  `scripts/lib/test-artifacts.sh` (run by `go test`, `TestArtifactsLib`) tests the pruning.
+  `scripts/gate/lib/test-artifacts.sh` (run by `go test`, `TestArtifactsLib`) tests the pruning.
 
 Tests of the collector (`cmd/janus/cachegc_test.go`, on private fixture caches; seconds):
 
@@ -1163,7 +1163,7 @@ sandbox starts, so the cgroup contains the whole bwrap/unshare tree.
 
 | mechanism | when | how | peak |
 |---|---|---|---|
-| `cgroup` | `$JANUS_MEMGUARD_CGROUP` is a delegated cgroup (set by `scripts/lib/memguard.sh`), or janus's own cgroup is delegated | a child cgroup per job (`memory.max`, `memory.swap.max=0`, `memory.oom.group=1`), entered with clone3 `CLONE_INTO_CGROUP` | the child's `memory.peak` |
+| `cgroup` | `$JANUS_MEMGUARD_CGROUP` is a delegated cgroup (set by `scripts/gate/lib/memguard.sh`), or janus's own cgroup is delegated | a child cgroup per job (`memory.max`, `memory.swap.max=0`, `memory.oom.group=1`), entered with clone3 `CLONE_INTO_CGROUP` | the child's `memory.peak` |
 | `systemd-user` | a user systemd manager is reachable | `systemd-run --user --scope --collect -p MemoryMax=… -p MemorySwapMax=0 -p OOMPolicy=continue`; janus re-runs itself in the scope as a supervisor that starts the job, waits, and writes the scope's `memory.peak` and OOM-kill count for its parent | the scope's `memory.peak` |
 | `systemd-system` | root, no user manager | the same with the system manager | same |
 | `prlimit` | no cgroup mechanism | `prlimit --as=limit+16G` per process | max RSS (`wait4`) |
@@ -1213,7 +1213,7 @@ with the verdict. `JANUS_MEMGUARD_LOG=1` also prints each job's label and peak.
 
 ### Scripts
 
-`scripts/lib/memguard.sh`, sourced by verify-examples, verify-amd64-examples, the build
+`scripts/gate/lib/memguard.sh`, sourced by verify-examples, verify-amd64-examples, the build
 scripts, the oracle scripts, asl.sh, bench.sh, break-demo.sh, test/redteam/run-all.sh and every
 audit round runner.
 
@@ -1226,7 +1226,7 @@ audit round runner.
 * `memguard_lake ARGS…` is `lake ARGS…` with `LEAN_NUM_THREADS` from the budget
   (`memguard_jobs 3G`). Every `lake build` in the scripts (the framework, the oracles, ArmASL,
   JanusASL) uses it, and the go test rows use `memguard_run`.
-* `bash scripts/lib/memguard.sh run|lake|mechanism …` is the same from outside a script (used by
+* `bash scripts/gate/lib/memguard.sh run|lake|mechanism …` is the same from outside a script (used by
   CI).
 
 **Nesting.** The outer guard is a systemd scope with `Delegate=yes`. Its command runs in a leaf
@@ -1236,7 +1236,7 @@ of new systemd scopes, which would be siblings outside the outer limit. So the l
 
 ```
 script guard  (max(24G, MemAvailable − 40G))          memguard_self
-└─ parallel slot  (JANUS_JOB_MEM, 10G)               scripts/lib/parallel.sh par_run → memguard_run
+└─ parallel slot  (JANUS_JOB_MEM, 10G)               scripts/gate/lib/parallel.sh par_run → memguard_run
    └─ janus job  (JANUS_MEM_MAX, 24G → effective 10G) cmd/janus guardRun, one per lean/leanchecker/lake
 ```
 
@@ -1257,7 +1257,7 @@ root) were skipped.
 (`loginctl enable-linger`), which starts its user manager, then exports `XDG_RUNTIME_DIR` and
 `JANUS_MEM_MAX=12G`. It logs `memguard mechanism: …` (the scripts' detection) and `janus memguard` (janus's),
 and runs a 1G probe. The lake builds and
-`go test` run under `scripts/lib/memguard.sh`. If the user manager does not come up, the guard
+`go test` run under `scripts/gate/lib/memguard.sh`. If the user manager does not come up, the guard
 degrades as above and the log says which mechanism is active.
 
 ### Tests
@@ -1266,7 +1266,7 @@ degrades as above and the log says which mechanism is active.
 
 * `TestMemGuardKillsHungryProof`: a proof whose `#eval` builds a list of 10⁸ naturals,
   verified by a separate janus process under `JANUS_MEM_MAX=1G`. It is run directly (the detected
-  mechanism, `systemd-user` here) and nested in a 4G `scripts/lib/memguard.sh` job guard (janus
+  mechanism, `systemd-user` here) and nested in a 4G `scripts/gate/lib/memguard.sh` job guard (janus
   then uses `cgroup` children of it). Both must print `Invalid:`, `Stage: resource limit`,
   `limit 1.0 GiB` and the measured peak, no proof/audit error, and leave no `verified.json`. In
   the nested case the job guard's summary must not claim the kill. The test skips when there is no
@@ -1299,12 +1299,12 @@ replay threads (6.5 GiB with 4), the verification's peak; every other job ≤ 22
 538 MiB with 1 job (62 s) and 1.0 GiB with 8 jobs (23 s), so 3 GiB per lake job is a generous
 budget for the framework.
 
-**ArmASL / JanusASL** (`scripts/asl.sh build`, 8 lake jobs from the 24 GiB budget): the cold
+**ArmASL / JanusASL** (`scripts/build/asl.sh build`, 8 lake jobs from the 24 GiB budget): the cold
 ArmASL build (41 jobs, 42.5 min) peaked at **10.7 GiB** for the whole lake tree (its largest
 modules, Part17/Part24, take ~9 min each). The JanusASL + janus-asl-check build on top (199 jobs,
 16 min) peaked at 7.3 GiB.
 
-**Warm, arm64** (`scripts/verify-examples.sh -j 1`, peak per verification, heaviest job):
+**Warm, arm64** (`scripts/verify/verify-examples.sh -j 1`, peak per verification, heaviest job):
 
 | example | peak | heaviest job |
 |---|---|---|
@@ -1332,7 +1332,7 @@ modules, Part17/Part24, take ~9 min each). The JanusASL + janus-asl-check build 
 
 The whole run (21 verifications, one at a time) peaked at 4.9 GiB in its script guard.
 
-**Warm, amd64** (`scripts/verify-amd64-examples.sh -j 1`, peak per function):
+**Warm, amd64** (`scripts/verify/verify-amd64-examples.sh -j 1`, peak per function):
 
 | example | peak | example | peak |
 |---|---|---|---|
@@ -1355,4 +1355,4 @@ verify with room to spare.
 
 ## Per-item time limit
 
-The verify-* scripts run every `janus verify` through `jv` (scripts/lib/itemtimeout.sh) under `JANUS_ITEM_TIMEOUT` seconds (default 2700; 0 disables). A hung proof is killed, reported as `TIMEOUT:` in its log, and counts as a failure; the run continues.
+The verify-* scripts run every `janus verify` through `jv` (scripts/gate/lib/itemtimeout.sh) under `JANUS_ITEM_TIMEOUT` seconds (default 2700; 0 disables). A hung proof is killed, reported as `TIMEOUT:` in its log, and counts as a failure; the run continues.

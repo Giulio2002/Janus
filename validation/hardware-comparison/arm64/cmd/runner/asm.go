@@ -3,7 +3,7 @@
 package main
 
 // A tiny AArch64 encoder for the fixed trampoline. Every encoding here is checked by
-// `runner -dump-trampoline | aarch64-linux-gnu-objdump` (see scripts/oracle.sh selftest).
+// `runner -dump-trampoline | aarch64-linux-gnu-objdump` (see scripts/validation/hardware-arm64.sh selftest).
 
 type asm struct {
 	base  uint64

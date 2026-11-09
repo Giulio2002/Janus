@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test of scripts/lib/theorems.sh (verify_theorems), with a stub `bin/janus` that checks its
+# Self-test of scripts/gate/lib/theorems.sh (verify_theorems), with a stub `bin/janus` that checks its
 # extraction directory exists before and after a delay (as `janus verify` re-checks the artifacts
 # at its end) and that the relative binary path in identity.json resolves, and that takes every
 # theorem in ONE run and writes the --results file as the real one does. Run by go test

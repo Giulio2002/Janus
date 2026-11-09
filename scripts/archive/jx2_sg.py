@@ -46,7 +46,7 @@ wrap='''/-! ## Call-site preconditions (for the witness) -/
 mk='/-! ## Non-vacuity: every hypothesis of `correctness` holds together'
 assert t.count(mk)==1
 t=t.replace(mk,wrap+mk)
-defs=open('scripts/jx2_sg_defs.lean').read()
+defs=open('scripts/archive/jx2_sg_defs.lean').read()
 nvk='/-- All hypotheses of `correctness` hold together. -/\ntheorem nonvacuous'
 assert t.count(nvk)==1
 t=t.replace(nvk,defs+'\n'+nvk)

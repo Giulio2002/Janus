@@ -3,15 +3,15 @@
 # control stops verifying or prints something else, or a model row disagrees with hardware.
 # Writes only under test/redteam/rounds/round5/work/, test/redteam/rounds/round5/bin/ and test/redteam/rounds/round5/model/{bin,cases,out-*}.
 # Usage: test/redteam/rounds/round5/run-round5.sh [-j N]     (SKIP_MODEL=1 skips the oracle rows; -j: blocks at
-#        once, default the core count capped by memory, scripts/lib/parallel.sh)
+#        once, default the core count capped by memory, scripts/gate/lib/parallel.sh)
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
-# shellcheck source=../../../../scripts/lib/parallel.sh
-. "$root/scripts/lib/parallel.sh"
-# shellcheck source=../../../../scripts/lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+# shellcheck source=../../../../scripts/gate/lib/parallel.sh
+. "$root/scripts/gate/lib/parallel.sh"
+# shellcheck source=../../../../scripts/gate/lib/memguard.sh
+. "$root/scripts/gate/lib/memguard.sh"
 memguard_self "$@"
 par_init "$@"
 J="$root/test/redteam/rounds/round5/bin/janus"; mkdir -p "$(dirname "$J")"
@@ -19,7 +19,7 @@ J="$root/test/redteam/rounds/round5/bin/janus"; mkdir -p "$(dirname "$J")"
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
+[ -f artifacts/examples-arm64 ] || scripts/build/build-examples.sh >/dev/null
 W=test/redteam/rounds/round5/work; rm -rf "$W"; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1
 broken=()

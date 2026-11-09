@@ -8,17 +8,17 @@
 # It runs `janus incr explain` on one cheap item (arm64:Add: its proof file, the verifier, the toolchain; --no-fw: no build needed) in two
 # consecutive invocations with identical content and different run-specific bookkeeping, and fails if the keys differ:
 #   A  the environment as it is (inside a gate run: the real exports of THIS run)
-#   B  the same, with the value of every variable the gate ADDED to its environment (GATE_ENV0_NAMES, written by scripts/gate.sh
+#   B  the same, with the value of every variable the gate ADDED to its environment (GATE_ENV0_NAMES, written by scripts/gate/gate.sh
 #      before its first export, names the variables that were there at the start) changed to another value, except the variables
-#      listed in scripts/lib/incr-keyed-exports.txt (constants of the gate that are keyed on purpose). PATH, HOME, PWD, OLDPWD, SHLVL,
+#      listed in scripts/gate/lib/incr-keyed-exports.txt (constants of the gate that are keyed on purpose). PATH, HOME, PWD, OLDPWD, SHLVL,
 #      _ and LC_*/LANG are not keyed by decision (docs/TESTING.md "Unkeyed environment").
 #   C  (control) A with a keyed variable changed: the key MUST differ, so the check cannot pass because explain ignores the environment.
 # Without GATE_ENV0_NAMES (a standalone run) B is the original bug: JANUS_GATE_TREE0, JANUS_LAKEGUARD_PIN/ROOT and the sizing
 # variables with other values.
-# Usage: LIVENESS_BIN=<janus> scripts/lib/incr-liveness.sh   (without it: builds cmd/janus into a private directory)
+# Usage: LIVENESS_BIN=<janus> scripts/gate/lib/incr-liveness.sh   (without it: builds cmd/janus into a private directory)
 # Takes about two seconds. Exit 0: alive; 1: a variable makes the keys differ (named); 2: the check could not run.
 set -uo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 [ ! -d "$HOME/.elan/bin" ] || export PATH="$HOME/.elan/bin:$PATH"
@@ -34,9 +34,9 @@ if [ -z "$bin" ]; then
   bin="$t/janus"
 fi
 [ -x "$bin" ] || { echo "incr-liveness: $bin is not executable" >&2; exit 2; }
-# the two kinds of key: an item (arm64:Add) and a lane (scripts/lib/incr.sh incr_lane_spec: the whole non-documentation tree, go env, ...)
+# the two kinds of key: an item (arm64:Add) and a lane (scripts/gate/lib/incr.sh incr_lane_spec: the whole non-documentation tree, go env, ...)
 item_spec=(incr explain --id arm64:Add --kind arm64 --no-fw --proof examples/proofs/Add.lean --arg sym:Add)
-. "$root/scripts/lib/incr.sh"
+. "$root/scripts/gate/lib/incr.sh"
 # ASL_CACHE is keyed by the digest of the files below it (incr-host.sh _ih_tree). A cache above IH_MAX_FILES/IH_MAX_BYTES (the real
 # /srv/janus-asl-cache is) has, BY DESIGN, a random digest on every call (a forced miss: never a false hit), so two invocations with the
 # same environment legitimately differ. That is not a leaked run-specific variable: say so and run the check without ASL_CACHE (it is
@@ -63,7 +63,7 @@ key() {
 }
 
 declare -A allowed=() env0=()
-while IFS=$'\t' read -r n _; do [ -z "$n" ] || case "$n" in \#*) ;; *) allowed[$n]=1 ;; esac; done < "$root/scripts/lib/incr-keyed-exports.txt"
+while IFS=$'\t' read -r n _; do [ -z "$n" ] || case "$n" in \#*) ;; *) allowed[$n]=1 ;; esac; done < "$root/scripts/gate/lib/incr-keyed-exports.txt"
 perturb=()
 if [ -n "${GATE_ENV0_NAMES+x}" ]; then
   for n in $GATE_ENV0_NAMES; do env0[$n]=1; done
@@ -103,7 +103,7 @@ for kind in item lane; do
     fi
     for n in "${perturb[@]}"; do
       if [ "$n" = TMPDIR ]; then mkdir -p "$t/tmp3"; k="$(key TMPDIR="$t/tmp3")" || continue; else k="$(key "$n=${!n-}~liveness-probe")" || continue; fi
-      [ "$k" = "$keyA" ] || echo "  keyed and run-specific: $n  (add it to incrEnvSkip with its reason, or if it can change what is checked, to scripts/lib/incr-keyed-exports.txt)"
+      [ "$k" = "$keyA" ] || echo "  keyed and run-specific: $n  (add it to incrEnvSkip with its reason, or if it can change what is checked, to scripts/gate/lib/incr-keyed-exports.txt)"
     done
     rc=1
   fi

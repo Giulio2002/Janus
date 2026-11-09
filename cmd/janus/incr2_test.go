@@ -13,7 +13,7 @@ import (
 // INCR2: why the incremental gate skipped (almost) nothing across commits, and the tests that keep it from happening
 // again without weakening it. See docs/TESTING.md "Incremental gate" (the miss analysis and the rules).
 
-// gateRunEnv is what scripts/gate.sh, scripts/lib/incr.sh and scripts/verify-all-examples.sh export to every item of
+// gateRunEnv is what scripts/gate/gate.sh, scripts/gate/lib/incr.sh and scripts/verify/verify-all-examples.sh export to every item of
 // one gate run, with the values of that run: they are run-specific (a timestamped output directory, the stamp of the
 // tree, the load-derived sizing). Two gate runs of identical item inputs differ in all of them.
 func gateRunEnv(n int) []string {
@@ -373,7 +373,7 @@ func scanExportsRaw(src string, out []string) []string {
 }
 
 // gateScriptPatterns are the scripts whose exports reach the gate's items and lanes (test scripts excluded).
-var gateScriptPatterns = []string{"scripts/gate.sh", "scripts/verify-*.sh", "scripts/build-examples*.sh", "scripts/example-*.sh", "scripts/lib/*.sh",
+var gateScriptPatterns = []string{"scripts/gate/gate.sh", "scripts/verify/verify-*.sh", "scripts/build/build-examples*.sh", "scripts/verify/example-*.sh", "scripts/gate/lib/*.sh",
 	"test/redteam/*.sh", "test/redteam/*/*.sh", "test/redteam/*/*/*.sh", "test/redteam/*/*/*/*.sh", "test/redteam/*/*/*/*/*.sh"}
 
 func gateScriptFiles(root string) []string {
@@ -412,7 +412,7 @@ func gateExports(t *testing.T) map[string][]string { t.Helper(); return gateExpo
 // sound. A NEW export that is relevant to the key fails TestIncr2EveryGateExportIsClassified: either it is bookkeeping
 // (add it to incrEnvSkip with its reason, and to gateRunEnv above) or it can change what is checked (add it here).
 func keyedGateExports() map[string]string {
-	b, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "lib", "incr-keyed-exports.txt"))
+	b, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "gate", "lib", "incr-keyed-exports.txt"))
 	if err != nil {
 		panic(err)
 	}
@@ -423,7 +423,7 @@ func keyedGateExports() map[string]string {
 		}
 		n, why, ok := strings.Cut(l, "\t")
 		if !ok || n == "" || why == "" {
-			panic("scripts/lib/incr-keyed-exports.txt: bad line " + l)
+			panic("scripts/gate/lib/incr-keyed-exports.txt: bad line " + l)
 		}
 		m[n] = why
 	}
@@ -474,12 +474,12 @@ func TestIncr2EveryGateExportIsClassified(t *testing.T) {
 	for _, n := range unclassifiedExports(ex) {
 		t.Errorf("%s is exported by %v, is part of every item's and lane's key and is not classified: if its value differs from "+
 			"one gate run to the next, no incremental gate run can ever skip anything (the bug of ad264a2). Bookkeeping: add it to "+
-			"incrEnvSkip with its reason; a constant or something that changes what is checked: add it to scripts/lib/incr-keyed-exports.txt.", n, ex[n])
+			"incrEnvSkip with its reason; a constant or something that changes what is checked: add it to scripts/gate/lib/incr-keyed-exports.txt.", n, ex[n])
 	}
 	// the other direction: a classification of a name no script exports any more is stale
 	for n := range keyedGateExports() {
 		if _, ok := ex[n]; !ok && n != "JANUS_GO_TOOLCHAIN" && n != "JANUS_COLD" {
-			t.Errorf("scripts/lib/incr-keyed-exports.txt lists %s, which no gate script exports (stale)", n)
+			t.Errorf("scripts/gate/lib/incr-keyed-exports.txt lists %s, which no gate script exports (stale)", n)
 		}
 	}
 }
@@ -524,13 +524,13 @@ func TestIncr2ExportScanCatchesEveryForm(t *testing.T) {
 		"prefixed":       "FOO=1 export JANUS_FAKE_RUN=1\n",
 		"allexport-pref": "set -a\nFOO=1 JANUS_FAKE_RUN=5 true\n",
 	}
-	dirs := []string{"scripts/lib", "scripts", "test/redteam", "test/redteam/rounds/round99", "test/redteam/rounds/rt-x/deep", "test/redteam/a/b/c", "test/redteam/rounds/a/b/c"}
+	dirs := []string{"scripts/gate/lib", "scripts/verify", "test/redteam", "test/redteam/rounds/round99", "test/redteam/rounds/rt-x/deep", "test/redteam/a/b/c", "test/redteam/rounds/a/b/c"}
 	for name, body := range forms {
 		for _, d := range dirs {
 			t.Run(name+"@"+d, func(t *testing.T) {
 				root := copyGateScripts(t)
 				name := "zz-fake.sh"
-				if d == "scripts" {
+				if d == "scripts/verify" {
 					name = "verify-fake.sh"
 				}
 				wr(t, filepath.Join(root, d, name), "#!/usr/bin/env bash\n"+body)

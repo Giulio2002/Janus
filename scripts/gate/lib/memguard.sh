@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Hard memory guard for scripts that run Lean, lake or go test (sourced; also executable as
-# `bash scripts/lib/memguard.sh run …`). The shell side of cmd/janus/memguard.go: a command
+# `bash scripts/gate/lib/memguard.sh run …`). The shell side of cmd/janus/memguard.go: a command
 # runs inside a cgroup v2 memory limit (memory.max, no swap), so a runaway Lean process is
 # killed on its own by the kernel's cgroup OOM killer instead of taking the host down.
 #

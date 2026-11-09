@@ -9,10 +9,10 @@ import (
 )
 
 // The rtmisc contract stubs (rtmiscContractStubs: the -d=checkptr checks, the cgo pointer
-// checks and the size-specialised allocator) are linked by scripts/stubpins (so gen-stubpins measures them) and
+// checks and the size-specialised allocator) are linked by scripts/dev/stubpins (so gen-stubpins measures them) and
 // described by their contract library.
 func TestRtmiscContractStubNames(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "stubpins", "main.go"))
+	src, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "dev", "stubpins", "main.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestRtmiscContractStubNames(t *testing.T) {
 	}
 	for name := range rtmiscContractStubs {
 		if !strings.Contains(string(src), "//go:linkname s_"+strings.TrimPrefix(name, "runtime.")+" "+name+"\n") {
-			t.Errorf("scripts/stubpins does not link %s", name)
+			t.Errorf("scripts/dev/stubpins does not link %s", name)
 		}
 		short := strings.TrimPrefix(name, "runtime.")
 		switch {
@@ -59,13 +59,13 @@ func TestRtmiscContractStubNames(t *testing.T) {
 
 // The soft-float contracts (Janus/Contracts/SoftFloat.lean) are IEEE 754 where the exact result is
 // not tiny: examples/rtmisc/softcheck tests the runtime's own fadd64, fsub64, fmul64 and fdiv64
-// against the hardware (scripts/softfloat-check.sh), and that Go's addition is not IEEE for tiny
+// against the hardware (scripts/validation/softfloat-check.sh), and that Go's addition is not IEEE for tiny
 // results (so the precondition is needed).
 func TestSoftFloatRuntimeAgreesWithIEEE(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the runtime's soft float on random operands")
 	}
-	cmd := exec.Command(filepath.Join(repoRoot, "scripts", "softfloat-check.sh"))
+	cmd := exec.Command(filepath.Join(repoRoot, "scripts", "validation", "softfloat-check.sh"))
 	cmd.Env = append(os.Environ(), "SOFTCHECK_N=100000")
 	out, err := cmd.CombinedOutput()
 	if err != nil {

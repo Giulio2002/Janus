@@ -80,7 +80,7 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 		return nil, &diag{
 			Msg:   fmt.Sprintf("Cannot read binary %s: %v", path, err),
 			Stage: "binary identity",
-			Next:  "Pass the path of the Go executable (build it with scripts/build-examples.sh for the examples).",
+			Next:  "Pass the path of the Go executable (build it with scripts/build/build-examples.sh for the examples).",
 		}
 	}
 	sum := sha256.Sum256(data)

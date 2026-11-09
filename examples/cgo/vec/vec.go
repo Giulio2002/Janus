@@ -1,5 +1,5 @@
 // Package vec holds the Janus FFI example whose C code is compiled by clang (built with
-// CC=clang, see scripts/build-examples-cgo.sh): a loop that clang -O2 vectorises with SSE2.
+// CC=clang, see scripts/build/build-examples-cgo.sh): a loop that clang -O2 vectorises with SSE2.
 package vec
 
 // #include "cvec.h"

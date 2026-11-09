@@ -5,7 +5,7 @@
 #      fixture lock after ...") when the holder lets go.
 # Uses a private fixture dir (JANUS_TEST_FIXTURE_DIR) and a private test cache; the shared fixture is never touched.
 set -uo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 export PATH=/usr/local/go/bin:$PATH
 t="$(mktemp -d "${TMPDIR:-/tmp}/test-fixture-wait.XXXXXX")"
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }

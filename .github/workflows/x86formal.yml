@@ -13,7 +13,7 @@ on:
     paths:
       - "Janus/Amd64/**"
       - "models/x86/**"
-      - "scripts/x86formal.sh"
+      - "scripts/build/x86formal.sh"
       - ".github/workflows/x86formal.yml"
 
 permissions:
@@ -44,8 +44,8 @@ jobs:
           echo "XDG_RUNTIME_DIR=/run/user/$uid" >> "$GITHUB_ENV"
           echo "JANUS_MEM_MAX=12G" >> "$GITHUB_ENV"
           export XDG_RUNTIME_DIR="/run/user/$uid" JANUS_MEM_MAX=12G
-          echo "memguard mechanism: $(bash scripts/lib/memguard.sh mechanism)"
-          bash scripts/lib/memguard.sh run -l 1G -n ci-probe -- true
+          echo "memguard mechanism: $(bash scripts/gate/lib/memguard.sh mechanism)"
+          bash scripts/gate/lib/memguard.sh run -l 1G -n ci-probe -- true
 
       - name: Cache the X86Sail build
         uses: actions/cache@v4
@@ -56,9 +56,9 @@ jobs:
           key: x86formal-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'models/x86/vendor/X86Sail.tar.gz', 'models/x86/lakefile*', 'models/x86/lake-manifest.json') }}
 
       - name: Build X86Sail, JanusX86 and janus-x86-check
-        run: scripts/x86formal.sh build
+        run: scripts/build/x86formal.sh build
 
       - name: Audit the class theorems (only propext, Classical.choice, Quot.sound)
         run: |
-          scripts/x86formal.sh prove | tee audit.txt
+          scripts/build/x86formal.sh prove | tee audit.txt
           grep -q "only propext, Classical.choice, Quot.sound" audit.txt

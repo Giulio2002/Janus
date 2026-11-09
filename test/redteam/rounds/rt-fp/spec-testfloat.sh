@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Row SPEC-TF (docs/audit/AUDIT-FP.md): Janus.Float.add/mul/fma/truncInt against SoftFloat 3e vectors.
-# Usage: test/redteam/rounds/rt-fp/spec-testfloat.sh [MAX_VECTORS_PER_RUN]   (needs /srv/janus-fp-deps, scripts/testfloat.sh)
+# Usage: test/redteam/rounds/rt-fp/spec-testfloat.sh [MAX_VECTORS_PER_RUN]   (needs /srv/janus-fp-deps, scripts/validation/testfloat.sh)
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 TG="${DEPS:-/srv/janus-fp-deps}/tf-8086-SSE/testfloat_gen"
 MAX="${1:-60000}"
-[ -x "$TG" ] || { echo "skip: no $TG (run scripts/testfloat.sh once)"; exit 0; }
+[ -x "$TG" ] || { echo "skip: no $TG (run scripts/validation/testfloat.sh once)"; exit 0; }
 cd "$root" || exit 1
 fail=0; tot=0
 run() { # FN ROUNDING

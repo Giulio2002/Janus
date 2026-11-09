@@ -253,7 +253,7 @@ On `agent/redteam10` (merge/b23 + this round), one heavy job at a time (`LEAN_NU
 | Suite | Result |
 |---|---|
 | `test/redteam/rounds/round10/run-round10.sh` | all rows as expected (V1a–f, V1_ctl×2, V2×5, V3_ctl, SAT×4, I1a–b, V3a, A1, F1, G1–G2, X1, C1, ASL1), 74 min |
-| `scripts/verify-all-examples.sh -j 1` | all ok: 78 arm64 items, 80 amd64 functions, 10 assembly items (6264 s) |
+| `scripts/verify/verify-all-examples.sh -j 1` | all ok: 78 arm64 items, 80 amd64 functions, 10 assembly items (6264 s) |
 | `go test -count=1 -parallel 2 -timeout 7000s ./cmd/...` | ok (1269 s) |
 | `test/redteam/run-all.sh -j 1` | ok (670 s) |
 | `test/redteam/rounds/round{2,…,9}` runners, `test/redteam/rounds/rt-model/run.sh` | all rows as expected |

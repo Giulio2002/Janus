@@ -2,17 +2,17 @@
 # Differential test of the Lean AArch64 model (Janus.Arm64.step) against native execution
 # under qemu-aarch64. See docs/validation/ORACLE.md.
 #
-#   scripts/oracle.sh selftest        build, then check the native harness on known answers
-#   scripts/oracle.sh quick           ~60k generated cases
-#   scripts/oracle.sh full            generated + harvested from real Go arm64 binaries (default)
-#   scripts/oracle.sh fp              scalar floating point only: generated fp.* classes (FP_K
+#   scripts/validation/hardware-arm64.sh selftest        build, then check the native harness on known answers
+#   scripts/validation/hardware-arm64.sh quick           ~60k generated cases
+#   scripts/validation/hardware-arm64.sh full            generated + harvested from real Go arm64 binaries (default)
+#   scripts/validation/hardware-arm64.sh fp              scalar floating point only: generated fp.* classes (FP_K
 #                                     states per word) + harvested fp.* words (FP_HARVEST_K states)
-#   scripts/oracle.sh neon            Advanced SIMD: the targeted neon.*/vls.struct/vls.np classes,
+#   scripts/validation/hardware-arm64.sh neon            Advanced SIMD: the targeted neon.*/vls.struct/vls.np classes,
 #                                     the SIMD&FP words of the C harvest corpus (validation/hardware-comparison/arm64/harvest/neon,
 #                                     gcc/clang -O0/-O2/-O3, NEON_K states each) and of the Go
 #                                     harvest, random simd/vls group words, and SEQ straight-line
 #                                     blocks (sequence mode, validation/hardware-comparison/arm64/cmd/neonseq)
-#   scripts/oracle.sh crypto          crypto extension / CRC32 / permutes only: generated classes
+#   scripts/validation/hardware-arm64.sh crypto          crypto extension / CRC32 / permutes only: generated classes
 #                                     (CRYPTO_CLASSES), harvested words of the crypto test binaries
 #                                     (CRYPTO_HARVEST_K states each) and sequence-mode blocks
 #                                     (oracle seqgen: SEQ_N per family, SEQ_WINDOWS real windows)
@@ -25,16 +25,16 @@
 # SVESIMD_N (words per top-level SVE/SME/SIMD&FP/SIMD-ldst group of the quick/full slice, default 800; 0 = off),
 # EXCL_SEQ (generated exclusive-monitor blocks, default 5·N), EXCL_LOOPS_K (states per harvested
 # LL/SC retry loop, default 8).
-# KEEP: what the run leaves in OUT (scripts/lib/artifacts.sh). Default: summary.md, repro.*,
+# KEEP: what the run leaves in OUT (scripts/gate/lib/artifacts.sh). Default: summary.md, repro.*,
 # mismatches.jsonl (MISMATCH verdicts, if any) and cases/hw/model/verdicts.jsonl zstd-compressed
 # (.zst); gen.jsonl and harvest.jsonl (whose union is cases.jsonl) are removed. KEEP=zst
 # compresses every dump, KEEP=1 keeps them all raw.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
+. "$root/scripts/gate/lib/memguard.sh"
 # shellcheck source=lib/artifacts.sh
-. "$root/scripts/lib/artifacts.sh"
+. "$root/scripts/gate/lib/artifacts.sh"
 memguard_self "$@"
 mode="${1:-full}"
 export PATH="$PATH:/usr/local/go/bin"
@@ -64,7 +64,7 @@ tail -1 "$bin/selftest.log"
 
 mkdir -p "$OUT"
 # However the run ends: keep the summaries, compressed verdicts and corpus, drop the other dumps
-# (KEEP=1 keeps everything raw; scripts/lib/artifacts.sh).
+# (KEEP=1 keeps everything raw; scripts/gate/lib/artifacts.sh).
 trap 'art_prune "$OUT"' EXIT
 cases=()
 case "$mode" in

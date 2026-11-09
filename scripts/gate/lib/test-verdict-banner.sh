@@ -2,13 +2,13 @@
 # Regression test: row scripts must select a verdict by pattern, never by position, so a stderr banner
 # (janus: memory guard: ..., janus-memguard: ..., memguard[...]) before or after the verdict cannot turn a row BROKEN.
 # (A nightly lost 8 rows of the 'all' round and a cachekeys check to exactly that.)
-#   - scripts/lib/verdict.sh on injected banners (before, after, none, no verdict at all);
+#   - scripts/gate/lib/verdict.sh on injected banners (before, after, none, no verdict at all);
 #   - the real janus binary with the guard forced to "none" (notice must come AFTER the verdict), with
 #     JANUS_MEMGUARD_LOG=1 and JANUS_MEMGUARD_VERBOSE=1 (banner first): the verdict is the same in every mode.
 # Seconds (one go build); scratch in a mktemp directory on disk.
-#   scripts/lib/test-verdict-banner.sh
+#   scripts/gate/lib/test-verdict-banner.sh
 set -uo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 mkdir -p "$root/artifacts"
 t=$(mktemp -d "${TMPDIR:-$root/artifacts}/test-verdict-banner.XXXXXX")
 trap 'rm -rf "$t"' EXIT
@@ -16,7 +16,7 @@ fail=0
 ok() { echo "ok   $*"; }
 bad() { echo "FAIL $*"; fail=1; }
 # shellcheck source=verdict.sh
-. "$root/scripts/lib/verdict.sh"
+. "$root/scripts/gate/lib/verdict.sh"
 export PATH=/usr/local/go/bin:$PATH
 
 B1='janus: memory guard: cgroup, limit 16.0 GiB per job (default), no swap, under /x'

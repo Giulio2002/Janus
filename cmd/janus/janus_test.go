@@ -63,7 +63,7 @@ func statFSExisting(p string) fsInfo {
 
 // defaultTestParallel is the -parallel default for this package (unless -parallel is given):
 // min(GOMAXPROCS / 6, (GOMAXPROCS - load) / 6, (MemAvailable - 40 GiB) / 10 GiB, 8), at least 1, the budget of
-// scripts/lib/parallel.sh (a verifying test holds 0.2-5 GB: a cold kernel replay of the framework
+// scripts/gate/lib/parallel.sh (a verifying test holds 0.2-5 GB: a cold kernel replay of the framework
 // 3 GB, the largest proof 4.8 GB; docs/TESTING.md "Measured peaks").
 func defaultTestParallel() int {
 	n := runtime.GOMAXPROCS(0) / 6
@@ -99,7 +99,7 @@ func defaultTestParallel() int {
 
 func TestMain(m *testing.M) {
 	flag.Parse()
-	// Build the example binaries with the same pinned Go release as scripts/build-examples*.sh.
+	// Build the example binaries with the same pinned Go release as scripts/build/build-examples*.sh.
 	if os.Getenv("GOTOOLCHAIN") == "" {
 		os.Setenv("GOTOOLCHAIN", "go1.26.0")
 	}
