@@ -458,6 +458,8 @@ package of your own, scaffold one with `janus init my-proofs` and see
 for this README: the checkout is modified, so `janus init` refuses ("no Janus commit has its
 framework"). Confirm both once the tree is committed and pushed. -->
 
+Looking for something in the repository? **[Structure/README.md](Structure/README.md)** is a plain-English map of every folder (verifier, reference validation, tests, generated files, entry points).
+
 New to Janus? **[docs/TUTORIAL.md](docs/TUTORIAL.md)** goes from an empty directory to a verified
 theorem about your own function, then breaks it, then proves a function where pointer aliasing
 matters.
