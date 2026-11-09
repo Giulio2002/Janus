@@ -521,7 +521,7 @@ verify_one() { # N
   local n=$1 res="$OUT/verify-$1.result"
   {
     "$root/bin/janus" extract "$root/artifacts/examples-arm64" "example.com/basic.$n" "$root/artifacts/$n" >/dev/null
-    if "$root/bin/janus" verify "$root/artifacts/$n" --proof "$root/examples/proofs/$n.lean" --janus-root "$root" --asl \
+    if "$root/bin/janus" verify "$root/artifacts/$n" --proof "$root/examples/proofs/$n.lean" --theorem Proof.correctness --theorem Proof.Witness.nonvacuous --janus-root "$root" --asl \
          > "$OUT/verify-$n.log" 2>&1 && grep -q '^ASL corollary: Verified: JanusASLCorollary.correctness_asl' "$OUT/verify-$n.log"; then
       echo "$n: ASL corollary verified"
       sed -n '/^ASL corollary/,/^  Assumptions/p' "$OUT/verify-$n.log" | grep -A1 '^  Statement:' | tail -1

@@ -248,7 +248,7 @@ asl_v() { # asl_v PROOF [flags…]: the ASL verdict line and its stage
 }
 if ! want base; then :
 elif [ "${JANUS_AUDIT_ASL:-}" = 1 ]; then
-  row ASL.control_Add Verified "$(asl_v --proof examples/proofs/Add.lean $W/Add)"
+  row ASL.control_Add Verified "$(asl_v --proof examples/proofs/Add.lean --theorem Proof.correctness --theorem Proof.Witness.nonvacuous $W/Add)"
   for a in X1_shadow_toASL X3_plant_words X4_plant_corollary X5_elab_override X6_other_program X7_reserved_name; do
     row "ASL.$a" blocked "$(asl_v --proof audit/asl/attacks/$a.lean $W/Add)"
   done
