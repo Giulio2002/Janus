@@ -10,9 +10,9 @@ set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 t=$(mktemp -d "${TMPDIR:-/tmp}/test-nightly-objcache.XXXXXX"); trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
-repo="$t/repo"; mkdir -p "$repo/scripts/gate/lib" "$repo/validation/reference-models/sail-arm"; cd "$repo"
+repo="$t/repo"; mkdir -p "$repo/scripts/gate/lib" "$repo/scripts/build" "$repo/validation/reference-models/sail-arm"; cd "$repo"
 git init -q . && git config user.email t@t && git config user.name t
-cp "$root/scripts/gate/nightly-cold-gate.sh" scripts/; cp "$root/scripts/gate/gate-cachecmp.py" scripts/
+cp "$root/scripts/gate/nightly-cold-gate.sh" scripts/gate/; cp "$root/scripts/gate/gate-cachecmp.py" scripts/gate/
 cat > scripts/gate/gate.sh <<'S'
 #!/usr/bin/env bash
 out=""; while [ $# -gt 0 ]; do case "$1" in --out) out="$2"; shift 2 ;; *) shift ;; esac; done
@@ -35,7 +35,7 @@ cat > scripts/gate/lib/nightly-objaudit.sh <<'S'
 #!/usr/bin/env bash
 echo "objaudit $*" >> "$STUB/calls.log"; exit "$(cat "$STUB/audit.rc")"
 S
-chmod +x scripts/*.sh scripts/gate/lib/*.sh
+chmod +x scripts/gate/*.sh scripts/build/*.sh scripts/gate/lib/*.sh
 git add -A; git commit -qm stub
 run() {  # run MODE AUDIT_RC
   export STUB="$t/stub"; rm -rf "$STUB" "$t/work"; mkdir -p "$STUB"; echo "$1" > "$STUB/mode"; echo "$2" > "$STUB/audit.rc"
