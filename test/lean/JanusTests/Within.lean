@@ -101,6 +101,13 @@ example {lower : State → Nat} {entry : Nat} {args : List W64} {pre : State →
     (h : RunsAtLeastOnCall lower p entry args pre) : RunsAtLeastOnCall (fun s => lower s - 1) p entry args pre :=
   h.mono fun _ _ => Nat.sub_le _ _
 
+/-- Bound and correctness proved apart. -/
+example {bound : State → Nat} {entry : Nat} {args : List W64} {pre : State → Prop} {post : State → State → Prop}
+    (hw : EnsuresWithin bound p entry args pre (fun _ _ => True)) (he : Ensures p entry args pre post) :
+    EnsuresWithin bound p entry args pre post := hw.of_ensures he
+example {P Q : State → Prop} (h : ReturnsWithin n p s P) (hr : Returns p s Q) :
+    ReturnsWithin n p s (fun s' => P s' ∧ Q s') := h.and_returns hr
+
 end Lemmas
 
 end JanusTests.Within.Arm
@@ -152,5 +159,10 @@ example (x y : W64) (ret : Nat) (hret : RetAddr maxProg ret) (s : State)
       simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
       janus64_run
   trivial
+
+example {bound : Janus.Amd64.State → Nat} {p : Janus.Amd64.Program} {entry : Nat} {args : List W64}
+    {pre : Janus.Amd64.State → Prop} {post : Janus.Amd64.State → Janus.Amd64.State → Prop}
+    (hw : EnsuresWithin bound p entry args pre (fun _ _ => True)) (he : Ensures p entry args pre post) :
+    EnsuresWithin bound p entry args pre post := hw.of_ensures he
 
 end JanusTests.Within.Amd

@@ -822,6 +822,26 @@ theorem exact_count {post : State → Prop} (hl : RunsAtLeast k p s)
   subst this
   exact ⟨s', hs, hx, hp⟩
 
+/-- A bound and a plain return combine: the run is unique, so the state a `ReturnsWithin n` run reaches is the
+state the `Returns` run reaches, and satisfies both postconditions. -/
+theorem ReturnsWithin.and_returns {P Q : State → Prop} (h : ReturnsWithin n p s P) (hr : Returns p s Q) :
+    ReturnsWithin n p s (fun s' => P s' ∧ Q s') := by
+  obtain ⟨s', hr1, hp⟩ := h
+  obtain ⟨f, s'', hr2, hq⟩ := hr
+  have := Program.run_ok_unique hr1 hr2
+  cases this
+  exact ⟨s', hr1, hp, hq⟩
+
+/-- **Bound and correctness proved apart.** An `EnsuresWithin` theorem whose postcondition is trivial (proved by
+`janus_run` alone, fast) and an `Ensures` theorem with the real postcondition (the correctness proof, unchanged) give the
+`EnsuresWithin` theorem with the real postcondition. -/
+theorem EnsuresWithin.of_ensures {bound : State → Nat} {entry : Nat} {args : List W64}
+    {pre : State → Prop} {post : State → State → Prop}
+    (hw : EnsuresWithin bound p entry args pre (fun _ _ => True))
+    (he : Ensures p entry args pre post) : EnsuresWithin bound p entry args pre post :=
+  fun ret hret s hs hp =>
+    ((hw ret hret s hs hp).and_returns (he ret hret s hs hp)).post_mono fun _ ⟨⟨ha, _⟩, _, hq⟩ => ⟨ha, hq⟩
+
 /-- The bound claim implies the plain `Ensures` claim. -/
 theorem EnsuresWithin.ensures {bound : State → Nat} {entry : Nat} {args : List W64}
     {pre : State → Prop} {post : State → State → Prop}
