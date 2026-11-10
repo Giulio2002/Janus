@@ -15,9 +15,7 @@ theorem real (x y : BitVec 64) :
   all_goals split <;> first | rfl | omega
 
 def lenOf (s : State) : Nat :=
-  match Extracted.program.run 8 s with
-  | .ok (.returned s') => (s'.regs 0).toNat
-  | _ => 0
+  ((Extracted.program.run 8 s).toOption.map fun o => (o.state.regs 0).toNat).getD 0
 def Stmt (x y : BitVec 64) : Prop :=
   EnsuresWithin (fun s => lenOf s + 4) Extracted.program Extracted.entry [x, y] (fun _ => True) (fun _ s' => s'.regs 0 = if y.toNat < x.toNat then x else y)
 
