@@ -147,6 +147,16 @@ theorem atLeast : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extract
   ⟨ret, s0, (3), (5), hret, setup, trivial, Proof.atLeast (3) (5) ret hret s0 setup trivial⟩
 end Witness
 """)
+a("W6e_bound_in_local_def", "Expected-reason: the instruction bound mentions the execution of the program; the bound is hidden in a proof-local definition inside a visible EnsuresWithin (the audit expands it).", A_REAL + """
+def B (s : State) : Nat :=
+  match Extracted.program.run 8 s with
+  | .ok (.returned s') => (s'.regs 0).toNat + 4
+  | _ => 4
+
+theorem within (x y : BitVec 64) :
+    EnsuresWithin B Extracted.program Extracted.entry [x, y] (fun _ => True) %s :=
+  (real x y).mono_bound fun _ _ => by unfold B; split <;> omega
+""" % A_POST)
 a("W6a_defwrapped_with_witness", "Expected-reason: the statement does not mention Extracted.program or Extracted.entry. A def-wrapped EnsuresWithin statement is rejected exactly like a def-wrapped Ensures, even with a tied witness.", A_REAL + """
 def Stmt (x y : BitVec 64) : Prop :=
   EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun _ => True) %s
@@ -402,6 +412,17 @@ theorem atLeast (x y : BitVec 64) :
   obtain ⟨⟨-, hnw, hacc⟩, _⟩ := hpre
   simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
   janus64_run
+""")
+m("W5b_witness_has_no_run", "Expected-reason: the witness does not exhibit a RUN. Witness.within names the main `within` but states only a call state, no returning run.", M_REAL + """
+theorem within (x y : BitVec 64) :
+    EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] %s %s := real x y
+
+namespace Witness
+""" % (M_PRE, M_POST) + M_WIT + """
+theorem within : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (StackWritable s 0 8) :=
+  ⟨ret, s0, x, y, hret, setup, hpre⟩
+end Witness
 """)
 m("W6e_pre_in_local_def", "Expected-reason: the precondition constrains the memory word at the entry RSP; the precondition is hidden in a proof-local definition inside a visible EnsuresWithin (the audit expands it).", M_REAL + """
 def PreBad (s : State) : Prop := StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = 0

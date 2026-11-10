@@ -876,3 +876,7 @@ rounds/roundwithin/run-roundwithin.sh	amd64_W7_rsp_word	constrains the memory wo
 rounds/roundwithin/run-roundwithin.sh	amd64_W6b_defwrapped_rsp	the statement does not mention Extracted.program or Extracted.entry
 rounds/roundwithin/run-roundwithin.sh	amd64_W6e_pre_in_local_def	constrains the memory word at the entry `RSP`
 rounds/roundwithin/run-roundwithin.sh	amd64_W8_atleast_rsp	constrains the memory word at the entry `RSP`
+rounds/roundwithin/run-roundwithin.sh	W6e_bound_in_local_def	the statement has the instruction bound
+rounds/roundwithin/run-roundwithin.sh	W6e_bound_in_local_def	U-BOUND-PURE
+rounds/roundwithin/run-roundwithin.sh	amd64_W5b_witness_no_run	is not exhibited as a RUN
+rounds/roundwithin/run-roundwithin.sh	amd64_W5b_witness_no_run	U-WITNESS-RUN

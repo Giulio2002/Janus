@@ -21,6 +21,11 @@ rule is unchanged), so the result and framework caches rebuild once.
 - Examples: `Max` (arm64, amd64) gets `within` (N = 4) and `atLeast` (M = 3) with witnesses; `JanusTests.Within`;
   red-team round `test/redteam/rounds/roundwithin`.
 - `lakefile.toml` version 0.3.0 (it still said 0.1.0).
+- Known limitations: `janus verify --asl` transfers `Ensures` theorems only; an `EnsuresWithin` theorem is
+  rejected there ("not `Janus.GoABI.Ensures`"); derive the plain `Ensures` with `EnsuresWithin.ensures` and
+  transfer that. `janus_run` proves numeral bounds only (no state-dependent budget from a loop invariant), and
+  has no `calls`/`join` in bound goals. A def-wrapped `EnsuresWithin` statement is rejected like a def-wrapped
+  `Ensures` (the statement must mention `Extracted.program`).
 
 ## v0.2.0 (2026-11-10)
 

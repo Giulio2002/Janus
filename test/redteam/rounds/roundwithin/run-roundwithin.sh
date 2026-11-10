@@ -10,7 +10,7 @@
 #               W6   def-wrapped EnsuresWithin (rejected like a def-wrapped Ensures: the statement must mention Extracted.program), and parts
 #                    of a visible EnsuresWithin hidden in local defs (the bound of a run, the [RSP]-word precondition): the audit expands them
 #               W7/W8 the [RSP]-word rule on EnsuresWithin / RunsAtLeastOnCall
-# Usage: test/redteam/rounds/roundwithin/run-roundwithin.sh   (env: JANUS_AUDIT_BIN, JANUS_AUDIT_PREBUILT=1)   Exits 1 if a row differs.
+# Usage: test/redteam/rounds/roundwithin/run-roundwithin.sh   (env: JANUS_AUDIT_BIN, JANUS_AUDIT_PREBUILT=1, ROUNDWITHIN_ONLY=ROW-REGEX)   Exits 1 if a row differs.
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
@@ -45,6 +45,7 @@ isver() { # BLOCK: a verified block
 }
 runrow() { # LABEL EXPECT FILE ART THMS(comma) TARGET [extra janus flags]
   local label=$1 expect=$2 file=$3 art=$4 thms=$5 target=$6 fl=${7:-} t status="" out verdict
+  [ -z "${ROUNDWITHIN_ONLY:-}" ] || [[ "$label" =~ $ROUNDWITHIN_ONLY ]] || return 0   # ROUNDWITHIN_ONLY=REGEX: run only the matching rows (mutation tests)
   local -a targs=()
   for t in ${thms//,/ }; do targs+=(--theorem "Proof.$t"); done
   "$J" verify "$W/$art" --proof "$file" "${targs[@]}" --janus-root "$root" --no-result-cache $fl > "$W/$label.txt" 2>&1
@@ -82,6 +83,7 @@ runrow W5_untied_within+anw blocked $A/W5_untied_witness.lean Max correctness,wi
 runrow W5b_witness_no_run blocked $A/W5b_witness_has_no_run.lean Max within,Witness.within Witness.within
 runrow W5c_atleast_no_return blocked $A/W5c_atleast_witness_no_return.lean Max atLeast,Witness.atLeast Witness.atLeast
 runrow W6a_defwrapped_with_witness blocked $A/W6a_defwrapped_with_witness.lean Max within,Witness.within within
+runrow W6e_bound_in_local_def blocked $A/W6e_bound_in_local_def.lean Max within within
 runrow W6c_defwrapped_untied blocked $A/W6c_defwrapped_untied.lean Max within within
 runrow W6d_defwrapped_run_bound blocked $A/W6d_defwrapped_bound_of_run.lean Max within within
 echo "== amd64"
@@ -93,6 +95,7 @@ runrow amd64_W3_offbyone_within blocked $A/amd64_W3_offbyone_within3.lean Max64 
 runrow amd64_W3b_offbyone_atleast blocked $A/amd64_W3b_offbyone_atleast4.lean Max64 atLeast atLeast
 runrow amd64_W4_faulting_pre blocked $A/amd64_W4_lower_bound_faulting_pre.lean LoadField64 atLeast0,Witness.atLeast0 Witness.atLeast0
 runrow amd64_W5_untied_within blocked $A/amd64_W5_untied_witness.lean Max64 correctness,within,Witness.nonvacuous within
+runrow amd64_W5b_witness_no_run blocked $A/amd64_W5b_witness_has_no_run.lean Max64 within,Witness.within Witness.within
 runrow amd64_W5c_atleast_no_return blocked $A/amd64_W5c_atleast_witness_no_return.lean Max64 atLeast,Witness.atLeast Witness.atLeast
 runrow amd64_W7_rsp_word blocked $A/amd64_W7_rsp_word_in_pre.lean Max64 within within
 runrow amd64_W6b_defwrapped_rsp blocked $A/amd64_W6b_defwrapped_rsp_word.lean Max64 within within
