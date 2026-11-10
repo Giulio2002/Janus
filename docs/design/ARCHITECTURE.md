@@ -301,3 +301,18 @@ change the result it reports:
   audit and the replay.
 
 [AUDIT.md](../audit/AUDIT.md) describes the attacks this arrangement was built against.
+
+## Three design decisions that carry the soundness argument
+
+(Moved from the top-level README.)
+
+* **Decoding happens in Lean.** The extractor never translates an instruction. It copies 32-bit words
+  (arm64) or raw bytes (amd64) from `.text`; Lean decodes them on every step. Its reachability and
+  data-reference analysis only decide *what* to copy: a miss makes a proof impossible (`noCode`,
+  `outsideAllocation`), never a false theorem provable.
+* **Nothing is undefined.** Every step yields a state or a named `Fault`. Memory is a list of
+  caller-granted regions below `2^48`; any access outside them faults. Words outside the supported
+  subset fault as `undecodable` instead of getting a guessed meaning.
+* **The return is to *any* caller.** Specifications quantify over every admissible return address,
+  so only a genuine `RET` through the caller's link register counts as returning, and a computed
+  jump to a fixed address cannot fake one.

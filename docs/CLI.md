@@ -16,6 +16,24 @@ Invalid: artifacts/Get/Extracted.lean was modified after extraction: SHA-256 6ab
 
 Paths under the working directory are shown relative to it.
 
+## Command summary
+
+| Command | Purpose |
+|---|---|
+| `janus list <binary>` | List the functions of a Go ELF binary (from `.symtab`, or `.gopclntab` if stripped) |
+| `janus extract <binary> <symbol> <outdir>` | Copy the function, its reachable callees and the read-only data they load into `Extracted.lean` + `identity.json`; `--contract SYM` leaves runtime functions out as contracts |
+| `janus check <outdir>` | Re-extract in memory and byte-compare with the saved artifacts, without running Lean |
+| `janus verify <outdir> --proof FILE` | Check, sandboxed build, audit, kernel replay; writes `verified.json` |
+| `janus verify-batch <requests.json>` | Verify many requests against one consumer-package snapshot |
+| `janus explain <verified.json \| outdir>` | Human-readable account of what was proved, and whether every hashed file still matches |
+| `janus blockers <binary> <symbol>...` | Which copied words the Lean decoder rejects (arm64): is a function in the supported subset? |
+| `janus init <dir>` | Scaffold a consumer Lake package pinned to this binary's framework |
+| `janus framework` | Which Janus Lean framework this binary carries (source, SHA-256, revision) |
+
+Every command exits `0` on success and `1` on failure. Rejections print `Invalid:` with the failing
+`Stage:` and a `Next:` hint; `verify` withdraws any previous `verified.json` first, so a failed run
+leaves none.
+
 ## Build
 
 ```sh
