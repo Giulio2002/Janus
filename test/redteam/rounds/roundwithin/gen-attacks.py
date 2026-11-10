@@ -443,7 +443,7 @@ def Stmt (x y : BitVec 64) : Prop :=
 theorem within (x y : BitVec 64) : Stmt x y :=
   real x y |>.mono (fun _ h => h.1) (fun _ _ _ h => h)
 """ % M_POST)
-m("W8_atleast_rsp_word", "Expected-reason: the precondition constrains the memory word at the entry RSP (RunsAtLeastOnCall's precondition is scanned too).", """
+m("W8_atleast_rsp_word", "Expected-reason: the precondition constrains the memory word at the entry RSP (RunsAtLeastOnCall's precondition is scanned too).", M_REAL + """
 theorem atLeast (x y : BitVec 64) :
     RunsAtLeastOnCall (fun _ => 3) Extracted.program Extracted.entry [x, y]
       (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = s.mem.readLE (s.regs regSP).toNat 8) := by
@@ -452,7 +452,7 @@ theorem atLeast (x y : BitVec 64) :
   obtain ⟨⟨-, hnw, hacc⟩, _⟩ := hpre
   simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
   janus64_run
-"
+
 namespace Witness
 """ + M_WIT + """
 theorem atLeast : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
