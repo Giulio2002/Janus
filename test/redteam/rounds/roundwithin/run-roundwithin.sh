@@ -74,7 +74,7 @@ runrow W9_state_bound_ctl verified $A/W9_state_dependent_bound_control.lean Max 
 runrow W1_unsat_pre blocked $A/W1_unsat_pre.lean Max within within
 runrow W1_unsat_pre+anw blocked $A/W1_unsat_pre.lean Max within within --allow-no-witness
 runrow W1b_witness_drops_pre blocked $A/W1b_unsat_pre_witness_drops_pre.lean Max within,Witness.within Witness.within
-runrow W2_bound_of_run blocked $A/W2_bound_depends_on_post.lean Max within within
+runrow W2_bound_of_run blocked $A/W2_bound_depends_on_post.lean Max within,Witness.within within
 runrow W3_offbyone_within blocked $A/W3_offbyone_within3.lean Max within within
 runrow W3b_offbyone_atleast blocked $A/W3b_offbyone_atleast4.lean Max atLeast atLeast
 runrow W4_faulting_pre blocked $A/W4_lower_bound_faulting_pre.lean LoadField atLeast0,Witness.atLeast0 Witness.atLeast0
@@ -83,24 +83,24 @@ runrow W5_untied_within+anw blocked $A/W5_untied_witness.lean Max correctness,wi
 runrow W5b_witness_no_run blocked $A/W5b_witness_has_no_run.lean Max within,Witness.within Witness.within
 runrow W5c_atleast_no_return blocked $A/W5c_atleast_witness_no_return.lean Max atLeast,Witness.atLeast Witness.atLeast
 runrow W6a_defwrapped_with_witness blocked $A/W6a_defwrapped_with_witness.lean Max within,Witness.within within
-runrow W6e_bound_in_local_def blocked $A/W6e_bound_in_local_def.lean Max within within
+runrow W6e_bound_in_local_def blocked $A/W6e_bound_in_local_def.lean Max within,Witness.within within
 runrow W6c_defwrapped_untied blocked $A/W6c_defwrapped_untied.lean Max within within
 runrow W6d_defwrapped_run_bound blocked $A/W6d_defwrapped_bound_of_run.lean Max within within
 echo "== amd64"
 runrow amd64_W6a_defwrapped_with_witness blocked $A/amd64_W6a_defwrapped_with_witness.lean Max64 within,Witness.within within
 runrow amd64_W1_unsat_pre blocked $A/amd64_W1_unsat_pre.lean Max64 within within
 runrow amd64_W1b_witness_drops blocked $A/amd64_W1b_unsat_pre_witness_drops_pre.lean Max64 within,Witness.within Witness.within
-runrow amd64_W2_bound_of_run blocked $A/amd64_W2_bound_depends_on_post.lean Max64 within within
+runrow amd64_W2_bound_of_run blocked $A/amd64_W2_bound_depends_on_post.lean Max64 within,Witness.within within
 runrow amd64_W3_offbyone_within blocked $A/amd64_W3_offbyone_within3.lean Max64 within within
 runrow amd64_W3b_offbyone_atleast blocked $A/amd64_W3b_offbyone_atleast4.lean Max64 atLeast atLeast
 runrow amd64_W4_faulting_pre blocked $A/amd64_W4_lower_bound_faulting_pre.lean LoadField64 atLeast0,Witness.atLeast0 Witness.atLeast0
 runrow amd64_W5_untied_within blocked $A/amd64_W5_untied_witness.lean Max64 correctness,within,Witness.nonvacuous within
 runrow amd64_W5b_witness_no_run blocked $A/amd64_W5b_witness_has_no_run.lean Max64 within,Witness.within Witness.within
 runrow amd64_W5c_atleast_no_return blocked $A/amd64_W5c_atleast_witness_no_return.lean Max64 atLeast,Witness.atLeast Witness.atLeast
-runrow amd64_W7_rsp_word blocked $A/amd64_W7_rsp_word_in_pre.lean Max64 within within
+runrow amd64_W7_rsp_word blocked $A/amd64_W7_rsp_word_in_pre.lean Max64 within,Witness.within within
 runrow amd64_W6b_defwrapped_rsp blocked $A/amd64_W6b_defwrapped_rsp_word.lean Max64 within within
-runrow amd64_W6e_pre_in_local_def blocked $A/amd64_W6e_pre_in_local_def.lean Max64 within within
-runrow amd64_W8_atleast_rsp blocked $A/amd64_W8_atleast_rsp_word.lean Max64 atLeast atLeast
+runrow amd64_W6e_pre_in_local_def blocked $A/amd64_W6e_pre_in_local_def.lean Max64 within,Witness.within within
+runrow amd64_W8_atleast_rsp blocked $A/amd64_W8_atleast_rsp_word.lean Max64 atLeast,Witness.atLeast atLeast
 echo
 if [ ${#broken[@]} -gt 0 ]; then echo "round within: BROKEN rows: ${broken[*]}"; exit 1; fi
 echo "round within: all rows as expected"
