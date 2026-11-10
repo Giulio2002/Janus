@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.0 (unreleased)
+## v0.2.0 (2026-11-10)
 
 Repository restructure and an arm64 host-build fix. **No Lean API, auditor rule, gate, red-team
 expectation or safety check changed.** Lean module names (`Janus.*`, `JanusTests.*`, `Oracle.*`) are
