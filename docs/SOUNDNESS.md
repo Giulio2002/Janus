@@ -839,6 +839,8 @@ instructions on the paths taken from states satisfying `pre`.
 | `GrowsStack p s` | the run reaches `runtime.morestack*` |
 | `Kernel.Traps p s` (`Amd64.Kernel.Traps`) | the run reaches a trap instruction (`BRK`, `UDF`; `INT3`, `UD2`, `HLT`): a `.trap` stub whose word is a trap, which executed faults with `Fault.trap` (`SIGTRAP`, `SIGILL`, `SIGSEGV`) |
 | `Kernel.ReturnsK p E post onExit s k` | every run from `s` with kernel state `k` returns satisfying `post` (or ends the process with `exit_group`, satisfying `onExit`), where each system call, environment read and vDSO clock call has **any** result its contract allows (see "The kernel trust boundary") |
+| `ReturnsWithin n p s post` | like `Returns`, and the run executes at most `n` instructions: `∃ s', p.run (n + 1) s = .ok (.returned s') ∧ post s'` |
+| `RunsAtLeast m p s` | the run is still going after `m` instructions: `p.run m s = .error .outOfFuel` (`m` instructions executed without a fault, a stub or the return) |
 | `GoReturns p C s Q` / `EnsuresGo` | Go-level outcome (`Janus/GoABI.lean`): the run returns (`.returned s'`) or **panics with an interface value** (`.panicked v s'`: it stops at a panic stub, a faulting instruction or a frame exit that the classification `C` names, with the value `C` assigns); `Ensures.toGo` embeds every `Ensures` with no panic |
 
 On real hardware every model fault is a crash or a Go panic: a memory fault is `SIGSEGV`, which
@@ -850,6 +852,53 @@ panics" must exclude faults, and it does. `Returns` implies `NeverPanics`
 memory, code and instruction subset the theorem grants; on hardware that access may hit another
 mapping (memory the caller did not grant) rather than trap. Read `Faults` as "the function
 needs more than the precondition provides", not as a guarantee of a hardware trap.
+
+### Instruction-count bounds (`ReturnsWithin`, `EnsuresWithin`, `RunsAtLeast`, `RunsAtLeastOnCall`)
+
+`GoABI.EnsuresWithin bound p entry args pre post` is `Ensures` with a budget: for every admissible
+`ret` and call state `s` meeting `pre`, `(p.withExit ret).run (bound s + 1) s` returns `s'` with
+`ABIReturn s s'` and `post s s'` (`EnsuresWithin.ensures` is the plain `Ensures`).
+`GoABI.RunsAtLeastOnCall lower p entry args pre` is its lower-bound companion: for every such `s`,
+`(p.withExit ret).run (lower s) s = .error .outOfFuel`. Both exist for both ISAs
+(`Janus.GoABI`, `Janus.Amd64.GoABI`); kernel-checked lemmas: `ReturnsWithin.returns`, `.mono`
+(`n ≤ n'`), `.post_mono`, `Returns.within`, `RunsAtLeast.mono`, `RunsAtLeast.le_of_returnsWithin`
+(`m ≤ n`), `exact_count` (`RunsAtLeast k ∧ ReturnsWithin k` give exactly `k` ordinary steps to the
+return), `EnsuresWithin.ensures`/`.mono_bound`/`.mono`, `RunsAtLeastOnCall.mono`; `Program.run_mono`
+is the fuel monotonicity they rest on.
+
+**What the number is.** The unit is the **instructions executed by the model**: the fuel of
+`Program.run`, one per instruction of the extracted code, the final `RET` included (`Max` returns
+after 3 or 4 instructions). It is **not** a cycle count: the model has no timing, no pipeline, no
+caches, no branch prediction. A cycle figure for a given microarchitecture can only be derived
+outside the proof (the bound times a worst-case cycles per instruction), and is not a claim of this
+framework. **Runtime-call stubs are not counted**: a call that reaches a stub or a contract ends the
+run of `Program.run` at that stub (`.stub`, not `.returned`), so a bound is only claimed for runs
+that return, and the instructions a contract stands for (an allocator, a map operation) are not part
+of the number; a function that makes such calls has a bound on its own instructions only when its
+proof steps through the callees with `Summary`s, which hide their counts: `janus_run` does not
+support `calls` in a bound goal. Loop-free code that makes no runtime call (`Add`) has an exact,
+path-by-path number. A loop needs a state-dependent `bound s` (for example in a length argument) that
+the proof's invariant justifies; `janus_run` proves only numeral bounds (see PROOFS.md).
+
+**A lower bound is not a speed claim by itself.** `RunsAtLeast m` also holds of a state whose run
+faults or panics after `m` instructions, and `m = 0` holds of every state. `RunsAtLeastOnCall` is
+therefore verified only together with a tied witness that contains the `RunsAtLeast` conjunct **and a
+returning run** (`Returns`/`ReturnsWithin`) from the same state: a precondition that admits only
+faulting calls cannot carry a lower bound.
+
+**Audit rules (v0.3.0, nothing existing was weakened).** `EnsuresWithin` is an `Ensures`-family
+main theorem: its statement must mention `Extracted.program`/`Extracted.entry`, and the same
+contract, call-site, binder and size-variable rules apply (it unfolds, through proof-local
+definitions too, to the same `∀ ret, RetAddr … → ∀ s, CallSetup … → pre s → …` shape); its
+precondition is scanned by the `[RSP]`-word rule like an `Ensures`'s; `ReturnsWithin` and
+`RunsAtLeast` are run claims (a statement that reaches them is never "run-free"); and every such
+theorem needs a witness tied to it by name (`Witness.within` for `within`, strict pairing),
+like any main theorem. The tied witness of an `EnsuresWithin` main states its returning run with
+`Returns` or with `ReturnsWithin` (of any bound: the bound itself is a universal property the kernel
+checks, non-vacuity only needs some returning run from a state meeting the precondition). The
+instruction bound (`bound`, `lower`) must be a function of the call state: it may not mention the
+execution of the program (`Program.run`, a `step`/`exec`/`run` function, a `Returns`-style
+claim), which would make the budget depend on the outcome it bounds (U-BOUND-PURE).
 
 ### The return address
 

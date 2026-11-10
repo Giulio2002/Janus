@@ -1866,6 +1866,31 @@ def reachesRunClaim (env : Environment) (e : Expr) : Bool := Id.run do
 
 
 
+/-- Instruction-count bounds (v0.3.0): the `bound` of every `EnsuresWithin bound p entry args pre post` and the `lower` of every
+`RunsAtLeastOnCall lower p entry args pre` in `e`. -/
+partial def boundArgs (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
+  let isEW := e.getAppFn.constName?.any fun n => n == `Janus.GoABI.EnsuresWithin || n == `Janus.Amd64.GoABI.EnsuresWithin
+  let isRL := e.getAppFn.constName?.any fun n => n == `Janus.GoABI.RunsAtLeastOnCall || n == `Janus.Amd64.GoABI.RunsAtLeastOnCall
+  let acc := if (isEW && e.getAppNumArgs == 6) || (isRL && e.getAppNumArgs == 5) then acc.push (e.getArg! 0) else acc
+  match e with
+  | .app f a => boundArgs a (boundArgs f acc)
+  | .lam _ d b _ | .forallE _ d b _ => boundArgs b (boundArgs d acc)
+  | .letE _ ty v b _ => boundArgs b (boundArgs v (boundArgs ty acc))
+  | .mdata _ b | .proj _ _ b => boundArgs b acc
+  | _ => acc
+
+/-- U-BOUND-PURE (v0.3.0): the instruction bound of an `EnsuresWithin` / `RunsAtLeastOnCall` is a function of the call state:
+it may not reach the execution of the program (`Program.run`, a machine `step`/`exec`/`run` function, a `Returns`-style claim, an
+opaque or axiom: `reachesRunClaim`). A budget computed from the final state of a run (`fun s => (run s).regs 0 + 4`) depends on the
+post-state it bounds. `e` is the statement with the proof-local definitions expanded, so a def-wrapped bound is seen. -/
+def checkBoundPure (e : Expr) : MetaM (Option String) := do
+  let env ← getEnv
+  for b in boundArgs e do
+    if reachesRunClaim env b then
+      let s := (← try Meta.ppExpr b catch _ => pure "?").pretty 300
+      return some s!"has the instruction bound `{s}`, which mentions the execution of the program (`Program.run`, a step or run function, a `Returns`-style claim, an axiom or an opaque definition): an instruction bound must be a function of the call state alone, not of the outcome it bounds (U-BOUND-PURE)"
+  return none
+
 /-- UP3c: `runFree` binders: every binder of the statement is a plain machine datum (`BitVec`, `Nat`, `Int`, `Bool`, `UInt*`): no `Prop`
 hypothesis and no binder over a type that may be empty (`PLift`, `Fin 0`, subtypes, sums, …), which would make the statement vacuous. -/
 def runFreeBinders (t : Expr) : Bool :=
@@ -2675,6 +2700,10 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     -- round 10 V1: contract hypotheses quantify the runtime
     if let some m ← checkContractHyps expanded main then
       throwError s!"the statement {m}"
+    -- instruction-count bounds: the bound is a function of the call state (U-BOUND-PURE)
+    if main then
+      if let some m ← checkBoundPure expanded then
+        throwError s!"the statement {m}"
     -- the amd64 undefined-value stream (BSF/BSR of zero) is never pinned by a statement
     -- role-based, never name-prefix based (round 14 reconciliation): only a theorem whose role is exactly
     -- `Witness.nonvacuous` / `Witness.returns` AND that is not the main theorem (`main` is the role verdict

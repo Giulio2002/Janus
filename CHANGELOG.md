@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.3.0 (unreleased)
+
+Instruction-count bounds. **Auditor change** (new accepted statement shapes and one new rule; every existing
+rule is unchanged), so the result and framework caches rebuild once.
+
+- `GoABI.ReturnsWithin`, `RunsAtLeast`, `EnsuresWithin`, `RunsAtLeastOnCall` (arm64 `Janus/GoABI.lean`,
+  amd64 `Janus/Amd64/GoABI.lean`): at most `n` / at least `m` instructions executed by the model
+  (`Program.run` fuel; not CPU cycles; runtime-call stubs are not counted). Kernel-checked lemmas
+  (no axiom, `sorry` or `native_decide`): `ReturnsWithin.returns`, `.mono`, `.post_mono`, `Returns.within`,
+  `RunsAtLeast.mono`, `RunsAtLeast.le_of_returnsWithin`, `exact_count`, `EnsuresWithin.ensures`,
+  `.mono_bound`, `.mono`, `RunsAtLeastOnCall.mono`.
+- `janus_run` / `janus64_run` prove `ReturnsWithin n` and `RunsAtLeast m` goals by fuel-counted stepping
+  (`ReachesW`, `Going`; a bound one too small or too large is not provable and the tactic says so).
+- Auditor: `EnsuresWithin` is an Ensures-family main (same Extracted.program mention, contract, call-site,
+  binder and `[RSP]`-word rules; through def-wrapped statements too); `ReturnsWithin`/`RunsAtLeast` are run
+  claims; the tied witness of an `EnsuresWithin` main may use `Returns` or `ReturnsWithin`; a
+  `RunsAtLeastOnCall` witness must also contain a returning run from the same state; the instruction bound
+  may not mention the execution of the program (U-BOUND-PURE).
+- Examples: `Max` (arm64, amd64) gets `within` (N = 4) and `atLeast` (M = 3) with witnesses; `JanusTests.Within`;
+  red-team round `test/redteam/rounds/roundwithin`.
+- `lakefile.toml` version 0.3.0 (it still said 0.1.0).
+
 ## v0.2.0 (2026-11-10)
 
 Repository restructure and an arm64 host-build fix. **No Lean API, auditor rule, gate, red-team

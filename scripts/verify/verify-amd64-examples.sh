@@ -33,7 +33,7 @@ verify_function() {
   local f=$1 st i
   local -a thms=(Proof.correctness)
   local thm
-  for thm in panics exact outOfRange faults forAllValues; do
+  for thm in panics exact outOfRange faults forAllValues within atLeast; do
     if grep -q "^theorem $thm" "examples/proofs-amd64/$f/Proof.lean"; then thms+=("Proof.$thm" "Proof.Witness.$thm"); fi
   done
   if grep -q '^namespace Witness' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.Witness.nonvacuous); grep -q '^theorem returns' "examples/proofs-amd64/$f/Proof.lean" && thms+=(Proof.Witness.returns); fi

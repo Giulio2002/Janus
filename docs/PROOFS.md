@@ -1037,6 +1037,48 @@ theorem correctness (P : PanicRuntime) (x etyp edata : BitVec 64) :
   call state) and `Proof.Witness.returns` applies the theorem to it; both are verified by
   `scripts/verify/verify-examples.sh` when the proof has a `namespace Witness`.
 
+### Instruction-count bounds (`Max`)
+
+`EnsuresWithin` (upper bound) and `RunsAtLeastOnCall` (lower bound) state how many instructions of the
+extracted code a call executes. The unit is **instructions of the model**, not cycles (see
+SOUNDNESS.md, "Instruction-count bounds"). `examples/proofs/Max.lean` and
+`examples/proofs-amd64/Max/Proof.lean` state, next to `correctness`:
+
+```lean
+/-- SPEED: every call returns after executing at most 4 instructions. -/
+theorem within (x y : BitVec 64) :
+    EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun _ => True)
+      (fun _ s' => s'.regs 0 = if y.toNat < x.toNat then x else y) := by
+  intro ret hret s hs _
+  janus_intro hs
+  janus_run              -- ReturnsWithin goal: the fuel is the numeral 4 + 1, each step consumes one unit
+  all_goals split <;> first | rfl | omega
+
+/-- SPEED (lower bound): every call executes at least 3 instructions. -/
+theorem atLeast (x y : BitVec 64) :
+    RunsAtLeastOnCall (fun _ => 3) Extracted.program Extracted.entry [x, y] (fun _ => True) := by
+  intro ret hret s hs _
+  janus_intro hs
+  janus_run              -- RunsAtLeast goal: every branch must execute 3 instructions without returning
+```
+
+`janus_run` (`janus64_run` on amd64) accepts `ReturnsWithin n p s post` and `RunsAtLeast m p s` goals.
+The bound must evaluate to a numeral (`fun _ => 4`, or `fun s => 2 + 2`; literal arithmetic is
+evaluated). For `ReturnsWithin` the longest path decides: if a path needs more than `n` instructions the
+tactic stops with "the bound is too small" (off-by-one: `Max` needs `4`, not `3`). For `RunsAtLeast` the
+shortest path decides: a path that returns earlier stops it with "the bound is too large". `calls [...]`
+and `join` are not available in a bound goal (a callee summary hides its instruction count). The
+straight-line or branching, loop-free case is therefore exact: the longest and the shortest path over
+the aliasing cases give `N` and `M`. Lemmas for the rest of a proof: `ReturnsWithin.mono`
+(a larger budget is a bound), `ReturnsWithin.returns`, `EnsuresWithin.ensures` (the plain `Ensures`),
+`exact_count` (`RunsAtLeast k` and `ReturnsWithin k` give exactly `k` steps).
+
+Both theorems need witnesses like every main theorem, paired by name: `Witness.within` is
+`∃ ret s x y, RetAddr … ∧ CallSetup … ∧ <pre> ∧ ReturnsWithin 4 … (fun s' => ABIReturn s s' ∧ <post>)`
+(a plain `Returns` is accepted too), and `Witness.atLeast` is `∃ …, <pre> ∧ RunsAtLeast 3 … s ∧ Returns … s …`:
+the lower bound needs a returning run from the same state. The example scripts verify
+`Proof.within`, `Proof.atLeast` and both witnesses with `Proof.correctness`.
+
 ### Counterexamples (`WrongAdd`)
 
 `scripts/archive/break-demo.sh` changes `x + y` to `x - y` in a copy of the Go source, rebuilds,
