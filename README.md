@@ -106,7 +106,7 @@ The first `verify` builds the embedded framework once under `~/.cache/janus`. Ne
 
 ## What a Verified result means
 
-A `Verified:` line means the printed statement, with its hypotheses and quantifiers, holds for the exact bytes of this binary under the Lean model. The kernel checks the proof, **not whether the statement says what you meant**: read the statement, and beware an unsatisfiable precondition (the theorem is then vacuous).
+A `Verified:` line means the printed statement, with its hypotheses and quantifiers, holds for the exact bytes of this binary under the Lean model. The kernel checks the proof, **not whether the statement says what you meant**: read the statement. Janus refuses a theorem that comes without a kernel-checked witness that its precondition can be met and the code really returns, so a claim cannot be vacuously true.
 
 It says nothing about another build or compiler version, timing and side channels, concurrency (the model is single-threaded), or instructions outside the modelled subset (these fault as `undecodable`). You trust the ISA models (tested against qemu, Arm's Sail model, TestFloat and real x86 hardware, with 0 mismatches: [docs/MODEL-VALIDATION.md](docs/MODEL-VALIDATION.md)), the byte copy and the verifier. The proof file is not trusted.
 
