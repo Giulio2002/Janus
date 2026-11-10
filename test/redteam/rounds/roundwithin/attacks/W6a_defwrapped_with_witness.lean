@@ -1,6 +1,6 @@
 import Extracted
 
-/-! Control: a def-wrapped EnsuresWithin statement with its tied witness is accepted (definitional wrappers are expanded like a def-wrapped Ensures). -/
+/-! Expected-reason: the statement does not mention Extracted.program or Extracted.entry. A def-wrapped EnsuresWithin statement is rejected exactly like a def-wrapped Ensures, even with a tied witness. -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 

@@ -1,7 +1,7 @@
 import Janus
 import Extracted
 
-/-! Control: a def-wrapped EnsuresWithin with its tied witness is accepted. -/
+/-! Expected-reason: the statement does not mention Extracted.program or Extracted.entry (def-wrapped EnsuresWithin). -/
 
 namespace Proof
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Float

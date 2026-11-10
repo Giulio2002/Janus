@@ -836,3 +836,43 @@ rounds/round15/run-round15.sh	N7:correctness	Proof.correctness assumes runtime c
 rounds/round15/run-round15.sh	N7:correctness	does not bypass this and is ignored
 rounds/round15/run-round15.sh	N7b:correctness	Audit-only:
 rounds/round15/run-round15.sh	N7b:correctness	NOT A VERIFICATION
+rounds/roundwithin/run-roundwithin.sh	W1_unsat_pre	has no kernel-checked non-vacuity witness verified in this run
+rounds/roundwithin/run-roundwithin.sh	W1_unsat_pre+anw	has no kernel-checked non-vacuity witness verified in this run
+rounds/roundwithin/run-roundwithin.sh	W1b_witness_drops_pre	does not instantiate any main theorem of the proof module
+rounds/roundwithin/run-roundwithin.sh	W1b_witness_drops_pre	the premise `Eq (s.regs 0) 1` is not among the conjuncts of the witness
+rounds/roundwithin/run-roundwithin.sh	W2_bound_of_run	the statement has the instruction bound
+rounds/roundwithin/run-roundwithin.sh	W2_bound_of_run	U-BOUND-PURE
+rounds/roundwithin/run-roundwithin.sh	W3_offbyone_within	Lean rejected the proof
+rounds/roundwithin/run-roundwithin.sh	W3_offbyone_within	the bound is too small
+rounds/roundwithin/run-roundwithin.sh	W3b_offbyone_atleast	Lean rejected the proof
+rounds/roundwithin/run-roundwithin.sh	W3b_offbyone_atleast	the bound is too large
+rounds/roundwithin/run-roundwithin.sh	W4_faulting_pre	is not exhibited with a RETURNING run
+rounds/roundwithin/run-roundwithin.sh	W4_faulting_pre	U-WITNESS-RUN
+rounds/roundwithin/run-roundwithin.sh	W5_untied_within	Proof.within has no kernel-checked non-vacuity witness verified in this run
+rounds/roundwithin/run-roundwithin.sh	W5_untied_within+anw	Proof.within has no kernel-checked non-vacuity witness verified in this run
+rounds/roundwithin/run-roundwithin.sh	W5b_witness_no_run	is not exhibited as a RUN
+rounds/roundwithin/run-roundwithin.sh	W5b_witness_no_run	U-WITNESS-RUN
+rounds/roundwithin/run-roundwithin.sh	W5c_atleast_no_return	is not exhibited with a RETURNING run
+rounds/roundwithin/run-roundwithin.sh	W5c_atleast_no_return	U-WITNESS-RUN
+rounds/roundwithin/run-roundwithin.sh	W6a_defwrapped_with_witness	the statement does not mention Extracted.program or Extracted.entry
+rounds/roundwithin/run-roundwithin.sh	W6c_defwrapped_untied	the statement does not mention Extracted.program or Extracted.entry
+rounds/roundwithin/run-roundwithin.sh	W6d_defwrapped_run_bound	the statement does not mention Extracted.program or Extracted.entry
+rounds/roundwithin/run-roundwithin.sh	amd64_W6a_defwrapped_with_witness	the statement does not mention Extracted.program or Extracted.entry
+rounds/roundwithin/run-roundwithin.sh	amd64_W1_unsat_pre	has no kernel-checked non-vacuity witness verified in this run
+rounds/roundwithin/run-roundwithin.sh	amd64_W1b_witness_drops	does not instantiate any main theorem of the proof module
+rounds/roundwithin/run-roundwithin.sh	amd64_W1b_witness_drops	is not among the conjuncts of the witness
+rounds/roundwithin/run-roundwithin.sh	amd64_W2_bound_of_run	the statement has the instruction bound
+rounds/roundwithin/run-roundwithin.sh	amd64_W2_bound_of_run	U-BOUND-PURE
+rounds/roundwithin/run-roundwithin.sh	amd64_W3_offbyone_within	Lean rejected the proof
+rounds/roundwithin/run-roundwithin.sh	amd64_W3_offbyone_within	the bound is too small
+rounds/roundwithin/run-roundwithin.sh	amd64_W3b_offbyone_atleast	Lean rejected the proof
+rounds/roundwithin/run-roundwithin.sh	amd64_W3b_offbyone_atleast	the bound is too large
+rounds/roundwithin/run-roundwithin.sh	amd64_W4_faulting_pre	is not exhibited with a RETURNING run
+rounds/roundwithin/run-roundwithin.sh	amd64_W4_faulting_pre	U-WITNESS-RUN
+rounds/roundwithin/run-roundwithin.sh	amd64_W5_untied_within	Proof.within has no kernel-checked non-vacuity witness verified in this run
+rounds/roundwithin/run-roundwithin.sh	amd64_W5c_atleast_no_return	is not exhibited with a RETURNING run
+rounds/roundwithin/run-roundwithin.sh	amd64_W5c_atleast_no_return	U-WITNESS-RUN
+rounds/roundwithin/run-roundwithin.sh	amd64_W7_rsp_word	constrains the memory word at the entry `RSP`
+rounds/roundwithin/run-roundwithin.sh	amd64_W6b_defwrapped_rsp	the statement does not mention Extracted.program or Extracted.entry
+rounds/roundwithin/run-roundwithin.sh	amd64_W6e_pre_in_local_def	constrains the memory word at the entry `RSP`
+rounds/roundwithin/run-roundwithin.sh	amd64_W8_atleast_rsp	constrains the memory word at the entry `RSP`

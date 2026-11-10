@@ -10,10 +10,8 @@ theorem atLeast (x y : BitVec 64) :
     RunsAtLeastOnCall (fun _ => 3) Extracted.program Extracted.entry [x, y]
       (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = 0) := by
   intro ret hret s hs hpre
-  obtain ⟨hpre, _⟩ := hpre
-  intro ret hret s hs hpre
   janus64_intro hs
-  obtain ⟨-, hnw, hacc⟩ := hpre
+  obtain ⟨⟨-, hnw, hacc⟩, _⟩ := hpre
   simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
   janus64_run
 

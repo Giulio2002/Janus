@@ -147,7 +147,7 @@ theorem atLeast : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extract
   ⟨ret, s0, (3), (5), hret, setup, trivial, Proof.atLeast (3) (5) ret hret s0 setup trivial⟩
 end Witness
 """)
-a("W6a_defwrapped_control", "Control: a def-wrapped EnsuresWithin statement with its tied witness is accepted (definitional wrappers are expanded like a def-wrapped Ensures).", A_REAL + """
+a("W6a_defwrapped_with_witness", "Expected-reason: the statement does not mention Extracted.program or Extracted.entry. A def-wrapped EnsuresWithin statement is rejected exactly like a def-wrapped Ensures, even with a tied witness.", A_REAL + """
 def Stmt (x y : BitVec 64) : Prop :=
   EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun _ => True) %s
 
@@ -364,7 +364,7 @@ theorem atLeast : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extract
   ⟨ret, s0, x, y, hret, setup, hpre, Proof.atLeast x y ret hret s0 setup hpre⟩
 end Witness
 """)
-m("W6a_defwrapped_control", "Control: a def-wrapped EnsuresWithin with its tied witness is accepted.", M_REAL + """
+m("W6a_defwrapped_with_witness", "Expected-reason: the statement does not mention Extracted.program or Extracted.entry (def-wrapped EnsuresWithin).", M_REAL + """
 def Stmt (x y : BitVec 64) : Prop :=
   EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] %s %s
 
@@ -398,8 +398,19 @@ theorem atLeast (x y : BitVec 64) :
     RunsAtLeastOnCall (fun _ => 3) Extracted.program Extracted.entry [x, y]
       (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = 0) := by
   intro ret hret s hs hpre
-  obtain ⟨hpre, _⟩ := hpre
-%s""" % M_TAC)
+  janus64_intro hs
+  obtain ⟨⟨-, hnw, hacc⟩, _⟩ := hpre
+  simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
+  janus64_run
+""")
+m("W6e_pre_in_local_def", "Expected-reason: the precondition constrains the memory word at the entry RSP; the precondition is hidden in a proof-local definition inside a visible EnsuresWithin (the audit expands it).", M_REAL + """
+def PreBad (s : State) : Prop := StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = 0
+
+theorem within (x y : BitVec 64) :
+    EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] PreBad %s :=
+  real x y |>.mono (fun _ h => h.1) (fun _ _ _ h => h)
+""" % M_POST)
+
 open(os.path.join(D, "amd64_W4_lower_bound_faulting_pre.lean"), "w").write("""import Janus
 import Extracted
 
