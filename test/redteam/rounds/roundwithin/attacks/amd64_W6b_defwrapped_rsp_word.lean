@@ -17,7 +17,7 @@ theorem real (x y : BitVec 64) :
 
 def Stmt (x y : BitVec 64) : Prop :=
   EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y]
-      (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = 0) (fun _ s' => results 1 s' = [if y.toNat < x.toNat then x else y])
+      (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = s.mem.readLE (s.regs regSP).toNat 8) (fun _ s' => results 1 s' = [if y.toNat < x.toNat then x else y])
 
 theorem within (x y : BitVec 64) : Stmt x y :=
   real x y |>.mono (fun _ h => h.1) (fun _ _ _ h => h)

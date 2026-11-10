@@ -97,7 +97,18 @@ def lenOf (s : State) : Nat :=
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun s => lenOf s + 4) Extracted.program Extracted.entry [x, y] (fun _ => True) %s :=
   (real x y).mono_bound fun _ _ => Nat.le_add_left _ _
-""" % A_POST)
+""" % A_POST + """
+namespace Witness
+""" + A_WIT + """
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+theorem within : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (True) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (s'.regs 0 = if y.toNat < x.toNat then x else y)) :=
+  ⟨ret, s0, (3), (5), hret, setup, trivial, (Proof.real (3) (5) ret hret s0 setup trivial).returns⟩
+end Witness
+""")
 a("W3_offbyone_within3", "Expected-reason: Lean rejected the proof (the bound is too small). Fuel off by one: `Max` needs 4 instructions on its longer path.", """
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 3) Extracted.program Extracted.entry [x, y] (fun _ => True) %s := by
@@ -156,7 +167,18 @@ def B (s : State) : Nat :=
 theorem within (x y : BitVec 64) :
     EnsuresWithin B Extracted.program Extracted.entry [x, y] (fun _ => True) %s :=
   (real x y).mono_bound fun _ _ => by unfold B; split <;> omega
-""" % A_POST)
+""" % A_POST + """
+namespace Witness
+""" + A_WIT + """
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+theorem within : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (True) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (s'.regs 0 = if y.toNat < x.toNat then x else y)) :=
+  ⟨ret, s0, (3), (5), hret, setup, trivial, (Proof.real (3) (5) ret hret s0 setup trivial).returns⟩
+end Witness
+""")
 a("W6a_defwrapped_with_witness", "Expected-reason: the statement does not mention Extracted.program or Extracted.entry. A def-wrapped EnsuresWithin statement is rejected exactly like a def-wrapped Ensures, even with a tied witness.", A_REAL + """
 def Stmt (x y : BitVec 64) : Prop :=
   EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun _ => True) %s
@@ -346,7 +368,16 @@ def lenOf (s : State) : Nat :=
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun s => lenOf s + 4) Extracted.program Extracted.entry [x, y] %s %s :=
   (real x y).mono_bound fun _ _ => Nat.le_add_left _ _
-""" % (M_PRE, M_POST))
+""" % (M_PRE, M_POST) + """
+namespace Witness
+""" + M_WIT + """
+theorem within : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ (results 1 s') = [if y.toNat < x.toNat then x else y]) :=
+  ⟨ret, s0, x, y, hret, setup, hpre, (Proof.real x y ret hret s0 setup hpre).returns⟩
+end Witness
+""")
 m("W3_offbyone_within3", "Expected-reason: Lean rejected the proof (the bound is too small).", """
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 3) Extracted.program Extracted.entry [x, y] %s %s := by
@@ -392,13 +423,22 @@ end Witness
 m("W7_rsp_word_in_pre", "Expected-reason: the precondition constrains the memory word at the entry RSP (the [RSP]-word rule covers EnsuresWithin).", M_REAL + """
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y]
-      (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = 0) %s :=
+      (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = s.mem.readLE (s.regs regSP).toNat 8) %s :=
   real x y |>.mono (fun _ h => h.1) (fun _ _ _ h => h)
-""" % M_POST)
+""" % M_POST + """
+namespace Witness
+""" + M_WIT + """
+theorem within : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = s.mem.readLE (s.regs regSP).toNat 8) ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ (results 1 s') = [if y.toNat < x.toNat then x else y]) :=
+  ⟨ret, s0, x, y, hret, setup, ⟨hpre, rfl⟩, (Proof.real x y ret hret s0 setup hpre).returns⟩
+end Witness
+""")
 m("W6b_defwrapped_rsp_word", "Expected-reason: the precondition constrains the memory word at the entry RSP, inside a def-wrapped EnsuresWithin.", M_REAL + """
 def Stmt (x y : BitVec 64) : Prop :=
   EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y]
-      (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = 0) %s
+      (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = s.mem.readLE (s.regs regSP).toNat 8) %s
 
 theorem within (x y : BitVec 64) : Stmt x y :=
   real x y |>.mono (fun _ h => h.1) (fun _ _ _ h => h)
@@ -406,13 +446,24 @@ theorem within (x y : BitVec 64) : Stmt x y :=
 m("W8_atleast_rsp_word", "Expected-reason: the precondition constrains the memory word at the entry RSP (RunsAtLeastOnCall's precondition is scanned too).", """
 theorem atLeast (x y : BitVec 64) :
     RunsAtLeastOnCall (fun _ => 3) Extracted.program Extracted.entry [x, y]
-      (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = 0) := by
+      (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = s.mem.readLE (s.regs regSP).toNat 8) := by
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨⟨-, hnw, hacc⟩, _⟩ := hpre
   simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
   janus64_run
+"
+namespace Witness
+""" + M_WIT + """
+theorem atLeast : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = s.mem.readLE (s.regs regSP).toNat 8) ∧
+    RunsAtLeast 3 (Extracted.program.withExit ret) s ∧
+    (Returns (Extracted.program.withExit ret) s fun s' => ABIReturn s s') :=
+  ⟨ret, s0, x, y, hret, setup, ⟨hpre, rfl⟩, Proof.atLeast x y ret hret s0 setup ⟨hpre, rfl⟩,
+    (Proof.real x y ret hret s0 setup hpre).returns.mono fun _ h => h.1⟩
+end Witness
 """)
+
 m("W5b_witness_has_no_run", "Expected-reason: the witness does not exhibit a RUN. Witness.within names the main `within` but states only a call state, no returning run.", M_REAL + """
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] %s %s := real x y
@@ -425,13 +476,21 @@ theorem within : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracte
 end Witness
 """)
 m("W6e_pre_in_local_def", "Expected-reason: the precondition constrains the memory word at the entry RSP; the precondition is hidden in a proof-local definition inside a visible EnsuresWithin (the audit expands it).", M_REAL + """
-def PreBad (s : State) : Prop := StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = 0
+def PreBad (s : State) : Prop := StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = s.mem.readLE (s.regs regSP).toNat 8
 
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] PreBad %s :=
   real x y |>.mono (fun _ h => h.1) (fun _ _ _ h => h)
-""" % M_POST)
-
+""" % M_POST + """
+namespace Witness
+""" + M_WIT + """
+theorem within : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ PreBad s ∧
+    (Returns (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ (results 1 s') = [if y.toNat < x.toNat then x else y]) :=
+  ⟨ret, s0, x, y, hret, setup, ⟨hpre, rfl⟩, (Proof.real x y ret hret s0 setup hpre).returns⟩
+end Witness
+""")
 open(os.path.join(D, "amd64_W4_lower_bound_faulting_pre.lean"), "w").write("""import Janus
 import Extracted
 
