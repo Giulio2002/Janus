@@ -90,7 +90,7 @@ end Witness
 a("W2_bound_depends_on_post", "Expected-reason: the instruction bound mentions the execution of the program. The budget is computed from the final state of a run.", A_REAL + """
 /-- the "bound" reads the result of running the program: it depends on the post-state. -/
 def lenOf (s : State) : Nat :=
-  ((Extracted.program.run 8 s).toOption.map fun o => (o.state.regs 0).toNat).getD 0
+  if (Extracted.program.run 8 s).toOption.isSome then 0 else 1
 
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun s => lenOf s + 4) Extracted.program Extracted.entry [x, y] (fun _ => True) %s :=
@@ -158,11 +158,11 @@ end Witness
 """)
 a("W6e_bound_in_local_def", "Expected-reason: the instruction bound mentions the execution of the program; the bound is hidden in a proof-local definition inside a visible EnsuresWithin (the audit expands it).", A_REAL + """
 def B (s : State) : Nat :=
-  ((Extracted.program.run 8 s).toOption.map fun o => (o.state.regs 0).toNat).getD 0 + 4
+  if (Extracted.program.run 8 s).toOption.isSome then 4 else 5
 
 theorem within (x y : BitVec 64) :
     EnsuresWithin B Extracted.program Extracted.entry [x, y] (fun _ => True) %s :=
-  (real x y).mono_bound fun _ _ => Nat.le_add_left _ _
+  (real x y).mono_bound fun _ _ => by unfold B; split <;> omega
 """ % A_POST + """
 namespace Witness
 """ + A_WIT + """
@@ -200,7 +200,7 @@ theorem within (x y : BitVec 64) : Stmt x y := real x y
 """ % A_POST)
 a("W6d_defwrapped_bound_of_run", "Expected-reason: the instruction bound mentions the execution of the program, hidden in a def-wrapped statement.", A_REAL + """
 def lenOf (s : State) : Nat :=
-  ((Extracted.program.run 8 s).toOption.map fun o => (o.state.regs 0).toNat).getD 0
+  if (Extracted.program.run 8 s).toOption.isSome then 0 else 1
 def Stmt (x y : BitVec 64) : Prop :=
   EnsuresWithin (fun s => lenOf s + 4) Extracted.program Extracted.entry [x, y] (fun _ => True) %s
 
@@ -355,7 +355,7 @@ end Witness
 """)
 m("W2_bound_depends_on_post", "Expected-reason: the instruction bound mentions the execution of the program.", M_REAL + """
 def lenOf (s : State) : Nat :=
-  ((Extracted.program.run 8 s).toOption.map fun o => (o.state.regs 0).toNat).getD 0
+  if (Extracted.program.run 8 s).toOption.isSome then 0 else 1
 
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun s => lenOf s + 4) Extracted.program Extracted.entry [x, y] %s %s :=

@@ -16,7 +16,7 @@ theorem real (x y : BitVec 64) :
 
 /-- the "bound" reads the result of running the program: it depends on the post-state. -/
 def lenOf (s : State) : Nat :=
-  ((Extracted.program.run 8 s).toOption.map fun o => (o.state.regs 0).toNat).getD 0
+  if (Extracted.program.run 8 s).toOption.isSome then 0 else 1
 
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun s => lenOf s + 4) Extracted.program Extracted.entry [x, y] (fun _ => True) (fun _ s' => s'.regs 0 = if y.toNat < x.toNat then x else y) :=

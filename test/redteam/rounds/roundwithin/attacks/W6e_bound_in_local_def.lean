@@ -15,11 +15,11 @@ theorem real (x y : BitVec 64) :
   all_goals split <;> first | rfl | omega
 
 def B (s : State) : Nat :=
-  ((Extracted.program.run 8 s).toOption.map fun o => (o.state.regs 0).toNat).getD 0 + 4
+  if (Extracted.program.run 8 s).toOption.isSome then 4 else 5
 
 theorem within (x y : BitVec 64) :
     EnsuresWithin B Extracted.program Extracted.entry [x, y] (fun _ => True) (fun _ s' => s'.regs 0 = if y.toNat < x.toNat then x else y) :=
-  (real x y).mono_bound fun _ _ => Nat.le_add_left _ _
+  (real x y).mono_bound fun _ _ => by unfold B; split <;> omega
 
 namespace Witness
 

@@ -16,7 +16,7 @@ theorem real (x y : BitVec 64) :
   all_goals simp [hbr]
 
 def lenOf (s : State) : Nat :=
-  ((Extracted.program.run 8 s).toOption.map fun o => (o.state.regs 0).toNat).getD 0
+  if (Extracted.program.run 8 s).toOption.isSome then 0 else 1
 
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun s => lenOf s + 4) Extracted.program Extracted.entry [x, y] (fun s => StackWritable s 0 8) (fun _ s' => results 1 s' = [if y.toNat < x.toNat then x else y]) :=
