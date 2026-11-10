@@ -3,6 +3,7 @@ import JanusTests.MemoryLemmas
 import JanusTests.Run
 import JanusTests.GoABI
 import JanusTests.Bridge
+import JanusTests.Within
 import JanusTests.LiveStub
 import JanusTests.LiveStubSlice
 import JanusTests.LiveStubMemmoveUpto

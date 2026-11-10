@@ -256,6 +256,224 @@ theorem ite {c : Prop} [Decidable c] {r₁ r₂ : Except Fault State} (h₁ : c 
 
 end ExecThen
 
+/-! ## Fuel-counted goals (`ReachesW`, `Going`): instruction-count bounds
+
+`janus_run` on `ReturnsWithin n p s post` (and on `RunsAtLeast m p s`) steps the program exactly as
+for `Returns`, but the fuel is a literal that every step consumes, so the proof is the bound: each
+step turns `ReachesW (k + 1)` into `ExecThenW k`, the exit address closes a branch with at least one
+unit of fuel left, and a branch that needs more steps than the bound is not provable (the tactic
+stops there and says how many instructions it executed). `Going m` is the lower-bound goal
+(`p.run m s = .error .outOfFuel`): every branch must execute `m` instructions without a final
+outcome, so `m = 0` closes it and an exit or a stub before that is an error. Both ignore calls
+(`calls [...]`: a callee summary hides its instruction count) and path merging. -/
+
+/-- With fuel `n` the run of `p` from `s` ends in an outcome satisfying `Q`. -/
+def ReachesW (n : Nat) (p : Program) (s : State) (Q : Outcome → Prop) : Prop :=
+  ∃ o, p.run n s = .ok o ∧ Q o
+
+/-- Continue after an instruction (fuel-counted). -/
+def ExecThenW (n : Nat) (p : Program) (r : Except Fault State) (Q : Outcome → Prop) : Prop :=
+  match r with
+  | .ok s' => ReachesW n p s' Q
+  | .error _ => False
+
+/-- The run with fuel `m` is still going (`RunsAtLeast`); `Q` is a phantom argument that gives the
+goal the same shape as `ReachesW`. -/
+def Going (m : Nat) (p : Program) (s : State) (_Q : Outcome → Prop) : Prop :=
+  p.run m s = .error .outOfFuel
+
+/-- Continue after an instruction (the lower-bound goal). -/
+def ExecThenG (n : Nat) (p : Program) (r : Except Fault State) (Q : Outcome → Prop) : Prop :=
+  match r with
+  | .ok s' => Going n p s' Q
+  | .error _ => False
+
+namespace ReachesW
+
+variable {p : Program} {s : State} {Q : Outcome → Prop}
+
+theorem step {n c len : Nat} {bs : List Nat} {i : Instr} {r : Except Fault State}
+    (hpc : s.rip = BitVec.ofNat 64 c) (hok : stepOK p c bs i len = true) (he : exec i len s = r)
+    (h : ExecThenW n p r Q) : ReachesW (n + 1) p s Q := by
+  simp only [stepOK, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne,
+    Option.isNone_iff_eq_none, beq_iff_eq] at hok
+  obtain ⟨⟨⟨⟨hc, hx⟩, hs⟩, hf⟩, hd⟩ := hok
+  have hpc' := rip_toNat_of hpc hc
+  cases r with
+  | error e => exact h.elim
+  | ok s' =>
+    obtain ⟨o, hr, hq⟩ := h
+    refine ⟨o, ?_, hq⟩
+    rw [Program.run_succ_step (s' := s') (by rw [hpc']; exact hx) (by rw [hpc']; exact hs)
+      (by rw [hpc']; exact hf) (by rw [step_of_decode hd]; exact he)]
+    exact hr
+
+theorem exit {n c : Nat} (hpc : s.rip = BitVec.ofNat 64 c) (hok : exitOK p c = true)
+    (hq : Q (.returned s)) : ReachesW (n + 1) p s Q := by
+  simp only [exitOK, Bool.and_eq_true, decide_eq_true_eq, beq_iff_eq] at hok
+  exact ⟨_, Program.run_succ_exit (by rw [rip_toNat_of hpc hok.1]; exact hok.2), hq⟩
+
+theorem stub {n c : Nat} {name : String} {kind : StubKind} (hpc : s.rip = BitVec.ofNat 64 c)
+    (hok : stubOK p c name kind = true) (hq : Q (.stub name kind s)) : ReachesW (n + 1) p s Q := by
+  unfold stubOK at hok
+  simp only [Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne] at hok
+  obtain ⟨⟨hc, hx⟩, hst⟩ := hok
+  have hpc' := rip_toNat_of hpc hc
+  cases hfind : p.stubAt c with
+  | none => rw [hfind] at hst; cases hst
+  | some st =>
+    rw [hfind] at hst
+    simp only [Bool.and_eq_true, beq_iff_eq] at hst
+    obtain ⟨h1, h2⟩ := hst
+    refine ⟨_, Program.run_succ_stub (by rw [hpc']; exact hx) (by rw [hpc']; exact hfind), ?_⟩
+    rw [h1, h2]; exact hq
+
+theorem ite_state {c : Prop} [Decidable c] {n : Nat} {s₁ s₂ : State}
+    (h₁ : c → ReachesW n p s₁ Q) (h₂ : ¬c → ReachesW n p s₂ Q) :
+    ReachesW n p (if c then s₁ else s₂) Q := by
+  by_cases hc : c
+  · rw [ite_eq_left hc]; exact h₁ hc
+  · rw [ite_eq_right hc]; exact h₂ hc
+
+variable {ret : Nat}
+
+theorem step_withExit {n c len : Nat} {bs : List Nat} {i : Instr} {r : Except Fault State} (hret : GoABI.RetAddr p ret)
+    (hpc : s.rip = BitVec.ofNat 64 c) (hok : stepOK p c bs i len = true) (he : exec i len s = r)
+    (h : ExecThenW n (p.withExit ret) r Q) : ReachesW (n + 1) (p.withExit ret) s Q := by
+  simp only [stepOK, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne,
+    Option.isNone_iff_eq_none, beq_iff_eq] at hok
+  obtain ⟨⟨⟨⟨hc, _⟩, hs⟩, hf⟩, hd⟩ := hok
+  have hpc' := rip_toNat_of hpc hc
+  cases r with
+  | error e => exact h.elim
+  | ok s' =>
+    obtain ⟨o, hr, hq⟩ := h
+    refine ⟨o, ?_, hq⟩
+    rw [Program.run_succ_step (s' := s') (by rw [hpc']; exact hret.ne_of_fetch hf)
+      (by rw [hpc']; exact hs) (by rw [hpc']; exact hf) (by rw [step_of_decode hd]; exact he)]
+    exact hr
+
+theorem exit_withExit {n : Nat} (hret : GoABI.RetAddr p ret) (hpc : s.rip = BitVec.ofNat 64 ret)
+    (hq : Q (.returned s)) : ReachesW (n + 1) (p.withExit ret) s Q :=
+  ⟨_, Program.run_succ_exit (by rw [hpc, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hret.lt64]; rfl), hq⟩
+
+theorem stub_withExit {n c : Nat} {name : String} {kind : StubKind} (hret : GoABI.RetAddr p ret)
+    (hpc : s.rip = BitVec.ofNat 64 c) (hok : stubOK p c name kind = true)
+    (hq : Q (.stub name kind s)) : ReachesW (n + 1) (p.withExit ret) s Q := by
+  unfold stubOK at hok
+  simp only [Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne] at hok
+  obtain ⟨⟨hc, _⟩, hst⟩ := hok
+  have hpc' := rip_toNat_of hpc hc
+  cases hfind : p.stubAt c with
+  | none => rw [hfind] at hst; cases hst
+  | some st =>
+    rw [hfind] at hst
+    simp only [Bool.and_eq_true, beq_iff_eq] at hst
+    obtain ⟨h1, h2⟩ := hst
+    refine ⟨_, Program.run_succ_stub (p := p.withExit ret)
+      (by rw [hpc']; exact hret.ne_of_stubAt hfind) (by rw [hpc']; exact hfind), ?_⟩
+    rw [h1, h2]; exact hq
+
+/-- A bounded return is a bounded `IsReturn` goal. -/
+theorem of_returnsWithin {n : Nat} {post : State → Prop} {p : Program} {s : State}
+    (h : ReachesW (n + 1) p s (IsReturn post)) : ReturnsWithin n p s post := by
+  obtain ⟨o, hr, hq⟩ := h
+  cases o with
+  | returned s' => exact ⟨s', hr, hq⟩
+  | stub _ _ _ => exact hq.elim
+
+end ReachesW
+
+namespace ExecThenW
+
+variable {p : Program} {Q : Outcome → Prop} {n : Nat}
+
+theorem ok {s : State} (h : ReachesW n p s Q) : ExecThenW n p (.ok s) Q := h
+
+theorem ite {c : Prop} [Decidable c] {r₁ r₂ : Except Fault State} (h₁ : c → ExecThenW n p r₁ Q)
+    (h₂ : ¬c → ExecThenW n p r₂ Q) : ExecThenW n p (if c then r₁ else r₂) Q := by
+  by_cases hc : c
+  · rw [ite_eq_left hc]; exact h₁ hc
+  · rw [ite_eq_right hc]; exact h₂ hc
+
+end ExecThenW
+
+namespace Going
+
+variable {p : Program} {s : State} {Q : Outcome → Prop}
+
+theorem zero : Going 0 p s Q := rfl
+
+theorem step {n c len : Nat} {bs : List Nat} {i : Instr} {r : Except Fault State}
+    (hpc : s.rip = BitVec.ofNat 64 c) (hok : stepOK p c bs i len = true) (he : exec i len s = r)
+    (h : ExecThenG n p r Q) : Going (n + 1) p s Q := by
+  simp only [stepOK, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne,
+    Option.isNone_iff_eq_none, beq_iff_eq] at hok
+  obtain ⟨⟨⟨⟨hc, hx⟩, hs⟩, hf⟩, hd⟩ := hok
+  have hpc' := rip_toNat_of hpc hc
+  cases r with
+  | error e => exact h.elim
+  | ok s' =>
+    have h : p.run n s' = .error .outOfFuel := h
+    show p.run (n + 1) s = _
+    rw [Program.run_succ_step (s' := s') (by rw [hpc']; exact hx) (by rw [hpc']; exact hs)
+      (by rw [hpc']; exact hf) (by rw [step_of_decode hd]; exact he)]
+    exact h
+
+theorem ite_state {c : Prop} [Decidable c] {n : Nat} {s₁ s₂ : State}
+    (h₁ : c → Going n p s₁ Q) (h₂ : ¬c → Going n p s₂ Q) :
+    Going n p (if c then s₁ else s₂) Q := by
+  by_cases hc : c
+  · rw [ite_eq_left hc]; exact h₁ hc
+  · rw [ite_eq_right hc]; exact h₂ hc
+
+variable {ret : Nat}
+
+theorem step_withExit {n c len : Nat} {bs : List Nat} {i : Instr} {r : Except Fault State} (hret : GoABI.RetAddr p ret)
+    (hpc : s.rip = BitVec.ofNat 64 c) (hok : stepOK p c bs i len = true) (he : exec i len s = r)
+    (h : ExecThenG n (p.withExit ret) r Q) : Going (n + 1) (p.withExit ret) s Q := by
+  simp only [stepOK, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne,
+    Option.isNone_iff_eq_none, beq_iff_eq] at hok
+  obtain ⟨⟨⟨⟨hc, _⟩, hs⟩, hf⟩, hd⟩ := hok
+  have hpc' := rip_toNat_of hpc hc
+  cases r with
+  | error e => exact h.elim
+  | ok s' =>
+    have h : (p.withExit ret).run n s' = .error .outOfFuel := h
+    show (p.withExit ret).run (n + 1) s = _
+    rw [Program.run_succ_step (s' := s') (by rw [hpc']; exact hret.ne_of_fetch hf)
+      (by rw [hpc']; exact hs) (by rw [hpc']; exact hf) (by rw [step_of_decode hd]; exact he)]
+    exact h
+
+/-- A lower bound is a `Going` goal. -/
+theorem of_runsAtLeast {m : Nat} {p : Program} {s : State} (h : Going m p s (fun _ => True)) :
+    RunsAtLeast m p s := h
+
+end Going
+
+namespace ExecThenG
+
+variable {p : Program} {Q : Outcome → Prop} {n : Nat}
+
+theorem ok {s : State} (h : Going n p s Q) : ExecThenG n p (.ok s) Q := h
+
+theorem ite {c : Prop} [Decidable c] {r₁ r₂ : Except Fault State} (h₁ : c → ExecThenG n p r₁ Q)
+    (h₂ : ¬c → ExecThenG n p r₂ Q) : ExecThenG n p (if c then r₁ else r₂) Q := by
+  by_cases hc : c
+  · rw [ite_eq_left hc]; exact h₁ hc
+  · rw [ite_eq_right hc]; exact h₂ hc
+
+end ExecThenG
+
+/-- `janus64_run` on `ReturnsWithin n p s post`: the fuel-counted goal with `n + 1` units of fuel. -/
+theorem returnsWithin_of_reachesW {p : Program} {s : State} {n : Nat} {post : State → Prop}
+    (h : ReachesW (n + 1) p s (IsReturn post)) : ReturnsWithin n p s post :=
+  ReachesW.of_returnsWithin h
+
+/-- `janus64_run` on `RunsAtLeast m p s`: the lower-bound goal. -/
+theorem runsAtLeast_of_going {p : Program} {s : State} {m : Nat}
+    (h : Going m p s (fun _ => True)) : RunsAtLeast m p s := h
+
 theorem returns_of_reaches {p : Program} {s : State} {post : State → Prop}
     (h : Reaches p s (IsReturn post)) : Returns p s post := by
   obtain ⟨n, o, hr, hq⟩ := h
@@ -1453,6 +1671,11 @@ inductive GoalKind where
   | execThen (p r Q : Expr)
   | reachesRet (p ret s Q : Expr)
   | execThenRet (p ret r Q : Expr)
+  /-- `ReachesW n p s Q` (`isGoing = false`) or `Going n p s Q` (`isGoing = true`): the fuel-counted goals of
+  `ReturnsWithin` / `RunsAtLeast` -/
+  | budget (isGoing : Bool) (n p s Q : Expr)
+  /-- `ExecThenW n p r Q` / `ExecThenG n p r Q` -/
+  | execBudget (isGoing : Bool) (n p r Q : Expr)
   | other
 
 def goalKindOf (t : Expr) : GoalKind :=
@@ -1461,6 +1684,10 @@ def goalKindOf (t : Expr) : GoalKind :=
   | (``ExecThen, #[p, r, Q]) => .execThen p r Q
   | (``ReachesRet, #[p, ret, s, Q]) => .reachesRet p ret s Q
   | (``ReachesRet.ExecThenRet, #[p, ret, r, Q]) => .execThenRet p ret r Q
+  | (``ReachesW, #[n, p, s, Q]) => .budget false n p s Q
+  | (``Going, #[n, p, s, Q]) => .budget true n p s Q
+  | (``ExecThenW, #[n, p, r, Q]) => .execBudget false n p r Q
+  | (``ExecThenG, #[n, p, r, Q]) => .execBudget true n p r Q
   | _ => .other
 
 /-- The kind of goal. Goals produced by `induction`/`intro` may carry metadata or a beta-redex
@@ -1667,12 +1894,15 @@ def explainFault (f : Expr) : MessageData :=
 /-- Split `ExecThen` / `ite` structure after `exec` was simplified. -/
 partial def afterExec (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := do
   match ← goalKind g with
-  | .execThen _ r _ | .execThenRet _ _ r _ =>
+  | .execThen _ r _ | .execThenRet _ _ r _ | .execBudget _ _ _ r _ =>
     let isRet := match ← goalKind g with | .execThenRet .. => true | _ => false
+    let bud? := match ← goalKind g with | .execBudget isG .. => some isG | _ => none
     let r := (← instantiateMVars r).consumeMData.headBeta
     match r.getAppFnArgs with
     | (``Except.ok, #[_, _, _]) =>
-      let lem := if isRet then ``ReachesRet.ok else ``ExecThen.ok
+      let lem := match bud? with
+        | some true => ``ExecThenG.ok | some false => ``ExecThenW.ok
+        | none => if isRet then ``ReachesRet.ok else ``ExecThen.ok
       let gs ← Common.applyFast g (← mkConstWithFreshMVarLevels lem)
       let mut out := []
       for g' in gs do
@@ -1680,7 +1910,9 @@ partial def afterExec (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := do
         out := out ++ (← afterExec cfg g')
       return out
     | (``ite, #[_, _, _, _, _]) =>
-      let lem := if isRet then ``ReachesRet.ite else ``ExecThen.ite
+      let lem := match bud? with
+        | some true => ``ExecThenG.ite | some false => ``ExecThenW.ite
+        | none => if isRet then ``ReachesRet.ite else ``ExecThen.ite
       -- the `Decidable` instance comes from the term; re-synthesising it and comparing would
       -- evaluate the decision procedure on the symbolic condition
       let gs ← Common.applyFast g (← mkConstWithFreshMVarLevels lem)
@@ -1692,11 +1924,14 @@ partial def afterExec (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := do
     | _ =>
       let st ← cfg.status.get
       throwError (← g.withContext (Common.explainStuck tacName st accessFns r (some dischargeAccessible)))
-  | .reaches _ s _ | .reachesRet _ _ s _ =>
+  | .reaches _ s _ | .reachesRet _ _ s _ | .budget _ _ _ s _ =>
     let s ← instantiateMVars s
     if s.isAppOfArity ``ite 5 then
       let isRet := match ← goalKind g with | .reachesRet .. => true | _ => false
-      let lem := if isRet then ``ReachesRet.ite_state else ``Reaches.ite_state
+      let bud? := match ← goalKind g with | .budget isG .. => some isG | _ => none
+      let lem := match bud? with
+        | some true => ``Going.ite_state | some false => ``ReachesW.ite_state
+        | none => if isRet then ``ReachesRet.ite_state else ``Reaches.ite_state
       let gs ← Common.applyFast g (← mkConstWithFreshMVarLevels lem)
       return ← branches gs
     return [g]
@@ -1744,6 +1979,7 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
       pure <| mkAppN (mkConst (if regs then ``ReachesRet.call_regions else ``ReachesRet.call)) #[p, entry, pre, post, s, ret, Q, hsum, hpc, hpreM]
     | .reaches _ _ Q =>
       pure <| mkAppN (mkConst (if regs then ``Reaches.call_regions else ``Reaches.call)) #[p, entry, pre, post, s, Q, hsum, hpc, hpreM]
+    | .budget .. => throwError "{tacName}: a callee summary (`calls [...]`) hides its instruction count: an instruction-count goal (`ReturnsWithin`, `RunsAtLeast`) cannot step through a call"
     | _ => throwError "{tacName}: unexpected goal at a call"
   let gs ← Common.applyFast g lem
   Common.setPhase cfg.status s!"proving the precondition of the summary of {callee}"
@@ -1829,7 +2065,22 @@ def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (
     let (p, s, ret?, Q) ← match ← goalKind g with
       | .reaches p s Q => pure (p, s, none, Q)
       | .reachesRet p ret s Q => pure (p, s, some ret, Q)
+      | .budget _ _ p s Q => pure (p, s, none, Q)
       | _ => throwError "{tacName}: the goal is not `Reaches p s Q` or `ReachesRet p ret s Q`:{indentExpr (← g.getType)}"
+    -- an instruction-count goal (`ReturnsWithin`, `RunsAtLeast`): its fuel is a literal that each step consumes
+    let bud? : Option (Bool × Nat) ← match ← goalKind g with
+      | .budget isG n _ _ _ => do
+        let some k ← Janus.Tactic.Common.evalNatBeta? n |
+          throwError "{tacName}: the instruction bound of the goal is not a numeral:{indentExpr n}"
+        pure (some (isG, k))
+      | _ => pure none
+    if let some (true, 0) := bud? then
+      -- `RunsAtLeast`: the run has executed all `m` instructions without a final outcome
+      return some (← Common.applyFast g (mkAppN (mkConst ``Going.zero) #[p, s, Q]))
+    let some (nm1 : Nat) := (match bud? with | some (_, k) => some (k - 1) | none => some 0) | unreachable!
+    let n'E := mkNatLit nm1
+    if let some (false, 0) := bud? then
+      throwError "{tacName}: a path of the call is still running when the instruction bound of the goal is used up: the bound is too small (`ReturnsWithin n` needs every run to reach the return after at most `n` instructions)"
     let (pc?, pcE, pcPf) ← statePC ctx simprocs d? s
     let mode ← exitMode p
     if mode.isSome && ret?.isSome then
@@ -1854,7 +2105,10 @@ def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (
       if atRet then
         let hpc ← mkExpectedTypeHint pcPf
           (← mkEq (← mkAppM ``State.rip #[s]) (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) retE))
-        return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit_withExit) #[base, retE, s, Q, hret, hpc]))
+        match bud? with
+        | some (true, k) => throwError "{tacName}: a path of the call returns with {k} of the instructions the lower bound (`RunsAtLeast`) claims still to go: the bound is too large"
+        | some (false, _) => return some (← Common.applyFast g (mkAppN (mkConst ``ReachesW.exit_withExit) #[base, s, Q, retE, n'E, hret, hpc]))
+        | none => return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit_withExit) #[base, retE, s, Q, hret, hpc]))
     let some (c, hpc) := pc? |
       -- an indirect call to an abstract callee: `calls [h]` with `h : Summary p fn …` for a symbolic `fn`
       if let some gs ← symbolicCall cfg g p s pcE pcPf hret? then return some gs
@@ -1886,7 +2140,10 @@ def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (
     if mode.isNone && c == exitA then
       if ret?.isSome then throwError "{tacName}: reached the exit address {hex c} inside a callee"
       let hok ← liftLink impl? ``exitOK_link (← kernelDecide (mkApp2 (mkConst ``exitOK) evalE cE))
-      return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit) #[p, s, Q, cE, hpc, hok]))
+      match bud? with
+      | some (true, k) => throwError "{tacName}: a path of the call returns with {k} of the instructions the lower bound (`RunsAtLeast`) claims still to go: the bound is too large"
+      | some (false, _) => return some (← Common.applyFast g (mkAppN (mkConst ``ReachesW.exit) #[p, s, Q, n'E, cE, hpc, hok]))
+      | none => return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit) #[p, s, Q, cE, hpc, hok]))
     if let some (_, name, kindCode) := stubs.find? (·.1 == c) then
       if ret?.isSome then
         throwError "{tacName}: the callee reaches the runtime stub {name} at {hex c}; a \
@@ -1900,11 +2157,17 @@ def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (
         | _ => mkConst ``StubKind.trap
       let hok ← liftLink impl? ``stubOK_link
         (← kernelDecide (mkApp4 (mkConst ``stubOK) evalE cE (toExpr name) kind))
-      let lem := match mode, hret? with
-        | some (base, retE), some hret =>
+      if let some (true, _) := bud? then
+        throwError "{tacName}: a path of the call reaches the runtime stub {name} at {hex c} before the instructions the lower bound (`RunsAtLeast`) claims: the bound is too large"
+      let lem := match mode, hret?, bud? with
+        | some (base, retE), some hret, some _ =>
+          mkAppN (mkConst ``ReachesW.stub_withExit) #[base, s, Q, retE, n'E, cE, toExpr name, kind, hret,
+            hpc, hok]
+        | _, _, some _ => mkAppN (mkConst ``ReachesW.stub) #[p, s, Q, n'E, cE, toExpr name, kind, hpc, hok]
+        | some (base, retE), some hret, none =>
           mkAppN (mkConst ``Reaches.stub_withExit) #[base, retE, s, Q, cE, toExpr name, kind, hret,
             hpc, hok]
-        | _, _ => mkAppN (mkConst ``Reaches.stub) #[p, s, Q, cE, toExpr name, kind, hpc, hok]
+        | _, _, none => mkAppN (mkConst ``Reaches.stub) #[p, s, Q, cE, toExpr name, kind, hpc, hok]
       return some (← Common.applyFast g lem)
     -- the instruction at `c` (decoded and checked once per run)
     let fact ← match (← cfg.facts.get).get? c with
@@ -1926,11 +2189,17 @@ def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (
       | some ret =>
         mkAppN (mkConst ``ReachesRet.step) #[p, ret, s, Q, cE, mkNatLit fact.len, bsE, iE, r.expr,
           hpc, fact.hok, he]
-      | none => match mode, hret? with
-        | some (base, retE), some hret =>
+      | none => match mode, hret?, bud? with
+        | some (base, retE), some hret, some (isG, _) =>
+          mkAppN (mkConst (if isG then ``Going.step_withExit else ``ReachesW.step_withExit))
+            #[base, s, Q, retE, n'E, cE, mkNatLit fact.len, bsE, iE, r.expr, hret, hpc, fact.hok, he]
+        | _, _, some (isG, _) =>
+          mkAppN (mkConst (if isG then ``Going.step else ``ReachesW.step))
+            #[p, s, Q, n'E, cE, mkNatLit fact.len, bsE, iE, r.expr, hpc, fact.hok, he]
+        | some (base, retE), some hret, none =>
           mkAppN (mkConst ``Reaches.step_withExit)
             #[base, retE, s, Q, cE, mkNatLit fact.len, bsE, iE, r.expr, hret, hpc, fact.hok, he]
-        | _, _ => mkAppN (mkConst ``Reaches.step)
+        | _, _, none => mkAppN (mkConst ``Reaches.step)
             #[p, s, Q, cE, mkNatLit fact.len, bsE, iE, r.expr, hpc, fact.hok, he]
     let gs ← Common.applyFast g lemE
     Common.setPhase cfg.status "splitting the result (branches)"
@@ -1981,13 +2250,15 @@ def prepGoal (g : MVarId) : MetaM MVarId := do
     | _ => throwError "{tacName}: unexpected goals after {n}"
   match t.getAppFn.constName? with
   | some ``GoABI.Returns => tryApply ``returns_of_reaches
+  | some ``GoABI.ReturnsWithin => tryApply ``returnsWithin_of_reachesW
+  | some ``GoABI.RunsAtLeast => tryApply ``runsAtLeast_of_going
   | some ``GoABI.Panics => tryApply ``panics_of_reaches
   | some ``GoABI.GrowsStack => tryApply ``growsStack_of_reaches
   | _ => return g
 
 def isStepGoal (g : MVarId) : MetaM Bool := do
   match ← goalKind g with
-  | .reaches .. | .reachesRet .. => return true
+  | .reaches .. | .reachesRet .. | .budget .. => return true
   | _ => return false
 
 /-- The literal rip of a `Reaches`/`ReachesRet` goal whose state is a `State.mk` literal (path

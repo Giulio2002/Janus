@@ -24,6 +24,13 @@ import Janus.Tactic.ReadOverlap
   for `hS := S`; the run keeps `mem.regions`, `Program.Steps.regions`; it is simplified, so it is dropped when it
   is trivial and reads `m.regions = s.mem.regions` for a callee known by a `MemFrame` to `m`): what
   `rtView_eq_of_frame` needs to carry `H … (rtView rt s.mem)` past a callee. Nothing else changes.
+* Instruction-count goals: `janus_run` also takes `ReturnsWithin n p s post` and `RunsAtLeast m p s` (docs/PROOFS.md,
+  "Instruction-count bounds"). The fuel is a numeral (`(fun _ => 4) s` and literal arithmetic are evaluated) that every
+  step consumes: `ReturnsWithin n` is proved on EVERY branch (the longest path decides) and fails with "the bound is too
+  small" when a path needs more than `n` instructions; `RunsAtLeast m` is proved when EVERY branch executes `m`
+  instructions without reaching the return, and fails with "the bound is too large" when one returns earlier. Calls through
+  `calls [...]` and `join` are not supported there (a summary hides its instruction count); the result is kernel-checked
+  (`ReachesW`, `Going`: `Janus/Tactic/Basic.lean`).
 * `janus_step [lemmas]` performs exactly one step on the main goal.
 * `janus_intro hs` turns a `CallSetup` hypothesis into `h_pc : s.pc = …`, `h_lr : s.regs 30 = …`
   and `h_x<i> : s.regs i = argᵢ`.
@@ -368,6 +375,11 @@ inductive GoalKind where
   | reachesRet (p ret s Q : Expr)
   /-- `ExecThenRet p ret r Q` -/
   | execThenRet (p ret r Q : Expr)
+  /-- `ReachesW n p s Q` (`isGoing = false`) or `Going n p s Q` (`isGoing = true`): the fuel-counted goals of
+  `ReturnsWithin` / `RunsAtLeast` (see `Janus.Tactic.ReachesW`) -/
+  | budget (isGoing : Bool) (n p s Q : Expr)
+  /-- `ExecThenW n p r Q` / `ExecThenG n p r Q` -/
+  | execBudget (isGoing : Bool) (n p r Q : Expr)
   | other
 
 def goalKind (g : MVarId) : MetaM GoalKind := do
@@ -378,6 +390,10 @@ def goalKind (g : MVarId) : MetaM GoalKind := do
   | (``ExecThen, #[p, r, Q]) => return .execThen p r Q
   | (``ReachesRet, #[p, ret, s, Q]) => return .reachesRet p ret s Q
   | (``ReachesRet.ExecThenRet, #[p, ret, r, Q]) => return .execThenRet p ret r Q
+  | (``ReachesW, #[n, p, s, Q]) => return .budget false n p s Q
+  | (``Going, #[n, p, s, Q]) => return .budget true n p s Q
+  | (``ExecThenW, #[n, p, r, Q]) => return .execBudget false n p r Q
+  | (``ExecThenG, #[n, p, r, Q]) => return .execBudget true n p r Q
   | _ => return .other
 
 /-- Try to close a goal `False`-like branch: the branch hypothesis is contradictory. -/
@@ -588,16 +604,21 @@ def explainFault (f : Expr) : MessageData :=
 /-- Split `ExecThen` / `ite` structure after `exec` was simplified. -/
 partial def afterExec (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := do
   match ← goalKind g with
-  | .execThen _ r _ | .execThenRet _ _ r _ =>
+  | .execThen _ r _ | .execThenRet _ _ r _ | .execBudget _ _ _ r _ =>
     let isRet := match ← goalKind g with | .execThenRet .. => true | _ => false
+    let bud? := match ← goalKind g with | .execBudget isG .. => some isG | _ => none
     let r := (← instantiateMVars r).consumeMData.headBeta
     match r.getAppFnArgs with
     | (``Except.ok, #[_, _, _]) =>
-      let lem := if isRet then ``ReachesRet.ok else ``ExecThen.ok
+      let lem := match bud? with
+        | some true => ``ExecThenG.ok | some false => ``ExecThenW.ok
+        | none => if isRet then ``ReachesRet.ok else ``ExecThen.ok
       let gs ← Common.applyFast g (← mkConstWithFreshMVarLevels lem)
       afterExecList gs
     | (``ite, #[_, _, _, _, _]) =>
-      let lem := if isRet then ``ReachesRet.ite else ``ExecThen.ite
+      let lem := match bud? with
+        | some true => ``ExecThenG.ite | some false => ``ExecThenW.ite
+        | none => if isRet then ``ReachesRet.ite else ``ExecThen.ite
       let gs ← Common.applyFast g (← mkConstWithFreshMVarLevels lem)
       branches gs
     | (``Except.error, #[_, _, f]) =>
@@ -607,11 +628,14 @@ partial def afterExec (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := do
     | _ =>
       let st ← cfg.status.get
       throwError (← g.withContext (Common.explainStuck tacName st accessFns r (some dischargeAccessible)))
-  | .reaches _ s _ | .reachesRet _ _ s _ =>
+  | .reaches _ s _ | .reachesRet _ _ s _ | .budget _ _ _ s _ =>
     let s ← instantiateMVars s
     if s.isAppOfArity ``ite 5 then
       let isRet := match ← goalKind g with | .reachesRet .. => true | _ => false
-      let lem := if isRet then ``ReachesRet.ite_state else ``Reaches.ite_state
+      let bud? := match ← goalKind g with | .budget isG .. => some isG | _ => none
+      let lem := match bud? with
+        | some true => ``Going.ite_state | some false => ``ReachesW.ite_state
+        | none => if isRet then ``ReachesRet.ite_state else ``Reaches.ite_state
       let gs ← Common.applyFast g (← mkConstWithFreshMVarLevels lem)
       return ← branches gs
     return [g]
@@ -666,6 +690,7 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
       pure <| mkAppN (mkConst (if regs then ``ReachesRet.call_regions else ``ReachesRet.call)) #[p, entry, pre, post, s, ret, Q, hsum, hpc, hpreM]
     | .reaches _ _ Q =>
       pure <| mkAppN (mkConst (if regs then ``Reaches.call_regions else ``Reaches.call)) #[p, entry, pre, post, s, Q, hsum, hpc, hpreM]
+    | .budget .. => throwError "{tacName}: a callee summary (`calls [...]`) hides its instruction count: an instruction-count goal (`ReturnsWithin`, `RunsAtLeast`) cannot step through a call"
     | _ => throwError "{tacName}: unexpected goal at a call"
   let gs ← Common.applyFast g lem
   Common.setPhase cfg.status s!"proving the precondition of the summary of {callee}"
@@ -754,7 +779,22 @@ def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (
     let (p, s, ret?, Q) ← match ← goalKind g with
       | .reaches p s Q => pure (p, s, none, Q)
       | .reachesRet p ret s Q => pure (p, s, some ret, Q)
+      | .budget _ _ p s Q => pure (p, s, none, Q)
       | _ => throwError "{tacName}: the goal is not `Reaches p s Q` or `ReachesRet p ret s Q`:{indentExpr (← g.getType)}"
+    -- an instruction-count goal (`ReturnsWithin`, `RunsAtLeast`): its fuel is a literal that each step consumes
+    let bud? : Option (Bool × Nat) ← match ← goalKind g with
+      | .budget isG n _ _ _ => do
+        let some k ← Common.evalNatBeta? n |
+          throwError "{tacName}: the instruction bound of the goal is not a numeral:{indentExpr n}"
+        pure (some (isG, k))
+      | _ => pure none
+    if let some (true, 0) := bud? then
+      -- `RunsAtLeast`: the run has executed all `m` instructions without a final outcome
+      return some (← Common.applyFast g (mkAppN (mkConst ``Going.zero) #[p, s, Q]))
+    let some (nm1 : Nat) := (match bud? with | some (_, k) => some (k - 1) | none => some 0) | unreachable!
+    let n'E := mkNatLit nm1
+    if let some (false, 0) := bud? then
+      throwError "{tacName}: a path of the call is still running when the instruction bound of the goal is used up: the bound is too small (`ReturnsWithin n` needs every run to reach the return after at most `n` instructions)"
     let (pc?, pcE, pcPf) ← statePC ctx simprocs d? s
     trace[janus] "state pc: {pcE}, ret: {ret?}"
     -- a call with a symbolic return address: `p = Program.withExit base retE`
@@ -780,7 +820,10 @@ def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (
       if atRet then
         let hpc ← mkExpectedTypeHint pcPf
           (← mkEq (← mkAppM ``State.pc #[s]) (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) retE))
-        return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit_withExit) #[base, retE, s, Q, hret, hpc]))
+        match bud? with
+        | some (true, k) => throwError "{tacName}: a path of the call returns with {k} of the instructions the lower bound (`RunsAtLeast`) claims still to go: the bound is too large"
+        | some (false, _) => return some (← Common.applyFast g (mkAppN (mkConst ``ReachesW.exit_withExit) #[base, s, Q, retE, n'E, hret, hpc]))
+        | none => return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit_withExit) #[base, retE, s, Q, hret, hpc]))
     let some (c, hpc) := pc? |
       -- an indirect call to an abstract callee (`calls [h]` with `h : Summary p fn …` for a symbolic `fn`):
       -- the pc is `BitVec.ofNat 64 fn`, e.g. after `hF : s.mem.readLE (tab + 24) 8 = fn` rewrote the itab slot
@@ -813,7 +856,10 @@ def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (
     if mode.isNone && c == exitA then
       if ret?.isSome then throwError "{tacName}: reached the exit address {hex c} inside a callee"
       let hok ← liftLink impl? ``exitOK_link (← kernelDecide (mkApp2 (mkConst ``exitOK) evalE cE))
-      return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit) #[p, s, Q, cE, hpc, hok]))
+      match bud? with
+      | some (true, k) => throwError "{tacName}: a path of the call returns with {k} of the instructions the lower bound (`RunsAtLeast`) claims still to go: the bound is too large"
+      | some (false, _) => return some (← Common.applyFast g (mkAppN (mkConst ``ReachesW.exit) #[p, s, Q, n'E, cE, hpc, hok]))
+      | none => return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit) #[p, s, Q, cE, hpc, hok]))
     if let some (_, name, kindCode) := stubs.find? (·.1 == c) then
       if ret?.isSome then
         throwError "{tacName}: the callee reaches the runtime stub {name} at {hex c}; a \
@@ -827,11 +873,17 @@ def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (
         | _ => mkConst ``StubKind.trap
       let hok ← liftLink impl? ``stubOK_link
         (← kernelDecide (mkApp4 (mkConst ``stubOK) evalE cE (toExpr name) kind))
-      let lem := match mode, hret? with
-        | some (base, retE), some hret =>
+      if let some (true, _) := bud? then
+        throwError "{tacName}: a path of the call reaches the runtime stub {name} at {hex c} before the instructions the lower bound (`RunsAtLeast`) claims: the bound is too large"
+      let lem := match mode, hret?, bud? with
+        | some (base, retE), some hret, some _ =>
+          mkAppN (mkConst ``ReachesW.stub_withExit) #[base, s, Q, retE, n'E, cE, toExpr name, kind, hret,
+            hpc, hok]
+        | _, _, some _ => mkAppN (mkConst ``ReachesW.stub) #[p, s, Q, n'E, cE, toExpr name, kind, hpc, hok]
+        | some (base, retE), some hret, none =>
           mkAppN (mkConst ``Reaches.stub_withExit) #[base, retE, s, Q, cE, toExpr name, kind, hret,
             hpc, hok]
-        | _, _ => mkAppN (mkConst ``Reaches.stub) #[p, s, Q, cE, toExpr name, kind, hpc, hok]
+        | _, _, none => mkAppN (mkConst ``Reaches.stub) #[p, s, Q, cE, toExpr name, kind, hpc, hok]
       return some (← Common.applyFast g lem)
     -- the instruction at `c` (decoded and checked once per run)
     let fact ← match (← cfg.facts.get).get? c with
@@ -852,11 +904,17 @@ def stepGoalCore (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (
       | some ret =>
         mkAppN (mkConst ``ReachesRet.step) #[p, ret, s, Q, cE, mkNatLit fact.word, iE, r.expr, hpc,
           fact.hok, he]
-      | none => match mode, hret? with
-        | some (base, retE), some hret =>
+      | none => match mode, hret?, bud? with
+        | some (base, retE), some hret, some (isG, _) =>
+          mkAppN (mkConst (if isG then ``Going.step_withExit else ``ReachesW.step_withExit))
+            #[base, s, Q, retE, n'E, cE, mkNatLit fact.word, iE, r.expr, hret, hpc, fact.hok, he]
+        | _, _, some (isG, _) =>
+          mkAppN (mkConst (if isG then ``Going.step else ``ReachesW.step))
+            #[p, s, Q, n'E, cE, mkNatLit fact.word, iE, r.expr, hpc, fact.hok, he]
+        | some (base, retE), some hret, none =>
           mkAppN (mkConst ``Reaches.step_withExit)
             #[base, retE, s, Q, cE, mkNatLit fact.word, iE, r.expr, hret, hpc, fact.hok, he]
-        | _, _ => mkAppN (mkConst ``Reaches.step)
+        | _, _, none => mkAppN (mkConst ``Reaches.step)
             #[p, s, Q, cE, mkNatLit fact.word, iE, r.expr, hpc, fact.hok, he]
     let gs ← Common.applyFast g lemE
     Common.setPhase cfg.status "splitting the result (branches)"
@@ -907,13 +965,15 @@ def prepGoal (g : MVarId) : MetaM MVarId := do
     | _ => throwError "janus: unexpected goals after {n}"
   match t.getAppFn.constName? with
   | some ``GoABI.Returns => tryApply ``returns_of_reaches
+  | some ``GoABI.ReturnsWithin => tryApply ``returnsWithin_of_reachesW
+  | some ``GoABI.RunsAtLeast => tryApply ``runsAtLeast_of_going
   | some ``GoABI.Panics => tryApply ``panics_of_reaches
   | some ``GoABI.GrowsStack => tryApply ``growsStack_of_reaches
   | _ => return g
 
 def isStepGoal (g : MVarId) : MetaM Bool := do
   match ← goalKind g with
-  | .reaches .. | .reachesRet .. => return true
+  | .reaches .. | .reachesRet .. | .budget .. => return true
   | _ => return false
 
 /-- The literal pc of a `Reaches`/`ReachesRet` goal whose state is a `State.mk` literal (path

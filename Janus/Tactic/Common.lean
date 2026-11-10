@@ -215,6 +215,11 @@ def symbolicEntry : Nat := 2 ^ 64
 
 open Lean Meta Elab Tactic
 
+/-- The natural number a term denotes (literals and literal arithmetic) after instantiating metavariables and beta
+reduction: the fuel of an instruction-count goal (`ReturnsWithin ((fun _ => 4) s) …`). -/
+def evalNatBeta? (e : Expr) : MetaM (Option Nat) := do
+  Meta.evalNat (← Core.betaReduce (← instantiateMVars e))
+
 register_option janus.omega.log : Nat := {
   defValue := 0
   descr := "janus_run/janus64_run: with a value `ms` > 0, a line on stderr for every internal `omega` call that took at \

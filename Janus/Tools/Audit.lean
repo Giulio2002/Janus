@@ -1823,6 +1823,10 @@ partial def conjuncts (e : Expr) : List Expr :=
 /-- The precondition argument of every `Ensures p entry args pre post` in `ty`. -/
 partial def ensuresPres (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
   let acc := if (e.getAppFn.constName?.any fun n => n == `Janus.GoABI.Ensures || n == `Janus.Amd64.GoABI.Ensures) && e.getAppNumArgs == 5 then acc.push (e.getArg! 3) else acc
+  -- `EnsuresWithin bound p entry args pre post` and `RunsAtLeastOnCall lower p entry args pre` (instruction-count bounds): the
+  -- precondition is the next-to-last / last argument, and is checked like the one of an `Ensures` (the RSP-word rule)
+  let acc := if (e.getAppFn.constName?.any fun n => n == `Janus.GoABI.EnsuresWithin || n == `Janus.Amd64.GoABI.EnsuresWithin) && e.getAppNumArgs == 6 then acc.push (e.getArg! 4) else acc
+  let acc := if (e.getAppFn.constName?.any fun n => n == `Janus.GoABI.RunsAtLeastOnCall || n == `Janus.Amd64.GoABI.RunsAtLeastOnCall) && e.getAppNumArgs == 5 then acc.push (e.getArg! 4) else acc
   match e with
   | .app f a => ensuresPres a (ensuresPres f acc)
   | .lam _ d b _ | .forallE _ d b _ => ensuresPres b (ensuresPres d acc)
@@ -1836,6 +1840,8 @@ fuel exhausted) counts as reaching one; so does any constant whose name mentions
 function reaches the machine's `step`). -/
 def reachesRunClaim (env : Environment) (e : Expr) : Bool := Id.run do
   let base : List Name := [`Janus.GoABI.Returns, `Janus.GoABI.Panics, `Janus.Amd64.GoABI.Returns, `Janus.Amd64.GoABI.Panics,
+    -- instruction-count bounds (v0.3.0): `ReturnsWithin`/`RunsAtLeast` claim a run of the program like `Returns`
+    `Janus.GoABI.ReturnsWithin, `Janus.GoABI.RunsAtLeast, `Janus.Amd64.GoABI.ReturnsWithin, `Janus.Amd64.GoABI.RunsAtLeast,
     `Janus.Tactic.ReachesRet, `Janus.Tactic.Reaches, `Janus.Tactic.Summary, `Janus.Amd64.Tactic.ReachesRet, `Janus.Amd64.Tactic.Reaches,
     `Janus.Amd64.Tactic.Summary, `Janus.Program.run, `Janus.Amd64.Program.run]
   let mut todo : Array Name := e.getUsedConstants
@@ -3016,6 +3022,33 @@ partial def factPieces (f : Expr) : MetaM (Array Expr) := do
     return (← factPieces (f.getArg! 0)) ++ (← factPieces (f.getArg! 1))
   else return #[f]
 
+/-- Instruction-count bounds (v0.3.0): `ReturnsWithin n p s Q` (either ISA) read as the `Returns p s Q` it implies; every other claim
+unchanged. A witness for an `EnsuresWithin` main may state its returning run with `Returns` or with `ReturnsWithin` (non-vacuity
+needs SOME returning run from a state meeting the precondition; the bound itself is a universal property the kernel checks), so
+both sides are compared without the bound. -/
+def withoutBound (e : Expr) : Expr :=
+  let e := e.consumeMData
+  match e.getAppFn.constName? with
+  | some `Janus.GoABI.ReturnsWithin =>
+    if e.getAppNumArgs == 4 then mkApp3 (mkConst `Janus.GoABI.Returns) (e.getArg! 1) (e.getArg! 2) (e.getArg! 3) else e
+  | some `Janus.Amd64.GoABI.ReturnsWithin =>
+    if e.getAppNumArgs == 4 then mkApp3 (mkConst `Janus.Amd64.GoABI.Returns) (e.getArg! 1) (e.getArg! 2) (e.getArg! 3) else e
+  | _ => e
+
+/-- `RunsAtLeast m p s` (either ISA): the lower-bound claim of a `RunsAtLeastOnCall` main, unfolded. -/
+def isRunsAtLeast (e : Expr) : Bool :=
+  let e := e.consumeMData
+  (e.getAppFn.isConstOf `Janus.GoABI.RunsAtLeast || e.getAppFn.isConstOf `Janus.Amd64.GoABI.RunsAtLeast) && e.getAppNumArgs == 3
+
+/-- Is the witness conjunct `w` a returning run (`Returns`, or `ReturnsWithin` read without its bound) of the program `p` from
+the state `s`? A lower bound `RunsAtLeast m p s` also holds of a call that faults after `m` instructions: only a returning run
+from a state meeting the precondition shows that the precondition admits a call that returns (U-WITNESS-RUN for `RunsAtLeastOnCall`). -/
+def returnsRunAt (p s w : Expr) : MetaM Bool := do
+  let w := withoutBound (← instantiateMVars w)
+  let isRet := w.getAppFn.isConstOf `Janus.GoABI.Returns || w.getAppFn.isConstOf `Janus.Amd64.GoABI.Returns
+  if !isRet || w.getAppNumArgs != 3 then return false
+  return (← defEqTry p (w.getArg! 0)) && (← defEqTry s (w.getArg! 1))
+
 /-- Is the witness body `wconjs` an instance of the main statement `mty`? `none` when it is, else
 the reason. Every hypothesis of `mty` must be a conjunct of the witness; and, for EVERY conjunct of the
 conclusion (a main theorem may state several guarantees, `IsEven ∧ IsOdd`, `wb1 ∧ … ∧ wb8`; a witness for one
@@ -3046,7 +3079,8 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
   -- no anchor and is refused here (the run-free exemption is decided on the Go side).
   let runName := fun (n : Name) =>
     let t := n.getString!
-    t.startsWith "Returns" || t.startsWith "GoReturns" || t.startsWith "GrownReturns" || t == "ReachesRet" || t == "Panics" || t == "Faults"
+    t.startsWith "Returns" || t.startsWith "GoReturns" || t.startsWith "GrownReturns" || t == "ReachesRet" || t == "Panics" || t == "Faults" ||
+      t == "RunsAtLeast"
   let isFact := fun (c : Expr) =>
     !panicOnly c &&
     (match (claimBody c).consumeMData.getAppFn with
@@ -3175,8 +3209,23 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
       -- a panic-only conjunct: the claim is `Panics p s` (an `↔` states it on one side and its guard on the other: both are required)
       let lastCs := if isPan then (if lastC.isAppOfArity ``Iff 2 then #[lastC.getArg! 0, lastC.getArg! 1] else #[lastC]) else #[lastC]
       for lastC in lastCs do
-       unless ← findConj lastC wconjs do
+       -- instruction-count bounds: a `ReturnsWithin n p s Q` conclusion is witnessed by `Returns p s Q` or by a `ReturnsWithin`
+       -- of any bound at the same instantiation (`withoutBound` on both sides)
+       let wconjsB := wconjs.map fun w => withoutBound w
+       unless (← findConj lastC wconjs) || (← findConj (withoutBound lastC) wconjsB) do
         return some s!"the main theorem{which} is not exhibited as a RUN: the witness must contain, at the same instantiation, the conjunct `{(← Meta.ppExpr lastC).pretty 300}` (a concrete run from the precondition state to the return with the post holding; U-WITNESS-RUN)"
+       -- a lower-bound claim (`RunsAtLeastOnCall`, whose unfolded conclusion is `RunsAtLeast m p s`) is exhibited as the RunsAtLeast
+       -- conjunct above AND a returning run from the same state: a state that faults after `m` instructions satisfies a lower bound
+       -- vacuously (no call of the function returns from it), and `m = 0` holds of every state
+       if isRunsAtLeast lastC then
+         let p := (← instantiateMVars lastC).consumeMData.getArg! 1
+         let s := (← instantiateMVars lastC).consumeMData.getArg! 2
+         let mut hasRet := false
+         for w in wconjs do
+           if hasRet then break
+           if ← returnsRunAt p s w then hasRet := true
+         unless hasRet do
+           return some s!"the lower bound `{(← Meta.ppExpr lastC).pretty 300}` of the main theorem{which} is not exhibited with a RETURNING run: the witness must also contain, at the same instantiation, a `Returns`/`ReturnsWithin` conjunct for this program and state (a lower bound holds vacuously of a state that faults or never returns; U-WITNESS-RUN)"
       -- the pc premises: matched if the witness states them, else they must be about a state the other
       -- premises fixed
       for q in all.filter pcPrem do
@@ -3240,7 +3289,10 @@ postcondition with `Returns.mono`): the same predicate with the same program, st
 auxiliary arguments, whose postcondition keeps the first conjunct of the main theorem's (the ABI
 obligation `ABIReturn s s'` / `CReturn s s'`) and adds at least one further conjunct, i.e. says
 something about the result. A trivial postcondition, or the ABI obligation alone, is rejected. -/
-def returnsMatches (mr r : Expr) : MetaM Bool := do
+def returnsMatches (mr0 r0 : Expr) : MetaM Bool := do
+  -- instruction-count bounds: `ReturnsWithin n p s Q` is compared as the `Returns p s Q` it implies, on both sides
+  let mr := withoutBound (← instantiateMVars mr0)
+  let r := withoutBound (← instantiateMVars r0)
   if ← defEqTry mr r then return true
   unless mr.getAppFn == r.getAppFn && mr.getAppNumArgs == r.getAppNumArgs do return false
   let ma := mr.getAppArgs

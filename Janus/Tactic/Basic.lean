@@ -270,6 +270,215 @@ theorem ite {c : Prop} [Decidable c] {r₁ r₂ : Except Fault State} (h₁ : c 
 
 end ExecThen
 
+/-! ## Fuel-counted goals (`ReachesW`, `Going`): instruction-count bounds
+
+`janus_run` on `ReturnsWithin n p s post` (and on `RunsAtLeast m p s`) steps the program exactly as
+for `Returns`, but the fuel is a literal that every step consumes, so the proof is the bound: each
+step turns `ReachesW (k + 1)` into `ExecThenW k`, the exit address closes a branch with at least one
+unit of fuel left, and a branch that needs more steps than the bound is not provable (the tactic
+stops there and says how many instructions it executed). `Going m` is the lower-bound goal
+(`p.run m s = .error .outOfFuel`): every branch must execute `m` instructions without a final
+outcome, so `m = 0` closes it and an exit or a stub before that is an error. Both ignore calls
+(`calls [...]`: a callee summary hides its instruction count) and path merging. -/
+
+/-- With fuel `n` the run of `p` from `s` ends in an outcome satisfying `Q`. -/
+def ReachesW (n : Nat) (p : Program) (s : State) (Q : Outcome → Prop) : Prop :=
+  ∃ o, p.run n s = .ok o ∧ Q o
+
+/-- Continue after an instruction (fuel-counted). -/
+def ExecThenW (n : Nat) (p : Program) (r : Except Fault State) (Q : Outcome → Prop) : Prop :=
+  match r with
+  | .ok s' => ReachesW n p s' Q
+  | .error _ => False
+
+/-- The run with fuel `m` is still going (`RunsAtLeast`); `Q` is a phantom argument that gives the
+goal the same shape as `ReachesW`. -/
+def Going (m : Nat) (p : Program) (s : State) (_Q : Outcome → Prop) : Prop :=
+  p.run m s = .error .outOfFuel
+
+/-- Continue after an instruction (the lower-bound goal). -/
+def ExecThenG (n : Nat) (p : Program) (r : Except Fault State) (Q : Outcome → Prop) : Prop :=
+  match r with
+  | .ok s' => Going n p s' Q
+  | .error _ => False
+
+namespace ReachesW
+
+variable {p : Program} {s : State} {Q : Outcome → Prop}
+
+theorem step {n c w : Nat} {i : Instr} {r : Except Fault State}
+    (hpc : s.pc = BitVec.ofNat 64 c) (hok : stepOK p c w i = true) (he : exec i s = r)
+    (h : ExecThenW n p r Q) : ReachesW (n + 1) p s Q := by
+  simp only [stepOK, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne,
+    Option.isNone_iff_eq_none, beq_iff_eq] at hok
+  obtain ⟨⟨⟨⟨hc, hx⟩, hs⟩, hf⟩, hd⟩ := hok
+  have hpc' := pc_toNat_of hpc hc
+  cases r with
+  | error e => exact h.elim
+  | ok s' =>
+    obtain ⟨o, hr, hq⟩ := h
+    refine ⟨o, ?_, hq⟩
+    rw [Program.run_succ_step (s' := s') (by rw [hpc']; exact hx) (by rw [hpc']; exact hs)
+      (by rw [hpc']; exact hf) (by rw [step_of_decodeAll hd]; exact he)]
+    exact hr
+
+theorem exit {n c : Nat} (hpc : s.pc = BitVec.ofNat 64 c) (hok : exitOK p c = true)
+    (hq : Q (.returned s)) : ReachesW (n + 1) p s Q := by
+  simp only [exitOK, Bool.and_eq_true, decide_eq_true_eq, beq_iff_eq] at hok
+  exact ⟨_, Program.run_succ_exit (by rw [pc_toNat_of hpc hok.1]; exact hok.2), hq⟩
+
+theorem stub {n c : Nat} {name : String} {kind : StubKind} (hpc : s.pc = BitVec.ofNat 64 c)
+    (hok : stubOK p c name kind = true) (hq : Q (.stub name kind s)) : ReachesW (n + 1) p s Q := by
+  unfold stubOK at hok
+  simp only [Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne] at hok
+  obtain ⟨⟨hc, hx⟩, hst⟩ := hok
+  have hpc' := pc_toNat_of hpc hc
+  cases hfind : p.stubAt c with
+  | none => rw [hfind] at hst; cases hst
+  | some st =>
+    rw [hfind] at hst
+    simp only [Bool.and_eq_true, beq_iff_eq] at hst
+    obtain ⟨h1, h2⟩ := hst
+    refine ⟨_, Program.run_succ_stub (by rw [hpc']; exact hx) (by rw [hpc']; exact hfind), ?_⟩
+    rw [h1, h2]; exact hq
+
+theorem ite_state {c : Prop} [Decidable c] {n : Nat} {s₁ s₂ : State}
+    (h₁ : c → ReachesW n p s₁ Q) (h₂ : ¬c → ReachesW n p s₂ Q) :
+    ReachesW n p (if c then s₁ else s₂) Q := by
+  by_cases hc : c
+  · rw [ite_eq_left hc]; exact h₁ hc
+  · rw [ite_eq_right hc]; exact h₂ hc
+
+variable {ret : Nat}
+
+theorem step_withExit {n c w : Nat} {i : Instr} {r : Except Fault State} (hret : RetAddr p ret)
+    (hpc : s.pc = BitVec.ofNat 64 c) (hok : stepOK p c w i = true) (he : exec i s = r)
+    (h : ExecThenW n (p.withExit ret) r Q) : ReachesW (n + 1) (p.withExit ret) s Q := by
+  simp only [stepOK, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne,
+    Option.isNone_iff_eq_none, beq_iff_eq] at hok
+  obtain ⟨⟨⟨⟨hc, _⟩, hs⟩, hf⟩, hd⟩ := hok
+  have hpc' := pc_toNat_of hpc hc
+  cases r with
+  | error e => exact h.elim
+  | ok s' =>
+    obtain ⟨o, hr, hq⟩ := h
+    refine ⟨o, ?_, hq⟩
+    rw [Program.run_succ_step (s' := s') (by rw [hpc']; exact hret.ne_of_fetch hf)
+      (by rw [hpc']; exact hs) (by rw [hpc']; exact hf) (by rw [step_of_decodeAll hd]; exact he)]
+    exact hr
+
+theorem exit_withExit {n : Nat} (hret : RetAddr p ret) (hpc : s.pc = BitVec.ofNat 64 ret)
+    (hq : Q (.returned s)) : ReachesW (n + 1) (p.withExit ret) s Q :=
+  ⟨_, Program.run_succ_exit (by rw [hpc, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hret.lt64]; rfl), hq⟩
+
+theorem stub_withExit {n c : Nat} {name : String} {kind : StubKind} (hret : RetAddr p ret)
+    (hpc : s.pc = BitVec.ofNat 64 c) (hok : stubOK p c name kind = true)
+    (hq : Q (.stub name kind s)) : ReachesW (n + 1) (p.withExit ret) s Q := by
+  unfold stubOK at hok
+  simp only [Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne] at hok
+  obtain ⟨⟨hc, _⟩, hst⟩ := hok
+  have hpc' := pc_toNat_of hpc hc
+  cases hfind : p.stubAt c with
+  | none => rw [hfind] at hst; cases hst
+  | some st =>
+    rw [hfind] at hst
+    simp only [Bool.and_eq_true, beq_iff_eq] at hst
+    obtain ⟨h1, h2⟩ := hst
+    refine ⟨_, Program.run_succ_stub (p := p.withExit ret)
+      (by rw [hpc']; exact hret.ne_of_stubAt hfind) (by rw [hpc']; exact hfind), ?_⟩
+    rw [h1, h2]; exact hq
+
+/-- A bounded return is a bounded `IsReturn` goal. -/
+theorem of_returnsWithin {n : Nat} {post : State → Prop} {p : Program} {s : State}
+    (h : ReachesW (n + 1) p s (IsReturn post)) : ReturnsWithin n p s post := by
+  obtain ⟨o, hr, hq⟩ := h
+  cases o with
+  | returned s' => exact ⟨s', hr, hq⟩
+  | stub _ _ _ => exact hq.elim
+
+end ReachesW
+
+namespace ExecThenW
+
+variable {p : Program} {Q : Outcome → Prop} {n : Nat}
+
+theorem ok {s : State} (h : ReachesW n p s Q) : ExecThenW n p (.ok s) Q := h
+
+theorem ite {c : Prop} [Decidable c] {r₁ r₂ : Except Fault State} (h₁ : c → ExecThenW n p r₁ Q)
+    (h₂ : ¬c → ExecThenW n p r₂ Q) : ExecThenW n p (if c then r₁ else r₂) Q := by
+  by_cases hc : c
+  · rw [ite_eq_left hc]; exact h₁ hc
+  · rw [ite_eq_right hc]; exact h₂ hc
+
+end ExecThenW
+
+namespace Going
+
+variable {p : Program} {s : State} {Q : Outcome → Prop}
+
+theorem zero : Going 0 p s Q := rfl
+
+theorem step {n c w : Nat} {i : Instr} {r : Except Fault State}
+    (hpc : s.pc = BitVec.ofNat 64 c) (hok : stepOK p c w i = true) (he : exec i s = r)
+    (h : ExecThenG n p r Q) : Going (n + 1) p s Q := by
+  simp only [stepOK, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne,
+    Option.isNone_iff_eq_none, beq_iff_eq] at hok
+  obtain ⟨⟨⟨⟨hc, hx⟩, hs⟩, hf⟩, hd⟩ := hok
+  have hpc' := pc_toNat_of hpc hc
+  cases r with
+  | error e => exact h.elim
+  | ok s' =>
+    have h : p.run n s' = .error .outOfFuel := h
+    show p.run (n + 1) s = _
+    rw [Program.run_succ_step (s' := s') (by rw [hpc']; exact hx) (by rw [hpc']; exact hs)
+      (by rw [hpc']; exact hf) (by rw [step_of_decodeAll hd]; exact he)]
+    exact h
+
+theorem ite_state {c : Prop} [Decidable c] {n : Nat} {s₁ s₂ : State}
+    (h₁ : c → Going n p s₁ Q) (h₂ : ¬c → Going n p s₂ Q) :
+    Going n p (if c then s₁ else s₂) Q := by
+  by_cases hc : c
+  · rw [ite_eq_left hc]; exact h₁ hc
+  · rw [ite_eq_right hc]; exact h₂ hc
+
+variable {ret : Nat}
+
+theorem step_withExit {n c w : Nat} {i : Instr} {r : Except Fault State} (hret : RetAddr p ret)
+    (hpc : s.pc = BitVec.ofNat 64 c) (hok : stepOK p c w i = true) (he : exec i s = r)
+    (h : ExecThenG n (p.withExit ret) r Q) : Going (n + 1) (p.withExit ret) s Q := by
+  simp only [stepOK, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne,
+    Option.isNone_iff_eq_none, beq_iff_eq] at hok
+  obtain ⟨⟨⟨⟨hc, _⟩, hs⟩, hf⟩, hd⟩ := hok
+  have hpc' := pc_toNat_of hpc hc
+  cases r with
+  | error e => exact h.elim
+  | ok s' =>
+    have h : (p.withExit ret).run n s' = .error .outOfFuel := h
+    show (p.withExit ret).run (n + 1) s = _
+    rw [Program.run_succ_step (s' := s') (by rw [hpc']; exact hret.ne_of_fetch hf)
+      (by rw [hpc']; exact hs) (by rw [hpc']; exact hf) (by rw [step_of_decodeAll hd]; exact he)]
+    exact h
+
+/-- A lower bound is a `Going` goal. -/
+theorem of_runsAtLeast {m : Nat} {p : Program} {s : State} (h : Going m p s (fun _ => True)) :
+    RunsAtLeast m p s := h
+
+end Going
+
+namespace ExecThenG
+
+variable {p : Program} {Q : Outcome → Prop} {n : Nat}
+
+theorem ok {s : State} (h : Going n p s Q) : ExecThenG n p (.ok s) Q := h
+
+theorem ite {c : Prop} [Decidable c] {r₁ r₂ : Except Fault State} (h₁ : c → ExecThenG n p r₁ Q)
+    (h₂ : ¬c → ExecThenG n p r₂ Q) : ExecThenG n p (if c then r₁ else r₂) Q := by
+  by_cases hc : c
+  · rw [ite_eq_left hc]; exact h₁ hc
+  · rw [ite_eq_right hc]; exact h₂ hc
+
+end ExecThenG
+
 /-! ## Specifications in terms of `Reaches` -/
 
 theorem returns_of_reaches {p : Program} {s : State} {post : State → Prop}
@@ -290,6 +499,15 @@ theorem panics_of_reaches {p : Program} {s : State} (h : Reaches p s IsPanic) : 
     | external => exact hq.elim
     | syscall => exact hq.elim
     | trap => exact hq.elim
+
+/-- `janus_run` on `ReturnsWithin n p s post`: the fuel-counted goal with `n + 1` units of fuel. -/
+theorem returnsWithin_of_reachesW {p : Program} {s : State} {n : Nat} {post : State → Prop}
+    (h : ReachesW (n + 1) p s (IsReturn post)) : ReturnsWithin n p s post :=
+  ReachesW.of_returnsWithin h
+
+/-- `janus_run` on `RunsAtLeast m p s`: the lower-bound goal. -/
+theorem runsAtLeast_of_going {p : Program} {s : State} {m : Nat}
+    (h : Going m p s (fun _ => True)) : RunsAtLeast m p s := h
 
 theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMorestack) :
     GrowsStack p s := by

@@ -17,6 +17,30 @@ theorem correctness (x y : BitVec 64) :
   janus64_run
   all_goals simp [hbr]
 
+/-- SPEED: every call returns after executing at most 4 instructions (`CMPQ; JCC; MOVQ; RET` on the longer path). The
+unit is instructions of the model, not cycles (docs/SOUNDNESS.md, "Instruction-count bounds"). -/
+theorem within (x y : BitVec 64) :
+    EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y]
+      (fun s => StackWritable s 0 8)
+      (fun _ s' => results 1 s' = [if y.toNat < x.toNat then x else y]) := by
+  intro ret hret s hs hpre
+  janus64_intro hs
+  obtain ⟨-, hnw, hacc⟩ := hpre
+  simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
+  janus64_run
+  all_goals simp [hbr]
+
+/-- SPEED (lower bound): every call executes at least 3 instructions before it returns (`CMPQ; JCC; RET` on the shorter path). -/
+theorem atLeast (x y : BitVec 64) :
+    RunsAtLeastOnCall (fun _ => 3) Extracted.program Extracted.entry [x, y]
+      (fun s => StackWritable s 0 8) := by
+  intro ret hret s hs hpre
+  janus64_intro hs
+  obtain ⟨-, hnw, hacc⟩ := hpre
+  simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
+  janus64_run
+
+
 namespace Witness
 
 open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
@@ -43,6 +67,21 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64)
     (Returns (Extracted.program.withExit ret) s fun s' =>
     ABIReturn s s' ∧ (results 1 s') = [if y.toNat < x.toNat then x else y]) :=
   ⟨ret, s0, x, y, hret, setup, hpre, correctness x y ret hret s0 setup hpre⟩
+
+/-- `within` is not vacuous: a concrete call (`Max(3, 4)`) returns within 4 instructions with the guarantee. -/
+theorem within : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧
+    (ReturnsWithin 4 (Extracted.program.withExit ret) s fun s' =>
+    ABIReturn s s' ∧ (results 1 s') = [if y.toNat < x.toNat then x else y]) :=
+  ⟨ret, s0, x, y, hret, setup, hpre, Proof.within x y ret hret s0 setup hpre⟩
+
+/-- `atLeast` is not vacuous: the same call is still running after 3 instructions and returns. -/
+theorem atLeast : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧
+    RunsAtLeast 3 (Extracted.program.withExit ret) s ∧
+    (Returns (Extracted.program.withExit ret) s fun s' => ABIReturn s s') :=
+  ⟨ret, s0, x, y, hret, setup, hpre, Proof.atLeast x y ret hret s0 setup hpre,
+    (Proof.correctness x y ret hret s0 setup hpre).mono fun _ h => h.1⟩
 
 end Witness
 

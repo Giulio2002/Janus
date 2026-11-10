@@ -704,5 +704,155 @@ theorem EnsuresGoX.mono {entry : Nat} {args : List W64} {pre pre' : State → Pr
 
 end GoLemmas
 
+/-! ## Instruction-count bounds (`ReturnsWithin`, `RunsAtLeast`, `EnsuresWithin`, `RunsAtLeastOnCall`)
+
+The unit is **instructions executed by the model** (`Program.run` steps), not CPU cycles: the model
+has no timing, a cycle figure can only be derived outside the proof (N × a worst-case CPI). A
+runtime-contract stub is not an instruction of the extracted code: its instructions are not counted
+(a loop-free function that calls no runtime function, such as `Add`, makes none).
+
+`p.run (fuel + 1) s` returns `.ok (.returned s)` when `pc = p.exitAddr` and otherwise executes one
+instruction and continues with `fuel`; `p.run 0 s = .error .outOfFuel`. So a call that returns after
+executing `k` instructions is exactly a run with fuel `k + 1` (`ReturnsWithin k`), and a run with
+fuel `m` that is still going (`RunsAtLeast m`) has executed `m` instructions without a final outcome. -/
+
+section Within
+
+/-- The call returns (reaches `p.exitAddr`) after executing AT MOST `n` instructions, in a state
+satisfying `post`. Excludes faults, panics, stack growth and non-termination, exactly like
+`Returns`; `ReturnsWithin.returns` forgets the bound. -/
+def ReturnsWithin (n : Nat) (p : Program) (s : State) (post : State → Prop) : Prop :=
+  ∃ s', p.run (n + 1) s = .ok (.returned s') ∧ post s'
+
+/-- Executing fewer than `m` instructions never reaches a final outcome (return, stub, fault):
+the run with fuel `m` is still going. A LOWER bound on the running time of the call (it is
+vacuous when the call faults early: such a state needs a tied witness like any claim). -/
+def RunsAtLeast (m : Nat) (p : Program) (s : State) : Prop :=
+  p.run m s = .error .outOfFuel
+
+/-- `Ensures` with an instruction budget that may depend on the call state (for example on an input
+length). For every admissible return address and call state meeting `pre`, the call returns, obeys
+the ABI, satisfies `post`, and executes at most `bound s` instructions. -/
+def EnsuresWithin (bound : State → Nat) (p : Program) (entry : Nat) (args : List W64)
+    (pre : State → Prop) (post : State → State → Prop) : Prop :=
+  ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+    ReturnsWithin (bound s) (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')
+
+/-- Lower-bound companion: every admissible call state meeting `pre` executes at least `lower s`
+instructions before any outcome. A universal run claim like `EnsuresWithin`: it is verified only
+together with a tied witness that exhibits a call state meeting `pre` and the returning run. -/
+def RunsAtLeastOnCall (lower : State → Nat) (p : Program) (entry : Nat) (args : List W64)
+    (pre : State → Prop) : Prop :=
+  ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+    RunsAtLeast (lower s) (p.withExit ret) s
+
+section WithinLemmas
+
+variable {p : Program} {s : State} {n m k : Nat}
+
+/-- Forget the bound. -/
+theorem ReturnsWithin.returns {post : State → Prop} (h : ReturnsWithin n p s post) :
+    Returns p s post := by
+  obtain ⟨s', hr, hp⟩ := h; exact ⟨n + 1, s', hr, hp⟩
+
+/-- A larger budget is still a valid budget. -/
+theorem ReturnsWithin.mono {post : State → Prop} (h : ReturnsWithin n p s post) (hle : n ≤ m) :
+    ReturnsWithin m p s post := by
+  obtain ⟨s', hr, hp⟩ := h; exact ⟨s', Program.run_mono hr (by omega), hp⟩
+
+/-- Weaken the postcondition. -/
+theorem ReturnsWithin.post_mono {P Q : State → Prop} (h : ReturnsWithin n p s P)
+    (hPQ : ∀ s', P s' → Q s') : ReturnsWithin n p s Q := by
+  obtain ⟨s', hr, hp⟩ := h; exact ⟨s', hr, hPQ _ hp⟩
+
+/-- Conversely, a returning run is a bounded one: with the fuel it used. -/
+theorem Returns.within {post : State → Prop} (h : Returns p s post) :
+    ∃ n, ReturnsWithin n p s post := by
+  obtain ⟨f, s', hr, hp⟩ := h
+  cases f with
+  | zero => simp [Program.run] at hr
+  | succ f => exact ⟨f, s', hr, hp⟩
+
+/-- A lower bound for `m` is one for every smaller `m'`. -/
+theorem RunsAtLeast.mono (h : RunsAtLeast m p s) (hle : n ≤ m) : RunsAtLeast n p s :=
+  Program.run_outOfFuel_of_le h hle
+
+/-- A run that is still going after `m` instructions cannot return within fewer than `m`. -/
+theorem RunsAtLeast.le_of_returnsWithin {post : State → Prop} (hl : RunsAtLeast m p s)
+    (hu : ReturnsWithin n p s post) : m ≤ n := by
+  refine Classical.byContradiction fun hlt => ?_
+  obtain ⟨s', hr, _⟩ := hu
+  have := Program.run_outOfFuel_of_le hl (show n + 1 ≤ m by omega)
+  rw [hr] at this; cases this
+
+/-- A returning run: the returned state is reached by ordinary steps, strictly fewer than the fuel. -/
+theorem steps_of_run_returned_lt : ∀ {f : Nat} {s s' : State}, p.run f s = .ok (.returned s') →
+    ∃ k, k < f ∧ Program.Steps p s k s' ∧ s'.pc.toNat = p.exitAddr
+  | 0, _, _, h => by simp [Program.run] at h
+  | f + 1, s, s', h => by
+    rw [Program.run_succ] at h
+    split at h
+    · rename_i hx; cases h; exact ⟨0, by omega, .refl _, hx⟩
+    · rename_i hx
+      split at h
+      · cases h
+      · rename_i hst
+        split at h
+        · cases h
+        · rename_i w hf
+          cases hstep : Arm64.step w s with
+          | error e => rw [hstep] at h; cases h
+          | ok s₁ =>
+            rw [hstep] at h
+            obtain ⟨k, hk, hs1, he⟩ := steps_of_run_returned_lt h
+            exact ⟨k + 1, by omega, .step hx hst hf hstep hs1, he⟩
+
+/-- **Exact count.** If the call is still going after `k` instructions and returns within `k`
+instructions, it executes exactly `k` instructions: `k` ordinary steps reach the return. -/
+theorem exact_count {post : State → Prop} (hl : RunsAtLeast k p s)
+    (hu : ReturnsWithin k p s post) :
+    ∃ s', Program.Steps p s k s' ∧ s'.pc.toNat = p.exitAddr ∧ post s' := by
+  obtain ⟨s', hr, hp⟩ := hu
+  obtain ⟨j, hj, hs, hx⟩ := steps_of_run_returned_lt hr
+  have hge : k ≤ j := Classical.byContradiction fun h => by
+    have h1 := Program.run_steps_exit hs hx
+    have h2 := Program.run_outOfFuel_of_le hl (show j + 1 ≤ k by omega)
+    rw [h1] at h2; cases h2
+  have : j = k := by omega
+  subst this
+  exact ⟨s', hs, hx, hp⟩
+
+/-- The bound claim implies the plain `Ensures` claim. -/
+theorem EnsuresWithin.ensures {bound : State → Nat} {entry : Nat} {args : List W64}
+    {pre : State → Prop} {post : State → State → Prop}
+    (h : EnsuresWithin bound p entry args pre post) : Ensures p entry args pre post :=
+  fun ret hret s hs hp => (h ret hret s hs hp).returns
+
+/-- A larger budget is still a valid budget. -/
+theorem EnsuresWithin.mono_bound {bound bound' : State → Nat} {entry : Nat} {args : List W64}
+    {pre : State → Prop} {post : State → State → Prop}
+    (h : EnsuresWithin bound p entry args pre post) (hle : ∀ s, pre s → bound s ≤ bound' s) :
+    EnsuresWithin bound' p entry args pre post :=
+  fun ret hret s hs hp => (h ret hret s hs hp).mono (hle s hp)
+
+/-- Weaken the precondition and the postcondition (as `Ensures.mono`). -/
+theorem EnsuresWithin.mono {bound : State → Nat} {entry : Nat} {args : List W64}
+    {pre pre' : State → Prop} {post post' : State → State → Prop}
+    (h : EnsuresWithin bound p entry args pre post) (hpre : ∀ s, pre' s → pre s)
+    (hpost : ∀ s s', pre' s → post s s' → post' s s') :
+    EnsuresWithin bound p entry args pre' post' :=
+  fun ret hret s hs hp =>
+    (h ret hret s hs (hpre s hp)).post_mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ hp hq⟩
+
+/-- A lower bound for `lower` is one for every pointwise smaller bound. -/
+theorem RunsAtLeastOnCall.mono {lower lower' : State → Nat} {entry : Nat} {args : List W64}
+    {pre : State → Prop} (h : RunsAtLeastOnCall lower p entry args pre)
+    (hle : ∀ s, pre s → lower' s ≤ lower s) : RunsAtLeastOnCall lower' p entry args pre :=
+  fun ret hret s hs hp => (h ret hret s hs hp).mono (hle s hp)
+
+end WithinLemmas
+
+end Within
+
 end GoABI
 end Janus

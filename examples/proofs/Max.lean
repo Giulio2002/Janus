@@ -22,6 +22,24 @@ theorem correctness (x y : BitVec 64) :
   all_goals split <;> first | rfl | omega
 
 
+/-- SPEED: every call returns after executing at most 4 instructions (`CMP; B.cond; MOV; RET` on the longer path). The
+unit is instructions of the model, not cycles (docs/SOUNDNESS.md, "Instruction-count bounds"). -/
+theorem within (x y : BitVec 64) :
+    EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun _ => True)
+      (fun _ s' => s'.regs 0 = if y.toNat < x.toNat then x else y) := by
+  intro ret hret s hs _
+  janus_intro hs
+  janus_run
+  all_goals split <;> first | rfl | omega
+
+/-- SPEED (lower bound): every call executes at least 3 instructions before it returns (`CMP; B.cond; RET` on the shorter path). -/
+theorem atLeast (x y : BitVec 64) :
+    RunsAtLeastOnCall (fun _ => 3) Extracted.program Extracted.entry [x, y] (fun _ => True) := by
+  intro ret hret s hs _
+  janus_intro hs
+  janus_run
+
+
 namespace Witness
 
 def ret : Nat := 0x1000
@@ -60,6 +78,25 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64)
   case pre =>
     try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp]
     all_goals decide
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- `within` is not vacuous: a concrete call (`Max(3, 5)`, the longer path) returns within 4 instructions with the guarantee. -/
+theorem within : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (True) ∧
+    (ReturnsWithin 4 (Extracted.program.withExit ret) s fun s' =>
+      ABIReturn s s' ∧ (s'.regs 0 = if y.toNat < x.toNat then x else y)) :=
+  ⟨ret, s0, (3), (5), hret, setup, trivial, Proof.within (3) (5) ret hret s0 setup trivial⟩
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 4000000 in
+/-- `atLeast` is not vacuous: the same call is still running after 3 instructions and returns. -/
+theorem atLeast : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (True) ∧
+    RunsAtLeast 3 (Extracted.program.withExit ret) s ∧
+    (Returns (Extracted.program.withExit ret) s fun s' => ABIReturn s s') :=
+  ⟨ret, s0, (3), (5), hret, setup, trivial, Proof.atLeast (3) (5) ret hret s0 setup trivial,
+    (Proof.correctness (3) (5) ret hret s0 setup trivial).mono fun _ h => h.1⟩
 
 end Witness
 
