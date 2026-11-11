@@ -21,20 +21,32 @@ rule is unchanged), so the result and framework caches rebuild once.
 - Examples: `Max` (arm64, amd64) gets `within` (N = 4) and `atLeast` (M = 3) with witnesses; `JanusTests.Within`;
   red-team round `test/redteam/rounds/roundwithin`.
 - `lakefile.toml` version 0.3.0 (it still said 0.1.0).
-- Olean provenance supports packages written with Lean's module system (`module` header, `public import`),
-  e.g. ethereum/EthLib (PR #1). janus's own compile keeps every module-data part (`.olean`, `.olean.server`,
-  `.olean.private`, `.ir`); the trusted olean store entry is v2 (the MAC covers the key and every part's
-  SHA-256, an absent part recorded as absent; v0.2.0 entries are misses and rebuild once); the import-header
-  parser reads `public`/`meta`/`private` before `import`.
-- Fix (found by red-teaming PR #1 before release): `import all` is always the modifier, as Lean reads it, also
-  across a newline or comment (`import all -- c⏎ M` imports `M`); the PR's parser and the incremental gate's
-  `leanImports` had read it as a module named `all` there, so a hidden import was missing from the closure.
-  `leanImports` also no longer treats `runtime` as a modifier (Lean 4.34.1 reads it as a module name).
+- Includes everything in v0.2.1 below (PR #1: module-system consumer dependencies, olean store v2,
+  and the `import all` parser fix).
 - Known limitations: `janus verify --asl` transfers `Ensures` theorems only; an `EnsuresWithin` theorem is
   rejected there ("not `Janus.GoABI.Ensures`"); derive the plain `Ensures` with `EnsuresWithin.ensures` and
   transfer that. `janus_run` proves numeral bounds only (no state-dependent budget from a loop invariant), and
   has no `calls`/`join` in bound goals. A def-wrapped `EnsuresWithin` statement is rejected like a def-wrapped
   `Ensures` (the statement must mention `Extracted.program`).
+
+## v0.2.1 (unreleased)
+
+Bug fix for consumer packages whose dependencies use Lean's module system (`module` header,
+`public import`), such as ethereum/EthLib. Before, `janus verify --proof-root` failed at
+"Stage: olean provenance" for them; it never produced a wrong verdict.
+
+- janus's own compile of the consumer closure keeps every module-data part `lean -o` writes
+  (`.olean`, `.olean.server`, `.olean.private`, `.ir`), not only the `.olean`.
+- The trusted olean store records and authenticates each part (entry format v2; v0.2.0 entries are
+  rebuilt once). A module's identity covers all its parts; olean-only modules keep their keys.
+- The import-header parser accepts the module system's modifiers before `import`
+  (`public import`, `public meta import`, `private import`) and `all` after it.
+- `import all` is always read as the modifier, as Lean 4.34.1 reads it: the module name follows,
+  across newlines and comments, and `import all` without a module is refused. Found by red-teaming
+  this release: an intermediate version of the parser read `import all` followed by a newline as an
+  import of a module named `all`, which would have left the real import out of a module's key. The
+  incremental item keys' header parser (`incr.go`) is fixed the same way, and no longer treats
+  `runtime` as a modifier.
 
 ## v0.2.0 (2026-11-10)
 
