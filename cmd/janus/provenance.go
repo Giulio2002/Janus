@@ -167,16 +167,13 @@ func parseImports(src []byte) (imports []string, ok bool) {
 		if s[i] >= 0x80 || s[i] == '\xc2' {
 			return nil, false
 		}
-		start := i
 		w := word()
 		if w == "module" || w == "prelude" {
 			continue
 		}
 		// Lean's module system puts the modifiers BEFORE the keyword: `public import M`, `public meta import M`,
 		// `meta import M`, `private import M`; only `all` follows it (`import all M`).
-		mods := 0
 		for w == "public" || w == "meta" || w == "private" {
-			mods++
 			if !skip() {
 				return nil, false
 			}
@@ -186,11 +183,7 @@ func parseImports(src []byte) (imports []string, ok bool) {
 			w = word()
 		}
 		if w != "import" {
-			if mods > 0 {
-				// `public` before anything but an import (`public section`, `public def`): the header ended at start
-				i = start
-			}
-			return imports, true // the header ended
+			return imports, true // the header ended (also at `public section`, `public def`, ...)
 		}
 		if !skip() {
 			return nil, false
