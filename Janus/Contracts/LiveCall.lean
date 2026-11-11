@@ -231,4 +231,57 @@ theorem pool_disjoint {rt : List (Nat × Nat)} {lo hi P : Nat} (h1 : InRanges P 
   have a3 := InRanges.disjoint h3 hw
   omega
 
+/-- **A zero-byte allocation's return** (arm64, `ZeroAllocRet`): a callee that returns to `X30`
+with the kept registers and changes memory only in its own window (`calleeStack`, apart from the
+live set and from `R.rt`) keeps the live objects and the invariant for the same `L` and `b`. The
+result `X0` is whatever the callee left there. -/
+theorem zeroAllocRet_of_frame {R : RtInv} {stack nargs b : Nat} {L : List (Nat × Nat)} {s fin : State}
+    (hpc : fin.pc = s.regs 30) (hsp : fin.sp = s.sp) (h18 : fin.regs 18 = s.regs 18)
+    (h28 : fin.regs 28 = s.regs 28) (h29 : fin.regs 29 = s.regs 29) (hdz : fin.dczid = s.dczid)
+    (htp : fin.tpidr = s.tpidr) (hfc : fin.fpcr = s.fpcr) (hfs : fin.fpsr = s.fpsr)
+    (hmf : MemFrame s.mem fin.mem (calleeStack s stack nargs))
+    (hLs : LiveSep L (calleeStack s stack nargs)) (hWs : LiveSep (calleeStack s stack nargs) R.rt)
+    (hinv : R.inv b L (s.regs 28).toNat (view R.rt L s.mem)) :
+    ZeroAllocRet R stack nargs L b s fin := by
+  obtain ⟨junk, f, vr, m, ex, ep, hs⟩ := retStateX_intro (res := [fin.regs 0]) hpc hsp h18 h28 h29 hdz htp hfc hfs
+    (fun i hi => by simp at hi; subst hi; rfl)
+  have hm : m = fin.mem := by
+    have := congrArg State.mem hs
+    simp only [retStateX] at this
+    exact this.symm
+  subst hm
+  exact ⟨fin.regs 0, junk, f, vr, _, ex, ep, hs, hmf.widen _, LiveFrame.of_win hmf hLs,
+    RtInv.inv_frame hmf hWs hinv⟩
+
+/-- A live set with an empty range `(p, p)` appended covers the same bytes. -/
+theorem inRs_append_empty (L : List (Nat × Nat)) (p a : Nat) : inRs (L ++ [(p, p)]) a = inRs L a := by
+  simp only [inRs, List.any_append, List.any_cons, List.any_nil, Bool.or_false]
+  have : (decide (p ≤ a) && decide (a < p)) = false := by
+    by_cases h : p ≤ a <;> simp [h] <;> omega
+  rw [this, Bool.or_false]
+
+theorem view_append_empty (rt L : List (Nat × Nat)) (p : Nat) (m : Memory) :
+    view rt (L ++ [(p, p)]) m = view rt L m := by
+  simp only [view, inRs_append_empty]
+
+/-- **`MakesliceLiveContract` gives `MakesliceZeroLive`** (arm64) for a runtime hypothesis whose
+invariant does not depend on an EMPTY range of the live set (`hdrop`; the toy runtime's,
+`LiveSat.toyR_dropEmpty`): for a zero-byte request the block is `blockSize 0 _ = 0` bytes, so
+the live contract's postcondition is the invariant for `L ++ [(ptr, ptr)]` at the budget `b - 0`. -/
+theorem MakesliceZeroLive.of_live {p : Program} {addr stack : Nat} {R : RtInv}
+    (h : MakesliceLiveContract p addr stack R)
+    (hdrop : ∀ b L g q m, R.inv b (L ++ [(q, q)]) g (view R.rt (L ++ [(q, q)]) m) → R.inv b L g (view R.rt L m)) :
+    MakesliceZeroLive p addr stack R := by
+  intro L b
+  have hbs : ∀ c, blockSize 0 c = 0 := fun c => by cases c <;> decide
+  refine Janus.Tactic.Summary.mono (h L b) (fun s hp => ?_) (fun s s' hp hq => ?_)
+  · obtain ⟨⟨hP, hR, hok, hinv, _, hs1, hs2⟩, hz, -⟩ := hp
+    have hr : makesliceRound s = 0 := by simp only [makesliceRound, hz, hbs]
+    exact ⟨hP, hR, hok, hinv, by rw [hr]; exact Nat.zero_le _, hs1, hs2⟩
+  · obtain ⟨_, hz, -⟩ := hp
+    have hr : makesliceRound s = 0 := by simp only [makesliceRound, hz, hbs]
+    obtain ⟨ptr, junk, f, v, m, ex, ep, hs', hMF, hLF, _, _, hinv⟩ := hq
+    rw [hr, Nat.sub_zero, Nat.add_zero] at hinv
+    exact ⟨ptr, junk, f, v, m, ex, ep, hs', hMF, hLF, hdrop _ _ _ _ _ hinv⟩
+
 end Janus.Contracts

@@ -88,6 +88,27 @@ def MakesliceLiveContract64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat)
       s s' fun m ptr => 0 < typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat →
         makesliceObj64 R.rt s m ptr ∧ ApartAll ptr (makesliceRound64 s) L)
 
+/-- The return of a zero-byte allocation (amd64): `LiveAllocRet64` without the object (live set
+and budget kept), as arm64 `ZeroAllocRet`. -/
+@[reducible] def ZeroAllocRet64 (R : RtInv) (stack nargs : Nat) (L : List (Nat × Nat)) (b : Nat) (s s' : State) : Prop :=
+  ∃ (ptr : W64) (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Janus.Arm64.Memory)
+    (zh : Nat → BitVec 256) (kr : Nat → W64),
+    s' = retState64 s junk [ptr] f x yh m zh kr ∧
+      MemFrame s.mem m (R.rt ++ calleeStack64 s stack nargs) ∧ LiveFrame s.mem m L [] ∧
+      R.inv b L (s.regs 14).toNat (view R.rt L m)
+
+/-- **`runtime.makeslice(et, len, cap)` with `et.Size_ · cap = 0`, live** (amd64; `RAX = et`,
+`RBX = len`, `RCX = cap`): as arm64 `MakesliceZeroLive`, the live set and the budget kept.
+`MakesliceZeroSatAmd64.makesliceZeroLive64_pinned` runs the pinned code. -/
+def MakesliceZeroLive64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat) (R : RtInv) : Prop :=
+  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
+    (fun s => (MakeslicePre64 stack s ∧ StackRoom64 s stack 3 ∧
+      LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b 0 (s.regs 14).toNat s.mem
+        (liveWin64 s stack 3)) ∧
+      typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat = 0 ∧
+      Outside (s.regs 0).toNat 16 (calleeStack64 s stack 3))
+    (fun s s' => ZeroAllocRet64 R stack 3 L b s s')
+
 /-! ### Non-zero sizes (amd64) -/
 
 theorem MallocgcLiveContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {stack : Nat} {R : RtInv}

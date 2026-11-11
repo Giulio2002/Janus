@@ -262,6 +262,9 @@ theorem MemmoveLive.of_codeIn (hc : CodeIn p P) {a d : Nat} {R : RtInv}
 theorem MemmoveZeroLive.of_codeIn (hc : CodeIn p P) {a d : Nat} {R : RtInv}
     (h : MemmoveZeroLive p a d R) : MemmoveZeroLive P a d R :=
   fun L b => Summary.of_codeIn hc (h L b)
+theorem MakesliceZeroLive.of_codeIn (hc : CodeIn p P) {a st : Nat} {R : RtInv}
+    (h : MakesliceZeroLive p a st R) : MakesliceZeroLive P a st R :=
+  fun L b => Summary.of_codeIn hc (h L b)
 theorem MemclrNoHeapPointersLive.of_codeIn (hc : CodeIn p P) {a d : Nat} {R : RtInv}
     (h : MemclrNoHeapPointersLive p a d R) : MemclrNoHeapPointersLive P a d R :=
   fun L b => Summary.of_codeIn hc (h L b)

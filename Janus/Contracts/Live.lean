@@ -575,6 +575,41 @@ def MakesliceLiveContract (p : Program) (addr : Nat) (stack : Nat)
       s s' fun m ptr => 0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat →
         makesliceObj R.rt s m ptr ∧ ApartAll ptr (makesliceRound s) L)
 
+/-! ### Zero-byte `makeslice` -/
+
+/-- The return of a zero-byte allocation (arm64): `LiveAllocRet` without the object. The callee
+returned to `X30` (`retStateX`, result `ptr` unconstrained), memory changed only in `R.rt` and the
+callee's window and not in the live objects, and the invariant holds for the SAME live set `L` and
+the SAME budget `b`. -/
+@[reducible] def ZeroAllocRet (R : RtInv) (stack nargs : Nat) (L : List (Nat × Nat)) (b : Nat) (s s' : State) : Prop :=
+  ∃ (ptr : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+    (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+    s' = retStateX s junk [ptr] f v m ex ep ∧
+      MemFrame s.mem m (R.rt ++ calleeStack s stack nargs) ∧ LiveFrame s.mem m L [] ∧
+      R.inv b L (s.regs 28).toNat (view R.rt L m)
+
+/-- **`runtime.makeslice(et, len, cap)` with `et.Size_ · cap = 0`, live** (arm64; `X0 = et`,
+`X1 = len`, `X2 = cap`). `MakesliceLiveContract` appends the result range
+`[ptr, ptr + blockSize 0 _) = [ptr, ptr)` to the live set also for a zero-byte request, while it
+says nothing about `ptr` then (its object facts are under `0 < size`): the invariant after such a
+call is about `L ++ [(ptr, ptr)]` with an arbitrary `ptr`, from which a caller can neither state a
+summary's `LiveExt R L L'` nor the `LiveSep` of a later call. The pinned runtime allocates nothing
+for a zero-byte request (`makeslice` → `mallocgc(0, et, true)`, whose first test is
+`if size == 0 { return unsafe.Pointer(&zerobase) }`), so this contract keeps the live set and the
+budget (`ZeroAllocRet`). The precondition is `MakesliceLiveContract`'s with cost `0`, the zero
+size, and the type descriptor outside the callee's window (`makeslice` reads `et.Size_` after
+pushing its frame; a descriptor is read-only data, never in a stack). `ptr` stays unconstrained
+(it is `&runtime.zerobase`). `MakesliceZeroSat.makesliceZeroLive_pinned` runs the pinned
+`makeslice` and `mallocgc` themselves (docs/RUNTIME-CONTRACTS.md, "Zero-byte allocations"). -/
+def MakesliceZeroLive (p : Program) (addr : Nat) (stack : Nat) (R : RtInv) : Prop :=
+  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
+    (fun s => (MakeslicePre stack s ∧ StackRoom s stack 3 ∧
+      LiveAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b 0
+        (s.regs 28).toNat s.mem (calleeStack s stack 3)) ∧
+      typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat = 0 ∧
+      Outside (s.regs 0).toNat 16 (calleeStack s stack 3))
+    (fun s s' => ZeroAllocRet R stack 3 L b s s')
+
 /-! ### `growslice` (8-byte pointer-free elements) -/
 
 @[reducible] def growsliceRound (s : State) : Nat := 8 * growCap8 (s.regs 1).toNat (s.regs 2).toNat

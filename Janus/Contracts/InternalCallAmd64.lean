@@ -215,6 +215,9 @@ theorem MemmoveLive64.of_codeIn (hc : CodeIn64 p P) {a d : Nat} {R : RtInv}
 theorem MemmoveZeroLive64.of_codeIn (hc : CodeIn64 p P) {a d : Nat} {R : RtInv}
     (h : MemmoveZeroLive64 p a d R) : MemmoveZeroLive64 P a d R :=
   fun L b => Summary.of_codeIn64 hc (h L b)
+theorem MakesliceZeroLive64.of_codeIn (hc : CodeIn64 p P) {a st : Nat} {R : RtInv}
+    (h : MakesliceZeroLive64 p a st R) : MakesliceZeroLive64 P a st R :=
+  fun L b => Summary.of_codeIn64 hc (h L b)
 theorem MemclrNoHeapPointersLive64.of_codeIn (hc : CodeIn64 p P) {a d : Nat} {R : RtInv}
     (h : MemclrNoHeapPointersLive64 p a d R) : MemclrNoHeapPointersLive64 P a d R :=
   fun L b => Summary.of_codeIn64 hc (h L b)

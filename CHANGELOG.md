@@ -2,7 +2,27 @@
 
 ## Unreleased
 
-New runtime contract for `memmove` of zero bytes (additive: no existing statement, proof or auditor rule changes).
+New runtime contracts for zero-byte runtime calls, `memmove` and `makeslice` (additive: no existing statement, proof
+or auditor rule changes).
+
+- `MakesliceZeroLive` (arm64, `Janus/Contracts/Live.lean`) and `MakesliceZeroLive64` (amd64, `LiveAmd64.lean`): a call
+  of `runtime.makeslice(et, len, cap)` with `et.Size_ · cap = 0` returns with the live set and the budget unchanged
+  (`ZeroAllocRet` / `ZeroAllocRet64`; the result pointer is unconstrained). `MakesliceLiveContract` appends an empty
+  range at an unconstrained pointer to the live set in that case, after which a caller can state neither `LiveExt`
+  nor a later call's `LiveSep`. The precondition is `MakesliceLiveContract`'s with cost `0`, the zero size, and the
+  type descriptor outside the callee's window. `MakesliceZeroLive(64).of_codeIn`.
+- Justification: the pinned `makeslice` calls `mallocgc(0, …)`, which returns `&runtime.zerobase` first thing
+  (`malloc.go:1075`). `LiveSat.makesliceZeroLive_pinned` / `LiveSatAmd64.makesliceZeroLive64_pinned` run the pinned
+  go1.26.10 `makeslice` and `mallocgc` themselves in the model, for every runtime hypothesis.
+- `zeroAllocRet_of_frame` (`LiveCall.lean`), `zeroAllocRet64_of_frame`, `MakesliceZeroLive.of_live` /
+  `MakesliceZeroLive64.of_live` (a live-contract stub is a zero-byte witness when the invariant ignores empty live
+  ranges), `LiveSat.toyR_dropEmpty`, `inRs_append_empty`, `view_append_empty`; SAT witnesses
+  `makesliceZeroLive(64)_satisfiable` (both makeslice contracts on one stub).
+- Both contracts are on the auditor's pinned-contract list. JanusTests.MakesliceZero (incl. a red team: a stub that
+  charges the budget for a zero-byte request is refuted, `¬ MakesliceZeroLive …`, both ISAs). docs/RUNTIME-CONTRACTS.md:
+  "Zero-byte allocations".
+
+New runtime contract for `memmove` of zero bytes:
 
 - `MemmoveZeroLive` (arm64, `Janus/Contracts/Live.lean`) and `MemmoveZeroLive64` (amd64, `LiveAmd64.lean`): a call of
   `runtime.memmove(dst, src, 0)` returns as a `MemmoveLive` call does, with an empty written range, under only the ABI
