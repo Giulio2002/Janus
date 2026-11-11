@@ -21,6 +21,15 @@ rule is unchanged), so the result and framework caches rebuild once.
 - Examples: `Max` (arm64, amd64) gets `within` (N = 4) and `atLeast` (M = 3) with witnesses; `JanusTests.Within`;
   red-team round `test/redteam/rounds/roundwithin`.
 - `lakefile.toml` version 0.3.0 (it still said 0.1.0).
+- Olean provenance supports packages written with Lean's module system (`module` header, `public import`),
+  e.g. ethereum/EthLib (PR #1). janus's own compile keeps every module-data part (`.olean`, `.olean.server`,
+  `.olean.private`, `.ir`); the trusted olean store entry is v2 (the MAC covers the key and every part's
+  SHA-256, an absent part recorded as absent; v0.2.0 entries are misses and rebuild once); the import-header
+  parser reads `public`/`meta`/`private` before `import`.
+- Fix (found by red-teaming PR #1 before release): `import all` is always the modifier, as Lean reads it, also
+  across a newline or comment (`import all -- c⏎ M` imports `M`); the PR's parser and the incremental gate's
+  `leanImports` had read it as a module named `all` there, so a hidden import was missing from the closure.
+  `leanImports` also no longer treats `runtime` as a modifier (Lean 4.34.1 reads it as a module name).
 - Known limitations: `janus verify --asl` transfers `Ensures` theorems only; an `EnsuresWithin` theorem is
   rejected there ("not `Janus.GoABI.Ensures`"); derive the plain `Ensures` with `EnsuresWithin.ensures` and
   transfer that. `janus_run` proves numeral bounds only (no state-dependent budget from a loop invariant), and

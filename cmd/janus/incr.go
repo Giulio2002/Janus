@@ -351,15 +351,15 @@ func leanImports(src []byte) ([]string, error) {
 			return nil, err
 		}
 		m := word()
-		if m == "all" || m == "runtime" {
-			// a modifier if another word follows on the same line, else a module of that name
-			k := i
-			for k < len(s) && (s[k] == ' ' || s[k] == '\t') {
-				k++
+		if m == "all" {
+			// Lean 4.34.1 always reads `all` after `import` as the modifier: the module name follows, across
+			// newlines and comments (`import all` with no module is rejected). `runtime` is not a modifier there.
+			if err := skip(); err != nil {
+				return nil, err
 			}
-			if k < len(s) && s[k] != '\n' && s[k] != '\r' && !strings.HasPrefix(s[k:], "--") && !strings.HasPrefix(s[k:], "/-") {
-				i = k
-				m = word()
+			m = word()
+			if m == "import" {
+				return nil, fmt.Errorf("`import all` without a module name")
 			}
 		}
 		if m == "" || strings.ContainsAny(m, "«»/\\\"") || strings.HasPrefix(m, ".") || strings.HasSuffix(m, ".") || strings.Contains(m, "..") {
