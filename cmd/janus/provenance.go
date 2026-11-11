@@ -108,7 +108,7 @@ func compileConfig(files map[string][]byte, config string) (srcDirs, dopts []str
 }
 
 // parseImports reads the import header of a Lean source: `module`, `prelude`, and the `import`
-// commands with their modifiers. ok is false for anything it does not understand (an unterminated
+// commands with their modifiers (`public`/`meta`/`private` before `import`, `all` after it). ok is false for anything it does not understand (an unterminated
 // comment, a non-ASCII or guillemet module name).
 func parseImports(src []byte) (imports []string, ok bool) {
 	s := string(src)
@@ -167,34 +167,56 @@ func parseImports(src []byte) (imports []string, ok bool) {
 		if s[i] >= 0x80 || s[i] == '\xc2' {
 			return nil, false
 		}
+		start := i
 		w := word()
-		switch w {
-		case "module", "prelude":
+		if w == "module" || w == "prelude" {
 			continue
-		case "import":
-			for {
-				if !skip() {
-					return nil, false
-				}
-				if i >= len(s) || s[i] >= 0x80 || s[i] == '\xc2' {
-					return nil, false
-				}
-				m := word()
-				if m == "" {
-					return nil, false
-				}
-				if m == "public" || m == "meta" || m == "all" {
-					continue
-				}
-				if strings.HasPrefix(m, ".") || strings.HasSuffix(m, ".") || strings.Contains(m, "..") {
-					return nil, false
-				}
-				imports = append(imports, m)
-				break
+		}
+		// Lean's module system puts the modifiers BEFORE the keyword: `public import M`, `public meta import M`,
+		// `meta import M`, `private import M`; only `all` follows it (`import all M`).
+		mods := 0
+		for w == "public" || w == "meta" || w == "private" {
+			mods++
+			if !skip() {
+				return nil, false
 			}
-		default:
+			if i >= len(s) || s[i] >= 0x80 || s[i] == '\xc2' {
+				return nil, false
+			}
+			w = word()
+		}
+		if w != "import" {
+			if mods > 0 {
+				// `public` before anything but an import (`public section`, `public def`): the header ended at start
+				i = start
+			}
 			return imports, true // the header ended
 		}
+		if !skip() {
+			return nil, false
+		}
+		if i >= len(s) || s[i] >= 0x80 || s[i] == '\xc2' {
+			return nil, false
+		}
+		m := word()
+		if m == "all" {
+			// a modifier if another word follows on the same line, else a module named `all`
+			k := i
+			for k < len(s) && (s[k] == ' ' || s[k] == '\t') {
+				k++
+			}
+			if k < len(s) && s[k] != '\n' && s[k] != '\r' && !strings.HasPrefix(s[k:], "--") && !strings.HasPrefix(s[k:], "/-") {
+				i = k
+				if s[i] >= 0x80 || s[i] == '\xc2' {
+					return nil, false
+				}
+				m = word()
+			}
+		}
+		if m == "" || strings.HasPrefix(m, ".") || strings.HasSuffix(m, ".") || strings.Contains(m, "..") {
+			return nil, false
+		}
+		imports = append(imports, m)
 	}
 }
 
@@ -214,7 +236,7 @@ type ownBuild struct {
 }
 
 type ownMod struct {
-	sha string // of the olean janus holds
+	sha string // of the module data janus holds (modParts.digest)
 	ext bool   // its import closure reaches Extracted or JanusTrusted
 	rel string // source path inside the package
 	pkg *provPkg
@@ -360,16 +382,16 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 	if err := os.MkdirAll(filepath.Dir(oleanPath), 0o755); err != nil {
 		return nil, wsDiag(err)
 	}
-	var data []byte
+	var parts modParts
 	if ob.ws.replayCache {
 		if d, ok := oleanStoreGet(key); ok {
-			data = d
+			parts = d
 			ob.mu.Lock()
 			ob.hits++
 			ob.mu.Unlock()
 		}
 	}
-	if data == nil {
+	if parts == nil {
 		work, err := os.MkdirTemp(ob.ws.Dir, "ownwork-")
 		if err != nil {
 			return nil, wsDiag(err)
@@ -390,19 +412,19 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 				Msg:  fmt.Sprintf("janus's own compile of %s (the hashed source, the package's options) failed, although the Lake build succeeded:\n%s", m, summarizeLeanErrors(o, 2000)),
 				Next: "Check the module for code that behaves differently outside Lake (include_str of a file outside the snapshot, an option set by the lakefile)."}
 		}
-		data, err = os.ReadFile(out)
-		if err != nil || len(data) == 0 {
+		parts, err = readModParts(out)
+		if err != nil {
 			return nil, provDiag(fmt.Sprintf("janus's own compile of %s produced no olean", m))
 		}
 		_ = os.RemoveAll(work)
 		if ob.ws.replayCache {
-			oleanStorePut(key, data)
+			oleanStorePut(key, parts)
 		}
 	}
-	if err := os.WriteFile(oleanPath, data, 0o644); err != nil {
+	if err := parts.write(oleanPath); err != nil {
 		return nil, wsDiag(err)
 	}
-	om := &ownMod{sha: sha256Hex(data), rel: srel, pkg: pkg, ext: reachesExt}
+	om := &ownMod{sha: parts.digest(), rel: srel, pkg: pkg, ext: reachesExt}
 	ob.mu.Lock()
 	ob.done[m] = om
 	ob.mu.Unlock()
@@ -669,19 +691,25 @@ func (ws *consumerWS) ownDir() string { return filepath.Join(ws.Dir, "own") }
 func oleanStoreDir() string { return filepath.Join(cacheRoot(), "v1", "oleans") }
 
 type oleanEntry struct {
-	Key string `json:"key"`
-	Sha string `json:"sha256"`
-	MAC string `json:"mac"`
+	Key   string            `json:"key"`
+	Sha   string            `json:"sha256"` // modParts.digest of the parts
+	Parts map[string]string `json:"parts"`  // SHA-256 of each part, by extension
+	MAC   string            `json:"mac"`
 }
 
-func oleanMAC(hk []byte, key, sha string) string {
+// oleanMAC authenticates an entry: its key and the SHA-256 of every part, in moduleDataExts order (an absent part
+// is recorded as absent, so a part can be neither added to nor removed from a stored module).
+func oleanMAC(hk []byte, key string, parts map[string]string) string {
 	m := hmac.New(sha256.New, hk)
-	fmt.Fprintf(m, "janus-olean-entry-v1\n%q\n%q\n", key, sha)
+	fmt.Fprintf(m, "janus-olean-entry-v2\n%q\n", key)
+	for _, e := range moduleDataExts {
+		fmt.Fprintf(m, "%q %q\n", e, parts[e])
+	}
 	return hex.EncodeToString(m.Sum(nil))
 }
 
-// oleanStoreGet returns the stored olean of key if its entry is authentic and the bytes match.
-func oleanStoreGet(key string) ([]byte, bool) {
+// oleanStoreGet returns the stored module data of key if its entry is authentic and every part's bytes match.
+func oleanStoreGet(key string) (modParts, bool) {
 	if len(key) < 3 {
 		return nil, false
 	}
@@ -692,20 +720,32 @@ func oleanStoreGet(key string) ([]byte, bool) {
 	}
 	var e oleanEntry
 	hk, err := resultHMACKey()
-	if err != nil || json.Unmarshal(b, &e) != nil || e.Key != key || !hmac.Equal([]byte(e.MAC), []byte(oleanMAC(hk, key, e.Sha))) {
+	if err != nil || json.Unmarshal(b, &e) != nil || e.Key != key || e.Parts[".olean"] == "" ||
+		!hmac.Equal([]byte(e.MAC), []byte(oleanMAC(hk, key, e.Parts))) {
 		return nil, false
 	}
-	data, err := readPrivateFile(filepath.Join(dir, key+".olean"), false)
-	if err != nil || sha256Hex(data) != e.Sha {
+	parts := modParts{}
+	for _, ext := range moduleDataExts {
+		want, ok := e.Parts[ext]
+		if !ok {
+			continue
+		}
+		data, err := readPrivateFile(filepath.Join(dir, key+ext), false)
+		if err != nil || sha256Hex(data) != want {
+			return nil, false
+		}
+		parts[ext] = data
+	}
+	if len(parts) != len(e.Parts) || parts.digest() != e.Sha {
 		return nil, false
 	}
 	touchHit(filepath.Join(dir, key+".json"))
-	return data, true
+	return parts, true
 }
 
-// oleanStorePut records a freshly compiled olean (data first, then the authenticating entry).
-func oleanStorePut(key string, data []byte) {
-	if len(key) < 3 {
+// oleanStorePut records freshly compiled module data (the parts first, then the authenticating entry).
+func oleanStorePut(key string, parts modParts) {
+	if len(key) < 3 || len(parts[".olean"]) == 0 {
 		return
 	}
 	hk, err := resultHMACKey()
@@ -716,12 +756,79 @@ func oleanStorePut(key string, data []byte) {
 	if os.MkdirAll(dir, 0o755) != nil {
 		return
 	}
-	sha := sha256Hex(data)
-	if writeFileAtomic(filepath.Join(dir, key+".olean"), data) != nil {
-		return
+	shas := map[string]string{}
+	for _, ext := range moduleDataExts {
+		data, ok := parts[ext]
+		if !ok {
+			continue
+		}
+		if writeFileAtomic(filepath.Join(dir, key+ext), data) != nil {
+			return
+		}
+		shas[ext] = sha256Hex(data)
 	}
-	e, _ := json.Marshal(oleanEntry{Key: key, Sha: sha, MAC: oleanMAC(hk, key, sha)})
+	e, _ := json.Marshal(oleanEntry{Key: key, Sha: parts.digest(), Parts: shas, MAC: oleanMAC(hk, key, shas)})
 	_ = writeFileAtomic(filepath.Join(dir, key+".json"), e)
+}
+
+// modParts is the module data of one module, by extension (moduleDataExts): the olean, and for a file of Lean's
+// module system (`module` header) also its server and private parts, plus its IR. A module that imports a
+// module-system file needs that file's server part next to its olean, so janus keeps every part `lean -o` wrote.
+type modParts map[string][]byte
+
+// readModParts reads the parts `lean -o out` wrote next to out (an .olean path); the olean must exist and be non-empty.
+func readModParts(out string) (modParts, error) {
+	base := strings.TrimSuffix(out, ".olean")
+	parts := modParts{}
+	for _, ext := range moduleDataExts {
+		data, err := os.ReadFile(base + ext)
+		if err != nil {
+			if ext == ".olean" || !os.IsNotExist(err) {
+				return nil, fmt.Errorf("reading %s: %w", base+ext, err)
+			}
+			continue
+		}
+		parts[ext] = data
+	}
+	if len(parts[".olean"]) == 0 {
+		return nil, fmt.Errorf("%s is empty", out)
+	}
+	return parts, nil
+}
+
+// write puts the parts next to oleanPath and removes any part this module does not have (a stale file from
+// another build of the same module).
+func (p modParts) write(oleanPath string) error {
+	base := strings.TrimSuffix(oleanPath, ".olean")
+	for _, ext := range moduleDataExts {
+		data, ok := p[ext]
+		if !ok {
+			if err := os.Remove(base + ext); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			continue
+		}
+		if err := os.WriteFile(base+ext, data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// digest identifies the module data: the SHA-256 of the olean when that is the only part (as for a file outside
+// the module system, so those keys are unchanged), else the SHA-256 of every part's extension and SHA-256.
+func (p modParts) digest() string {
+	if len(p) == 1 {
+		return sha256Hex(p[".olean"])
+	}
+	h := sha256.New()
+	fmt.Fprintf(h, "janus-module-parts-v1\n")
+	for _, ext := range moduleDataExts {
+		if data, ok := p[ext]; ok {
+			fmt.Fprintf(h, "%q %s\n", ext, sha256Hex(data))
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // moduleOfRel is the module whose source is the file rel of the consumer package (a hashed file under one of its
