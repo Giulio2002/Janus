@@ -106,7 +106,8 @@ attribute [janus64_exec, janus64_post] rtView_writeLE
 def MallocgcPre64 (stack : Nat) (s : State) : Prop :=
   CallOK64 s stack 3 ∧ (s.regs 0).toNat ≤ maxAlloc ∧
     ((s.regs 3).toNat = 0 ∨ (TypeOK s.mem (s.regs 3).toNat ∧
-      (typNoscan s.mem (s.regs 3).toNat = false → (s.regs 1).toNat % 256 ≠ 0)))
+      (typNoscan s.mem (s.regs 3).toNat = false → (s.regs 1).toNat % 256 ≠ 0) ∧
+      Outside (s.regs 3).toNat 16 (calleeStack64 s stack 3)))
 
 @[reducible] def mallocgcObj64 (rt : List (Nat × Nat)) (s : State) (m : Memory) (ptr : Nat) :
     Prop :=
@@ -133,7 +134,8 @@ theorem MallocgcContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {rt : List
 
 /-- The precondition of `runtime.newobject` (amd64; `RAX = typ`). -/
 def NewobjectPre64 (stack : Nat) (s : State) : Prop :=
-  CallOK64 s stack 1 ∧ TypeOK s.mem (s.regs 0).toNat ∧ typSize s.mem (s.regs 0).toNat ≤ maxAlloc
+  CallOK64 s stack 1 ∧ TypeOK s.mem (s.regs 0).toNat ∧ typSize s.mem (s.regs 0).toNat ≤ maxAlloc ∧
+    Outside (s.regs 0).toNat 16 (calleeStack64 s stack 1)
 
 @[reducible] def newobjectObj64 (rt : List (Nat × Nat)) (s : State) (m : Memory) (ptr : Nat) :
     Prop :=
@@ -160,7 +162,8 @@ theorem NewobjectContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {rt : Lis
 def MakeslicePre64 (stack : Nat) (s : State) : Prop :=
   CallOK64 s stack 3 ∧ TypeOK s.mem (s.regs 0).toNat ∧
     (s.regs 3).toNat ≤ (s.regs 1).toNat ∧ (s.regs 1).toNat < 2 ^ 63 ∧
-    typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat ≤ maxAlloc
+    typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat ≤ maxAlloc ∧
+    Outside (s.regs 0).toNat 16 (calleeStack64 s stack 3)
 
 @[reducible] def makesliceObj64 (rt : List (Nat × Nat)) (s : State) (m : Memory) (ptr : Nat) :
     Prop :=
@@ -194,15 +197,18 @@ def GrowsliceArgs64 (stack : Nat) (s : State) : Prop :=
     typSize s.mem (s.regs 6).toNat = 8 ∧ typPtrBytes s.mem (s.regs 6).toNat = 0 ∧
     (s.regs 7).toNat ≤ (s.regs 3).toNat ∧
     (s.regs 3).toNat - (s.regs 7).toNat ≤ (s.regs 1).toNat ∧
-    (s.regs 1).toNat < (s.regs 3).toNat ∧ (s.regs 3).toNat < 2 ^ 40
+    (s.regs 1).toNat < (s.regs 3).toNat ∧ (s.regs 3).toNat < 2 ^ 40 ∧
+    Outside (s.regs 6).toNat 16 (calleeStack64 s stack 5)
 
-/-- The `oldLen` old elements at `oldPtr` are readable (amd64). -/
-def GrowsliceOld64 (s : State) : Prop :=
+/-- The `oldLen` old elements at `oldPtr` are readable, and outside the callee's stack window
+(amd64; see `GrowsliceOld`). -/
+def GrowsliceOld64 (stack : Nat) (s : State) : Prop :=
   (s.regs 0).toNat + 8 * ((s.regs 3).toNat - (s.regs 7).toNat) ≤ 2 ^ 48 ∧
-    s.mem.accessible (s.regs 0).toNat (8 * ((s.regs 3).toNat - (s.regs 7).toNat)) false = true
+    s.mem.accessible (s.regs 0).toNat (8 * ((s.regs 3).toNat - (s.regs 7).toNat)) false = true ∧
+    Outside (s.regs 0).toNat (8 * ((s.regs 3).toNat - (s.regs 7).toNat)) (calleeStack64 s stack 5)
 
 def GrowslicePre64 (stack : Nat) (s : State) : Prop :=
-  GrowsliceArgs64 stack s ∧ (0 < (s.regs 3).toNat - (s.regs 7).toNat → GrowsliceOld64 s)
+  GrowsliceArgs64 stack s ∧ (0 < (s.regs 3).toNat - (s.regs 7).toNat → GrowsliceOld64 stack s)
 
 @[reducible] def growsliceObj64 (rt : List (Nat × Nat)) (s : State) (m : Memory) (ptr : Nat) :
     Prop :=
@@ -230,7 +236,7 @@ def GrowsliceContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat �
 
 theorem GrowsliceContract64.withOld {p : Janus.Amd64.Program} {addr : Nat} {rt : List (Nat × Nat)}
     {stack : Nat} {H : RtReady} (h : GrowsliceContract64 p addr rt stack H) :
-    Summary p addr (fun s => (GrowsliceArgs64 stack s ∧ GrowsliceOld64 s) ∧
+    Summary p addr (fun s => (GrowsliceArgs64 stack s ∧ GrowsliceOld64 stack s) ∧
       Ready64 H rt (growsliceArgs64 s) s)
       (fun s s' => AllocRet64 rt stack 5
         (fun ptr => [ptr, s.regs 3, BitVec.ofNat 64 (growCap8 (s.regs 3).toNat (s.regs 1).toNat)])

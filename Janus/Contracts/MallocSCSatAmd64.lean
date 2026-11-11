@@ -18,7 +18,7 @@ theorem mallocgcSmallNoScanSC64_satisfiable : ∃ (n : Nat) (impl : List Janus.A
     ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧ MallocgcSCPre64 (NoScanArgs n) rt 4096 H s :=
   ⟨2, _, _, _, mallocgc64_impl.smallNoScanSC,
     wstate 16 (fun i => if i = 0 then 16 else if i = 3 then BitVec.ofNat 64 tyA else if i = 1 then 1 else 0),
-    rfl, ⟨⟨callOK_w _ _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by simp at h; decide⟩⟩,
+    rfl, ⟨⟨callOK_w _ _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by simp at h; decide, outside_tyA_at _ rfl _ rfl _⟩⟩,
       heapReady_w 16 (by decide), 16, tyA, 1, rfl, by decide⟩, by unfold NoScanArgs; decide⟩
 
 theorem mallocgcTinySize64_satisfiable : ∃ (n : Nat) (impl : List Janus.Amd64.Segment)
@@ -26,7 +26,7 @@ theorem mallocgcTinySize64_satisfiable : ∃ (n : Nat) (impl : List Janus.Amd64.
     ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧ MallocgcSCPre64 (TinyArgs n) rt 4096 H s :=
   ⟨8, _, _, _, mallocgc64_impl.tinySize,
     wstate 16 (fun i => if i = 0 then 8 else if i = 3 then BitVec.ofNat 64 tyA else if i = 1 then 1 else 0),
-    rfl, ⟨⟨callOK_w _ _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by simp at h; decide⟩⟩,
+    rfl, ⟨⟨callOK_w _ _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by simp at h; decide, outside_tyA_at _ rfl _ rfl _⟩⟩,
       heapReady_w 16 (by decide), 8, tyA, 1, rfl, by decide⟩, by unfold TinyArgs; decide⟩
 
 /-- `AllocSatAmd64.wmem 16` with a pointerful descriptor at `tyA` (`PtrBytes = 8`). -/
@@ -53,7 +53,7 @@ theorem mallocgcSmallScanNoHeaderSC64_satisfiable : ∃ (n : Nat) (impl : List J
     ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧ MallocgcSCPre64 (ScanArgs n) rt 4096 H s :=
   ⟨2, _, _, _, mallocgc64_impl.smallScanNoHeaderSC,
     wstateS (fun i => if i = 0 then 16 else if i = 3 then BitVec.ofNat 64 tyA else if i = 1 then 1 else 0),
-    rfl, ⟨⟨callOK_w 16 (fun i => if i = 0 then 16 else if i = 3 then BitVec.ofNat 64 tyA else if i = 1 then 1 else 0) 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun _ => by decide⟩⟩,
+    rfl, ⟨⟨callOK_w 16 (fun i => if i = 0 then 16 else if i = 3 then BitVec.ofNat 64 tyA else if i = 1 then 1 else 0) 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun _ => by decide, outside_tyA_at _ rfl _ rfl _⟩⟩,
       heapReady_s, 16, tyA, 1, rfl, by decide⟩, by unfold ScanArgs; decide⟩
 
 end Janus.Contracts.MallocSCSatAmd64

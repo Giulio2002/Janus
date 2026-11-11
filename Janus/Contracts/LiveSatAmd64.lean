@@ -527,6 +527,12 @@ theorem wcallOK64 (l : List Nat) (n : Nat) (hn : n ≤ 5) : CallOK64 (wst l) 409
   refine ⟨by decide, by decide, by decide, by simp [wsp]; omega, ?_⟩
   exact Janus.Arm64.Memory.accessible_mono _ hw (Nat.le_refl _) (by omega)
 
+/-- A descriptor is outside the callee's window (amd64). -/
+theorem wdesc64 (l : List Nat) (n : Nat) (p : Nat) (hp : p = tyA ∨ p = tyB ∨ p = tyC) :
+    Outside p 16 (calleeStack64 (wst l) 4096 n) := by
+  simp only [calleeStack64, w4, wspn, outside_cons, outside_nil, and_true]
+  rcases hp with rfl | rfl | rfl <;> simp only [wsp, tyA, tyB, tyC] <;> omega
+
 theorem wguard64 (l : List Nat) (n : Nat) (hn : n ≤ 5) : StackRoom64 (wst l) 4096 n := by
   simp only [StackRoom64, GuardOK64, w14, w4, wmem_eq, wspn, wgn, calleeStack64]
   refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
@@ -589,7 +595,8 @@ theorem newobjectLive64_satisfiable : ∃ (impl : List Janus.Amd64.Segment) (R :
       0 < typSize s.mem (s.regs 0).toNat := by
   have h0 : ((wst [tyA]).regs 0).toNat = tyA := wr0 _ (by decide)
   refine ⟨at0 newobjectCodeD, toyR tys0 okNew, newobjectD_impl tys0 tysOK0 okNew, [], 0x400, wst [tyA], rfl,
-    ⟨wcallOK64 _ 1 (by omega), by rw [h0, wmem_eq]; exact wTypeOK, by rw [h0, wmem_eq]; decide⟩,
+    ⟨wcallOK64 _ 1 (by omega), by rw [h0, wmem_eq]; exact wTypeOK, by rw [h0, wmem_eq]; decide,
+      by rw [h0]; exact wdesc64 _ 1 _ (Or.inl rfl)⟩,
     wguard64 _ 1 (by omega), ⟨by rw [h0]; exact ⟨rfl, rfl⟩, wmem_inv 0, by simp only [newobjectRound64, h0, wmem_eq]; decide,
       by simp, wwin64 _ 1 (by omega)⟩, by rw [h0, wmem_eq]; decide⟩
 
@@ -607,7 +614,8 @@ theorem makesliceLive64_satisfiable : ∃ (impl : List Janus.Amd64.Segment) (R :
   have h1 : ((wst [tyB, 2, 2]).regs 1).toNat = 2 := wr1 _ (by decide)
   refine ⟨at0 makesliceCodeD, toyR tys0 okMake, makesliceD_impl tys0 tysOK0 okMake, [], 0x400, wst [tyB, 2, 2], rfl,
     ⟨wcallOK64 _ 3 (by omega), by rw [h0, wmem_eq]; exact ⟨by decide, by decide⟩, by rw [h3, h1]; decide,
-      by rw [h1]; decide, by rw [h0, h1, wmem_eq]; decide⟩,
+      by rw [h1]; decide, by rw [h0, h1, wmem_eq]; decide,
+      by rw [h0]; exact wdesc64 _ 3 _ (Or.inr (Or.inl rfl))⟩,
     wguard64 _ 3 (by omega), ⟨by rw [h0, h3, h1]; exact ⟨rfl, rfl⟩, wmem_inv 0,
       by simp only [makesliceRound64, h0, h1, wmem_eq]; decide, by simp, wwin64 _ 3 (by omega)⟩,
     by rw [h0, h1, wmem_eq]; decide⟩
@@ -628,7 +636,8 @@ theorem mallocgcLive64_satisfiable : ∃ (impl : List Janus.Amd64.Segment) (R : 
   have h1 : ((wst [16, tyB, 1]).regs 1).toNat = 1 := wr1 _ (by decide)
   refine ⟨at0 mallocgcCodeD, toyR tys0 okMalloc, mallocgcD_impl tys0 tysOK0 okMalloc, [], 0x400, wst [16, tyB, 1], rfl,
     ⟨wcallOK64 _ 3 (by omega), by rw [h0]; decide, Or.inr ⟨by rw [h3, wmem_eq]; exact ⟨by decide, by decide⟩,
-      fun h => by rw [h1]; revert h; rw [h3, wmem_eq]; decide⟩⟩,
+      fun h => by rw [h1]; revert h; rw [h3, wmem_eq]; decide,
+      by rw [h3]; exact wdesc64 _ 3 _ (by first | exact Or.inr (Or.inl rfl) | exact Or.inr (Or.inr rfl))⟩⟩,
     wguard64 _ 3 (by omega), ⟨by rw [h0, h3, h1]; exact ⟨rfl, rfl⟩, wmem_inv 0,
       by simp only [mallocgcRound64, h0, h3, wmem_eq]; decide, by simp, wwin64 _ 3 (by omega)⟩, by rw [h0]; decide⟩
 
@@ -651,7 +660,8 @@ theorem growsliceLive64_satisfiable : ∃ (impl : List Janus.Amd64.Segment) (R :
     wst [HEAP, 2, 0, 2, tyB], rfl,
     ⟨⟨wcallOK64 _ 5 (by omega), by rw [h6, wmem_eq]; exact ⟨by decide, by decide⟩, by rw [h6, wmem_eq]; decide,
       by rw [h6, wmem_eq]; decide, by rw [h7, h3]; decide, by rw [h3, h7, h1]; decide, by rw [h1, h3]; decide,
-      by rw [h3]; decide⟩, fun h => absurd h (by rw [h3, h7]; decide)⟩,
+      by rw [h3]; decide, by rw [h6]; exact wdesc64 _ 5 _ (Or.inr (Or.inl rfl))⟩,
+      fun h => absurd h (by rw [h3, h7]; decide)⟩,
     wguard64 _ 5 (by omega), ⟨by simp only [growsliceArgs64, h0, h3, h1, h7, h6]; exact ⟨rfl, rfl⟩, wmem_inv 0,
       by simp only [growsliceRound64, h3, h1]; decide, by simp, wwin64 _ 5 (by omega)⟩⟩
   rintro args ⟨-, rfl⟩
@@ -669,7 +679,8 @@ theorem mallocgcSmallNoScanSCLive64_satisfiable : ∃ (n : Nat) (impl : List Jan
   have h1 : ((wst [16, tyB, 1]).regs 1).toNat = 1 := wr1 _ (by decide)
   refine ⟨2, at0 mallocgcCodeD, toyR tys0 okMalloc, (mallocgcD_impl tys0 tysOK0 okMalloc).smallNoScanSC, [], 0x400,
     wst [16, tyB, 1], rfl, ⟨⟨wcallOK64 _ 3 (by omega), by rw [h0]; decide, Or.inr ⟨by rw [h3, wmem_eq]; exact ⟨by decide, by decide⟩,
-      fun h => by rw [h1]; revert h; rw [h3, wmem_eq]; decide⟩⟩,
+      fun h => by rw [h1]; revert h; rw [h3, wmem_eq]; decide,
+      by rw [h3]; exact wdesc64 _ 3 _ (by first | exact Or.inr (Or.inl rfl) | exact Or.inr (Or.inr rfl))⟩⟩,
     wguard64 _ 3 (by omega), ⟨by rw [h0, h3, h1]; exact ⟨rfl, rfl⟩, wmem_inv 0,
       by simp only [mallocgcRound64, h0, h3, wmem_eq]; decide, by simp, wwin64 _ 3 (by omega)⟩⟩, ?_⟩
   unfold NoScanArgs; rw [h0, h3, wmem_eq]; exact ⟨by decide, by decide, by decide, by decide, by decide⟩
@@ -686,7 +697,8 @@ theorem mallocgcSmallScanNoHeaderSCLive64_satisfiable : ∃ (n : Nat) (impl : Li
   have h1 : ((wst [16, tyC, 1]).regs 1).toNat = 1 := wr1 _ (by decide)
   refine ⟨2, at0 mallocgcCodeD, toyR tys0 okScan, (mallocgcD_impl tys0 tysOK0 okScan).smallScanNoHeaderSC, [], 0x400,
     wst [16, tyC, 1], rfl, ⟨⟨wcallOK64 _ 3 (by omega), by rw [h0]; decide, Or.inr ⟨by rw [h3, wmem_eq]; exact ⟨by decide, by decide⟩,
-      fun h => by rw [h1]; revert h; rw [h3, wmem_eq]; decide⟩⟩,
+      fun h => by rw [h1]; revert h; rw [h3, wmem_eq]; decide,
+      by rw [h3]; exact wdesc64 _ 3 _ (by first | exact Or.inr (Or.inl rfl) | exact Or.inr (Or.inr rfl))⟩⟩,
     wguard64 _ 3 (by omega), ⟨by rw [h0, h3, h1]; exact ⟨rfl, rfl⟩, wmem_inv 0,
       by simp only [mallocgcRound64, h0, h3, wmem_eq]; decide, by simp, wwin64 _ 3 (by omega)⟩⟩, ?_⟩
   unfold ScanArgs; rw [h0, h3, wmem_eq]; exact ⟨by decide, by decide, by decide, by decide, by decide⟩
@@ -703,7 +715,8 @@ theorem mallocgcTinySizeLive64_satisfiable : ∃ (n : Nat) (impl : List Janus.Am
   have h1 : ((wst [8, tyB, 1]).regs 1).toNat = 1 := wr1 _ (by decide)
   refine ⟨8, at0 mallocgcCodeD, toyR tys0 okTiny, (mallocgcD_impl tys0 tysOK0 okTiny).tinySize, [], 0x400,
     wst [8, tyB, 1], rfl, ⟨⟨wcallOK64 _ 3 (by omega), by rw [h0]; decide, Or.inr ⟨by rw [h3, wmem_eq]; exact ⟨by decide, by decide⟩,
-      fun h => by rw [h1]; revert h; rw [h3, wmem_eq]; decide⟩⟩,
+      fun h => by rw [h1]; revert h; rw [h3, wmem_eq]; decide,
+      by rw [h3]; exact wdesc64 _ 3 _ (by first | exact Or.inr (Or.inl rfl) | exact Or.inr (Or.inr rfl))⟩⟩,
     wguard64 _ 3 (by omega), ⟨by rw [h0, h3, h1]; exact ⟨rfl, rfl⟩, wmem_inv 0,
       by simp only [mallocgcRound64, h0, h3, wmem_eq]; decide, by simp, wwin64 _ 3 (by omega)⟩⟩, ?_⟩
   unfold TinyArgs; rw [h0, h3, wmem_eq]; exact ⟨by decide, by decide, by decide, by decide, by decide⟩

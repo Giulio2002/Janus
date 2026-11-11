@@ -71,8 +71,26 @@ theorem callOK_w (r : Nat → W64) (n : Nat) (hn : n ≤ 5) : CallOK (wstate r) 
   exact Memory.accessible_mono _ hw (Nat.le_refl _) (by omega)
 
 theorem typeOK_w : TypeOK wmem tyA := ⟨by decide, by decide⟩
+
+/-- The descriptor is outside the callee's window (the stack at `wsp`, far from `tyA`), for every
+witness state and argument count. -/
+theorem outside_tyA (r : Nat → W64) (n : Nat) : Outside tyA 16 (calleeStack (wstate r) 4096 n) := by
+  have hsp : (wstate r).sp = BitVec.ofNat 64 wsp := rfl
+  simp only [calleeStack, hsp, outside_cons, outside_nil, and_true]
+  rw [show (BitVec.ofNat 64 wsp).toNat = wsp from rfl]
+  simp only [wsp, tyA]
+  omega
 theorem typSize_w : typSize wmem tyA = 16 := by decide
 theorem typPtr_w : typPtrBytes wmem tyA = 0 := by decide
+
+/-- `outside_tyA` for any state with the witness stack pointer and any address equal to `tyA`. -/
+theorem outside_tyA_at (s : State) (hsp : s.sp = BitVec.ofNat 64 wsp) (p : Nat) (hp : p = tyA) (n : Nat) :
+    Outside p 16 (calleeStack s 4096 n) := by
+  subst hp
+  simp only [calleeStack, hsp, outside_cons, outside_nil, and_true]
+  rw [show (BitVec.ofNat 64 wsp).toNat = wsp from rfl]
+  simp only [wsp, tyA]
+  omega
 
 /-- The object every implementation returns is `Fresh` for a request of at most 32 KiB. -/
 theorem fresh_heap {m : Memory} {size round : Nat} (zero hdr : Bool)
@@ -137,7 +155,8 @@ theorem newobject_satisfiable : ∃ (impl : List Segment) (rt : List (Nat × Nat
     ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
       (NewobjectPre 4096 s ∧ Ready H rt [(s.regs 0).toNat] s) ∧ 0 < typSize s.mem (s.regs 0).toNat :=
   ⟨_, _, _, newobject_impl, wstate (fun i => if i = 0 then BitVec.ofNat 64 tyA else 0), rfl,
-    ⟨⟨callOK_w _ 1 (by omega), typeOK_w, by rw [show ((wstate _).regs 0).toNat = tyA from rfl]; decide⟩,
+    ⟨⟨callOK_w _ 1 (by omega), typeOK_w, by rw [show ((wstate _).regs 0).toNat = tyA from rfl]; decide,
+      by rw [show ((wstate _).regs 0).toNat = tyA from rfl]; exact outside_tyA _ _⟩,
      heapReady_w, tyA, rfl, ⟨(tyA, tyA + 16), by simp [rt], Nat.le_refl _, Nat.le_refl _⟩, by decide⟩,
     by rw [show ((wstate _).regs 0).toNat = tyA from rfl]; decide⟩
 
@@ -197,7 +216,8 @@ theorem makeslice_satisfiable : ∃ (impl : List Segment) (rt : List (Nat × Nat
   ⟨_, _, _, makeslice_impl,
     wstate (fun i => if i = 0 then BitVec.ofNat 64 tyA else if i = 1 then 2 else if i = 2 then 4 else 0), rfl,
     ⟨⟨callOK_w _ 3 (by omega), typeOK_w, by decide, by decide,
-        by rw [show ((wstate _).regs 0).toNat = tyA from rfl]; decide⟩,
+        by rw [show ((wstate _).regs 0).toNat = tyA from rfl]; decide,
+        by rw [show ((wstate _).regs 0).toNat = tyA from rfl]; exact outside_tyA _ _⟩,
      heapReady_w, tyA, 2, 4, rfl, ⟨(tyA, tyA + 16), by simp [rt], Nat.le_refl _, Nat.le_refl _⟩,
      by decide⟩,
     by rw [show ((wstate _).regs 0).toNat = tyA from rfl]; decide⟩
@@ -240,7 +260,7 @@ theorem growslice_satisfiable : ∃ (impl : List Segment) (rt : List (Nat × Nat
   ⟨_, _, _, growslice_impl,
     wstate8 r8, rfl,
     ⟨⟨callOK_w r8 5 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide, by decide,
-        by decide, by decide⟩, fun h => absurd h (by decide)⟩,
+        by decide, by decide, by exact outside_tyA r8 5⟩, fun h => absurd h (by decide)⟩,
     ⟨by refine ⟨by decide, fun i hi => ?_⟩
         show (if _ then wmem8.bytes (heap + i) else 0) = 0
         split

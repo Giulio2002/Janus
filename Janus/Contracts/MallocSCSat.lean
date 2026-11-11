@@ -20,7 +20,7 @@ theorem mallocgcSmallNoScanSC_satisfiable : ∃ (n : Nat) (impl : List Segment) 
     ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ MallocgcSCPre (NoScanArgs n) rt 4096 H s :=
   ⟨2, _, _, _, mallocgc_impl.smallNoScanSC,
     wstate (fun i => if i = 0 then 16 else if i = 1 then BitVec.ofNat 64 tyA else if i = 2 then 1 else 0),
-    rfl, ⟨⟨callOK_w _ 3 (by omega), by decide, Or.inr ⟨typeOK_w, fun h => by simp at h; decide⟩⟩,
+    rfl, ⟨⟨callOK_w _ 3 (by omega), by decide, Or.inr ⟨typeOK_w, fun h => by simp at h; decide, outside_tyA_at _ rfl _ rfl _⟩⟩,
       heapReady_w, 16, tyA, 1, rfl, by decide⟩, by unfold NoScanArgs; decide⟩
 
 theorem mallocgcTinySize_satisfiable : ∃ (n : Nat) (impl : List Segment) (rt : List (Nat × Nat))
@@ -28,7 +28,7 @@ theorem mallocgcTinySize_satisfiable : ∃ (n : Nat) (impl : List Segment) (rt :
     ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ MallocgcSCPre (TinyArgs n) rt 4096 H s :=
   ⟨8, _, _, _, mallocgc_impl.tinySize,
     wstate (fun i => if i = 0 then 8 else if i = 1 then BitVec.ofNat 64 tyA else if i = 2 then 1 else 0),
-    rfl, ⟨⟨callOK_w _ 3 (by omega), by decide, Or.inr ⟨typeOK_w, fun h => by simp at h; decide⟩⟩,
+    rfl, ⟨⟨callOK_w _ 3 (by omega), by decide, Or.inr ⟨typeOK_w, fun h => by simp at h; decide, outside_tyA_at _ rfl _ rfl _⟩⟩,
       heapReady_w, 8, tyA, 1, rfl, by decide⟩, by unfold TinyArgs; decide⟩
 
 /-- `AllocSat.wmem` with a pointerful 16-byte descriptor at `tyA` (`PtrBytes = 8`). -/
@@ -56,7 +56,7 @@ theorem mallocgcSmallScanNoHeaderSC_satisfiable : ∃ (n : Nat) (impl : List Seg
     ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ MallocgcSCPre (ScanArgs n) rt 4096 H s :=
   ⟨2, _, _, _, mallocgc_impl.smallScanNoHeaderSC,
     wstateS (fun i => if i = 0 then 16 else if i = 1 then BitVec.ofNat 64 tyA else if i = 2 then 1 else 0),
-    rfl, ⟨⟨callOK_s _, by decide, Or.inr ⟨⟨by decide, by decide⟩, fun _ => by decide⟩⟩,
+    rfl, ⟨⟨callOK_s _, by decide, Or.inr ⟨⟨by decide, by decide⟩, fun _ => by decide, outside_tyA_at _ rfl _ rfl _⟩⟩,
       heapReady_s, 16, tyA, 1, rfl, by decide⟩, by unfold ScanArgs; decide⟩
 
 end Janus.Contracts.MallocSCSat

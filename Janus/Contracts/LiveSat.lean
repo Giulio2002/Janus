@@ -316,6 +316,12 @@ theorem wcallOK (r : Nat → W64) (n : Nat) (hn : n ≤ 5) : CallOK (wstate r) 4
   refine ⟨by decide, by decide, by decide, by decide, by decide, by simp [wsp]; omega, ?_⟩
   exact Memory.accessible_mono _ hw (Nat.le_refl _) (by omega)
 
+/-- A descriptor is outside the callee's window. -/
+theorem wdesc (r : Nat → W64) (n : Nat) (p : Nat) (hp : p = tyA ∨ p = tyB ∨ p = tyC) :
+    Outside p 16 (calleeStack (wstate r) 4096 n) := by
+  simp only [calleeStack, wsp_eq, wspn, outside_cons, outside_nil, and_true]
+  rcases hp with rfl | rfl | rfl <;> simp only [wsp, tyA, tyB, tyC] <;> omega
+
 theorem wguard (r : Nat → W64) (n : Nat) (hn : n ≤ 5) : StackRoom (wstate r) 4096 n := by
   simp only [StackRoom, GuardOK, w28, wsp_eq, wmem_eq, wspn, wgn, calleeStack]
   refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
@@ -344,7 +350,8 @@ theorem newobjectLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
     simp [wstate]; decide
   refine ⟨at0 (bumpCode 16), toyR tys0 okNew, newobject16_impl tys0 tysOK0 okNew ?_, [], 0x400,
     wstate (fun i => if i = 0 then BitVec.ofNat 64 tyA else 0), rfl,
-    ⟨wcallOK _ 1 (by omega), by rw [h0, wmem_eq]; exact wTypeOK, by rw [h0, wmem_eq]; decide⟩,
+    ⟨wcallOK _ 1 (by omega), by rw [h0, wmem_eq]; exact wTypeOK, by rw [h0, wmem_eq]; decide,
+      by rw [h0]; exact wdesc _ 1 _ (Or.inl rfl)⟩,
     wguard _ 1 (by omega), ⟨by rw [h0]; exact ⟨rfl, rfl⟩, wmem_inv 0, by simp only [newobjectRound, h0, wmem_eq]; decide,
       by simp, wwin _ 1 (by omega)⟩, by rw [h0, wmem_eq]; decide⟩
   · rintro args ⟨-, rfl⟩
@@ -366,7 +373,8 @@ theorem makesliceLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
         (s.regs 28).toNat s.mem (calleeStack s 4096 3) ∧
       0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat := by
   refine ⟨at0 (bumpCode 16), toyR tys0 okMake, makeslice16_impl tys0 tysOK0 okMake ?_, [], 0x400,
-    wst [tyB, 2, 2], rfl, ⟨wst_wcallOK _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide⟩,
+    wst [tyB, 2, 2], rfl, ⟨wst_wcallOK _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide,
+      wdesc _ 3 _ (Or.inr (Or.inl (by decide)))⟩,
     wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp,
       wwin _ 3 (by omega)⟩, by decide⟩
   · rintro args ⟨-, rfl⟩
@@ -382,7 +390,8 @@ theorem mallocgcLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
         (s.regs 28).toNat s.mem (calleeStack s 4096 3) ∧
       0 < (s.regs 0).toNat := by
   refine ⟨at0 (bumpCode 16), toyR tys0 okMalloc, mallocgc16_impl tys0 tysOK0 okMalloc (K := 16) (by omega) (by omega) ?_, [], 0x400,
-    wst [16, tyB, 1], rfl, ⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide⟩⟩,
+    wst [16, tyB, 1], rfl, ⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide,
+      wdesc _ 3 _ (by first | exact Or.inr (Or.inl (by decide)) | exact Or.inr (Or.inr (by decide)))⟩⟩,
     wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp,
       wwin _ 3 (by omega)⟩, by decide⟩
   · rintro args ⟨-, rfl⟩
@@ -397,7 +406,8 @@ theorem growsliceLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
       LiveAt R A0 (growsliceArgs s) L b (growsliceRound s) (s.regs 28).toNat s.mem (calleeStack s 4096 5) := by
   refine ⟨growCode16 |> at0, toyR tys0 okGrow, growslice16_impl tys0 tysOK0 okGrow ?_, [], 0x400,
     wst [HEAP, 2, 0, 2, tyB], rfl, ⟨⟨wst_wcallOK _ 5 (by omega), ⟨by decide, by decide⟩, by decide, by decide,
-      by decide, by decide, by decide, by decide⟩, fun h => absurd h (by decide)⟩,
+      by decide, by decide, by decide, by decide, wdesc _ 5 _ (Or.inr (Or.inl (by decide)))⟩,
+      fun h => absurd h (by decide)⟩,
     wguard _ 5 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp,
       wwin _ 5 (by omega)⟩⟩
   · rintro args ⟨-, rfl⟩
@@ -416,7 +426,8 @@ theorem mallocgcSmallNoScanSCLive_satisfiable : ∃ (n : Nat) (impl : List Segme
       NoScanArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat := by
   refine ⟨2, at0 (bumpCode 16), toyR tys0 okMalloc,
     (mallocgc16_impl tys0 tysOK0 okMalloc (K := 16) (by omega) (by omega) ?_).smallNoScanSC, [], 0x400,
-    wst [16, tyB, 1], rfl, ⟨⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide⟩⟩,
+    wst [16, tyB, 1], rfl, ⟨⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide,
+      wdesc _ 3 _ (by first | exact Or.inr (Or.inl (by decide)) | exact Or.inr (Or.inr (by decide)))⟩⟩,
       wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp, wwin _ 3 (by omega)⟩⟩, ?_⟩
   · rintro args ⟨-, rfl⟩
     exact ⟨16, tyB, 1, rfl, Or.inr ⟨(tyB, 8, 0), by simp [tys0], rfl, by decide, by decide⟩⟩
@@ -431,7 +442,8 @@ theorem mallocgcSmallScanNoHeaderSCLive_satisfiable : ∃ (n : Nat) (impl : List
       ScanArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat := by
   refine ⟨2, at0 (bumpCode 16), toyR tys0 okScan,
     (mallocgc16_impl tys0 tysOK0 okScan (K := 16) (by omega) (by omega) ?_).smallScanNoHeaderSC, [], 0x400,
-    wst [16, tyC, 1], rfl, ⟨⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide⟩⟩,
+    wst [16, tyC, 1], rfl, ⟨⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide,
+      wdesc _ 3 _ (by first | exact Or.inr (Or.inl (by decide)) | exact Or.inr (Or.inr (by decide)))⟩⟩,
       wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp, wwin _ 3 (by omega)⟩⟩, ?_⟩
   · rintro args ⟨-, rfl⟩
     exact ⟨16, tyC, 1, rfl, Or.inr ⟨(tyC, 16, 8), by simp [tys0], rfl, by decide, by decide⟩⟩
@@ -446,7 +458,8 @@ theorem mallocgcTinySizeLive_satisfiable : ∃ (n : Nat) (impl : List Segment) (
       TinyArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat := by
   refine ⟨8, at0 (bumpCode 16), toyR tys0 okTiny,
     (mallocgc16_impl tys0 tysOK0 okTiny (K := 8) (by omega) (by omega) ?_).tinySize, [], 0x400,
-    wst [8, tyB, 1], rfl, ⟨⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide⟩⟩,
+    wst [8, tyB, 1], rfl, ⟨⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide,
+      wdesc _ 3 _ (by first | exact Or.inr (Or.inl (by decide)) | exact Or.inr (Or.inr (by decide)))⟩⟩,
       wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp, wwin _ 3 (by omega)⟩⟩, ?_⟩
   · rintro args ⟨-, rfl⟩
     exact ⟨8, tyB, 1, rfl, Or.inr ⟨(tyB, 8, 0), by simp [tys0], rfl, by decide, by decide⟩⟩
