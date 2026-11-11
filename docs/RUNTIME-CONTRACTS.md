@@ -318,6 +318,7 @@ Every contract is `∀ L b, Summary p addr pre post`, named `<Function>LiveContr
 | `gcWriteBarrierN` | `WbLiveContract p addr stack R n` |
 | strings, slices, bulk barriers (every `RtSpec`) | `RtLiveContract p addr stack R sp ls` with a `LiveSpec` (cost, fresh objects, kept results) |
 | `memmove`, `memclrNoHeapPointers` | `MemmoveLive`, `MemclrNoHeapPointersLive` |
+| `memmove` with `n = 0` | `MemmoveZeroLive` (`MemmoveLive.withZero` joins it with `MemmoveLive`) |
 | `typedmemmove`, `typedmemclr`, `memclrHasPointers` | `TypedMemmoveLive`, `TypedMemclrLive`, `MemclrHasPointersLive` |
 
 **Precondition.** The call's ABI part, `StackRoom` (the stack check falls through), and
@@ -343,6 +344,42 @@ invariant holds for **every** content the caller stores there (`InvSlots`). A co
 is a live object or caller memory outside `R.rt` (`LiveDest`), so the view and the invariant are
 unchanged. No contract mentions `runtime.writeBarrier.enabled`: after any call it is unknown and a
 theorem covers both branches of the inline test.
+
+**Copies of zero bytes** (`MemmoveZeroLive`, `MemmoveZeroLive64`). Go compiles `copy(dst, src)` to
+`if dst != src { memmove(dst, src, n) }` with no test of `n`, so a program calls `memmove` with `n = 0` and a
+pointer nothing is known about: a nil slice's `0`, or the pointer an empty `make` returned (`runtime.zerobase`, about
+which `MakesliceLiveContract` says nothing). `MemmoveLive`'s precondition asks for `n` accessible bytes at `dst` and
+`src`, the destination outside the callee's window and live or outside `R.rt` (`Mem.Input`, `LiveDest`), which such a
+call cannot meet although it is harmless. `MemmoveZeroLive p addr d R` is the contract of that call: for `X2 = 0`
+(amd64 `RCX = 0`) the precondition is only the ABI part and the live part (`Mem.EqPre d 3 s ∧ LiveMemAt …`; amd64
+`MemPre64 d 3 s ∧ LiveMemAt64 …`), nothing about `dst` or `src`, and the call returns as a `MemmoveLive` call does, with
+an empty written range (`LiveMemRet R d 3 [] L b s s' fun _ => True`: memory changed only in `R.rt` and the callee's
+window, the live objects unchanged, the invariant for the same `L` and `b`). A theorem that may copy zero bytes assumes
+both contracts at the `memmove` address and uses
+
+```lean
+MemmoveLive.withZero (h : MemmoveLive p addr d R) (hz : MemmoveZeroLive p addr d R) L b :
+  Summary p addr (fun s => Mem.EqPre d 3 s ∧ LiveMemAt … ∧ ((s.regs 2).toNat = 0 ∨ Mem.Input … ∧ LiveDest …))
+    (MemmoveLive's postcondition)                          -- amd64: MemmoveLive64.withZero, `(s.regs 1).toNat = 0 ∨ …`
+```
+
+*Why the runtime meets it.* The pinned toolchains' `runtime.memmove` (go1.26.0, .5, .8, .10; stub pins
+`490383cd…` arm64 and `c9868ea0…` amd64 in `cmd/janus/stubpins_gen.go`) returns before any memory access when
+`n = 0`. arm64 (`runtime/memmove_arm64.s:30`, `NOSPLIT|NOFRAME`): the first instruction is `CBZ R2, copy0`
+(`0xb40004a2`), and `copy0` (offset `0x94`, line 84) is `RET` (`0xd65f03c0`): no load, no store, no stack frame.
+amd64 (`runtime/memmove_amd64.s:35`, `NOSPLIT, $0-24`, no frame): `MOVQ AX, DI; MOVQ BX, SI; MOVQ CX, BX;
+TESTQ BX, BX; JEQ move_0` (`48 89 c7`, `48 89 de`, `48 89 cb`, `48 85 db`, `0f 84 1b 01 00 00`, lines 39–55) and
+`move_0` (offset `0x12d`, line 169) is `RET` (`c3`), whose only memory access is the read of its return address at
+`RSP`, which `MemPre64` makes readable. This is not only an argument: `LiveSat.memmoveZeroLive_pinned` and
+`LiveSatAmd64.memmoveZeroLive64_pinned` run the pinned function itself (all 156 words arm64, 1763 bytes amd64, as
+a go1.26.10 build links them; `memmovePinned`, `memmovePinned64`) in the model and prove `MemmoveZeroLive` for every
+`d` and `R`; they are also the contracts' SAT witnesses (`memmoveZeroLive_satisfiable`,
+`memmoveZeroLive64_satisfiable`). The code has no relocation on these paths (arm64 none at all; amd64's only one is
+the `RIP`-relative read of `runtime.memmoveBits`, for sizes above 256), so it behaves the same at any address.
+`MemmoveUptoSat.memmoveUptoWithZero_satisfiable` (and `…64`) shows both premises of `withZero` hold of one stub and one
+`R`, at a call with `n = 0` and `dst = 0`. Stubs: `janus_live_memmove_zero` (`janus64_live_memmove_zero`) proves
+`MemmoveZeroLive` for any stub that returns without a memory access when `n = 0`, e.g. `LiveStub.memmoveUptoSeg a N`
+(its compare chain falls through to the `RET`).
 
 **Costs** (`LiveCost.lean`): `blockSize_le : blockSize n b ≤ 2n + 24`, `nextslicecap_le`,
 `growsliceRound_le : 8·growCap8 newLen oldCap ≤ 32·newLen + 3096`, the per-contract round bounds,

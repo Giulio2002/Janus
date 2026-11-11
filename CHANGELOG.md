@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+New runtime contract for `memmove` of zero bytes (additive: no existing statement, proof or auditor rule changes).
+
+- `MemmoveZeroLive` (arm64, `Janus/Contracts/Live.lean`) and `MemmoveZeroLive64` (amd64, `LiveAmd64.lean`): a call of
+  `runtime.memmove(dst, src, 0)` returns as a `MemmoveLive` call does, with an empty written range, under only the ABI
+  and live parts of the precondition (nothing about `dst` or `src`). Go's `copy` calls `memmove` with `n = 0` and a nil or
+  `zerobase` pointer, which `MemmoveLive`'s precondition cannot accept.
+- `MemmoveLive.withZero` / `MemmoveLive64.withZero`: the two contracts give the `memmove` summary whose precondition is
+  `n = 0 ∨` the destination and source facts. `LiveMemRet.of_nil`, `LiveMemRet64.of_nil`, `liveMemRet_none`,
+  `liveMemRet_none64`, `MemmoveZeroLive(64).of_codeIn`.
+- Justification: the pinned runtime's `memmove` returns before any memory access for `n = 0` (arm64 `CBZ R2, copy0`;
+  amd64 `TESTQ BX, BX; JEQ move_0`). `LiveSat.memmoveZeroLive_pinned` / `LiveSatAmd64.memmoveZeroLive64_pinned` run the
+  pinned go1.26 code in the model and prove the contract for every runtime hypothesis; they are the SAT witnesses.
+  `MemmoveUptoSat(Amd64).memmoveUptoWithZero(64)_satisfiable`: both premises of `withZero` hold of one stub.
+- Tactics `janus_live_memmove_zero` / `janus64_live_memmove_zero` prove the contract for a stub that returns without a
+  memory access when `n = 0` (e.g. `LiveStub.memmoveUptoSeg`).
+- Both contracts are on the auditor's pinned-contract list (`Janus/Tools/Audit.lean`, round 9 SAT row).
+- docs/RUNTIME-CONTRACTS.md: "Copies of zero bytes".
+
 ## v0.2.1 (unreleased)
 
 Bug fix for consumer packages whose dependencies use Lean's module system (`module` header,

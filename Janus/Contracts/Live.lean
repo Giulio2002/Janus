@@ -751,6 +751,52 @@ def MemmoveLive (p : Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
     (fun s s' => LiveMemRet R d 3 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 2).toNat)] L b s s'
       fun m => Mem.Copied s.mem m (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat)
 
+/-- **`runtime.memmove(dst, src, 0)`, live** (`X0 = dst`, `X1 = src`, `X2 = n = 0`): the empty
+copy. Go's `copy(dst, src)` compiles to `if dst != src { memmove(dst, src, n) }` without a test of
+`n`, so a program calls `memmove` with `n = 0` and a pointer it knows nothing about (a nil slice's
+`0`, the `runtime.zerobase` of an empty `make`). The pinned runtime's `memmove` returns at its
+first instruction when `n = 0` (`CBZ R2, copy0`; `copy0: RET`), touching no memory, so the
+precondition is only the ABI part (`Mem.EqPre`) and the live part (`LiveMemAt`): no accessibility
+of, or apartness from, `dst` and `src`. The call returns as a `MemmoveLive` call does, with an
+empty written range. `MemmoveLive.withZero` joins the two contracts into the `memmove`
+summary with the precondition `n = 0 ∨ …`; `LiveSat.memmoveZeroLive_pinned` runs the pinned code
+itself (docs/RUNTIME-CONTRACTS.md). -/
+def MemmoveZeroLive (p : Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
+  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
+    (fun s => (s.regs 2).toNat = 0 ∧ Mem.EqPre d 3 s ∧
+      LiveMemAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b s (calleeStack s d 3))
+    (fun s s' => LiveMemRet R d 3 [] L b s s' fun _ => True)
+
+/-- A live copy's return with an empty written range is one with any written range `extra`,
+and any `P` that holds of every memory. -/
+theorem LiveMemRet.of_nil {R : RtInv} {d nargs : Nat} {extra L : List (Nat × Nat)} {b : Nat} {s s' : State}
+    {P : Memory → Prop} (h : LiveMemRet R d nargs [] L b s s' fun _ => True) (hP : ∀ m, P m) :
+    LiveMemRet R d nargs extra L b s s' P := by
+  obtain ⟨junk, f, v, m, ex, ep, hs, hfr, hlf, hinv, -⟩ := h
+  exact ⟨junk, f, v, m, ex, ep, hs,
+    hfr.mono fun a n hh => by simp only [outside_append, outside_nil, and_true] at hh ⊢; exact ⟨hh.1.1, hh.1.2⟩,
+    ⟨fun a n hin _ => hlf.readLE a n hin trivial⟩, hinv, hP m⟩
+
+/-- **`memmove` with `n = 0` allowed** (arm64): `MemmoveLive` and `MemmoveZeroLive` at the same
+address give the summary whose precondition asks for the destination and source facts only when
+`n ≠ 0`. The postcondition is `MemmoveLive`'s (for `n = 0` its written range `[dst, dst)` is
+empty and `Mem.Copied … 0` holds trivially). -/
+theorem MemmoveLive.withZero {p : Program} {addr d : Nat} {R : RtInv} (h : MemmoveLive p addr d R)
+    (hz : MemmoveZeroLive p addr d R) (L : List (Nat × Nat)) (b : Nat) :
+    Summary p addr
+      (fun s => Mem.EqPre d 3 s ∧
+        LiveMemAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b s (calleeStack s d 3) ∧
+        ((s.regs 2).toNat = 0 ∨
+          Mem.Input s d 3 (s.regs 1).toNat (s.regs 2).toNat ∧
+          LiveDest R L s d 3 (s.regs 0).toNat (s.regs 2).toNat))
+      (fun s s' => LiveMemRet R d 3 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 2).toNat)] L b s s'
+        fun m => Mem.Copied s.mem m (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat) := by
+  intro s hpc ⟨hE, hA, hn⟩
+  rcases hn with hn | ⟨hI, hD⟩
+  · obtain ⟨k, s', hst, hr, hq⟩ := hz L b s hpc ⟨hn, hE, hA⟩
+    exact ⟨k, s', hst, hr, LiveMemRet.of_nil hq fun _ i hi => absurd hi (by omega)⟩
+  · exact h L b s hpc ⟨hE, hA, hI, hD⟩
+
 /-- **`runtime.memclrNoHeapPointers(ptr, n)`, live** (`X0 = ptr`, `X1 = n`). -/
 def MemclrNoHeapPointersLive (p : Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
@@ -1184,6 +1230,22 @@ theorem retStateX_intro {s s' : State} {res : List W64} (hpc : s'.pc = s.regs 30
     ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat))
       (ep : Nat → Bool), s' = retStateX s junk res f v m ex ep := by
   exact ⟨s'.regs, s'.flags, s'.vregs, s'.mem, s'.excl, s'.exclPass, retStateX_eq hpc hsp h18 h28 h29 hdz htp hfc hfs hres⟩
+
+/-- A call that changes only registers meets `LiveMemRet` with an empty written range. -/
+theorem liveMemRet_none {R : RtInv} {d nargs b : Nat} {L : List (Nat × Nat)} {s fin : State}
+    (hpc : fin.pc = s.regs 30) (hsp : fin.sp = s.sp) (h18 : fin.regs 18 = s.regs 18)
+    (h28 : fin.regs 28 = s.regs 28) (h29 : fin.regs 29 = s.regs 29) (hdz : fin.dczid = s.dczid)
+    (htp : fin.tpidr = s.tpidr) (hfc : fin.fpcr = s.fpcr) (hfs : fin.fpsr = s.fpsr)
+    (hmem : fin.mem = s.mem) (hinv : R.inv b L (s.regs 28).toNat (view R.rt L s.mem)) :
+    LiveMemRet R d nargs [] L b s fin fun _ => True := by
+  obtain ⟨junk, f, vr, m, ex, ep, hs⟩ := retStateX_intro (res := []) hpc hsp h18 h28 h29 hdz htp hfc hfs
+    (fun i hi => absurd hi (by simp))
+  have hm : m = s.mem := by
+    have := congrArg State.mem hs
+    simp only [retStateX] at this
+    rw [← hmem]; exact this.symm ▸ rfl
+  subst hm
+  exact ⟨junk, f, vr, _, ex, ep, hs, MemFrame.refl _ _, LiveFrame.refl _ _ _, hinv, trivial⟩
 
 /-- **The fields a Go function keeps** (arm64): the system registers `DCZID`, `TPIDR`, `FPCR`, `FPSR`
 and the registers `X18` (platform) and `X28` (`g`). A loop invariant carries ONE `KeepX s t`

@@ -761,6 +761,59 @@ theorem memmoveLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
   · rintro args ⟨-, rfl⟩
     exact ⟨CB, CB + 0x100, rfl⟩
 
+/-! ### `memmove` with `n = 0`: the pinned runtime code
+
+`MemmoveZeroLive` is witnessed by the Go runtime's own `memmove`: `memmovePinned` is the code of
+`runtime.memmove` (`runtime/memmove_arm64.s`) of the pinned toolchains, the 156 words that a
+go1.26.10 `-trimpath` build links (the function `checkContractPin` accepts for `--contract
+runtime.memmove`: pin `490383cd…` in cmd/janus/stubpins_gen.go, the same for go1.26.0, .5, .8 and .10).
+It has no relocation (every branch is PC-relative), so it runs at any address; here at `A0`.
+`memmoveZeroLive_pinned` runs it in the model: for `n = 0`, its first instruction `CBZ R2, copy0`
+(`0xb40004a2`, offset 0) branches to `copy0: RET` (`0xd65f03c0`, offset `0x94`), for every runtime
+hypothesis `R` and stack bound `d`. -/
+
+def memmovePinned : List Nat := [
+  0xb40004a2, 0xf100405f, 0x5400018d, 0xf102005f, 0x540007c8, 0xf100805f, 0x54000408, 0xa9401c26,
+  0x8b010044, 0xa97f348c, 0xa9001c06, 0x8b000045, 0xa93f34ac, 0xd65f03c0, 0x8b010044, 0x8b000045,
+  0xf100205f, 0x540000cb, 0xf9400026, 0xf85f8087, 0xf9000006, 0xf81f80a7, 0xd65f03c0, 0x361000c2,
+  0xb9400026, 0xb85fc087, 0xb9000006, 0xb81fc0a7, 0xd65f03c0, 0x360800c2, 0x79400026, 0x785fe087,
+  0x79000006, 0x781fe0a7, 0xd65f03c0, 0x39400026, 0x39000006, 0xd65f03c0, 0x8b010044, 0x8b000045,
+  0xa9401c26, 0xa9412428, 0xa97e2c8a, 0xa97f348c, 0xf101005f, 0x540000c8, 0xa9001c06, 0xa9012408,
+  0xa93e2caa, 0xa93f34ac, 0xd65f03c0, 0xa9423c2e, 0xa9434430, 0xf101805f, 0x540000a9, 0xa97c0c82,
+  0xa97d1081, 0xa93c0ca2, 0xa93d10a1, 0xa9001c06, 0xa9012408, 0xa9023c0e, 0xa9034410, 0xa93e2caa,
+  0xa93f34ac, 0xd65f03c0, 0x8b010044, 0x8b000045, 0xaa1f03e7, 0xaa1f03e8, 0xf110005f, 0x5400012b,
+  0xf000357b, 0x3945bb66, 0xb5000086, 0xaa0003e7, 0xaa0503e8, 0x14000003, 0xaa0103e7, 0xaa0403e8,
+  0xcb01000e, 0xb4fffa8e, 0xeb0201df, 0x54000483, 0xa940342c, 0x92400cee, 0xcb0e0021, 0xcb0e0003,
+  0x8b0e0042, 0xa9411c26, 0xa900340c, 0xa9422428, 0xa9432c2a, 0xa9c4342c, 0xf1024042, 0x54000169,
+  0xa9011c66, 0xa9411c26, 0xa9022468, 0xa9422428, 0xa9032c6a, 0xa9432c2a, 0xa984346c, 0xa9c4342c,
+  0xf1010042, 0x54fffee8, 0xa97c3c8e, 0xa9011c66, 0xa97d1c86, 0xa9022468, 0xa97e2488, 0xa9032c6a,
+  0xa97f2c8a, 0xa904346c, 0xa93c3cae, 0xa93d1ca6, 0xa93e24a8, 0xa93f2caa, 0xd65f03c0, 0xa97f348c,
+  0x92400d0e, 0xcb0e0084, 0xcb0e0042, 0xa97f1c86, 0xa93f34ac, 0xa97e2488, 0xa97d2c8a, 0xa9fc348c,
+  0xcb0e00a5, 0xf1020042, 0x54000169, 0xa93f1ca6, 0xa97f1c86, 0xa93e24a8, 0xa97e2488, 0xa93d2caa,
+  0xa97d2c8a, 0xa9bc34ac, 0xa9fc348c, 0xf1010042, 0x54fffee8, 0xa9430c22, 0xa93f1ca6, 0xa9421c26,
+  0xa93e24a8, 0xa9412428, 0xa93d2caa, 0xa9402c2a, 0xa93c34ac, 0xa9030c02, 0xa9021c06, 0xa9012408,
+  0xa9002c0a, 0xd65f03c0, 0x00000000, 0x00000000]
+
+set_option maxRecDepth 20000 in
+/-- **The pinned `runtime.memmove` meets `MemmoveZeroLive`** (arm64), for every `d` and `R`. -/
+theorem memmoveZeroLive_pinned (d : Nat) (R : RtInv) :
+    MemmoveZeroLive (toy.link (at0 memmovePinned)) A0 d R := by
+  rw [link_at0]
+  intro L b s hpc ⟨h0, ⟨_, ⟨h30a, h30b, _, _, _, _, _⟩, _⟩, hLm⟩
+  have h2 : s.regs 2 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using h0)
+  janus_run [h2]
+  exact liveMemRet_none rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl hLm.2.1
+
+def okMoveZ : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [CB, CB + 0x100, 0]
+
+theorem memmoveZeroLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+    MemmoveZeroLive (toy.link impl) A0 4096 R ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
+      (s.regs 2).toNat = 0 ∧ Mem.EqPre 4096 3 s ∧
+      LiveMemAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b s (calleeStack s 4096 3) :=
+  ⟨at0 memmovePinned, toyR tys0 okMoveZ, memmoveZeroLive_pinned 4096 _, [], 0x400, wst [CB, CB + 0x100, 0], rfl,
+    by decide, wguardE _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by simp, wwin _ 3 (by omega)⟩⟩
+
 
 def okClr : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [CB, 8]
 
