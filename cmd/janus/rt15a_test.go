@@ -193,7 +193,12 @@ func TestRound15aParseImports(t *testing.T) {
 		ok   bool
 	}{
 		{"import A\nimport B.C\n\ntheorem x : True := trivial", []string{"A", "B.C"}, true},
-		{"/- c /- nested -/ -/\n-- x\nimport  A -- y\nimport public B\nimport meta all C\nnamespace Q\nimport Z", []string{"A", "B", "C"}, true},
+		{"/- c /- nested -/ -/\n-- x\nimport  A -- y\npublic import B\npublic meta import all C\nnamespace Q\nimport Z", []string{"A", "B", "C"}, true},
+		// Lean's module system: modifiers precede `import`; `all` follows it (EthLib's header shape)
+		{"module\n\npublic import EthLib.A\npublic import EthLib.B\nmeta import M\nprivate import P\nimport all Q\n\n@[expose] public section\ndef x := 1", []string{"EthLib.A", "EthLib.B", "M", "P", "Q"}, true},
+		{"module\npublic section\nimport A", nil, true}, // `public` before something else ends the header
+		{"import all\nimport B", []string{"all", "B"}, true}, // a module named `all`
+		{"public import «A»", nil, false},
 		{"module\nprelude\nimport Init.Core", []string{"Init.Core"}, true},
 		{"/-! doc -/\nimport A", nil, true}, // a module doc ends the header: no import after it counts
 		{"@[simp] theorem t : True := trivial\nimport A", nil, true},
@@ -245,9 +250,9 @@ func TestRound15aOleanStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	k1, k2 := strings.Repeat("a", 64), strings.Repeat("b", 64)
-	oleanStorePut(k1, []byte("olean-1"))
-	oleanStorePut(k2, []byte("olean-2"))
-	if d, ok := oleanStoreGet(k1); !ok || string(d) != "olean-1" {
+	oleanStorePut(k1, modParts{".olean": []byte("olean-1")})
+	oleanStorePut(k2, modParts{".olean": []byte("olean-2")})
+	if d, ok := oleanStoreGet(k1); !ok || string(d[".olean"]) != "olean-1" {
 		t.Fatalf("stored olean not found: %q %v", d, ok)
 	}
 	dir := func(k string) string { return filepath.Join(oleanStoreDir(), k[:2]) }
@@ -264,10 +269,78 @@ func TestRound15aOleanStore(t *testing.T) {
 		t.Error("another key's entry was served")
 	}
 	// an entry with a forged hash and no valid MAC
-	os.WriteFile(filepath.Join(dir(k2), k2+".json"), []byte(`{"key":"`+k2+`","sha256":"`+sha256Hex([]byte("x"))+`","mac":"00"}`), 0o600)
+	os.WriteFile(filepath.Join(dir(k2), k2+".json"), []byte(`{"key":"`+k2+`","sha256":"`+sha256Hex([]byte("x"))+`","parts":{".olean":"`+sha256Hex([]byte("x"))+`"},"mac":"00"}`), 0o600)
 	os.WriteFile(filepath.Join(dir(k2), k2+".olean"), []byte("x"), 0o600)
 	if _, ok := oleanStoreGet(k2); ok {
 		t.Error("an entry without a valid MAC was served")
+	}
+}
+
+// The olean store keeps every part of a module-system module (server, private, IR) under one authenticated entry:
+// a modified part, a part dropped from the store, and a v0.2.0-style entry (olean hash only) are misses.
+func TestOleanStoreModuleParts(t *testing.T) {
+	t.Setenv("JANUS_CACHE_DIR", t.TempDir())
+	if err := os.Chmod(os.Getenv("JANUS_CACHE_DIR"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	k := strings.Repeat("c", 64)
+	full := modParts{".olean": []byte("o"), ".olean.server": []byte("s"), ".olean.private": []byte("p"), ".ir": []byte("i")}
+	oleanStorePut(k, full)
+	d, ok := oleanStoreGet(k)
+	if !ok || len(d) != 4 || string(d[".olean.server"]) != "s" || d.digest() != full.digest() {
+		t.Fatalf("stored parts not served whole: %v %v", d, ok)
+	}
+	dir := filepath.Join(oleanStoreDir(), k[:2])
+	os.WriteFile(filepath.Join(dir, k+".olean.server"), []byte("forged"), 0o600)
+	if _, ok := oleanStoreGet(k); ok {
+		t.Error("a modified server part was served")
+	}
+	oleanStorePut(k, full)
+	os.Remove(filepath.Join(dir, k+".olean.private"))
+	if _, ok := oleanStoreGet(k); ok {
+		t.Error("a module with a missing part was served")
+	}
+	// an entry in the v0.2.0 format (no parts) is not authentic under the v2 MAC
+	oleanStorePut(k, full)
+	os.WriteFile(filepath.Join(dir, k+".json"), []byte(`{"key":"`+k+`","sha256":"`+sha256Hex([]byte("o"))+`","mac":"00"}`), 0o600)
+	if _, ok := oleanStoreGet(k); ok {
+		t.Error("an old-format entry was served")
+	}
+	// the digest of an olean-only module is the olean's SHA-256 (keys of non-module files unchanged)
+	if got := (modParts{".olean": []byte("o")}).digest(); got != sha256Hex([]byte("o")) {
+		t.Errorf("olean-only digest = %s", got)
+	}
+	if full.digest() == sha256Hex([]byte("o")) {
+		t.Error("the digest ignores the server/private/IR parts")
+	}
+}
+
+// readModParts takes every part lean -o wrote; write puts them next to the olean and removes stale parts.
+func TestModPartsReadWrite(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	for ext, b := range map[string]string{".olean": "o", ".olean.server": "s", ".ir": "i"} {
+		os.WriteFile(filepath.Join(src, "out"+ext), []byte(b), 0o600)
+	}
+	p, err := readModParts(filepath.Join(src, "out.olean"))
+	if err != nil || len(p) != 3 || string(p[".olean.server"]) != "s" {
+		t.Fatalf("readModParts = %v, %v", p, err)
+	}
+	target := filepath.Join(dst, "A", "B.olean")
+	os.MkdirAll(filepath.Dir(target), 0o755)
+	os.WriteFile(filepath.Join(dst, "A", "B.olean.private"), []byte("stale"), 0o600)
+	if err := p.write(target); err != nil {
+		t.Fatal(err)
+	}
+	for ext, want := range map[string]string{".olean": "o", ".olean.server": "s", ".ir": "i"} {
+		if b, _ := os.ReadFile(filepath.Join(dst, "A", "B"+ext)); string(b) != want {
+			t.Errorf("%s = %q", ext, b)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dst, "A", "B.olean.private")); !os.IsNotExist(err) {
+		t.Error("a stale part was kept")
+	}
+	if _, err := readModParts(filepath.Join(src, "missing.olean")); err == nil {
+		t.Error("a missing olean was accepted")
 	}
 }
 
