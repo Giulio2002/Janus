@@ -197,7 +197,7 @@ func TestRound15aParseImports(t *testing.T) {
 		// Lean's module system: modifiers precede `import`; `all` follows it (EthLib's header shape)
 		{"module\n\npublic import EthLib.A\npublic import EthLib.B\nmeta import M\nprivate import P\nimport all Q\n\n@[expose] public section\ndef x := 1", []string{"EthLib.A", "EthLib.B", "M", "P", "Q"}, true},
 		{"module\npublic section\nimport A", nil, true}, // `public` before something else ends the header
-		{"import all\nimport B", []string{"all", "B"}, true}, // a module named `all`
+		{"import all\nimport B", nil, false},            // Lean rejects `import all` without a module
 		{"public import «A»", nil, false},
 		{"module\nprelude\nimport Init.Core", []string{"Init.Core"}, true},
 		{"/-! doc -/\nimport A", nil, true}, // a module doc ends the header: no import after it counts

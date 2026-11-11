@@ -200,17 +200,17 @@ func parseImports(src []byte) (imports []string, ok bool) {
 		}
 		m := word()
 		if m == "all" {
-			// a modifier if another word follows on the same line, else a module named `all`
-			k := i
-			for k < len(s) && (s[k] == ' ' || s[k] == '\t') {
-				k++
+			// Lean 4.34.1 always reads `all` after `import` as the modifier (`import all` alone panics, there is no
+			// module `all`): the module name follows, across newlines and comments.
+			if !skip() {
+				return nil, false
 			}
-			if k < len(s) && s[k] != '\n' && s[k] != '\r' && !strings.HasPrefix(s[k:], "--") && !strings.HasPrefix(s[k:], "/-") {
-				i = k
-				if s[i] >= 0x80 || s[i] == '\xc2' {
-					return nil, false
-				}
-				m = word()
+			if i >= len(s) || s[i] >= 0x80 || s[i] == '\xc2' {
+				return nil, false
+			}
+			m = word()
+			if m == "import" {
+				return nil, false
 			}
 		}
 		if m == "" || strings.HasPrefix(m, ".") || strings.HasSuffix(m, ".") || strings.Contains(m, "..") {
