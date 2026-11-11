@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.1 (unreleased)
+
+Bug fix for consumer packages whose dependencies use Lean's module system (`module` header,
+`public import`), such as ethereum/EthLib. Before, `janus verify --proof-root` failed at
+"Stage: olean provenance" for them; it never produced a wrong verdict.
+
+- janus's own compile of the consumer closure keeps every module-data part `lean -o` writes
+  (`.olean`, `.olean.server`, `.olean.private`, `.ir`), not only the `.olean`.
+- The trusted olean store records and authenticates each part (entry format v2; v0.2.0 entries are
+  rebuilt once). A module's identity covers all its parts; olean-only modules keep their keys.
+- The import-header parser accepts the module system's modifiers before `import`
+  (`public import`, `public meta import`, `private import`) and `all` after it.
+- `import all` is always read as the modifier, as Lean 4.34.1 reads it: the module name follows,
+  across newlines and comments, and `import all` without a module is refused. Found by red-teaming
+  this release: an intermediate version of the parser read `import all` followed by a newline as an
+  import of a module named `all`, which would have left the real import out of a module's key. The
+  incremental item keys' header parser (`incr.go`) is fixed the same way, and no longer treats
+  `runtime` as a modifier.
+
 ## v0.2.0 (2026-11-10)
 
 Repository restructure and an arm64 host-build fix. **No Lean API, auditor rule, gate, red-team
