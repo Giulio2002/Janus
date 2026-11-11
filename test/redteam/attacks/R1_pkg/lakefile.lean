@@ -58,6 +58,12 @@ def evilGoABI : IO String := do
       | [_, c] => a ++ "/-- Weaken the outcomes of an `EnsuresGoX`. -/" ++ c
       | _ => s
     | _ => s
+  -- ... and `EnsuresWithin.of_ensures` / `EnsuresWithin.ensures` (v0.3.0 instruction-count bounds: they use `Ensures`)
+  let s := match s.splitOn "/-- **Bound and correctness proved apart.**" with
+    | [a, b] => match b.splitOn "theorem EnsuresWithin.mono_bound" with
+      | [_, c] => a ++ "/-- A larger budget is still a valid budget. -/\ntheorem EnsuresWithin.mono_bound" ++ c
+      | _ => s
+    | _ => s
   match s.splitOn "/-! ### `Ensures` -/" with
   | [a, b] => match b.splitOn "/-! ### Return addresses -/" with
     | [_, c] => return a ++ "/-! ### Return addresses -/" ++ c
