@@ -270,7 +270,7 @@ theorem site_mv : mvSite R mvA liveL 0x100 sMv := by
       (s.regs 14).toNat s.mem (liveWin64 s 4096 3)
 
 theorem site_mk : mkSite R mkA liveL 0x100 sMk := by
-  refine ⟨⟨cs_callOK _ _ _ _ 3 (by omega), ?_, by decide, by decide, by decide⟩, cs_room _ _ _ _ 3 (by omega),
+  refine ⟨⟨cs_callOK _ _ _ _ 3 (by omega), ?_, by decide, by decide, (by simp only [calleeStack64, outside_cons, outside_nil]; decide)⟩, cs_room _ _ _ _ 3 (by omega),
     ?_, ?_, by decide, cs_winL _ _ _ _ 3 (by omega), cs_winR _ _ _ _ 3 (by omega)⟩
   · exact ⟨by decide, by decide⟩
   · exact Or.inr (Or.inl ⟨rfl, by decide⟩)

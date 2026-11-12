@@ -280,7 +280,9 @@ theorem site_new : newSite R newA [] 0x400 sNew := by
   refine ⟨⟨cs_callOK _ _ _ _ (by omega), ?_, ?_⟩, cs_room _ _ _ _ (by omega), ?_, inv0, ?_,
     fun r hr => absurd hr (by simp), cs_winR _ _ _ _ (by omega)⟩
   · rw [h0]; exact ⟨by decide, by decide⟩
-  · rw [h0]; show typSize mem0 tNode ≤ maxAlloc; decide
+  · rw [h0]; refine ⟨?_, ?_⟩
+    · show typSize mem0 tNode ≤ maxAlloc; decide
+    · simp only [calleeStack64, outside_cons, outside_nil]; decide
   · rw [h0]; exact Or.inl ⟨rfl, rfl⟩
   · simp only [newobjectRound64, h0, cs_mem]; decide
 

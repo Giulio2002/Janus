@@ -2,6 +2,30 @@
 
 ## v0.3.1 (unreleased)
 
+### BREAKING: the allocation contracts keep the type descriptor out of the callee's stack window
+**BREAKING (runtime-contract preconditions; consumers must re-discharge).** The allocation contracts'
+preconditions (`NewobjectPre`, `MakeslicePre`, `MallocgcPre` for `typ ≠ 0`, `GrowsliceArgs`, and their amd64
+twins `…Pre64`, `GrowsliceArgs64`) now also require the type descriptor to lie outside the callee's stack
+window: `Outside (s.regs 0).toNat 16 (calleeStack s stack 1|3)` (arm64; `s.regs 1` for `mallocgc`, `s.regs 4`
+for `growslice`; amd64 `RAX`/`RBX`/`RSI`, `calleeStack64`). `GrowsliceOld`/`GrowsliceOld64` now take the stack
+bound and require the old elements outside the window.
+Why: the pinned go1.26.10 `runtime.makeslice` pushes its frame before it reads `et.Size_` (arm64
+`MOVD.W R30,-48(RSP)`, `MOVD R29,-8(RSP)`; amd64 `PUSHQ BP`), so for a state with the descriptor inside
+`[SP-56, SP-40)` the real runtime does not do what the contract says. The old contracts held there, so every
+theorem assuming them was vacuous for the real binary in those states (no real caller passes such a descriptor).
+The change reaches the non-live contracts (`NewobjectContract`, `MakesliceContract`, `MallocgcContract`,
+`GrowsliceContract`) and the live ones (`…LiveContract`, the SC variants) through their shared `…Pre`.
+`TypedMemmove`/`TypedMemclr` (+Live, +RtPre64 reads) already had this conjunct.
+Migration: at a call site, prove `Outside et 16 (calleeStack s stack n)` for the descriptor. A real descriptor
+is `.rodata`, which is not writable: with `janus_data hd [hw]` (the call window `hw`) the context has
+`a + n ≤ base ∨ base + len ≤ a` per data object, and `simp only [calleeStack, outside_cons, outside_nil,
+and_true]; omega` closes it (arm64 and, with `calleeStack64`, amd64). For a concrete witness state: `by simp only
+[calleeStack, outside_cons, outside_nil]; decide` (`Outside` has no `Decidable` instance; the fv-uint256 call-site
+modules define a scoped one). `growslice`: also the old array (a live object, `hL2W`-style fact) outside the window.
+Tests: red-team round `test/redteam/rounds/roundalloc` (the descriptor-in-window state satisfied the old
+precondition, falsifies the new one; ten drop-the-conjunct mutants flip; rodata control passes);
+`LiveSat*`/`AllocSat*`/`MallocSCSat*` witnesses carry the conjunct.
+
 ### Additive: zero-byte `memmove` and `makeslice` contracts (PR #2)
 New runtime contracts for zero-byte runtime calls, `memmove` and `makeslice` (additive: no existing statement, proof
 or auditor rule changes).

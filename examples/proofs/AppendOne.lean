@@ -202,7 +202,7 @@ theorem wsCall_pre : grSite rt H wsCall := by
   have hpt : u64Type = tyA := by unfold tyA; decide
   rw [hpt] at h
   refine ⟨⟨⟨⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩,
-    ⟨by decide, by decide⟩, by decide, by decide, by decide, by decide, by decide, by decide⟩,
+    ⟨by decide, by decide⟩, by decide, by decide, by decide, by decide, by decide, (by simp only [calleeStack, outside_cons, outside_nil]; decide)⟩,
     fun h => absurd h (by decide)⟩, ?_⟩
   exact h
 

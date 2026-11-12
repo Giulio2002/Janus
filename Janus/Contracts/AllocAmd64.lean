@@ -70,6 +70,33 @@ def CallOK64 (s : State) (stack nargs : Nat) : Prop :=
     stack ≤ (s.regs 4).toNat ∧ (s.regs 4).toNat + 8 + 8 * nargs ≤ 2 ^ 48 ∧
     s.mem.accessible ((s.regs 4).toNat - stack) (stack + 8 + 8 * nargs) true = true
 
+/-- **A type descriptor in read-only data is outside the callee's stack window** (amd64): the
+call window `[RSP - stack, RSP + 8 + 8·nargs)` is writable (`CallOK64`), `.rodata` is not, so the
+16-byte descriptor at `et` (inside a data object of the program) is disjoint from it. This is how a
+caller discharges the `Outside et 16 (calleeStack64 s stack n)` conjunct of the allocation
+contracts' preconditions, in one cheap step (no case split over the data segments). -/
+theorem outside_calleeStack64_of_data {p : Janus.Amd64.Program} {s : State} (h : p.DataLoaded s.mem) {stack nargs et : Nat}
+    (hd : (Janus.Amd64.Tactic.dataRead p et 16).isSome = true) (hst : stack ≤ (s.regs 4).toNat)
+    (hw : s.mem.accessible ((s.regs 4).toNat - stack) (stack + 8 + 8 * nargs) true = true) :
+    Outside et 16 (calleeStack64 s stack nargs) := by
+  -- the data object holding the descriptor (`dataRead` is defined only inside one), then its disjointness
+  have hk : ∃ d ∈ p.data, d.base ≤ et ∧ et + 16 ≤ d.base + d.bytes.length := by
+    unfold Janus.Amd64.Tactic.dataRead at hd
+    cases hs : Janus.Amd64.Tactic.dataSegAt p et 16 with
+    | none => rw [hs] at hd; cases hd
+    | some d =>
+      unfold Janus.Amd64.Tactic.dataSegAt at hs
+      have hm := List.mem_of_find?_eq_some hs
+      have hp := List.find?_some hs
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at hp
+      exact ⟨d, hm, hp.1, hp.2⟩
+  obtain ⟨d, hdm, hb1, hb2⟩ := hk
+  obtain ⟨k, hkl, hdk⟩ := List.mem_iff_getElem.1 hdm
+  have := Janus.Amd64.Tactic.disjoint_of_dataLoaded h k hkl hw
+  rw [hdk] at this
+  simp only [calleeStack64, outside_cons, outside_nil, and_true]
+  omega
+
 /-- The state a call returns in (amd64): registers by `callRegs64`, `rip` = the return address,
 flags, `X0`–`X14`, the `YMM` upper halves, the AVX-512 state (`ZMM` bits 511:256, `K0`–`K7`) and
 memory as given; `X15`, `FS` base and the direction flag unchanged. -/
@@ -106,7 +133,8 @@ attribute [janus64_exec, janus64_post] rtView_writeLE
 def MallocgcPre64 (stack : Nat) (s : State) : Prop :=
   CallOK64 s stack 3 ∧ (s.regs 0).toNat ≤ maxAlloc ∧
     ((s.regs 3).toNat = 0 ∨ (TypeOK s.mem (s.regs 3).toNat ∧
-      (typNoscan s.mem (s.regs 3).toNat = false → (s.regs 1).toNat % 256 ≠ 0)))
+      (typNoscan s.mem (s.regs 3).toNat = false → (s.regs 1).toNat % 256 ≠ 0) ∧
+      Outside (s.regs 3).toNat 16 (calleeStack64 s stack 3)))
 
 @[reducible] def mallocgcObj64 (rt : List (Nat × Nat)) (s : State) (m : Memory) (ptr : Nat) :
     Prop :=
@@ -133,7 +161,8 @@ theorem MallocgcContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {rt : List
 
 /-- The precondition of `runtime.newobject` (amd64; `RAX = typ`). -/
 def NewobjectPre64 (stack : Nat) (s : State) : Prop :=
-  CallOK64 s stack 1 ∧ TypeOK s.mem (s.regs 0).toNat ∧ typSize s.mem (s.regs 0).toNat ≤ maxAlloc
+  CallOK64 s stack 1 ∧ TypeOK s.mem (s.regs 0).toNat ∧ typSize s.mem (s.regs 0).toNat ≤ maxAlloc ∧
+    Outside (s.regs 0).toNat 16 (calleeStack64 s stack 1)
 
 @[reducible] def newobjectObj64 (rt : List (Nat × Nat)) (s : State) (m : Memory) (ptr : Nat) :
     Prop :=
@@ -160,7 +189,8 @@ theorem NewobjectContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {rt : Lis
 def MakeslicePre64 (stack : Nat) (s : State) : Prop :=
   CallOK64 s stack 3 ∧ TypeOK s.mem (s.regs 0).toNat ∧
     (s.regs 3).toNat ≤ (s.regs 1).toNat ∧ (s.regs 1).toNat < 2 ^ 63 ∧
-    typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat ≤ maxAlloc
+    typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat ≤ maxAlloc ∧
+    Outside (s.regs 0).toNat 16 (calleeStack64 s stack 3)
 
 @[reducible] def makesliceObj64 (rt : List (Nat × Nat)) (s : State) (m : Memory) (ptr : Nat) :
     Prop :=
@@ -194,15 +224,18 @@ def GrowsliceArgs64 (stack : Nat) (s : State) : Prop :=
     typSize s.mem (s.regs 6).toNat = 8 ∧ typPtrBytes s.mem (s.regs 6).toNat = 0 ∧
     (s.regs 7).toNat ≤ (s.regs 3).toNat ∧
     (s.regs 3).toNat - (s.regs 7).toNat ≤ (s.regs 1).toNat ∧
-    (s.regs 1).toNat < (s.regs 3).toNat ∧ (s.regs 3).toNat < 2 ^ 40
+    (s.regs 1).toNat < (s.regs 3).toNat ∧ (s.regs 3).toNat < 2 ^ 40 ∧
+    Outside (s.regs 6).toNat 16 (calleeStack64 s stack 5)
 
-/-- The `oldLen` old elements at `oldPtr` are readable (amd64). -/
-def GrowsliceOld64 (s : State) : Prop :=
+/-- The `oldLen` old elements at `oldPtr` are readable, and outside the callee's stack window
+(amd64; see `GrowsliceOld`). -/
+def GrowsliceOld64 (stack : Nat) (s : State) : Prop :=
   (s.regs 0).toNat + 8 * ((s.regs 3).toNat - (s.regs 7).toNat) ≤ 2 ^ 48 ∧
-    s.mem.accessible (s.regs 0).toNat (8 * ((s.regs 3).toNat - (s.regs 7).toNat)) false = true
+    s.mem.accessible (s.regs 0).toNat (8 * ((s.regs 3).toNat - (s.regs 7).toNat)) false = true ∧
+    Outside (s.regs 0).toNat (8 * ((s.regs 3).toNat - (s.regs 7).toNat)) (calleeStack64 s stack 5)
 
 def GrowslicePre64 (stack : Nat) (s : State) : Prop :=
-  GrowsliceArgs64 stack s ∧ (0 < (s.regs 3).toNat - (s.regs 7).toNat → GrowsliceOld64 s)
+  GrowsliceArgs64 stack s ∧ (0 < (s.regs 3).toNat - (s.regs 7).toNat → GrowsliceOld64 stack s)
 
 @[reducible] def growsliceObj64 (rt : List (Nat × Nat)) (s : State) (m : Memory) (ptr : Nat) :
     Prop :=
@@ -230,7 +263,7 @@ def GrowsliceContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat �
 
 theorem GrowsliceContract64.withOld {p : Janus.Amd64.Program} {addr : Nat} {rt : List (Nat × Nat)}
     {stack : Nat} {H : RtReady} (h : GrowsliceContract64 p addr rt stack H) :
-    Summary p addr (fun s => (GrowsliceArgs64 stack s ∧ GrowsliceOld64 s) ∧
+    Summary p addr (fun s => (GrowsliceArgs64 stack s ∧ GrowsliceOld64 stack s) ∧
       Ready64 H rt (growsliceArgs64 s) s)
       (fun s s' => AllocRet64 rt stack 5
         (fun ptr => [ptr, s.regs 3, BitVec.ofNat 64 (growCap8 (s.regs 3).toNat (s.regs 1).toNat)])

@@ -64,6 +64,24 @@ theorem callOK_w (sz : Nat) (r : Nat → W64) (n : Nat) (hn : n ≤ 5) : CallOK6
   · rw [show (BitVec.ofNat 64 wsp).toNat = wsp from rfl]
     exact Janus.Arm64.Memory.accessible_mono _ hw (Nat.le_refl _) (by omega)
 
+/-- The descriptor is outside the callee's window, for every witness state and argument count. -/
+theorem outside_tyA (sz : Nat) (r : Nat → W64) (n : Nat) :
+    Outside tyA 16 (calleeStack64 (wstate sz r) 4096 n) := by
+  have h4 : (wstate sz r).regs 4 = BitVec.ofNat 64 wsp := rfl
+  simp only [calleeStack64, h4, outside_cons, outside_nil, and_true]
+  rw [show (BitVec.ofNat 64 wsp).toNat = wsp from rfl]
+  simp only [wsp, tyA]
+  omega
+
+/-- `outside_tyA` for any state with the witness stack pointer and any address equal to `tyA`. -/
+theorem outside_tyA_at (s : Janus.Amd64.State) (hsp : s.regs 4 = BitVec.ofNat 64 wsp) (p : Nat)
+    (hp : p = tyA) (n : Nat) : Outside p 16 (calleeStack64 s 4096 n) := by
+  subst hp
+  simp only [calleeStack64, hsp, outside_cons, outside_nil, and_true]
+  rw [show (BitVec.ofNat 64 wsp).toNat = wsp from rfl]
+  simp only [wsp, tyA]
+  omega
+
 /-- `s'` is the return state `retState64 s s'.regs res …` when the result registers hold `res`. -/
 theorem ret_of (s s' : Janus.Amd64.State) (res : List W64) (hrip : s'.rip = retAddrOf s)
     (h4 : s'.regs 4 = s.regs 4 + 8) (h5 : s'.regs 5 = s.regs 5) (h14 : s'.regs 14 = s.regs 14)
@@ -122,7 +140,8 @@ theorem newobject64_satisfiable : ∃ (impl : List Janus.Amd64.Segment) (rt : Li
       (NewobjectPre64 4096 s ∧ Ready64 H rt [(s.regs 0).toNat] s) ∧ 0 < typSize s.mem (s.regs 0).toNat :=
   ⟨_, _, _, newobject64_impl, wstate 16 (fun i => if i = 0 then BitVec.ofNat 64 tyA else 0), rfl,
     ⟨⟨callOK_w _ _ 1 (by omega), ⟨by decide, by decide⟩,
-        by rw [show ((wstate 16 _).regs 0).toNat = tyA from rfl]; decide⟩,
+        by rw [show ((wstate 16 _).regs 0).toNat = tyA from rfl]; decide,
+        by rw [show ((wstate 16 _).regs 0).toNat = tyA from rfl]; exact outside_tyA _ _ _⟩,
      heapReady_w 16 (by decide), tyA, rfl, ⟨(tyA, tyA + 16), by simp [rt], Nat.le_refl _, Nat.le_refl _⟩,
      by decide⟩,
     by rw [show ((wstate 16 _).regs 0).toNat = tyA from rfl]; decide⟩
@@ -175,7 +194,8 @@ theorem makeslice64_satisfiable : ∃ (impl : List Janus.Amd64.Segment) (rt : Li
   ⟨_, _, _, makeslice64_impl,
     wstate 16 (fun i => if i = 0 then BitVec.ofNat 64 tyA else if i = 3 then 2 else if i = 1 then 4 else 0), rfl,
     ⟨⟨callOK_w _ _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide,
-        by rw [show ((wstate 16 _).regs 0).toNat = tyA from rfl]; decide⟩,
+        by rw [show ((wstate 16 _).regs 0).toNat = tyA from rfl]; decide,
+        by rw [show ((wstate 16 _).regs 0).toNat = tyA from rfl]; exact outside_tyA _ _ _⟩,
      heapReady_w 16 (by decide), tyA, 2, 4, rfl, ⟨(tyA, tyA + 16), by simp [rt], Nat.le_refl _, Nat.le_refl _⟩,
      by decide⟩,
     by rw [show ((wstate 16 _).regs 0).toNat = tyA from rfl]; decide⟩
@@ -206,7 +226,7 @@ theorem growslice64_satisfiable : ∃ (impl : List Janus.Amd64.Segment) (rt : Li
       Ready64 H rt (growsliceArgs64 s) s :=
   ⟨_, _, _, growslice64_impl, wstate 8 r8, rfl,
     ⟨⟨callOK_w 8 r8 5 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide, by decide,
-        by decide, by decide⟩, fun h => absurd h (by decide)⟩,
+        by decide, by decide, outside_tyA 8 r8 5⟩, fun h => absurd h (by decide)⟩,
     heapReady_w 8 (by decide), 0, tyA, rfl⟩
 
 end Janus.Contracts.AllocSatAmd64

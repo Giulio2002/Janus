@@ -242,7 +242,12 @@ theorem siteNew (R : RtInv) (L : List (Nat × Nat)) (bud : Nat) (s : State) (hPr
   rw [hround]
   refine ⟨⟨⟨h.1, ⟨by omega, ?_⟩, ?_⟩, h.2.1, h.2.2⟩, by omega⟩
   · rw [hm, h0, hF1.accessible]; exact Memory.accessible_mono _ h_data1 (by omega) (by omega)
-  · rw [hr]; simp [maxAlloc]
+  · rw [hr]; refine ⟨by simp [maxAlloc], ?_⟩
+    -- the descriptor (`bufN`, read-only data outside the writable window) is outside the callee's window
+    have hb := hbW
+    simp only [outside_cons, outside_nil, and_true] at hb
+    simp only [calleeStack, outside_cons, outside_nil, and_true, h0]
+    omega
 
 set_option maxHeartbeats 8000000 in
 set_option maxRecDepth 20000 in
@@ -353,7 +358,12 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : PoolShape)
       rw [hround]
       refine ⟨⟨⟨h.1, ⟨by omega, ?_⟩, ?_⟩, h.2.1, h.2.2⟩, by omega⟩
       · rw [hm, h0, hF1.accessible]; exact Memory.accessible_mono _ h_data1 (by omega) (by omega)
-      · rw [hr]; simp [maxAlloc]
+      · rw [hr]; refine ⟨by simp [maxAlloc], ?_⟩
+        -- the descriptor (`bufN`, read-only data outside the writable window) is outside the callee's window
+        have hb := hbW
+        simp only [outside_cons, outside_nil, and_true] at hb
+        simp only [calleeStack, outside_cons, outside_nil, and_true, h0]
+        omega
     refine Reaches.call (Summary.withExit (hnew.pos L bud) hret) rfl
       (key2 _ rfl (by simp [setReg, Map.keepABI]) (by simp [hsp48]; omega) (by simp [setReg])
         (by simp [setReg]) (by simp [setReg])) ?_

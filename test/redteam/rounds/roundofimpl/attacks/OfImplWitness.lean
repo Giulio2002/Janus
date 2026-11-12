@@ -144,7 +144,7 @@ theorem wsCall_pre : nwSite rt H wsCall := by
   have hpt : pairType = tyA := by unfold tyA; decide
   rw [hpt] at h
   refine ⟨⟨⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩,
-    ⟨by decide, by decide⟩, by decide⟩, ?_⟩
+    ⟨by decide, by decide⟩, (by simp only [calleeStack, outside_cons, outside_nil]; decide)⟩, ?_⟩
   exact h
 
 

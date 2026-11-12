@@ -1273,7 +1273,7 @@ theorem tail0 {impl : List Amd64.Segment} {R : RtInv} {B : Nat} {n : BitVec 64} 
       have hu64o : Outside (u64N) 16 (R.rt ++ [((s.regs 4).toNat - 4280, (s.regs 4).toNat + 16)]) := by
         simp only [outside_append]
         exact ⟨hu64, hu64W⟩
-      refine ⟨⟨⟨h.1, ⟨by omega, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩, h.2.1, h.2.2⟩
+      refine ⟨⟨⟨h.1, ⟨by omega, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩, h.2.1, h.2.2⟩
       · rw [hr4, hF3.accessible]; exact hu64acc
       · simp only [typSize, hr4]
         rw [hF3.readLE _ _ (Outside.of_sub hu64o (Nat.le_refl _) (by omega))]; exact hu64v.1
@@ -1283,13 +1283,24 @@ theorem tail0 {impl : List Amd64.Segment} {R : RtInv} {B : Nat} {n : BitVec 64} 
       · omega
       · omega
       · omega
+      · -- the element descriptor is read-only data, outside the callee's window
+        have hb := hu64W
+        simp only [outside_cons, outside_nil, and_true] at hb
+        simp only [calleeStack64, outside_cons, outside_nil, and_true, hr4]
+        omega
       · intro hpos
         have hc0 : 0 < cap0 := by omega
         have e : n.toNat - (n.toNat - cap0) = cap0 := by omega
-        refine ⟨?_, ?_⟩
+        refine ⟨?_, ?_, ?_⟩
         · rw [hr0, hr1, hr3, e]; omega
         · rw [hr0, hr1, hr3, e, hmm.accessible]
           exact Arm64.Memory.accessible_sub _ (harr hc0) (Or.inl rfl) (Nat.le_refl _) (Nat.le_refl _)
+        · -- the old array is a live object, apart from the callee's window
+          have hw := hL2W (ptr0, ptr0 + 8 * cap0)
+            (List.mem_append_right _ (List.mem_cons_of_mem _ (by simp; omega)))
+          simp only [outside_cons, outside_nil, and_true] at hw
+          simp only [calleeStack64, outside_cons, outside_nil, and_true, hr0, hr1, hr3, e]
+          omega
     have post : ∀ (S3 : State) (v : Nat) (ptr : W64) (junk : Nat → W64) (f3 : Flags) (x3 y3 : Nat → BitVec 128)
         (m3 : Memory) (zh3 : Nat → BitVec 256) (kr3 : Nat → W64), v % 2 ^ 64 = n.toNat - cap0 →
         S3.mem = stores3 S.mem (s.regs 4).toNat d v → S3.regs 4 = s.regs 4 - 144#64 → S3.regs 14 = s.regs 14 →
@@ -1573,7 +1584,12 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (S : PoolShape) (B :
       rw [hround]
       refine ⟨⟨⟨h.1, ⟨by omega, ?_⟩, ?_⟩, h.2.1, h.2.2⟩, by omega⟩
       · rw [h0, hF1'.accessible]; exact hstkacc
-      · rw [hr]; simp [maxAlloc]
+      · rw [hr]; refine ⟨by simp [maxAlloc], ?_⟩
+        -- the descriptor is read-only data, outside the callee's window
+        have hb := hsL
+        simp only [outside_cons, outside_nil, and_true] at hb
+        simp only [calleeStack64, outside_cons, outside_nil, and_true, h0]
+        omega
     refine Reaches.call (Summary.withExit (hnew.pos L bud) hret) rfl
       (key2 _ rfl (by simp [setRegF, MapAmd64.keepABI_apply]) (by simp [setRegF, hsp144] <;> omega) (by simp [setRegF])) ?_
     intro s2 hpc2 ⟨ptr, junk, f2, x2, y2, m2, zh2, kr2, hs2, hfr2, hlf2, ⟨hobj, hapL⟩, hapS, hinv2⟩
@@ -2127,7 +2143,10 @@ theorem wsN_pre : newSite R [] 0x400 wsN := by
   rw [hround]
   refine ⟨⟨h.1, ⟨by omega, ?_⟩, ?_⟩, h.2.1, h.2.2⟩
   · rw [h0, hf.accessible]; exact descs.2.2.1
-  · rw [hr]; simp [maxAlloc]
+  · rw [hr]; refine ⟨by simp [maxAlloc], ?_⟩
+    janus_eval_nat hSt : stkType
+    simp only [calleeStack64, outside_cons, outside_nil, and_true, h0]
+    omega
 
 /-- The call state at `runtime.growslice`'s entry: `growslice(nil, 1, 0, 1, uint64)`. -/
 def wsR : State := mkS64 (Extracted.program.contractAddr "runtime.growslice") (sp0 - 144) 0 1 0 uT 1 mem0
@@ -2167,7 +2186,7 @@ theorem wsR_pre : grSite R [] 0x400 wsR := by
     (by rw [show (s0.regs 4).toNat + 16 - ((s0.regs 4).toNat - 4280) = 4280 + 16 by omega]; exact hw4) hwrt hwL
     (by rw [hargs]; exact hokGr 0 0 (by omega) (by decide)) (by rw [hg']; exact RtInv.inv_frame hf hwrt hinv)
     (by rw [hround]; omega)
-  refine ⟨⟨⟨h.1, ⟨by omega, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩, h.2.1, h.2.2⟩
+  refine ⟨⟨⟨h.1, ⟨by omega, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩, h.2.1, h.2.2⟩
   · rw [hr6]; exact descs.2.2.2
   · simp only [typSize, hr6]; exact descs.2.1.1
   · simp only [typPtrBytes, hr6]; exact descs.2.1.2
@@ -2175,6 +2194,9 @@ theorem wsR_pre : grSite R [] 0x400 wsR := by
   · omega
   · omega
   · omega
+  · janus_eval_nat hUt : u64Type
+    simp only [calleeStack64, outside_cons, outside_nil, and_true, hr6]
+    omega
   · intro hpos; rw [hr3, hr7] at hpos; omega
 
 /-- The call state at `runtime.memclrNoHeapPointers`'s entry: clear 8 bytes of the stack window's bottom. -/

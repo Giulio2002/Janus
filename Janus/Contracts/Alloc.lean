@@ -451,6 +451,33 @@ attribute [janus_exec, janus_post] typSize typPtrBytes typNoscan maxAlloc malloc
 def TypeOK (m : Memory) (typ : Nat) : Prop :=
   typ + 16 ≤ 2 ^ 48 ∧ m.accessible typ 16 false = true
 
+/-- **A type descriptor in read-only data is outside the callee's stack window** (arm64): the
+call window `[SP - stack, SP + 8 + 8·nargs)` is writable (`CallOK`), `.rodata` is not, so the
+16-byte descriptor at `et` (inside a data object of the program) is disjoint from it. This is how a
+caller discharges the `Outside et 16 (calleeStack s stack n)` conjunct of the allocation
+contracts' preconditions, in one cheap step (no case split over the data segments). -/
+theorem outside_calleeStack_of_data {p : Program} {s : State} (h : p.DataLoaded s.mem) {stack nargs et : Nat}
+    (hd : (dataRead p et 16).isSome = true) (hst : stack ≤ s.sp.toNat)
+    (hw : s.mem.accessible (s.sp.toNat - stack) (stack + 8 + 8 * nargs) true = true) :
+    Outside et 16 (calleeStack s stack nargs) := by
+  -- the data object holding the descriptor (`dataRead` is defined only inside one), then its disjointness
+  have hk : ∃ d ∈ p.data, d.base ≤ et ∧ et + 16 ≤ d.base + d.bytes.length := by
+    unfold dataRead at hd
+    cases hs : dataSegAt p et 16 with
+    | none => rw [hs] at hd; cases hd
+    | some d =>
+      unfold dataSegAt at hs
+      have hm := List.mem_of_find?_eq_some hs
+      have hp := List.find?_some hs
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at hp
+      exact ⟨d, hm, hp.1, hp.2⟩
+  obtain ⟨d, hdm, hb1, hb2⟩ := hk
+  obtain ⟨k, hkl, hdk⟩ := List.mem_iff_getElem.1 hdm
+  have := disjoint_of_dataLoaded h k hkl hw
+  rw [hdk] at this
+  simp only [calleeStack, outside_cons, outside_nil, and_true]
+  omega
+
 /-- The state a call returns in (arm64): registers by `callRegs`, `pc = X30`, flags, SIMD&FP
 registers and memory as given; `SP`, `dczid`, `tpidr` unchanged. -/
 def retState (s : State) (junk : Nat → W64) (res : List W64) (f : Flags)
@@ -505,7 +532,8 @@ store-exclusive outcomes unspecified (`retStateX`). -/
 def MallocgcPre (stack : Nat) (s : State) : Prop :=
   CallOK s stack 3 ∧ (s.regs 0).toNat ≤ maxAlloc ∧
     ((s.regs 1).toNat = 0 ∨ (TypeOK s.mem (s.regs 1).toNat ∧
-      (typNoscan s.mem (s.regs 1).toNat = false → (s.regs 2).toNat % 256 ≠ 0)))
+      (typNoscan s.mem (s.regs 1).toNat = false → (s.regs 2).toNat % 256 ≠ 0) ∧
+      Outside (s.regs 1).toNat 16 (calleeStack s stack 3)))
 
 /-- `mallocgc`'s object for the call state `s`: `X0` bytes, block `blockSize`, zeroed when
 `needzero` (`X2`'s low byte) or the type has pointers. -/
@@ -539,7 +567,8 @@ theorem MallocgcContract.pos {p : Program} {addr : Nat} {rt : List (Nat × Nat)}
 
 /-- The precondition of `runtime.newobject` (arm64): see `NewobjectContract`. -/
 def NewobjectPre (stack : Nat) (s : State) : Prop :=
-  CallOK s stack 1 ∧ TypeOK s.mem (s.regs 0).toNat ∧ typSize s.mem (s.regs 0).toNat ≤ maxAlloc
+  CallOK s stack 1 ∧ TypeOK s.mem (s.regs 0).toNat ∧ typSize s.mem (s.regs 0).toNat ≤ maxAlloc ∧
+    Outside (s.regs 0).toNat 16 (calleeStack s stack 1)
 
 /-- `newobject`'s object: `typ.Size_` bytes, zeroed. -/
 @[reducible] def newobjectObj (rt : List (Nat × Nat)) (s : State) (m : Memory) (ptr : Nat) : Prop :=
@@ -569,7 +598,8 @@ theorem NewobjectContract.pos {p : Program} {addr : Nat} {rt : List (Nat × Nat)
 def MakeslicePre (stack : Nat) (s : State) : Prop :=
   CallOK s stack 3 ∧ TypeOK s.mem (s.regs 0).toNat ∧
     (s.regs 1).toNat ≤ (s.regs 2).toNat ∧ (s.regs 2).toNat < 2 ^ 63 ∧
-    typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat ≤ maxAlloc
+    typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat ≤ maxAlloc ∧
+    Outside (s.regs 0).toNat 16 (calleeStack s stack 3)
 
 /-- `makeslice`'s block: `et.Size_ · cap` bytes, zeroed. -/
 @[reducible] def makesliceObj (rt : List (Nat × Nat)) (s : State) (m : Memory) (ptr : Nat) : Prop :=
@@ -618,18 +648,22 @@ def GrowsliceArgs (stack : Nat) (s : State) : Prop :=
     typSize s.mem (s.regs 4).toNat = 8 ∧ typPtrBytes s.mem (s.regs 4).toNat = 0 ∧
     (s.regs 3).toNat ≤ (s.regs 1).toNat ∧
     (s.regs 1).toNat - (s.regs 3).toNat ≤ (s.regs 2).toNat ∧
-    (s.regs 2).toNat < (s.regs 1).toNat ∧ (s.regs 1).toNat < 2 ^ 40
+    (s.regs 2).toNat < (s.regs 1).toNat ∧ (s.regs 1).toNat < 2 ^ 40 ∧
+    Outside (s.regs 4).toNat 16 (calleeStack s stack 5)
 
-/-- The `oldLen` old elements at `oldPtr` are readable. -/
-def GrowsliceOld (s : State) : Prop :=
+/-- The `oldLen` old elements at `oldPtr` are readable, and outside the callee's stack window
+(`growslice` copies them with `memmove` after pushing its frame, so a frame over them would copy the
+frame's words, not the elements). -/
+def GrowsliceOld (stack : Nat) (s : State) : Prop :=
   (s.regs 0).toNat + 8 * ((s.regs 1).toNat - (s.regs 3).toNat) ≤ 2 ^ 48 ∧
-    s.mem.accessible (s.regs 0).toNat (8 * ((s.regs 1).toNat - (s.regs 3).toNat)) false = true
+    s.mem.accessible (s.regs 0).toNat (8 * ((s.regs 1).toNat - (s.regs 3).toNat)) false = true ∧
+    Outside (s.regs 0).toNat (8 * ((s.regs 1).toNat - (s.regs 3).toNat)) (calleeStack s stack 5)
 
 /-- The precondition of `runtime.growslice` for 8-byte pointer-free elements (arm64): the
 arguments, and the old elements readable when there are any (`append(nil, x)` passes a nil
 `oldPtr`). -/
 def GrowslicePre (stack : Nat) (s : State) : Prop :=
-  GrowsliceArgs stack s ∧ (0 < (s.regs 1).toNat - (s.regs 3).toNat → GrowsliceOld s)
+  GrowsliceArgs stack s ∧ (0 < (s.regs 1).toNat - (s.regs 3).toNat → GrowsliceOld stack s)
 
 /-- `growslice`'s new backing array for the call state `s` (8-byte pointer-free elements):
 `8·newCap` bytes, fresh, holding the `oldLen` old elements, zero from `8·newLen` on. -/
@@ -668,7 +702,7 @@ def GrowsliceContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack
 /-- `GrowsliceContract` at a call whose old elements are readable. -/
 theorem GrowsliceContract.withOld {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
     {H : RtReady} (h : GrowsliceContract p addr rt stack H) :
-    Summary p addr (fun s => (GrowsliceArgs stack s ∧ GrowsliceOld s) ∧ Ready H rt (growsliceArgs s) s)
+    Summary p addr (fun s => (GrowsliceArgs stack s ∧ GrowsliceOld stack s) ∧ Ready H rt (growsliceArgs s) s)
       (fun s s' => AllocRet rt stack 5
         (fun ptr => [ptr, s.regs 1, BitVec.ofNat 64 (growCap8 (s.regs 1).toNat (s.regs 2).toNat)])
         s s' (growsliceObj rt s)) :=
