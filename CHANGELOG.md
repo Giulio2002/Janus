@@ -41,8 +41,6 @@ New runtime contract for `memmove` of zero bytes:
 - Both contracts are on the auditor's pinned-contract list (`Janus/Tools/Audit.lean`, round 9 SAT row).
 - docs/RUNTIME-CONTRACTS.md: "Copies of zero bytes".
 
-## v0.2.1 (unreleased)
-
 ## v0.3.0 (2026-11-12)
 
 Instruction-count bounds. **Auditor change** (new accepted statement shapes and one new rule; every existing
