@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.2 (unreleased)
+
+Bug fix (PR #3): janus's own compile of a consumer package's modules (olean provenance) could reuse a stale
+stored olean. The trusted olean store key of a module covered its source and its direct imports' olean bytes
+only. An olean does not cover its own imports, so a change deep in the import closure (the body of a reducible
+definition) could leave an intermediate olean byte-identical while a module above it elaborated against the old
+body. The stale olean was then reused, and the kernel replay rejected it: **fail closed, never a wrong
+verdict**, but such rows failed in warm caches until the store was wiped.
+
+- The key now also covers each import's own key, hence the whole closure (`cmd/janus/provenance.go`). Key
+  format `janus-own-olean-v3`: existing store entries are rebuilt once.
+- `TestOleanStoreKeyTransitive`: Deep → Mid → Add, where Mid's olean is byte-identical across a change of Deep's
+  body; all three must recompile (fails before the fix: only Deep and Mid did).
+
 ## v0.3.1 (2026-11-12)
 
 `lakefile.toml` still says version 0.3.0: it is embedded in `janus` (verifier identity), and the release ships
