@@ -70,11 +70,11 @@ theorem bump16_not_zero : ¬ MakesliceZeroLive (toy.link (at0 (bumpCode 16))) A0
       LiveAt (toyR tys0 okZ) A0 [((wst [tyB, 0, 0]).regs 0).toNat, ((wst [tyB, 0, 0]).regs 1).toNat,
         ((wst [tyB, 0, 0]).regs 2).toNat] [] 0x400000 0 ((wst [tyB, 0, 0]).regs 28).toNat (wst [tyB, 0, 0]).mem
         (calleeStack (wst [tyB, 0, 0]) 4096 3)) ∧
-      typSize (wst [tyB, 0, 0]).mem ((wst [tyB, 0, 0]).regs 0).toNat * ((wst [tyB, 0, 0]).regs 2).toNat = 0 ∧
-      Outside ((wst [tyB, 0, 0]).regs 0).toNat 16 (calleeStack (wst [tyB, 0, 0]) 4096 3)) :=
-    ⟨⟨⟨wst_wcallOK _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide⟩,
+      typSize (wst [tyB, 0, 0]).mem ((wst [tyB, 0, 0]).regs 0).toNat * ((wst [tyB, 0, 0]).regs 2).toNat = 0) :=
+    ⟨⟨⟨wst_wcallOK _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide,
+        by simp only [calleeStack, outside_cons, outside_nil, and_true]; decide⟩,
       wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv_tight wg, by decide, by simp, wwin _ 3 (by omega)⟩⟩,
-      by decide, by simp only [calleeStack, outside_cons, outside_nil, and_true]; decide⟩
+      by decide⟩
   obtain ⟨k, s', hst, hpc', hq⟩ := h [] 0x400000 (wst [tyB, 0, 0]) rfl hpre
   obtain ⟨k0, fin, hst0, hpc0, rfl⟩ := bump16_run (wst [tyB, 0, 0]) (by decide) (by decide) (by decide) rfl
   have hnone : (toy.link (at0 (bumpCode 16))).fetch ((wst [tyB, 0, 0]).regs 30).toNat = none := by decide
@@ -100,8 +100,7 @@ example {p : Program} {a st : Nat} {R : RtInv} (hz : MakesliceZeroLive p a st R)
     (s : State) (hpc : s.pc = BitVec.ofNat 64 a)
     (hpre : (MakeslicePre st s ∧ StackRoom s st 3 ∧
       LiveAt R a [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b 0 (s.regs 28).toNat s.mem
-        (calleeStack s st 3)) ∧ typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat = 0 ∧
-      Outside (s.regs 0).toNat 16 (calleeStack s st 3)) :
+        (calleeStack s st 3)) ∧ typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat = 0) :
     ReachesRet p (s.regs 30) s fun s' => ∃ m, s'.mem = m ∧ R.inv b L (s.regs 28).toNat (view R.rt L m) := by
   obtain ⟨k, s', h1, h2, ptr, junk, f, v, m, ex, ep, hs, -, -, hinv⟩ := hz L b s hpc hpre
   exact ⟨k, s', h1, h2, m, by rw [hs]; rfl, hinv⟩
@@ -170,9 +169,9 @@ theorem bump16_not_zero : ¬ MakesliceZeroLive64 (toy.link (at0 bump16Code)) A0 
     rw [h0]; simp only [calleeStack64, w4, outside_cons, outside_nil, and_true, tyB, wsp]; decide
   obtain ⟨k, s', hst, hpc', hq⟩ := h [] 0x400000 (wst [tyB, 0, 0]) rfl
     ⟨⟨⟨wcallOK64 _ 3 (by omega), by rw [h0, wmem_eq]; exact ⟨by decide, by decide⟩, by rw [h3, h1]; decide,
-      by rw [h1]; decide, by rw [h0, h1, wmem_eq]; decide⟩,
+      by rw [h1]; decide, by rw [h0, h1, wmem_eq]; decide, het⟩,
       wguard64 _ 3 (by omega), ⟨by rw [h0, h3, h1]; exact ⟨rfl, rfl⟩, JanusTests.MakesliceZero.Arm.wmem_inv_tight wg,
-        Nat.zero_le _, by simp, wwin64 _ 3 (by omega)⟩⟩, by rw [h0, h1, wmem_eq]; decide, het⟩
+        Nat.zero_le _, by simp, wwin64 _ 3 (by omega)⟩⟩, by rw [h0, h1, wmem_eq]; decide⟩
   obtain ⟨k0, fin, hst0, hpc0, hfin⟩ := bump16_run (wst [tyB, 0, 0]) (by rw [w4]; decide) (by decide)
     (by unfold Apart; rw [w4]; decide) (by rw [w4]; decide) rfl
   have hnone : (toy.link (at0 bump16Code)).fetch (retAddrOf (wst [tyB, 0, 0])).toNat = none := by decide

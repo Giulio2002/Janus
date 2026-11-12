@@ -1129,8 +1129,8 @@ set_option maxRecDepth 20000 in
 theorem makesliceZeroLive_pinned (stack : Nat) (R : RtInv) (hst : 104 ≤ stack) :
     MakesliceZeroLive (toy.link makeslicePinnedSegs) makesliceA stack R := by
   rw [link_makeslicePinned]
-  rintro L b s hpc ⟨⟨⟨⟨h30a, h30b, hsp16, hsp1, hsp2, hsp3, hacc⟩, ⟨hty1, hty2⟩, hl, hc, hmax⟩,
-    ⟨⟨hg1, hg2, hg3⟩, hgo⟩, hok, hinv, -, hLs, hWs⟩, hz, het⟩
+  rintro L b s hpc ⟨⟨⟨⟨h30a, h30b, hsp16, hsp1, hsp2, hsp3, hacc⟩, ⟨hty1, hty2⟩, hl, hc, hmax, het⟩,
+    ⟨⟨hg1, hg2, hg3⟩, hgo⟩, hok, hinv, -, hLs, hWs⟩, hz⟩
   simp only [calleeStack, outside_cons, outside_nil, and_true] at het hgo
   simp only [typSize] at hz hmax
   have hrd := Memory.readLE_lt (m := s.mem) (s.regs 0).toNat 8
@@ -1169,13 +1169,13 @@ theorem makesliceZeroLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
       ((MakeslicePre 4096 s ∧ StackRoom s 4096 3 ∧
         LiveAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b 0
           (s.regs 28).toNat s.mem (calleeStack s 4096 3)) ∧
-        typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat = 0 ∧
-        Outside (s.regs 0).toNat 16 (calleeStack s 4096 3)) :=
+        typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat = 0) :=
   ⟨at0 makesliceCodeD, toyR tys0 okMakeZ, makesliceD_impl tys0 tysOK0 okMakeZ,
     MakesliceZeroLive.of_live (makesliceD_impl tys0 tysOK0 okMakeZ) (toyR_dropEmpty tys0 okMakeZ),
     [], 0x400, wst [tyB, 0, 0], rfl,
-    ⟨⟨wst_wcallOK _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide⟩,
+    ⟨⟨wst_wcallOK _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide,
+        wdesc _ 3 _ (Or.inr (Or.inl (by decide)))⟩,
       wguard _ 3 (by omega), ⟨⟨rfl, Or.inr (by decide)⟩, wmem_inv wg, Nat.zero_le _, by simp, wwin _ 3 (by omega)⟩⟩,
-    by decide, by simp only [calleeStack, outside_cons, outside_nil, and_true]; decide⟩
+    by decide⟩
 
 end Janus.Contracts.LiveSat

@@ -105,8 +105,7 @@ def MakesliceZeroLive64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat) (R 
     (fun s => (MakeslicePre64 stack s ∧ StackRoom64 s stack 3 ∧
       LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b 0 (s.regs 14).toNat s.mem
         (liveWin64 s stack 3)) ∧
-      typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat = 0 ∧
-      Outside (s.regs 0).toNat 16 (calleeStack64 s stack 3))
+      typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat = 0)
     (fun s s' => ZeroAllocRet64 R stack 3 L b s s')
 
 /-! ### Non-zero sizes (amd64) -/

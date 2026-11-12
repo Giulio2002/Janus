@@ -597,8 +597,8 @@ summary's `LiveExt R L L'` nor the `LiveSep` of a later call. The pinned runtime
 for a zero-byte request (`makeslice` → `mallocgc(0, et, true)`, whose first test is
 `if size == 0 { return unsafe.Pointer(&zerobase) }`), so this contract keeps the live set and the
 budget (`ZeroAllocRet`). The precondition is `MakesliceLiveContract`'s with cost `0`, the zero
-size, and the type descriptor outside the callee's window (`makeslice` reads `et.Size_` after
-pushing its frame; a descriptor is read-only data, never in a stack). `ptr` stays unconstrained
+size (the type descriptor outside the callee's window, which `makeslice` needs because it reads
+`et.Size_` after pushing its frame, is part of `MakeslicePre` since v0.3.1). `ptr` stays unconstrained
 (it is `&runtime.zerobase`). `MakesliceZeroSat.makesliceZeroLive_pinned` runs the pinned
 `makeslice` and `mallocgc` themselves (docs/RUNTIME-CONTRACTS.md, "Zero-byte allocations"). -/
 def MakesliceZeroLive (p : Program) (addr : Nat) (stack : Nat) (R : RtInv) : Prop :=
@@ -606,8 +606,7 @@ def MakesliceZeroLive (p : Program) (addr : Nat) (stack : Nat) (R : RtInv) : Pro
     (fun s => (MakeslicePre stack s ∧ StackRoom s stack 3 ∧
       LiveAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b 0
         (s.regs 28).toNat s.mem (calleeStack s stack 3)) ∧
-      typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat = 0 ∧
-      Outside (s.regs 0).toNat 16 (calleeStack s stack 3))
+      typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat = 0)
     (fun s s' => ZeroAllocRet R stack 3 L b s s')
 
 /-! ### `growslice` (8-byte pointer-free elements) -/

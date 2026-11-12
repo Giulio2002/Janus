@@ -1067,10 +1067,10 @@ theorem MakesliceZeroLive64.of_live {p : Janus.Amd64.Program} {addr stack : Nat}
   intro L b
   have hbs : ∀ c, blockSize 0 c = 0 := fun c => by cases c <;> decide
   refine Janus.Amd64.Tactic.Summary.mono (h L b) (fun s hp => ?_) (fun s s' hp hq => ?_)
-  · obtain ⟨⟨hP, hR, hok, hinv, _, hs1, hs2⟩, hz, -⟩ := hp
+  · obtain ⟨⟨hP, hR, hok, hinv, _, hs1, hs2⟩, hz⟩ := hp
     have hr : makesliceRound64 s = 0 := by simp only [makesliceRound64, hz, hbs]
     exact ⟨hP, hR, hok, hinv, by rw [hr]; exact Nat.zero_le _, hs1, hs2⟩
-  · obtain ⟨_, hz, -⟩ := hp
+  · obtain ⟨_, hz⟩ := hp
     have hr : makesliceRound64 s = 0 := by simp only [makesliceRound64, hz, hbs]
     obtain ⟨ptr, junk, f, x, yh, m, zh, kr, hs', hMF, hLF, _, _, hinv⟩ := hq
     rw [hr, Nat.sub_zero, Nat.add_zero] at hinv
@@ -1133,8 +1133,8 @@ set_option maxRecDepth 20000 in
 theorem makesliceZeroLive64_pinned (stack : Nat) (R : RtInv) (hst : 48 ≤ stack) :
     MakesliceZeroLive64 (toy.link makeslicePinnedSegs64) makesliceA64 stack R := by
   rw [link_makeslicePinned64]
-  rintro L b s hpc ⟨⟨⟨⟨hra, hal, hs1, hs2, hacc⟩, ⟨hty1, hty2⟩, hl, hc, hmax⟩, ⟨⟨hg1, hg2, hg3⟩, hgo⟩, hok, hinv, -,
-    hLs, hWs⟩, hz, het⟩
+  rintro L b s hpc ⟨⟨⟨⟨hra, hal, hs1, hs2, hacc⟩, ⟨hty1, hty2⟩, hl, hc, hmax, het⟩, ⟨⟨hg1, hg2, hg3⟩, hgo⟩, hok, hinv, -,
+    hLs, hWs⟩, hz⟩
   simp only [typSize] at hz hmax
   simp only [calleeStack64, outside_cons, outside_nil, and_true] at het hgo
   have hmsb : (s.regs 3).msb = false := by
@@ -1156,8 +1156,7 @@ theorem makesliceZeroLive64_satisfiable : ∃ (impl : List Janus.Amd64.Segment) 
       ((MakeslicePre64 4096 s ∧ StackRoom64 s 4096 3 ∧
         LiveAt R A0 [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b 0 (s.regs 14).toNat s.mem
           (liveWin64 s 4096 3)) ∧
-        typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat = 0 ∧
-        Outside (s.regs 0).toNat 16 (calleeStack64 s 4096 3)) := by
+        typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat = 0) := by
   have h0 : ((wst [tyB, 0, 0]).regs 0).toNat = tyB := wr0 _ (by decide)
   have h3 : ((wst [tyB, 0, 0]).regs 3).toNat = 0 := wr3 _ (by decide)
   have h1 : ((wst [tyB, 0, 0]).regs 1).toNat = 0 := wr1 _ (by decide)
@@ -1165,11 +1164,9 @@ theorem makesliceZeroLive64_satisfiable : ∃ (impl : List Janus.Amd64.Segment) 
     MakesliceZeroLive64.of_live (makesliceD_impl tys0 tysOK0 _) (LiveSat.toyR_dropEmpty tys0 _),
     [], 0x400, wst [tyB, 0, 0], rfl,
     ⟨⟨wcallOK64 _ 3 (by omega), by rw [h0, wmem_eq]; exact ⟨by decide, by decide⟩, by rw [h3, h1]; decide,
-      by rw [h1]; decide, by rw [h0, h1, wmem_eq]; decide⟩,
+      by rw [h1]; decide, by rw [h0, h1, wmem_eq]; decide,
+      by rw [h0]; exact wdesc64 _ 3 _ (Or.inr (Or.inl rfl))⟩,
       wguard64 _ 3 (by omega), ⟨by rw [h0, h3, h1]; exact ⟨rfl, Or.inr rfl⟩, wmem_inv 0, Nat.zero_le _, by simp,
-        wwin64 _ 3 (by omega)⟩⟩, by rw [h0, h1, wmem_eq]; decide, ?_⟩
-  rw [h0]
-  simp only [calleeStack64, w4, wspn, outside_cons, outside_nil, and_true, tyB, wsp]
-  decide
+        wwin64 _ 3 (by omega)⟩⟩, by rw [h0, h1, wmem_eq]; decide⟩
 
 end Janus.Contracts.LiveSatAmd64

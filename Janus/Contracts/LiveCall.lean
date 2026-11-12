@@ -275,10 +275,10 @@ theorem MakesliceZeroLive.of_live {p : Program} {addr stack : Nat} {R : RtInv}
   intro L b
   have hbs : ∀ c, blockSize 0 c = 0 := fun c => by cases c <;> decide
   refine Janus.Tactic.Summary.mono (h L b) (fun s hp => ?_) (fun s s' hp hq => ?_)
-  · obtain ⟨⟨hP, hR, hok, hinv, _, hs1, hs2⟩, hz, -⟩ := hp
+  · obtain ⟨⟨hP, hR, hok, hinv, _, hs1, hs2⟩, hz⟩ := hp
     have hr : makesliceRound s = 0 := by simp only [makesliceRound, hz, hbs]
     exact ⟨hP, hR, hok, hinv, by rw [hr]; exact Nat.zero_le _, hs1, hs2⟩
-  · obtain ⟨_, hz, -⟩ := hp
+  · obtain ⟨_, hz⟩ := hp
     have hr : makesliceRound s = 0 := by simp only [makesliceRound, hz, hbs]
     obtain ⟨ptr, junk, f, v, m, ex, ep, hs', hMF, hLF, _, _, hinv⟩ := hq
     rw [hr, Nat.sub_zero, Nat.add_zero] at hinv
