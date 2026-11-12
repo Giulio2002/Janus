@@ -451,6 +451,33 @@ attribute [janus_exec, janus_post] typSize typPtrBytes typNoscan maxAlloc malloc
 def TypeOK (m : Memory) (typ : Nat) : Prop :=
   typ + 16 ≤ 2 ^ 48 ∧ m.accessible typ 16 false = true
 
+/-- **A type descriptor in read-only data is outside the callee's stack window** (arm64): the
+call window `[SP - stack, SP + 8 + 8·nargs)` is writable (`CallOK`), `.rodata` is not, so the
+16-byte descriptor at `et` (inside a data object of the program) is disjoint from it. This is how a
+caller discharges the `Outside et 16 (calleeStack s stack n)` conjunct of the allocation
+contracts' preconditions, in one cheap step (no case split over the data segments). -/
+theorem outside_calleeStack_of_data {p : Program} {s : State} (h : p.DataLoaded s.mem) {stack nargs et : Nat}
+    (hd : (dataRead p et 16).isSome = true) (hst : stack ≤ s.sp.toNat)
+    (hw : s.mem.accessible (s.sp.toNat - stack) (stack + 8 + 8 * nargs) true = true) :
+    Outside et 16 (calleeStack s stack nargs) := by
+  -- the data object holding the descriptor (`dataRead` is defined only inside one), then its disjointness
+  have hk : ∃ d ∈ p.data, d.base ≤ et ∧ et + 16 ≤ d.base + d.bytes.length := by
+    unfold dataRead at hd
+    cases hs : dataSegAt p et 16 with
+    | none => rw [hs] at hd; cases hd
+    | some d =>
+      unfold dataSegAt at hs
+      have hm := List.mem_of_find?_eq_some hs
+      have hp := List.find?_some hs
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at hp
+      exact ⟨d, hm, hp.1, hp.2⟩
+  obtain ⟨d, hdm, hb1, hb2⟩ := hk
+  obtain ⟨k, hkl, hdk⟩ := List.mem_iff_getElem.1 hdm
+  have := disjoint_of_dataLoaded h k hkl hw
+  rw [hdk] at this
+  simp only [calleeStack, outside_cons, outside_nil, and_true]
+  omega
+
 /-- The state a call returns in (arm64): registers by `callRegs`, `pc = X30`, flags, SIMD&FP
 registers and memory as given; `SP`, `dczid`, `tpidr` unchanged. -/
 def retState (s : State) (junk : Nat → W64) (res : List W64) (f : Flags)

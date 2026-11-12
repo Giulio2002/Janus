@@ -70,6 +70,33 @@ def CallOK64 (s : State) (stack nargs : Nat) : Prop :=
     stack ≤ (s.regs 4).toNat ∧ (s.regs 4).toNat + 8 + 8 * nargs ≤ 2 ^ 48 ∧
     s.mem.accessible ((s.regs 4).toNat - stack) (stack + 8 + 8 * nargs) true = true
 
+/-- **A type descriptor in read-only data is outside the callee's stack window** (amd64): the
+call window `[RSP - stack, RSP + 8 + 8·nargs)` is writable (`CallOK64`), `.rodata` is not, so the
+16-byte descriptor at `et` (inside a data object of the program) is disjoint from it. This is how a
+caller discharges the `Outside et 16 (calleeStack64 s stack n)` conjunct of the allocation
+contracts' preconditions, in one cheap step (no case split over the data segments). -/
+theorem outside_calleeStack64_of_data {p : Janus.Amd64.Program} {s : State} (h : p.DataLoaded s.mem) {stack nargs et : Nat}
+    (hd : (Janus.Amd64.Tactic.dataRead p et 16).isSome = true) (hst : stack ≤ (s.regs 4).toNat)
+    (hw : s.mem.accessible ((s.regs 4).toNat - stack) (stack + 8 + 8 * nargs) true = true) :
+    Outside et 16 (calleeStack64 s stack nargs) := by
+  -- the data object holding the descriptor (`dataRead` is defined only inside one), then its disjointness
+  have hk : ∃ d ∈ p.data, d.base ≤ et ∧ et + 16 ≤ d.base + d.bytes.length := by
+    unfold Janus.Amd64.Tactic.dataRead at hd
+    cases hs : Janus.Amd64.Tactic.dataSegAt p et 16 with
+    | none => rw [hs] at hd; cases hd
+    | some d =>
+      unfold Janus.Amd64.Tactic.dataSegAt at hs
+      have hm := List.mem_of_find?_eq_some hs
+      have hp := List.find?_some hs
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at hp
+      exact ⟨d, hm, hp.1, hp.2⟩
+  obtain ⟨d, hdm, hb1, hb2⟩ := hk
+  obtain ⟨k, hkl, hdk⟩ := List.mem_iff_getElem.1 hdm
+  have := Janus.Amd64.Tactic.disjoint_of_dataLoaded h k hkl hw
+  rw [hdk] at this
+  simp only [calleeStack64, outside_cons, outside_nil, and_true]
+  omega
+
 /-- The state a call returns in (amd64): registers by `callRegs64`, `rip` = the return address,
 flags, `X0`–`X14`, the `YMM` upper halves, the AVX-512 state (`ZMM` bits 511:256, `K0`–`K7`) and
 memory as given; `X15`, `FS` base and the direction flag unchanged. -/
