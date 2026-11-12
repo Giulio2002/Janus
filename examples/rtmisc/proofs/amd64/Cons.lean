@@ -213,7 +213,9 @@ theorem site_new : newSite R newA [] 0x400 sNew := by
   have h0 : (sNew.regs 0).toNat = nodeType := by decide
   refine ⟨⟨cs_callOK _ _ _ (by omega), ?_, ?_⟩, cs_room _ _, ?_, inv0, ?_, cs_winL _ _ _, cs_winR _ _ _ (by omega)⟩
   · rw [h0]; exact ⟨by decide, by decide⟩
-  · rw [h0]; show typSize mem0 nodeType ≤ maxAlloc; decide
+  · rw [h0]; refine ⟨?_, ?_⟩
+    · show typSize mem0 nodeType ≤ maxAlloc; decide
+    · simp only [calleeStack64, outside_cons, outside_nil]; decide
   · rw [h0]; exact Or.inl ⟨rfl, rfl⟩
   · simp only [newobjectRound64, h0, cs_mem]; decide
 

@@ -233,8 +233,14 @@ stack bytes `stack` the runtime may use below `SP`. From any state at the entry 
 * an admissible return address (arm64: `X30` 4-aligned, below `2^48`; amd64: `[RSP]` below
   `2^47`, a canonical address, since `RET` faults otherwise), an aligned `SP` and the window
   `[SP - stack, SP + 8 + 8·nargs)` writable (`CallOK`, `CallOK64`);
-* a readable type descriptor (`TypeOK`: `Size_` at offset 0, `PtrBytes` at offset 8) and
-  arguments that take no panic or throw path (`makeslice`: `len ≤ cap`, `Size_·cap ≤ maxAlloc`;
+* a readable type descriptor (`TypeOK`: `Size_` at offset 0, `PtrBytes` at offset 8) that lies
+  **outside the callee's stack window** (`Outside et 16 (calleeStack s stack nargs)`, `calleeStack64`
+  on amd64; for `mallocgc` only when `typ ≠ 0`), because the pinned runtime pushes its frame before it
+  reads `et.Size_` (arm64 `MOVD.W R30, -48(RSP)`; amd64 `PUSHQ BP`): a descriptor inside the window
+  would be read after the frame overwrote it. `growslice`'s `oldLen` old elements are likewise
+  outside the window (`GrowsliceOld`). A real descriptor is read-only data, so a caller discharges
+  the conjunct from its `janus_data`/`apart_of_data` fact (the window is writable, `.rodata` is not);
+* arguments that take no panic or throw path (`makeslice`: `len ≤ cap`, `Size_·cap ≤ maxAlloc`;
   `growslice`: `oldLen ≤ oldCap < newLen < 2^40`, element size 8 without pointers);
 
 the function returns to the caller (`AllocRet`/`AllocRet64`: the ABI's preserved registers kept,

@@ -156,7 +156,7 @@ theorem wsCall_pre : mkSite rt H wsCall := by
   have hpt : u64Type = tyA := by unfold tyA; decide
   rw [hpt] at h
   refine ⟨⟨⟨by decide, by decide, by decide, by decide, by decide⟩,
-    ⟨by decide, by decide⟩, by decide, by decide, by decide⟩, ?_⟩
+    ⟨by decide, by decide⟩, by decide, by decide, (by simp only [calleeStack64, outside_cons, outside_nil]; decide)⟩, ?_⟩
   exact h
 
 /-- The theorem fires: `MakeSlice(4)` returns a zeroed slice of length and capacity 4 inside `rt`. -/

@@ -195,7 +195,7 @@ def sWb : Amd64.State := callS wbA 0 0 0
       (s.regs 14).toNat s.mem (liveWin64 s 4096 3)
 
 theorem site_mk : mkSite R mkA [] 0x400 sMk := by
-  refine ⟨⟨cs_callOK _ _ _ _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide⟩,
+  refine ⟨⟨cs_callOK _ _ _ _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, (by simp only [calleeStack64, outside_cons, outside_nil]; decide)⟩,
     cs_room _ _ _ _ 3 (by omega), ?_, inv0, by decide, fun r hr => absurd hr (by simp), cs_winR _ _ _ _ 3 (by omega)⟩
   exact Or.inl ⟨rfl, by decide⟩
 
@@ -204,7 +204,7 @@ theorem site_mk : mkSite R mkA [] 0x400 sMk := by
     LiveAt R addr [(s.regs 0).toNat] L b (newobjectRound64 s) (s.regs 14).toNat s.mem (liveWin64 s 4096 1)
 
 theorem site_new : newSite R newA [] 0x400 sNew := by
-  refine ⟨⟨cs_callOK _ _ _ _ 1 (by omega), ⟨by decide, by decide⟩, by decide⟩,
+  refine ⟨⟨cs_callOK _ _ _ _ 1 (by omega), ⟨by decide, by decide⟩, (by simp only [calleeStack64, outside_cons, outside_nil]; decide)⟩,
     cs_room _ _ _ _ 1 (by omega), ?_, inv0, by decide, fun r hr => absurd hr (by simp), cs_winR _ _ _ _ 1 (by omega)⟩
   exact Or.inr (Or.inl ⟨rfl, rfl⟩)
 

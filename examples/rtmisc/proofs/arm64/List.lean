@@ -325,7 +325,7 @@ def sWb : State := callS wbA 0
     LiveAt R addr [(s.regs 0).toNat] L b (newobjectRound s) (s.regs 28).toNat s.mem (calleeStack s 4096 1)
 
 theorem site_new : newSite R newA [] 0x400 sNew := by
-  refine ⟨⟨cs_callOK _ _ 1 (by omega), ⟨by decide, by decide⟩, by decide⟩,
+  refine ⟨⟨cs_callOK _ _ 1 (by omega), ⟨by decide, by decide⟩, (by simp only [calleeStack, outside_cons, outside_nil]; decide)⟩,
     cs_room _ _ 1 (by omega), ?_, inv0, by decide, fun r hr => absurd hr (by simp), cs_winR _ _ 1 (by omega)⟩
   exact Or.inl ⟨rfl, rfl⟩
 

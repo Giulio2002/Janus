@@ -444,7 +444,7 @@ def c0 : State :=
 set_option maxRecDepth 100000 in
 theorem c0_pre : NewobjectPre 4096 c0 ∧ Ready HaW rtW [(c0.regs 0).toNat] c0 := by
   refine ⟨⟨⟨by decide, by decide, by decide, by decide, by decide, by decide +kernel, by decide +kernel⟩,
-    ⟨by decide +kernel, by decide +kernel⟩, by decide +kernel⟩, ?_⟩
+    ⟨by decide +kernel, by decide +kernel⟩, (by simp only [calleeStack, outside_cons, outside_nil]; decide +kernel)⟩, ?_⟩
   show HaW [boxType] _ _ (rtView rtW cm)
   refine ⟨⟨by decide +kernel, fun i hi => ?_⟩, rfl, by decide +kernel⟩
   show (if _ then cm.bytes (heap + i) else 0) = 0
