@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.0 (unreleased)
+## v0.3.0 (2026-11-12)
 
 Instruction-count bounds. **Auditor change** (new accepted statement shapes and one new rule; every existing
 rule is unchanged), so the result and framework caches rebuild once.
@@ -23,13 +23,17 @@ rule is unchanged), so the result and framework caches rebuild once.
 - `lakefile.toml` version 0.3.0 (it still said 0.1.0).
 - Includes everything in v0.2.1 below (PR #1: module-system consumer dependencies, olean store v2,
   and the `import all` parser fix).
+- Disclosed (pre-existing since v0.1.0, fixed in v0.3.1): the live allocation contracts (makeslice, newobject,
+  mallocgc with a type, growslice; both ISAs) do not keep the type descriptor outside the callee's stack
+  window, so the pinned runtime does not meet them for a descriptor in the slots `makeslice` pushes before
+  reading it. See docs/RUNTIME-CONTRACTS.md ("Known gap").
 - Known limitations: `janus verify --asl` transfers `Ensures` theorems only; an `EnsuresWithin` theorem is
   rejected there ("not `Janus.GoABI.Ensures`"); derive the plain `Ensures` with `EnsuresWithin.ensures` and
   transfer that. `janus_run` proves numeral bounds only (no state-dependent budget from a loop invariant), and
   has no `calls`/`join` in bound goals. A def-wrapped `EnsuresWithin` statement is rejected like a def-wrapped
   `Ensures` (the statement must mention `Extracted.program`).
 
-## v0.2.1 (unreleased)
+## v0.2.1 (maintenance release, tagged separately on branch release/v0.2.1)
 
 Bug fix for consumer packages whose dependencies use Lean's module system (`module` header,
 `public import`), such as ethereum/EthLib. Before, `janus verify --proof-root` failed at

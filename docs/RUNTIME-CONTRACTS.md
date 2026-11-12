@@ -288,6 +288,17 @@ reserved address space.
 
 ### Live runtime contracts: many calls, one hypothesis (`Janus/Contracts/Live.lean`, `LiveAmd64.lean`, `LiveCost.lean`, `LiveToy.lean`)
 
+> **Known gap (v0.1.0–v0.3.0; fixed in v0.3.1).** `MakesliceLiveContract`, `NewobjectLiveContract`,
+> `MallocgcLiveContract` (with a type) and `GrowsliceLiveContract`, plus their amd64 twins, require `TypeOK`
+> of the type descriptor but do not place it outside the callee's stack window `calleeStack s stack nargs`.
+> The pinned go1.26.10 `runtime.makeslice` pushes its frame (arm64 `MOVD.W R30,-48(RSP)`; amd64 `PUSHQ BP`)
+> before it reads `et.Size_`. So for a state whose descriptor lies in those slots, the real runtime does
+> not meet the contract, and a theorem assuming the contract says nothing about the real binary. Real callers pass
+> read-only-data descriptors, so no verdict is known to be wrong. v0.3.1 adds
+> `Outside <descriptor> 16 (calleeStack …)` to these preconditions, as `RtPre64` (`ReadsOutside`) already
+> does for the Rt contracts. This is a breaking change: callers discharge the new conjunct from their descriptor's
+> `janus_data`/`apart_of_data` fact.
+
 The contracts above are for **one** call: `H` is assumed for the call, never re-established, and the
 allocator may change any byte of `rt`, including the objects the caller already owns. A function
 that allocates twice, in a loop, or interleaves `memmove`, `makeslice`, a barrier store and so on
