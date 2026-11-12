@@ -1,6 +1,9 @@
 # Changelog
 
-## v0.3.1 (unreleased)
+## v0.3.1 (2026-11-12)
+
+`lakefile.toml` still says version 0.3.0: it is embedded in `janus` (verifier identity), and the release ships
+the exact gated tree.
 
 ### BREAKING: the allocation contracts keep the type descriptor out of the callee's stack window
 **BREAKING (runtime-contract preconditions; consumers must re-discharge).** The allocation contracts'
@@ -98,7 +101,7 @@ rule is unchanged), so the result and framework caches rebuild once.
   has no `calls`/`join` in bound goals. A def-wrapped `EnsuresWithin` statement is rejected like a def-wrapped
   `Ensures` (the statement must mention `Extracted.program`).
 
-## v0.2.1 (maintenance release, tagged separately on branch release/v0.2.1)
+## v0.2.1 (2026-11-12, maintenance release, tagged separately on branch release/v0.2.1)
 
 Bug fix for consumer packages whose dependencies use Lean's module system (`module` header,
 `public import`), such as ethereum/EthLib. Before, `janus verify --proof-root` failed at
