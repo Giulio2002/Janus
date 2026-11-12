@@ -147,7 +147,8 @@ def sCall : Amd64.State :=
 theorem sCall_pre : MallocgcSCPre64 (NoScanArgs 2) rt 4096 Hmalloc sCall := by
   have hw : s0.mem.accessible (sp0 - 4096) (4096 + 8 + 8 * 3) true = true := by decide
   refine ⟨⟨⟨⟨?_, by decide, by decide, by decide, ?_⟩, by decide,
-    Or.inr ⟨⟨by decide, by decide⟩, fun h => absurd h (by decide)⟩⟩, ?_⟩, ?_⟩
+    Or.inr ⟨⟨by decide, by decide⟩, fun h => absurd h (by decide),
+      by simp only [calleeStack64, outside_cons, outside_nil]; decide⟩⟩, ?_⟩, ?_⟩
   · show s0.mem.readLE sp0 8 < 2 ^ 47
     decide
   · have e : (sCall.regs 4).toNat = sp0 := rfl

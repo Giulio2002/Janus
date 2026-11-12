@@ -187,7 +187,8 @@ def wsCall : State :=
 set_option maxRecDepth 100000 in
 theorem wsCall_pre : MallocgcSCPre (NoScanArgs 2) rt 4096 H wsCall := by
   have hw : s0.mem.accessible (sp0 - 16 - 4096) (4096 + 8 + 8 * 3) true = true := by decide
-  refine ⟨⟨⟨by unfold CallOK; decide, by decide, Or.inr ⟨⟨by decide, by decide⟩, by decide⟩⟩, ?_⟩, ?_⟩
+  refine ⟨⟨⟨by unfold CallOK; decide, by decide, Or.inr ⟨⟨by decide, by decide⟩, by decide,
+    by simp only [calleeStack, outside_cons, outside_nil]; decide⟩⟩, ?_⟩, ?_⟩
   · exact ⟨⟨16, pairType, 1, rfl, by decide⟩, by decide, hH.2.2⟩
   · refine ⟨by decide, by decide, by decide, by decide, by decide⟩
 

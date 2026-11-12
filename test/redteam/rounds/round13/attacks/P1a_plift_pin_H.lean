@@ -25,7 +25,7 @@ theorem unsat (p : Program) (addr : Nat) (rt : List (Nat × Nat)) :
   have hpre : NewobjectPre 4096 (bigState addr) ∧ Ready (fun _ _ _ _ => True) rt
       [((bigState addr).regs 0).toNat] (bigState addr) := by
     refine ⟨?_, trivial⟩
-    simp only [NewobjectPre, CallOK, TypeOK, bigState]
+    simp only [NewobjectPre, CallOK, TypeOK, calleeStack, outside_cons, outside_nil, bigState]
     simp only [ite_true, show (30 = 0) = False by decide, ite_false,
       show (BitVec.ofNat 64 T).toNat = T by decide, bigSize0]
     decide
