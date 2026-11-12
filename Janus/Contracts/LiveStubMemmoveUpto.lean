@@ -72,3 +72,17 @@ macro_rules
          all_goals first
            | exact Janus.Contracts.LiveStub.copied_copyWrites _ _ _ _ _
            | ((try simp only [Janus.Contracts.LiveStub.readLE_mod_of_le, Nat.reducePow, Nat.reduceLeDiff]); rfl)))))
+
+/-- `MemmoveZeroLive linked a d R` (`memmove(dst, src, 0)`) for a `memmove` stub that returns without a memory access when
+`X2 = 0`: `LiveStub.memmoveUptoSeg a N` (its compare chain falls through to the `RET`), or the pinned runtime's code
+(`LiveSat.memmoveZeroLive_pinned`). For any `d` and `R`. -/
+syntax "janus_live_memmove_zero" : tactic
+set_option hygiene false in
+macro_rules
+  | `(tactic| janus_live_memmove_zero) => `(tactic| (
+      intro L b s hpc pre
+      obtain ⟨h0, ⟨_, ⟨h30a, h30b, _, _, _, _, _⟩, _⟩, hLm⟩ := pre
+      have hr2 : s.regs 2 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using h0)
+      change Janus.Tactic.ReachesRet _ _ s _
+      janus_run [hr2]
+      exact Janus.Contracts.liveMemRet_none rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl hLm.2.1))

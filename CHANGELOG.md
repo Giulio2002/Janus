@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.3.1 (unreleased)
+
+### Additive: zero-byte `memmove` and `makeslice` contracts (PR #2)
+New runtime contracts for zero-byte runtime calls, `memmove` and `makeslice` (additive: no existing statement, proof
+or auditor rule changes).
+
+- `MakesliceZeroLive` (arm64, `Janus/Contracts/Live.lean`) and `MakesliceZeroLive64` (amd64, `LiveAmd64.lean`): a call
+  of `runtime.makeslice(et, len, cap)` with `et.Size_ · cap = 0` returns with the live set and the budget unchanged
+  (`ZeroAllocRet` / `ZeroAllocRet64`; the result pointer is unconstrained). `MakesliceLiveContract` appends an empty
+  range at an unconstrained pointer to the live set in that case, after which a caller can state neither `LiveExt`
+  nor a later call's `LiveSep`. The precondition is `MakesliceLiveContract`'s with cost `0`, the zero size, and the
+  type descriptor outside the callee's window. `MakesliceZeroLive(64).of_codeIn`.
+- Justification: the pinned `makeslice` calls `mallocgc(0, …)`, which returns `&runtime.zerobase` first thing
+  (`malloc.go:1075`). `LiveSat.makesliceZeroLive_pinned` / `LiveSatAmd64.makesliceZeroLive64_pinned` run the pinned
+  go1.26.10 `makeslice` and `mallocgc` themselves in the model, for every runtime hypothesis.
+- `zeroAllocRet_of_frame` (`LiveCall.lean`), `zeroAllocRet64_of_frame`, `MakesliceZeroLive.of_live` /
+  `MakesliceZeroLive64.of_live` (a live-contract stub is a zero-byte witness when the invariant ignores empty live
+  ranges), `LiveSat.toyR_dropEmpty`, `inRs_append_empty`, `view_append_empty`; SAT witnesses
+  `makesliceZeroLive(64)_satisfiable` (both makeslice contracts on one stub).
+- Both contracts are on the auditor's pinned-contract list. JanusTests.MakesliceZero (incl. a red team: a stub that
+  charges the budget for a zero-byte request is refuted, `¬ MakesliceZeroLive …`, both ISAs). docs/RUNTIME-CONTRACTS.md:
+  "Zero-byte allocations".
+
+New runtime contract for `memmove` of zero bytes:
+
+- `MemmoveZeroLive` (arm64, `Janus/Contracts/Live.lean`) and `MemmoveZeroLive64` (amd64, `LiveAmd64.lean`): a call of
+  `runtime.memmove(dst, src, 0)` returns as a `MemmoveLive` call does, with an empty written range, under only the ABI
+  and live parts of the precondition (nothing about `dst` or `src`). Go's `copy` calls `memmove` with `n = 0` and a nil or
+  `zerobase` pointer, which `MemmoveLive`'s precondition cannot accept.
+- `MemmoveLive.withZero` / `MemmoveLive64.withZero`: the two contracts give the `memmove` summary whose precondition is
+  `n = 0 ∨` the destination and source facts. `LiveMemRet.of_nil`, `LiveMemRet64.of_nil`, `liveMemRet_none`,
+  `liveMemRet_none64`, `MemmoveZeroLive(64).of_codeIn`.
+- Justification: the pinned runtime's `memmove` returns before any memory access for `n = 0` (arm64 `CBZ R2, copy0`;
+  amd64 `TESTQ BX, BX; JEQ move_0`). `LiveSat.memmoveZeroLive_pinned` / `LiveSatAmd64.memmoveZeroLive64_pinned` run the
+  pinned go1.26 code in the model and prove the contract for every runtime hypothesis; they are the SAT witnesses.
+  `MemmoveUptoSat(Amd64).memmoveUptoWithZero(64)_satisfiable`: both premises of `withZero` hold of one stub.
+- Tactics `janus_live_memmove_zero` / `janus64_live_memmove_zero` prove the contract for a stub that returns without a
+  memory access when `n = 0` (e.g. `LiveStub.memmoveUptoSeg`).
+- Both contracts are on the auditor's pinned-contract list (`Janus/Tools/Audit.lean`, round 9 SAT row).
+- docs/RUNTIME-CONTRACTS.md: "Copies of zero bytes".
+
+## v0.2.1 (unreleased)
+
 ## v0.3.0 (2026-11-12)
 
 Instruction-count bounds. **Auditor change** (new accepted statement shapes and one new rule; every existing

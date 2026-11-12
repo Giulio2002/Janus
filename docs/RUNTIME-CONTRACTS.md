@@ -329,6 +329,8 @@ Every contract is `∀ L b, Summary p addr pre post`, named `<Function>LiveContr
 | `gcWriteBarrierN` | `WbLiveContract p addr stack R n` |
 | strings, slices, bulk barriers (every `RtSpec`) | `RtLiveContract p addr stack R sp ls` with a `LiveSpec` (cost, fresh objects, kept results) |
 | `memmove`, `memclrNoHeapPointers` | `MemmoveLive`, `MemclrNoHeapPointersLive` |
+| `memmove` with `n = 0` | `MemmoveZeroLive` (`MemmoveLive.withZero` joins it with `MemmoveLive`) |
+| `makeslice` of zero bytes (`et.Size_ · cap = 0`) | `MakesliceZeroLive` (live set and budget kept) |
 | `typedmemmove`, `typedmemclr`, `memclrHasPointers` | `TypedMemmoveLive`, `TypedMemclrLive`, `MemclrHasPointersLive` |
 
 **Precondition.** The call's ABI part, `StackRoom` (the stack check falls through), and
@@ -354,6 +356,88 @@ invariant holds for **every** content the caller stores there (`InvSlots`). A co
 is a live object or caller memory outside `R.rt` (`LiveDest`), so the view and the invariant are
 unchanged. No contract mentions `runtime.writeBarrier.enabled`: after any call it is unknown and a
 theorem covers both branches of the inline test.
+
+**Copies of zero bytes** (`MemmoveZeroLive`, `MemmoveZeroLive64`). Go compiles `copy(dst, src)` to
+`if dst != src { memmove(dst, src, n) }` with no test of `n`, so a program calls `memmove` with `n = 0` and a
+pointer nothing is known about: a nil slice's `0`, or the pointer an empty `make` returned (`runtime.zerobase`, about
+which `MakesliceLiveContract` says nothing). `MemmoveLive`'s precondition asks for `n` accessible bytes at `dst` and
+`src`, the destination outside the callee's window and live or outside `R.rt` (`Mem.Input`, `LiveDest`), which such a
+call cannot meet although it is harmless. `MemmoveZeroLive p addr d R` is the contract of that call: for `X2 = 0`
+(amd64 `RCX = 0`) the precondition is only the ABI part and the live part (`Mem.EqPre d 3 s ∧ LiveMemAt …`; amd64
+`MemPre64 d 3 s ∧ LiveMemAt64 …`), nothing about `dst` or `src`, and the call returns as a `MemmoveLive` call does, with
+an empty written range (`LiveMemRet R d 3 [] L b s s' fun _ => True`: memory changed only in `R.rt` and the callee's
+window, the live objects unchanged, the invariant for the same `L` and `b`). A theorem that may copy zero bytes assumes
+both contracts at the `memmove` address and uses
+
+```lean
+MemmoveLive.withZero (h : MemmoveLive p addr d R) (hz : MemmoveZeroLive p addr d R) L b :
+  Summary p addr (fun s => Mem.EqPre d 3 s ∧ LiveMemAt … ∧ ((s.regs 2).toNat = 0 ∨ Mem.Input … ∧ LiveDest …))
+    (MemmoveLive's postcondition)                          -- amd64: MemmoveLive64.withZero, `(s.regs 1).toNat = 0 ∨ …`
+```
+
+*Why the runtime meets it.* The pinned toolchains' `runtime.memmove` (go1.26.0, .5, .8, .10; stub pins
+`490383cd…` arm64 and `c9868ea0…` amd64 in `cmd/janus/stubpins_gen.go`) returns before any memory access when
+`n = 0`. arm64 (`runtime/memmove_arm64.s:30`, `NOSPLIT|NOFRAME`): the first instruction is `CBZ R2, copy0`
+(`0xb40004a2`), and `copy0` (offset `0x94`, line 84) is `RET` (`0xd65f03c0`): no load, no store, no stack frame.
+amd64 (`runtime/memmove_amd64.s:35`, `NOSPLIT, $0-24`, no frame): `MOVQ AX, DI; MOVQ BX, SI; MOVQ CX, BX;
+TESTQ BX, BX; JEQ move_0` (`48 89 c7`, `48 89 de`, `48 89 cb`, `48 85 db`, `0f 84 1b 01 00 00`, lines 39–55) and
+`move_0` (offset `0x12d`, line 169) is `RET` (`c3`), whose only memory access is the read of its return address at
+`RSP`, which `MemPre64` makes readable. This is not only an argument: `LiveSat.memmoveZeroLive_pinned` and
+`LiveSatAmd64.memmoveZeroLive64_pinned` run the pinned function itself (all 156 words arm64, 1763 bytes amd64, as
+a go1.26.10 build links them; `memmovePinned`, `memmovePinned64`) in the model and prove `MemmoveZeroLive` for every
+`d` and `R`; they are also the contracts' SAT witnesses (`memmoveZeroLive_satisfiable`,
+`memmoveZeroLive64_satisfiable`). The code has no relocation on these paths (arm64 none at all; amd64's only one is
+the `RIP`-relative read of `runtime.memmoveBits`, for sizes above 256), so it behaves the same at any address.
+`MemmoveUptoSat.memmoveUptoWithZero_satisfiable` (and `…64`) shows both premises of `withZero` hold of one stub and one
+`R`, at a call with `n = 0` and `dst = 0`. Stubs: `janus_live_memmove_zero` (`janus64_live_memmove_zero`) proves
+`MemmoveZeroLive` for any stub that returns without a memory access when `n = 0`, e.g. `LiveStub.memmoveUptoSeg a N`
+(its compare chain falls through to the `RET`).
+
+**Zero-byte allocations** (`MakesliceZeroLive`, `MakesliceZeroLive64`). `MakesliceLiveContract` appends the result
+range `[ptr, ptr + blockSize 0 _) = [ptr, ptr)` to the live set also when `et.Size_ · cap = 0`, while its postcondition
+says nothing about `ptr` then (the object facts are under `0 < size`). After such a call the invariant is about
+`L ++ [(ptr, ptr)]` with an arbitrary `ptr`: a caller can state neither a summary's `LiveExt R L L'` (`InRanges ptr 0
+R.rt`) nor the `LiveSep` of a later live call (`Outside ptr 0` the callee window), and `R.inv` is abstract in `L`, so
+nothing about `L` can be recovered. Go code reaches this case often: `make([]byte, n)` with `n = 0` (e.g.
+`big.(*Int).Bytes` of zero). `MakesliceZeroLive p addr stack R` is the contract of that call:
+
+```lean
+∀ L b, Summary p addr
+  (fun s => (MakeslicePre stack s ∧ StackRoom s stack 3 ∧ LiveAt R addr [et, len, cap] L b 0 g s.mem (calleeStack s stack 3)) ∧
+    typSize s.mem et * cap = 0 ∧ Outside et 16 (calleeStack s stack 3))
+  (fun s s' => ZeroAllocRet R stack 3 L b s s')
+-- ZeroAllocRet: s' = retStateX s junk [ptr] …, MemFrame s.mem m (R.rt ++ calleeStack …), LiveFrame s.mem m L [],
+--               R.inv b L g (view R.rt L m)        -- the SAME live set and budget; `ptr` unconstrained
+```
+
+(amd64 `MakesliceZeroLive64`: `RAX, RBX, RCX`, `liveWin64`, `ZeroAllocRet64` with `retState64`.) The precondition is
+`MakesliceLiveContract`'s with cost `0`, plus the zero size and the type descriptor outside the callee's window:
+`makeslice` reads `et.Size_` after pushing its frame, so a descriptor inside the window would be read back as a
+saved register (a descriptor is read-only data and never in a stack; a caller proves it with its `janus_data` fact).
+
+*Why the runtime meets it.* The pinned `runtime.makeslice` (`runtime/slice.go:102`) computes `mem = et.Size_ · cap`
+(`MulUintptr`), passes its overflow and length checks, and calls `mallocgc(mem, et, true)`; `mallocgc`
+(`runtime/malloc.go:1067`) starts, after its stack check, with `if size == 0 { return unsafe.Pointer(&zerobase) }`
+(line 1075; `doubleCheckMalloc` is a constant `false`, and the `sizespecializedmalloc` dispatch comes after this
+test), touching no allocator state. `LiveSat.makesliceZeroLive_pinned` (arm64, for every `R` and `stack ≥ 104`) and
+`LiveSatAmd64.makesliceZeroLive64_pinned` (amd64, `stack ≥ 48`) run the two pinned functions themselves in the model,
+as a go1.26.10 `-trimpath` build links them (`makeslicePinned`/`mallocgcPinned`: 52 + 92 words at `0x8f650`/`0x8b8b0`;
+`makeslicePinned64`/`mallocgcPinned64`: 199 + 377 bytes at `0x485340`/`0x481620`, `GOAMD64=v1`): stack check, frame
+push, `et.Size_ · cap = 0` (`MUL`/`UMULH`; amd64 `MULQ`, no overflow), the length checks, the call, `mallocgc`'s stack
+check, `CBZ R0` (amd64 `TESTQ AX, AX; JE`) to the `&zerobase` return, both epilogues. Only the saved-register slots of
+the two frames are written (inside the callee window), so the live objects, `R.rt` and the invariant are untouched.
+The `BL`/`CALL` displacement and the `ADRP`/`RIP`-relative operands are relocated per link; the run uses one link's
+values (the call reaches `mallocgc` because the displacement is the one the linker wrote for it; the returned
+pointer is unconstrained by the contract anyway).
+
+*Toy witnesses.* `MakesliceZeroLive.of_live` (arm64, `LiveCall.lean`) / `MakesliceZeroLive64.of_live`: a
+`MakesliceLiveContract` stub gives `MakesliceZeroLive` for a runtime hypothesis whose invariant does not depend on an
+empty live range (`LiveSat.toyR_dropEmpty` for the toy runtime). The live stubs (`LiveStub.makesliceSeg`, which
+advance the bump pointer by `64 · size`, i.e. by `0`) therefore witness both contracts at a program's own address:
+`MakesliceZeroLive.of_live (by janus_live_makeslice) (toyR_dropEmpty [] ok)`. `makesliceZeroLive_satisfiable`
+(`…64`) shows both contracts hold of one stub and one `R`, with a zero-byte call state. Red team
+(`JanusTests.MakesliceZero`): a stub that advances the bump pointer by 16 bytes for a zero-byte request (charges the
+budget) is refuted by a kernel-checked `¬ MakesliceZeroLive …`, on both ISAs.
 
 **Costs** (`LiveCost.lean`): `blockSize_le : blockSize n b ≤ 2n + 24`, `nextslicecap_le`,
 `growsliceRound_le : 8·growCap8 newLen oldCap ≤ 32·newLen + 3096`, the per-contract round bounds,

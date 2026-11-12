@@ -88,6 +88,27 @@ def MakesliceLiveContract64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat)
       s s' fun m ptr => 0 < typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat →
         makesliceObj64 R.rt s m ptr ∧ ApartAll ptr (makesliceRound64 s) L)
 
+/-- The return of a zero-byte allocation (amd64): `LiveAllocRet64` without the object (live set
+and budget kept), as arm64 `ZeroAllocRet`. -/
+@[reducible] def ZeroAllocRet64 (R : RtInv) (stack nargs : Nat) (L : List (Nat × Nat)) (b : Nat) (s s' : State) : Prop :=
+  ∃ (ptr : W64) (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Janus.Arm64.Memory)
+    (zh : Nat → BitVec 256) (kr : Nat → W64),
+    s' = retState64 s junk [ptr] f x yh m zh kr ∧
+      MemFrame s.mem m (R.rt ++ calleeStack64 s stack nargs) ∧ LiveFrame s.mem m L [] ∧
+      R.inv b L (s.regs 14).toNat (view R.rt L m)
+
+/-- **`runtime.makeslice(et, len, cap)` with `et.Size_ · cap = 0`, live** (amd64; `RAX = et`,
+`RBX = len`, `RCX = cap`): as arm64 `MakesliceZeroLive`, the live set and the budget kept.
+`MakesliceZeroSatAmd64.makesliceZeroLive64_pinned` runs the pinned code. -/
+def MakesliceZeroLive64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat) (R : RtInv) : Prop :=
+  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
+    (fun s => (MakeslicePre64 stack s ∧ StackRoom64 s stack 3 ∧
+      LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b 0 (s.regs 14).toNat s.mem
+        (liveWin64 s stack 3)) ∧
+      typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat = 0 ∧
+      Outside (s.regs 0).toNat 16 (calleeStack64 s stack 3))
+    (fun s s' => ZeroAllocRet64 R stack 3 L b s s')
+
 /-! ### Non-zero sizes (amd64) -/
 
 theorem MallocgcLiveContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {stack : Nat} {R : RtInv}
@@ -298,6 +319,46 @@ def MemmoveLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) (R : RtInv) :
     (fun s s' => LiveMemRet64 R d 3 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 1).toNat)] L b s s'
       fun m => Mem.Copied s.mem m (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat)
 
+/-- **`runtime.memmove(dst, src, 0)`, live** (amd64; `RAX = dst`, `RBX = src`, `RCX = n = 0`): the
+empty copy, as arm64 `MemmoveZeroLive`. The pinned runtime's `memmove` moves `n` to `BX` and
+returns at `TESTQ BX, BX; JEQ move_0` (`move_0: RET`) when `n = 0`, reading only its return
+address, so the precondition is only the ABI part (`MemPre64`) and the live part
+(`LiveMemAt64`). `MemmoveLive64.withZero` joins it with `MemmoveLive64`;
+`LiveSatAmd64.memmoveZeroLive64_pinned` runs the pinned code itself. -/
+def MemmoveZeroLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
+  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
+    (fun s => (s.regs 1).toNat = 0 ∧ MemPre64 d 3 s ∧
+      LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b s (liveWin64 s d 3))
+    (fun s s' => LiveMemRet64 R d 3 [] L b s s' fun _ => True)
+
+/-- A live copy's return (amd64) with an empty written range is one with any written range. -/
+theorem LiveMemRet64.of_nil {R : RtInv} {d nargs : Nat} {extra L : List (Nat × Nat)} {b : Nat} {s s' : State}
+    {P : Memory → Prop} (h : LiveMemRet64 R d nargs [] L b s s' fun _ => True) (hP : ∀ m, P m) :
+    LiveMemRet64 R d nargs extra L b s s' P := by
+  obtain ⟨junk, f, x, yh, m, zh, kr, hs, hfr, hlf, hinv, -⟩ := h
+  exact ⟨junk, f, x, yh, m, zh, kr, hs,
+    hfr.mono fun a n hh => by simp only [outside_append, outside_nil, and_true] at hh ⊢; exact ⟨hh.1.1, hh.1.2⟩,
+    ⟨fun a n hin _ => hlf.readLE a n hin trivial⟩, hinv, hP m⟩
+
+/-- **`memmove` with `n = 0` allowed** (amd64): `MemmoveLive64` and `MemmoveZeroLive64` at the same
+address give the summary whose precondition asks for the destination and source facts only when
+`n ≠ 0`, with `MemmoveLive64`'s postcondition. -/
+theorem MemmoveLive64.withZero {p : Janus.Amd64.Program} {addr d : Nat} {R : RtInv}
+    (h : MemmoveLive64 p addr d R) (hz : MemmoveZeroLive64 p addr d R) (L : List (Nat × Nat)) (b : Nat) :
+    Summary p addr
+      (fun s => MemPre64 d 3 s ∧
+        LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b s (liveWin64 s d 3) ∧
+        ((s.regs 1).toNat = 0 ∨
+          MemAmd64.Input s d 3 (s.regs 3).toNat (s.regs 1).toNat ∧
+          LiveDest64 R L s d 3 (s.regs 0).toNat (s.regs 1).toNat))
+      (fun s s' => LiveMemRet64 R d 3 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 1).toNat)] L b s s'
+        fun m => Mem.Copied s.mem m (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat) := by
+  intro s hpc ⟨hE, hA, hn⟩
+  rcases hn with hn | ⟨hI, hD⟩
+  · obtain ⟨k, s', hst, hr, hq⟩ := hz L b s hpc ⟨hn, hE, hA⟩
+    exact ⟨k, s', hst, hr, LiveMemRet64.of_nil hq fun _ i hi => absurd hi (by omega)⟩
+  · exact h L b s hpc ⟨hE, hA, hI, hD⟩
+
 /-- **`runtime.memclrNoHeapPointers(ptr, n)`, live** (amd64). -/
 def MemclrNoHeapPointersLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
@@ -389,6 +450,23 @@ theorem retState64_intro {s s' : State} {res : List W64} (hrip : s'.rip = retAdd
       (zh : Nat → BitVec 256) (kr : Nat → W64), s' = retState64 s junk res f x yh m zh kr :=
   ⟨s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mem, s'.zmmHi, s'.kreg,
     retState64_eq hrip h4 h5 h14 hx hfs hdf hmx h0 h1 h2 hx87 hfw⟩
+
+/-- A call that changes only registers meets `LiveMemRet64` with an empty written range. -/
+theorem liveMemRet_none64 {R : RtInv} {d nargs b : Nat} {L : List (Nat × Nat)} {s fin : State}
+    (hrip : fin.rip = retAddrOf s) (h4 : fin.regs 4 = s.regs 4 + 8#64)
+    (h5 : fin.regs 5 = s.regs 5) (h14 : fin.regs 14 = s.regs 14) (hx : fin.xmm 15 = s.xmm 15)
+    (hfs : fin.fsBase = s.fsBase) (hdf : fin.df = s.df) (hmx : fin.mxcsr = s.mxcsr)
+    (hx87 : fin.x87 = s.x87) (hfw : fin.fpucw = s.fpucw)
+    (hmem : fin.mem = s.mem) (hinv : R.inv b L (s.regs 14).toNat (view R.rt L s.mem)) :
+    LiveMemRet64 R d nargs [] L b s fin fun _ => True := by
+  obtain ⟨junk, f, x, yh, m, zh, kr, hs⟩ := retState64_intro (res := []) hrip h4 h5 h14 hx hfs hdf hmx
+    (by simp) (by simp) (by simp) hx87 hfw
+  have hm : m = s.mem := by
+    have := congrArg State.mem hs
+    simp only [retState64] at this
+    rw [← hmem]; exact this.symm ▸ rfl
+  subst hm
+  exact ⟨junk, f, x, yh, _, zh, kr, hs, MemFrame.refl _ _, LiveFrame.refl _ _ _, hinv, trivial⟩
 
 /-- **The fields a Go function keeps** (amd64): the x87 state and control word, the `FS` base and the
 direction flag. A loop invariant carries ONE `Keep64 s t` conjunct instead of one equation per

@@ -56,3 +56,19 @@ macro_rules
          all_goals first
            | exact Janus.Contracts.LiveStub.copied_copyWrites _ _ _ _ _
            | ((try simp only [Janus.Contracts.LiveStub.readLE_mod_of_le, Nat.reducePow, Nat.reduceLeDiff]); rfl)))))
+
+/-- `MemmoveZeroLive64 linked a d R` (`memmove(dst, src, 0)`) for a `memmove` stub that returns without a memory access
+other than its return address when `RCX = 0`: `LiveStubAmd64.memmoveUptoSeg64 a N` (its compare chain falls through to the
+`RET`), or the pinned runtime's code (`LiveSatAmd64.memmoveZeroLive64_pinned`). For any `d` and `R`. -/
+syntax "janus64_live_memmove_zero" : tactic
+set_option hygiene false in
+macro_rules
+  | `(tactic| janus64_live_memmove_zero) => `(tactic| (
+      intro L b s hpc pre
+      obtain ⟨h0, ⟨_, ⟨hra, hal, h3, h4, h5⟩, _⟩, hLm⟩ := pre
+      have hr1 : s.regs 1 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using h0)
+      change Janus.Amd64.Tactic.ReachesRet _ _ s _
+      janus64_run [hr1]
+      open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts in
+        exact liveMemRet_none64 (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
+          (by simp) (by simp) (by simp) (by simp) rfl rfl rfl hLm.2.1))

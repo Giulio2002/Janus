@@ -7,6 +7,8 @@ import JanusTests.Within
 import JanusTests.LiveStub
 import JanusTests.LiveStubSlice
 import JanusTests.LiveStubMemmoveUpto
+import JanusTests.MemmoveZero
+import JanusTests.MakesliceZero
 import JanusTests.LiveStubGrow
 import JanusTests.LiveStubGrowMulti
 import JanusTests.LiveStubConvT

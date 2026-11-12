@@ -2,6 +2,7 @@ import Janus.Contracts.LiveToy
 import Janus.Contracts.AllocSat
 import Janus.Contracts.IfaceModel
 import Janus.Contracts.LiveCost
+import Janus.Contracts.LiveCall
 
 namespace Janus.Contracts.LiveSat
 
@@ -761,6 +762,59 @@ theorem memmoveLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
   · rintro args ⟨-, rfl⟩
     exact ⟨CB, CB + 0x100, rfl⟩
 
+/-! ### `memmove` with `n = 0`: the pinned runtime code
+
+`MemmoveZeroLive` is witnessed by the Go runtime's own `memmove`: `memmovePinned` is the code of
+`runtime.memmove` (`runtime/memmove_arm64.s`) of the pinned toolchains, the 156 words that a
+go1.26.10 `-trimpath` build links (the function `checkContractPin` accepts for `--contract
+runtime.memmove`: pin `490383cd…` in cmd/janus/stubpins_gen.go, the same for go1.26.0, .5, .8 and .10).
+It has no relocation (every branch is PC-relative), so it runs at any address; here at `A0`.
+`memmoveZeroLive_pinned` runs it in the model: for `n = 0`, its first instruction `CBZ R2, copy0`
+(`0xb40004a2`, offset 0) branches to `copy0: RET` (`0xd65f03c0`, offset `0x94`), for every runtime
+hypothesis `R` and stack bound `d`. -/
+
+def memmovePinned : List Nat := [
+  0xb40004a2, 0xf100405f, 0x5400018d, 0xf102005f, 0x540007c8, 0xf100805f, 0x54000408, 0xa9401c26,
+  0x8b010044, 0xa97f348c, 0xa9001c06, 0x8b000045, 0xa93f34ac, 0xd65f03c0, 0x8b010044, 0x8b000045,
+  0xf100205f, 0x540000cb, 0xf9400026, 0xf85f8087, 0xf9000006, 0xf81f80a7, 0xd65f03c0, 0x361000c2,
+  0xb9400026, 0xb85fc087, 0xb9000006, 0xb81fc0a7, 0xd65f03c0, 0x360800c2, 0x79400026, 0x785fe087,
+  0x79000006, 0x781fe0a7, 0xd65f03c0, 0x39400026, 0x39000006, 0xd65f03c0, 0x8b010044, 0x8b000045,
+  0xa9401c26, 0xa9412428, 0xa97e2c8a, 0xa97f348c, 0xf101005f, 0x540000c8, 0xa9001c06, 0xa9012408,
+  0xa93e2caa, 0xa93f34ac, 0xd65f03c0, 0xa9423c2e, 0xa9434430, 0xf101805f, 0x540000a9, 0xa97c0c82,
+  0xa97d1081, 0xa93c0ca2, 0xa93d10a1, 0xa9001c06, 0xa9012408, 0xa9023c0e, 0xa9034410, 0xa93e2caa,
+  0xa93f34ac, 0xd65f03c0, 0x8b010044, 0x8b000045, 0xaa1f03e7, 0xaa1f03e8, 0xf110005f, 0x5400012b,
+  0xf000357b, 0x3945bb66, 0xb5000086, 0xaa0003e7, 0xaa0503e8, 0x14000003, 0xaa0103e7, 0xaa0403e8,
+  0xcb01000e, 0xb4fffa8e, 0xeb0201df, 0x54000483, 0xa940342c, 0x92400cee, 0xcb0e0021, 0xcb0e0003,
+  0x8b0e0042, 0xa9411c26, 0xa900340c, 0xa9422428, 0xa9432c2a, 0xa9c4342c, 0xf1024042, 0x54000169,
+  0xa9011c66, 0xa9411c26, 0xa9022468, 0xa9422428, 0xa9032c6a, 0xa9432c2a, 0xa984346c, 0xa9c4342c,
+  0xf1010042, 0x54fffee8, 0xa97c3c8e, 0xa9011c66, 0xa97d1c86, 0xa9022468, 0xa97e2488, 0xa9032c6a,
+  0xa97f2c8a, 0xa904346c, 0xa93c3cae, 0xa93d1ca6, 0xa93e24a8, 0xa93f2caa, 0xd65f03c0, 0xa97f348c,
+  0x92400d0e, 0xcb0e0084, 0xcb0e0042, 0xa97f1c86, 0xa93f34ac, 0xa97e2488, 0xa97d2c8a, 0xa9fc348c,
+  0xcb0e00a5, 0xf1020042, 0x54000169, 0xa93f1ca6, 0xa97f1c86, 0xa93e24a8, 0xa97e2488, 0xa93d2caa,
+  0xa97d2c8a, 0xa9bc34ac, 0xa9fc348c, 0xf1010042, 0x54fffee8, 0xa9430c22, 0xa93f1ca6, 0xa9421c26,
+  0xa93e24a8, 0xa9412428, 0xa93d2caa, 0xa9402c2a, 0xa93c34ac, 0xa9030c02, 0xa9021c06, 0xa9012408,
+  0xa9002c0a, 0xd65f03c0, 0x00000000, 0x00000000]
+
+set_option maxRecDepth 20000 in
+/-- **The pinned `runtime.memmove` meets `MemmoveZeroLive`** (arm64), for every `d` and `R`. -/
+theorem memmoveZeroLive_pinned (d : Nat) (R : RtInv) :
+    MemmoveZeroLive (toy.link (at0 memmovePinned)) A0 d R := by
+  rw [link_at0]
+  intro L b s hpc ⟨h0, ⟨_, ⟨h30a, h30b, _, _, _, _, _⟩, _⟩, hLm⟩
+  have h2 : s.regs 2 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using h0)
+  janus_run [h2]
+  exact liveMemRet_none rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl hLm.2.1
+
+def okMoveZ : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [CB, CB + 0x100, 0]
+
+theorem memmoveZeroLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+    MemmoveZeroLive (toy.link impl) A0 4096 R ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
+      (s.regs 2).toNat = 0 ∧ Mem.EqPre 4096 3 s ∧
+      LiveMemAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b s (calleeStack s 4096 3) :=
+  ⟨at0 memmovePinned, toyR tys0 okMoveZ, memmoveZeroLive_pinned 4096 _, [], 0x400, wst [CB, CB + 0x100, 0], rfl,
+    by decide, wguardE _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by simp, wwin _ 3 (by omega)⟩⟩
+
 
 def okClr : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [CB, 8]
 
@@ -1004,5 +1058,111 @@ theorem mallocgcD_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat → 
   have ⟨⟨h30a, h30b, _, _, _, _, _⟩, _, _⟩ := pre.1
   janus_run
   exact finish_mallocgcD hty pre
+
+/-! ### `makeslice` of zero bytes
+
+`MakesliceZeroLive` (a zero-byte `makeslice` keeps the live set and the budget) is witnessed twice:
+
+* by the Go runtime's own code: `makeslicePinned` and `mallocgcPinned` are `runtime.makeslice` (52 words) and
+  `runtime.mallocgc` (92 words) of the pinned toolchains as a go1.26.10 `linux/arm64 -trimpath` build links them, at their
+  link addresses `0x8f650` and `0x8b8b0` (the `BL runtime.mallocgc` at `makeslice+0x4c` and the `ADRP`s are relocated for
+  those addresses; stub pins `50cafd2f…` and `110748120…` in cmd/janus/stubpins_gen.go). `makesliceZeroLive_pinned` runs
+  them in the model for every runtime hypothesis `R` and every stack bound `stack ≥ 104` (the two frames of 48 bytes and
+  their saved `X29`s): `makeslice` checks the stack, pushes its frame, reads `et.Size_`, computes `et.Size_ · cap = 0`
+  (`MUL`/`UMULH`), passes the length checks and calls `mallocgc(0, et, true)`, whose first test after its own stack check
+  (`CBZ R0`, `malloc.go:1075`) returns `&runtime.zerobase` (`ADRP`/`ADD`); both return through their epilogues. Only the
+  four stack slots of the frames are written.
+* by the toy runtime: `MakesliceZeroLive.of_live` turns the toy stub `makesliceCodeD` (which advances the bump pointer by
+  `64 · et.Size_ · cap`, so by `0`) into a witness, so both `MakesliceLiveContract` and `MakesliceZeroLive` hold of one
+  stub and one `R` (`makesliceZeroLive_satisfiable`). -/
+
+def makeslicePinned : List Nat := [
+  0xf9400b90, 0xeb3063ff, 0x54000529, 0xf81d0ffe, 0xf81f83fd, 0xd10023fd, 0xf9400003, 0x9b027c64,
+  0x9bc27c65, 0xb50001c5, 0xd2e00025, 0xeb05009f, 0x54000168, 0xb7f80141, 0xeb01005f, 0x5400010b,
+  0xaa0003e1, 0xb24003e2, 0xaa0403e0, 0x97fff085, 0xf85f83fd, 0xf84307fe, 0xd65f03c0, 0x9b017c62,
+  0x9bc17c63, 0xb40000e3, 0xd503201f, 0xd0001040, 0x91108000, 0xf0002061, 0x9139a021, 0x97fff775,
+  0xd2e00023, 0xeb03005f, 0x54ffff08, 0xb7fffee1, 0xd503201f, 0xd0001040, 0x91108000, 0xf0002061,
+  0x9139e021, 0x97fff76b, 0xd503201f, 0xa90087e0, 0xf9000fe2, 0xaa1e03e3, 0x94000c66, 0xa94087e0,
+  0xf9400fe2, 0x17ffffcf, 0x00000000, 0x00000000]
+
+def mallocgcPinned : List Nat := [
+  0xf9400b90, 0xeb3063ff, 0x54000a09, 0xf81d0ffe, 0xf81f83fd, 0xd10023fd, 0xb4000840, 0xf9001fe0,
+  0xf90023e1, 0x390123e2, 0xb00035db, 0x39523363, 0x360000c3, 0x97fe875f, 0xb50006e0, 0xf9401fe0,
+  0xf94023e1, 0x394123e2, 0x900035db, 0xb941bb63, 0x340000a3, 0x97fe87e3, 0xf9401fe0, 0xf94023e1,
+  0x394123e2, 0xd28fff03, 0xeb03001f, 0x54000268, 0xb4000141, 0xf9400423, 0xb4000103, 0x360005c2,
+  0xf108001f, 0x54000068, 0x97fe8506, 0x1400000c, 0x97fe85d4, 0x1400000a, 0xf100401f, 0x540000a2,
+  0xb980e783, 0x35000063, 0x97fe837e, 0x14000004, 0x97fe843c, 0x14000002, 0x97fe86a2, 0x900035db,
+  0xb941bb63, 0x34000143, 0xb4000121, 0xf9401b83, 0xf9405c63, 0xb40000c3, 0xf940dc64, 0xf9401fe5,
+  0x8b050084, 0xcb010084, 0xf900dc64, 0xb00035db, 0x39523363, 0x360000a3, 0xf90013e0, 0xf94023e2,
+  0x97fe8764, 0xf94013e0, 0xf85f83fd, 0xf84307fe, 0xd65f03c0, 0xf85f83fd, 0xf84307fe, 0xd65f03c0,
+  0x900035c0, 0x91058000, 0xf85f83fd, 0xf84307fe, 0xd65f03c0, 0xd0001340, 0x9126d800, 0xd2800481,
+  0x940007c4, 0xd503201f, 0xa90087e0, 0x390063e2, 0xaa1e03e3, 0x94001ba7, 0xa94087e0, 0x394063e2,
+  0x17ffffa8, 0x00000000, 0x00000000, 0x00000000]
+
+/-- The link addresses of the pinned code (go1.26.10 `linux/arm64 -trimpath`). -/
+def makesliceA : Nat := 0x8f650
+def mallocgcA : Nat := 0x8b8b0
+
+/-- The pinned `runtime.makeslice` and `runtime.mallocgc` at their link addresses. -/
+def makeslicePinnedSegs : List Segment :=
+  [{ name := "runtime.makeslice", base := makesliceA, words := makeslicePinned },
+   { name := "runtime.mallocgc", base := mallocgcA, words := mallocgcPinned }]
+
+def makeslicePinnedProg : Program := { segments := makeslicePinnedSegs, stubs := [], exitAddr := 0 }
+theorem link_makeslicePinned : toy.link makeslicePinnedSegs = makeslicePinnedProg := rfl
+
+set_option maxRecDepth 20000 in
+/-- **The pinned `runtime.makeslice` meets `MakesliceZeroLive`** (arm64), for every `R` and every `stack ≥ 104`. -/
+theorem makesliceZeroLive_pinned (stack : Nat) (R : RtInv) (hst : 104 ≤ stack) :
+    MakesliceZeroLive (toy.link makeslicePinnedSegs) makesliceA stack R := by
+  rw [link_makeslicePinned]
+  rintro L b s hpc ⟨⟨⟨⟨h30a, h30b, hsp16, hsp1, hsp2, hsp3, hacc⟩, ⟨hty1, hty2⟩, hl, hc, hmax⟩,
+    ⟨⟨hg1, hg2, hg3⟩, hgo⟩, hok, hinv, -, hLs, hWs⟩, hz, het⟩
+  simp only [calleeStack, outside_cons, outside_nil, and_true] at het hgo
+  simp only [typSize] at hz hmax
+  have hrd := Memory.readLE_lt (m := s.mem) (s.regs 0).toNat 8
+  have hmul : BitVec.ofNat 64 (s.mem.readLE (s.regs 0).toNat 8) * s.regs 2 = 0#64 := by
+    apply BitVec.eq_of_toNat_eq
+    rw [BitVec.toNat_mul, BitVec.toNat_ofNat, Nat.mod_eq_of_lt (a := s.mem.readLE _ 8) (by simpa using hrd), hz]; rfl
+  have h63 : (s.regs 1).getLsbD 63 = false := by
+    rw [BitVec.getLsbD_eq_getElem (by omega), BitVec.getElem_eq_testBit_toNat, Nat.testBit_lt_two_pow (by omega)]
+  have h63' : ((s.regs 1).getLsbD 63 == true) = false := by rw [h63]; rfl
+  -- the panic path's branch fact `(false == true) = true` is left to us
+  janus_run [hmul, h63, h63'] until [0x8f6ac]
+  all_goals first | exact absurd hbr (by decide) | skip
+  have hr : ((s.sp.toNat - stack, s.sp.toNat - 8) : Nat × Nat) ∈ calleeStack s stack 3 := List.mem_cons_self ..
+  exact zeroAllocRet_of_frame rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl rfl
+    ((((MemFrame.refl _ _).writeLE _ hr (by simp only; omega) (by simp only; omega)).writeLE _ hr
+      (by simp only; omega) (by simp only; omega)).writeLE _ hr (by simp only; omega) (by simp only; omega)
+      |>.writeLE _ hr (by simp only; omega) (by simp only; omega)) hLs hWs hinv
+
+/-- The toy invariant does not depend on an empty range of the live set. -/
+theorem toyR_dropEmpty (tys : Tys) (ok : Nat → List Nat → Prop) (b : Nat) (L : List (Nat × Nat)) (g q : Nat)
+    (m : Memory) (h : (toyR tys ok).inv b (L ++ [(q, q)]) g (view (toyR tys ok).rt (L ++ [(q, q)]) m)) :
+    (toyR tys ok).inv b L g (view (toyR tys ok).rt L m) := by
+  have h' : toyInv tys b (L ++ [(q, q)]) g (view (toyRt tys) L m) := by
+    rw [← view_append_empty _ L q]; exact h
+  obtain ⟨p, h1, h2, h3, h4, h5, h6⟩ := h'
+  exact ⟨p, h1, h2, h3, h4, fun r hr => h5 r (List.mem_append_left _ hr), h6⟩
+
+def okMakeZ : Nat → List Nat → Prop := fun a args => a = A0 ∧ (args = [tyB, 2, 2] ∨ args = [tyB, 0, 0])
+
+/-- **`MakesliceZeroLive` is satisfiable, together with `MakesliceLiveContract`** (arm64): the toy stub
+`makesliceCodeD` meets both for one runtime hypothesis that serves a 2-element and a 0-element request, and the
+0-element call state satisfies the zero-byte precondition. -/
+theorem makesliceZeroLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+    MakesliceLiveContract (toy.link impl) A0 4096 R ∧ MakesliceZeroLive (toy.link impl) A0 4096 R ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
+      ((MakeslicePre 4096 s ∧ StackRoom s 4096 3 ∧
+        LiveAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b 0
+          (s.regs 28).toNat s.mem (calleeStack s 4096 3)) ∧
+        typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat = 0 ∧
+        Outside (s.regs 0).toNat 16 (calleeStack s 4096 3)) :=
+  ⟨at0 makesliceCodeD, toyR tys0 okMakeZ, makesliceD_impl tys0 tysOK0 okMakeZ,
+    MakesliceZeroLive.of_live (makesliceD_impl tys0 tysOK0 okMakeZ) (toyR_dropEmpty tys0 okMakeZ),
+    [], 0x400, wst [tyB, 0, 0], rfl,
+    ⟨⟨wst_wcallOK _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide⟩,
+      wguard _ 3 (by omega), ⟨⟨rfl, Or.inr (by decide)⟩, wmem_inv wg, Nat.zero_le _, by simp, wwin _ 3 (by omega)⟩⟩,
+    by decide, by simp only [calleeStack, outside_cons, outside_nil, and_true]; decide⟩
 
 end Janus.Contracts.LiveSat
