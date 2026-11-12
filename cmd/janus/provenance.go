@@ -16,8 +16,8 @@ package main
 // no sandboxed process can write (it is a protected mount), and only that directory is on the search
 // path from then on. Lake's oleans for those modules are never read. The warm path is a record in
 // the trusted olean store (an HMAC'd entry keyed by the toolchain, the framework build, the module,
-// its source hash, its options and the hashes of its own imports, hence transitively of its whole
-// closure): the stored bytes are re-hashed on use, so no compile is repeated for an unchanged module.
+// its source hash, its options and the olean hashes and keys of its own imports, hence transitively of
+// its whole closure): the stored bytes are re-hashed on use, so no compile is repeated for an unchanged module.
 //
 // Only configurations the strict TOML subset of lakefiletoml.go understands (the ones the result
 // cache accepts) can be compiled this way, because janus must know every option Lake would pass.
@@ -230,6 +230,7 @@ type ownBuild struct {
 
 type ownMod struct {
 	sha string // of the module data janus holds (modParts.digest)
+	key string // its olean store key: covers its source and, through its imports' keys, its whole closure
 	ext bool   // its import closure reaches Extracted or JanusTrusted
 	rel string // source path inside the package
 	pkg *provPkg
@@ -356,7 +357,10 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 			if err != nil {
 				return nil, err
 			}
-			own = append(own, imp+" "+om.sha)
+			// The import's key, not only its olean bytes: an olean does not cover its own imports, so a
+			// change deep in the closure (e.g. the body of a reducible definition) can leave an
+			// intermediate olean byte-identical while this module's elaboration depends on it.
+			own = append(own, imp+" "+om.sha+" "+om.key)
 			reachesExt = reachesExt || om.ext
 			continue
 		}
@@ -417,7 +421,7 @@ func (ob *ownBuild) ensure(m, rel string) (*ownMod, error) {
 	if err := parts.write(oleanPath); err != nil {
 		return nil, wsDiag(err)
 	}
-	om := &ownMod{sha: parts.digest(), rel: srel, pkg: pkg, ext: reachesExt}
+	om := &ownMod{sha: parts.digest(), key: key, rel: srel, pkg: pkg, ext: reachesExt}
 	ob.mu.Lock()
 	ob.done[m] = om
 	ob.mu.Unlock()
@@ -629,7 +633,7 @@ func fwClosureDigestX(files map[string][]byte, want pins, imps []string, withSrc
 
 func (ob *ownBuild) moduleKey(pkg *provPkg, m, rel string, src []byte, own []string, fwDigest string, reachesExt bool) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "janus-own-olean-v2\n%q\n%s\n", ob.ws.tc.cacheID(), fwDigest)
+	fmt.Fprintf(h, "janus-own-olean-v3\n%q\n%s\n", ob.ws.tc.cacheID(), fwDigest)
 	if reachesExt {
 		// A module whose import closure includes Extracted or JanusTrusted was elaborated against one
 		// extraction: its key also covers the generated Extracted.lean and the whole pinned build of the
