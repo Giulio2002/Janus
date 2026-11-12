@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.1 (unreleased)
+## v0.2.1 (2026-11-12)
 
 Bug fix for consumer packages whose dependencies use Lean's module system (`module` header,
 `public import`), such as ethereum/EthLib. Before, `janus verify --proof-root` failed at
