@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.2 (unreleased)
+## v0.3.2 (2026-11-13)
 
 Bug fix (PR #3): janus's own compile of a consumer package's modules (olean provenance) could reuse a stale
 stored olean. The trusted olean store key of a module covered its source and its direct imports' olean bytes
