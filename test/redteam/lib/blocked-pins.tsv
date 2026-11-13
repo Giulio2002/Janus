@@ -888,3 +888,7 @@ rounds/roundn9/run-roundn9.sh	b15	the statement the precondition constrains the 
 rounds/roundn9/run-roundn9.sh	b15	any form: alias, arithmetic, existential): a theorem must n
 rounds/roundn9/run-roundn9.sh	b16	the statement the precondition constrains the memory word at the entry `RSP`
 rounds/roundn9/run-roundn9.sh	b16	any form: alias, arithmetic, existential): a theorem must n
+rounds/roundn9/run-roundn9.sh	b18	the statement the precondition constrains the memory word at the entry `RSP`
+rounds/roundn9/run-roundn9.sh	b18	any form: alias, arithmetic, existential): a theorem must n
+rounds/roundn9/run-roundn9.sh	b19	the statement the precondition constrains the memory word at the entry `RSP`
+rounds/roundn9/run-roundn9.sh	b19	any form: alias, arithmetic, existential): a theorem must n

@@ -96,4 +96,27 @@ def ArgAndRet (s : State) : Prop := s.mem.readLE ((s.regs 4).toNat + 8) 8 = 5 �
 theorem b16 : Ensures Extracted.program Extracted.entry [] (fun s => ArgAndRet s ∧ False) (fun _ _ => True) := by
   intro ret hret s hs hp; exact hp.2.elim
 
+/-! The framework's own stack-argument predicate `StackWords` (v0.3.4): allowed, since every word it reads is at or above
+`RSP + 8`; it does not launder a `[RSP]` read placed next to it. -/
+
+/-- b17 (CONTROL, must verify): `StackWords s 0 [5, 7]`, the idiomatic spelling of two stack-argument words. -/
+theorem b17 : Ensures Extracted.program Extracted.entry [] (fun s => StackWords s 0 [5, 7] ∧ False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.2.elim
+
+/-- b18: `StackWords` and a `[RSP]` read in one proof-local definition: still rejected. -/
+def WordsAndRet (s : State) : Prop := StackWords s 0 [5] ∧ s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 46
+
+theorem b18 : Ensures Extracted.program Extracted.entry [] (fun s => WordsAndRet s ∧ False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.2.elim
+
+/-- b19: `stackWord s 0` (offset 0 is the return-address word) is not an ABI predicate: rejected. -/
+theorem b19 : Ensures Extracted.program Extracted.entry [] (fun s => (stackWord s 0).toNat < 2 ^ 46 ∧ False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.2.elim
+
+/-- b20 (CONTROL, must verify): a stack-argument word bound by `∃` and first used as `yp.toNat`. The statement must
+round-trip; before v0.3.4 the printed `∃ yp, … yp.toNat` did not elaborate back (no binder type). -/
+theorem b20 : Ensures Extracted.program Extracted.entry []
+    (fun s => ∃ yp : W64, s.mem.readLE ((s.regs 4).toNat + 8) 8 = yp.toNat ∧ False) (fun _ _ => True) := by
+  intro ret hret s hs hp; obtain ⟨_, _, h⟩ := hp; exact h.elim
+
 end Proof

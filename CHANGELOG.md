@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.3.4 (unreleased)
+
+Auditor and CLI fixes requested by fv-modexp. No contract or statement form changed. Existing proofs need no edits.
+
+- **`StackWords` is accepted as a stack-argument form.** `Janus.GoABI.StackWords` and `Janus.Amd64.GoABI.StackWords`
+  join the ABI predicates that the amd64 `[RSP]`-word rule treats as opaque. Every word they read is at
+  `RSP + 8 + skip + 8 * i`, never inside `[RSP, RSP + 8)`. `stackWord s off` is not listed, because `off = 0` is `[RSP]`.
+- **The statement round-trip check tries a print with binder types** (`pp.funBinderTypes`) after the plain and the
+  `pp.numericTypes` prints. Before, `∃ yp : W64, … = yp.toNat` printed as `∃ yp, … yp.toNat` and was refused with
+  "the printed statement does not elaborate back". The annotated print must still elaborate back to a definitionally
+  equal statement.
+- **`janus --version`** prints the release (`janus 0.3.4 (extractor 0.2.0)`). Before, it printed only the
+  extraction-format version, `0.2.0`.
+- Round n9 rows:
+  - b17 (`StackWords`): control, verifies.
+  - b18 (`StackWords` with a `[RSP]` read in one definition): blocked.
+  - b19 (`stackWord s 0`): blocked.
+  - b20 (the `∃`-bound `yp.toNat` statement): control, verifies.
+
 ## v0.3.3 (2026-11-13)
 
 Auditor fix (PR #4): the amd64 `[RSP]`-word rule (a main theorem's precondition must not constrain the caller's
