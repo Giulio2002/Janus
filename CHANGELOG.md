@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.3.3 (unreleased)
+
+Auditor fix (PR #4): the amd64 `[RSP]`-word rule (a main theorem's precondition must not constrain the caller's
+return address at `[RSP]`) refused every statement about a function with Go stack arguments: ABIInternal passes
+the integer argument words beyond the registers at `RSP + 8, RSP + 16, …`, and any `readLE` whose address mentioned
+`RSP` counted as a read of `[RSP]`. A read whose address is exactly `(RSP).toNat + k` with a numeral `k ≥ 8` now counts
+as a stack-argument read (it starts above the return-address word). Every other address that mentions `RSP` (offset
+`< 8`, subtraction, a non-numeral offset, nested arithmetic) is still treated as a read of `[RSP]`.
+
+- Round n9: b12 (control: two stack-argument words, verifies) and b13–b16 (offset 4, `8 - 8`, `RSP - 4`, a definition
+  mixing an argument read with a `[RSP]` read; all blocked, pinned).
+- **Known gap, not fixed in this release (present in every release since the rule was added):** the rule recognises
+  `[RSP]` reads syntactically, so a statement can constrain the word without such a read: through an alias
+  (`∃ sp, (s.regs 4).toNat = sp ∧ s.mem.readLE sp 8 = …`, a `∀`/`let` alias, two inequalities), a byte read
+  (`s.mem.bytes`), `RSP` pinned to a constant and the word read at that constant, or an equation on the whole memory.
+  Such a precondition restricts the caller's return address the reader does not see (e.g. to `0`, so that a jump to a
+  nil code pointer counts as a return). It needs a deliberately misleading statement; read the precondition of a
+  theorem you rely on. A sound fix is being designed for a later release.
+
 ## v0.3.2 (2026-11-13)
 
 Bug fix (PR #3): janus's own compile of a consumer package's modules (olean provenance) could reuse a stale
