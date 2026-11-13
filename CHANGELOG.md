@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.3 (unreleased)
+## v0.3.3 (2026-11-13)
 
 Auditor fix (PR #4): the amd64 `[RSP]`-word rule (a main theorem's precondition must not constrain the caller's
 return address at `[RSP]`) refused every statement about a function with Go stack arguments: ABIInternal passes
@@ -17,7 +17,9 @@ as a stack-argument read (it starts above the return-address word). Every other 
   (`s.mem.bytes`), `RSP` pinned to a constant and the word read at that constant, or an equation on the whole memory.
   Such a precondition restricts the caller's return address the reader does not see (e.g. to `0`, so that a jump to a
   nil code pointer counts as a return). It needs a deliberately misleading statement; read the precondition of a
-  theorem you rely on. A sound fix is being designed for a later release.
+  theorem you rely on. The same holds on arm64, where the return address is in `X30` and there is no rule at all:
+  `(s.regs 30).toNat = 0` in a precondition is accepted. A sound fix (evaluate the precondition before the return
+  address is installed, BREAKING) is planned for v0.4.0.
 
 ## v0.3.2 (2026-11-13)
 
