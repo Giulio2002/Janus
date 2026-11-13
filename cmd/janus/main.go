@@ -167,7 +167,7 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	case "memguard":
 		err = cmdMemguard(args[1:], stdout, stderr)
 	case "version", "--version":
-		fmt.Fprintf(stdout, "janus %s\n", extractorVersion)
+		fmt.Fprintf(stdout, "janus %s (extractor %s)\n", releaseVersion, extractorVersion)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 	default:

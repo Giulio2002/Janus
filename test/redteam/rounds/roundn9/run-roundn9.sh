@@ -2,7 +2,7 @@
 # Red-team round n9 (today's new features: U14 live convT, U-GROWMULTI, ErrorfLive amd64 RetLow/r15, Lake-free verify,
 # janus_grab). Semantic attacks on the contracts are Lean theorems in test/lean/JanusTests/RedTeamN9.lean (built by
 # `lake build JanusTests.RedTeamN9`; a regression there fails the build). This script runs the auditor-level rows:
-# RetLow smuggled into a consumer statement. Rows: b1-b7 and b9 must be rejected by the auditor with the reason checked; b8 (CallOK64 as-is) and b12 (stack-argument words at RSP+8/+16) are controls and verify; b13-b16 (offset < 8, non-numeral, negative offset, mixed definition) must be rejected. Exits 1 if a row differs.
+# RetLow smuggled into a consumer statement. Rows: b1-b7 and b9 must be rejected by the auditor with the reason checked; b8 (CallOK64 as-is) and b12 (stack-argument words at RSP+8/+16) are controls and verify; b13-b16 (offset < 8, non-numeral, negative offset, mixed definition) must be rejected; b17 (StackWords) is a control and verifies; b18 (StackWords plus a [RSP] read in one definition) and b19 (stackWord s 0) must be rejected; b20 (an ∃-bound stack-argument word used as yp.toNat) is a control and verifies (print round-trip). Exits 1 if a row differs.
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
@@ -24,7 +24,7 @@ mapfile -t tg < <(scripts/verify/example-targets.sh ErrWrap)
 broken=()
 P=Proof
 all="$("$J" verify --audit-only --janus-root "$root" --proof "$R/attacks/RetLowAlias64.lean" "$W/ErrWrap64" \
-  --theorem $P.b1 --theorem $P.b2 --theorem $P.b3 --theorem $P.b4 --theorem $P.b5 --theorem $P.b6 --theorem $P.b7 --theorem $P.b8 --theorem $P.b9 --theorem $P.b10 --theorem $P.b11 --theorem $P.b12 --theorem $P.b13 --theorem $P.b14 --theorem $P.b15 --theorem $P.b16 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"
+  --theorem $P.b1 --theorem $P.b2 --theorem $P.b3 --theorem $P.b4 --theorem $P.b5 --theorem $P.b6 --theorem $P.b7 --theorem $P.b8 --theorem $P.b9 --theorem $P.b10 --theorem $P.b11 --theorem $P.b12 --theorem $P.b13 --theorem $P.b14 --theorem $P.b15 --theorem $P.b16 --theorem $P.b17 --theorem $P.b18 --theorem $P.b19 --theorem $P.b20 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/')"
 printf '%s\n' "$all" > "$W/RetLowAlias64.txt"
 blk() { awk -v n="=== $P.$1:" 'index($0,n)==1{p=1;print;next} /^=== /{p=0} p' <<<"$all"; }
 . "$root/test/redteam/lib/blocked.sh"
@@ -60,6 +60,10 @@ row b13 blocked "$RL"
 row b14 blocked "$RL"
 row b15 blocked "$RL"
 row b16 blocked "$RL"
+row b17 Verified
+row b18 blocked "$RL"
+row b19 blocked "$RL"
+row b20 Verified
 echo
 if [ ${#broken[@]} -gt 0 ]; then echo "round n9: BROKEN rows: ${broken[*]}"; exit 1; fi
 echo "round n9: all rows as expected"

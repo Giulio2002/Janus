@@ -1791,12 +1791,16 @@ def isSpRead (e : Expr) : Bool :=
     let a := e.getArg! 1
     (a.find? isRspReg).isSome && (match rspOffset? a with | some k => k < 8 | none => true)
 
-/-- The framework's standard ABI predicates are opaque to the analysis below (see `abiPredicates`). -/
+/-- The framework's standard ABI predicates are opaque to the analysis below (see `abiPredicates`).
+`StackWords s skip words` (stack-assigned argument words) reads only `[RSP + stackArgOffset + skip + 8 * i]` with
+`stackArgOffset = 8`, so every read starts at or above `RSP + 8`, never inside the return-address word `[RSP, RSP + 8)`:
+it is the framework's own spelling of Go stack arguments (v0.3.4). `stackWord s off` is NOT listed (`off = 0` is `[RSP]`). -/
 def abiNames : List Name :=
   [`Janus.Contracts.CallOK64, `Janus.Contracts.StackRoom64,
    `Janus.GoABI.CallSetup, `Janus.GoABI.RetAddr, `Janus.GoABI.StackWritable, `Janus.GoABI.StackGuardOK,
+   `Janus.GoABI.StackWords,
    `Janus.Amd64.GoABI.CallSetup, `Janus.Amd64.GoABI.RetAddr, `Janus.Amd64.GoABI.StackWritable,
-   `Janus.Amd64.GoABI.StackGuardOK]
+   `Janus.Amd64.GoABI.StackGuardOK, `Janus.Amd64.GoABI.StackWords]
 
 /-- by EXACT full name (a name the framework already declares cannot be redeclared by a proof file), never by a
 prefix or a last component: a proof's own `def Janus.Sneak.CallSetup` is not an ABI predicate -/
@@ -2486,13 +2490,17 @@ current options, then, if a numeral's type is what the plain print loses (`5 ≠
 `BitVec 64` reads back at `Nat`), with `pp.numericTypes` too. The first print that round-trips
 is the statement; if none does, the error of the plain print. Every print is made with `pp.deepTerms`
 (UP3b): the default depth limit elides a deep subterm as `⋯`, which reads back as a hole, so a statement
-with several call-site conjuncts in front of the run (a witness) would never round-trip. -/
+with several call-site conjuncts in front of the run (a witness) would never round-trip.
+A third print adds `pp.funBinderTypes` (v0.3.4): an `∃ x, …` whose first use of `x` is a dot-notation
+projection (`x.toNat`) prints as `∃ x, … x.toNat …`, which cannot elaborate back without `x`'s type. The
+annotated print must round-trip like the others, so it is never accepted on weaker terms. -/
 def printFaithful (thm : Name) (thmType : Expr) : MetaM (Except String String) := do
   let mut firstErr := none
-  for numeric in [false, true] do
+  for (numeric, binderTypes) in [(false, false), (true, false), (true, true)] do
     let sig ← withOptions (fun o =>
         let o := (o.setBool `pp.deepTerms true).insert `pp.maxSteps (100000 : Nat)
-        if numeric then o.setBool `pp.numericTypes true else o)
+        let o := if numeric then o.setBool `pp.numericTypes true else o
+        if binderTypes then o.setBool `pp.funBinderTypes true else o)
       (PrettyPrinter.ppSignature thm)
     let sigStr := sig.fmt.pretty 10000
     match ← roundTrip thm thmType sigStr with
