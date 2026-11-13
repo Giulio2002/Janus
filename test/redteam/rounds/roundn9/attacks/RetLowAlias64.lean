@@ -68,4 +68,32 @@ def Janus.Sneak.CallSetup (s : State) : Prop := s.mem.readLE (s.regs 4).toNat 8 
 theorem b11 : Ensures Extracted.program Extracted.entry [] (fun s => Janus.Sneak.CallSetup s ∧ False) (fun _ _ => True) := by
   intro ret hret s hs hp; exact hp.2.elim
 
+/-! Stack ARGUMENTS (Go ABIInternal passes the integer argument words beyond the registers at `RSP + 8, RSP + 16, …`): a read
+of `[RSP + k]` with a numeral `k ≥ 8` is an argument, not the return address, and is allowed; a read that may overlap
+`[RSP, RSP + 8)` stays rejected. -/
+
+/-- b12 (CONTROL, must verify): two stack-argument words `[RSP + 8]`, `[RSP + 16]` (nat.divBasic's `v` on amd64). -/
+theorem b12 : Ensures Extracted.program Extracted.entry []
+    (fun s => s.mem.readLE ((s.regs 4).toNat + 8) 8 = 5 ∧ s.mem.readLE ((s.regs 4).toNat + 16) 8 < 2 ^ 40 ∧ False)
+    (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.2.2.elim
+
+/-- b13: an offset below 8 overlaps the return-address word. -/
+theorem b13 : Ensures Extracted.program Extracted.entry [] (fun s => s.mem.readLE ((s.regs 4).toNat + 4) 8 < 2 ^ 46 ∧ False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.2.elim
+
+/-- b14: an offset that is not a numeral (`8 - 8`) is treated as `[RSP]` (conservative). -/
+theorem b14 : Ensures Extracted.program Extracted.entry [] (fun s => s.mem.readLE ((s.regs 4).toNat + (8 - 8)) 8 < 2 ^ 46 ∧ False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.2.elim
+
+/-- b15: a negative offset (`RSP - 4`, overlapping `[RSP, RSP + 4)`) is treated as `[RSP]`. -/
+theorem b15 : Ensures Extracted.program Extracted.entry [] (fun s => s.mem.readLE ((s.regs 4).toNat - 4) 8 < 2 ^ 46 ∧ False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.2.elim
+
+/-- b16: a stack-argument read hidden in a definition whose OTHER conjunct reads `[RSP]`: still rejected. -/
+def ArgAndRet (s : State) : Prop := s.mem.readLE ((s.regs 4).toNat + 8) 8 = 5 ∧ s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 46
+
+theorem b16 : Ensures Extracted.program Extracted.entry [] (fun s => ArgAndRet s ∧ False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.2.elim
+
 end Proof

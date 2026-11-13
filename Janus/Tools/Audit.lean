@@ -1764,13 +1764,32 @@ partial def strayImpl (ivs : Std.HashSet FVarId) (e : Expr) : Option FVarId :=
   | .mdata _ b | .proj _ _ b => strayImpl ivs b
   | _ => none
 
-/-- `e` is a read of the memory word at the entry `RSP` (`Memory.readLE m (… State.regs s 4 …) n`, the saved return
-address `[RSP]`), in any form. -/
+/-- `x` is the entry stack pointer `State.regs s 4` (or `State.regs s regSP`). -/
+def isRspReg (x : Expr) : Bool :=
+  x.getAppFn.constName? == some `Janus.Amd64.State.regs && x.getAppNumArgs == 2 &&
+    ((x.getArg! 1).nat? == some 4 || (x.getArg! 1).constName?.any (·.getString! == "regSP"))
+
+/-- The byte offset `k` of an address of the exact form `(RSP).toNat` (`k = 0`) or `(RSP).toNat + k` with a numeral `k`;
+`none` for every other address (including any other arithmetic on `RSP`). -/
+def rspOffset? (a : Expr) : Option Nat :=
+  let a := a.consumeMData
+  let isRspNat (b : Expr) : Bool :=
+    let b := b.consumeMData
+    b.isAppOfArity ``BitVec.toNat 2 && isRspReg (b.getArg! 1).consumeMData
+  if isRspNat a then some 0
+  else if a.isAppOfArity ``HAdd.hAdd 6 && isRspNat (a.getArg! 4) then (a.getArg! 5).consumeMData.nat?
+  else none
+
+/-- `e` is a read that may overlap the memory word at the entry `RSP` (`[RSP, RSP + 8)`, the saved return address):
+`Memory.readLE m a n` whose address `a` mentions `RSP`, unless `a` is exactly `(RSP).toNat + k` with a numeral `k ≥ 8`
+— such a read starts above the return-address word and is a Go stack ARGUMENT (ABIInternal passes the words that do not
+fit in the integer argument registers at `RSP + 8, RSP + 16, …`), which a precondition may legitimately state. Every
+other address that mentions `RSP` (offset `< 8`, subtraction, a non-numeral offset, nested arithmetic) counts as a read of
+`[RSP]` (conservative). -/
 def isSpRead (e : Expr) : Bool :=
   e.getAppFn.constName? == some `Janus.Arm64.Memory.readLE && e.getAppNumArgs ≥ 3 &&
-    ((e.getArg! 1).find? fun x => x.getAppFn.constName? == some `Janus.Amd64.State.regs &&
-      x.getAppNumArgs == 2 && ((x.getArg! 1).nat? == some 4 ||
-        (x.getArg! 1).constName?.any (·.getString! == "regSP"))).isSome
+    let a := e.getArg! 1
+    (a.find? isRspReg).isSome && (match rspOffset? a with | some k => k < 8 | none => true)
 
 /-- The framework's standard ABI predicates are opaque to the analysis below (see `abiPredicates`). -/
 def abiNames : List Name :=
