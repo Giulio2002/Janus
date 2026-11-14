@@ -117,6 +117,13 @@ example (p : Program) (entry : Nat) (args : List W64) : ∀ s ret, CallSetup0 en
     (fun s : State => (s.regs 5).toNat < 7 ∧ s.mem.readLE s.sp.toNat 8 = 3) (s.setRet ret) := by
   janus_pre_setRet
 
+/-- a8: `janus_intro` accepts the ret-free call state (`CallSetup0`, the shape of `intro s hs hpre ret hret`): the facts it adds are about
+`s.setRet ret`, the state the run starts from. -/
+example (p : Program) (ret : Nat) (hret : RetAddr p ret) (s : State) (hs : CallSetup0 100 [3, 4] s) :
+    (s.setRet ret).regs 0 = 3 ∧ (s.setRet ret).regs 30 = BitVec.ofNat 64 ret := by
+  janus_intro hs
+  exact ⟨h_x0, h_lr⟩
+
 end Arm64
 
 /-! ## amd64 -/
@@ -278,6 +285,19 @@ example {p : Program} {entry : Nat} {args : List W64} {post post' : State → St
     (hp : ∀ s s', (s.regs 5).toNat < 3 → post s s' → post' s s') :
     Ensures p entry args (fun s => (s.regs 5).toNat < 3) post' :=
   Ensures.mono h (fun s hs => by omega) hp
+
+
+/-- m18: `janus64_intro` accepts the ret-free call state; `h_ret` says the slot of `s.setRet ret` holds `ret`. -/
+example (p : Program) (ret : Nat) (hret : RetAddr p ret) (s : State) (hs : CallSetup0 100 [3, 4] s) :
+    (s.setRet ret).regs 0 = 3 ∧ (s.setRet ret).mem.readLE ((s.setRet ret).regs 4).toNat 8 = ret := by
+  janus64_intro hs
+  exact ⟨h_a0, h_ret⟩
+
+/-- m19: the ABI0 ret-free call state too (`janus64_intro0` on `CallSetupF`). -/
+example (p : Program) (ret : Nat) (hret : RetAddr p ret) (s : State) (hs : Janus.Amd64.GoABI0.CallSetupF 100 [3, 4] 1 s) :
+    (s.setRet ret).mem.readLE ((s.setRet ret).regs 4).toNat 8 = ret := by
+  janus64_intro0 hs
+  exact h_ret
 
 
 end Amd64

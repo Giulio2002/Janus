@@ -1,149 +1,677 @@
 #!/usr/bin/env python3
-"""Mechanical migration of an example/test proof file to the v0.4.0 `Ensures` shape.
+"""Mechanical migration of a proof tree to the v0.4.0 main-theorem shape (`Ensures` & co. evaluate the precondition
+BEFORE the return address is installed).
 
-Usage: scripts/dev/migrate-v040.py FILE.lean [...]     (rewrites in place; prints what needs a manual look)
+Usage: scripts/dev/migrate-v040.py FILE.lean [FILE.lean ...]     (rewrites in place; prints what needs a manual look)
+
+Give it the WHOLE tree in one call (`find lean -name '*.lean' | xargs scripts/dev/migrate-v040.py`): a first pass over
+all files collects the names of the theorems whose conclusion is an `Ensures` form (so applications of them in other
+files are recognised); the second pass rewrites each file.
 
 Rewrites (see CHANGELOG.md, "v0.4.0", Migration guide):
- 1. Main theorems stated with Ensures / EnsuresResults / EnsuresWithin / EnsuresGo / EnsuresGoX /
-    RunsAtLeastOnCall: the old proof body is kept, preceded by `janus_ensures_old` (arm64) or
-    `janus64_ensures_old` (amd64); that tactic proves `pre s -> pre (s.setRet ret)` and leaves the old-shaped goal,
-    so the following `intro ret hret s hs hpre ...` is unchanged.
- 2. Witnesses that apply such a theorem: `CallSetup (P.withExit ret) E args s` -> `CallSetup0 E args s`;
-    `Returns|ReturnsWithin n|RunsAtLeast n (P.withExit ret) s` -> the same at `(s.setRet ret)`, with every free `s` of that
-    conjunct (the `ABIReturn s s'` and any `s` in the post) replaced by `(s.setRet ret)`; the application
-    `thm args ret hret s0 hs hpre` -> `thm args s0 hs hpre ret hret`; the `setup` lemma loses the return-address field
-    (amd64) / gains the `len` field (arm64).
+ 1. ROW theorems (conclusion `Ensures …` / `Ensures0 …` / `EnsuresWithin …` / … with a concrete precondition): `janus_ensures_old`
+    (arm64) / `janus64_ensures_old` (amd64) is inserted as the first tactic; it proves `pre s -> pre (s.setRet ret)` and
+    leaves the old-shaped goal, so the old proof (`intro ret hret s hs hpre …`, `rw`s and comments before it included) is
+    unchanged. A term-mode `:= fun ret hret s hs … => …` becomes `:= by janus_ensures_old; exact (fun …)`.
+ 2. GENERIC HELPERS (conclusion `Ensures P entry args pre post` with `pre` a bound variable, e.g. `Ensures.full64`,
+    `ensures_of_summary`): a last binder `(hinv : Ensures.SetRetInv P entry args pre := by janus_pre_setRet)` is added and the
+    proof starts with `refine Ensures.of_old hinv ?_`. Call sites are unchanged (the default tactic proves `hinv` for their
+    concrete `pre`).
+ 3. Old-shaped applications `thm args ret hret s hs hp` of such theorems (inside an old-shaped proof) become
+    `(thm args).toOld ret hret s hs hp`.
+ 4. Witnesses (`namespace Witness`): `CallSetup (P.withExit ret) E args s` -> `CallSetup0 E args s` (the `setup` lemma loses
+    the return-address field on amd64 / replaces `lr` by `len` on arm64); `Returns|ReturnsWithin n|RunsAtLeast n
+    (P.withExit ret) s …` -> the same at `(s.setRet ret)`, with every free `s` of that conjunct replaced by `(s.setRet ret)`;
+    the application `thm args ret hret s0 setup pre` -> `thm args s0 setup pre ret hret`.
 Raw old-shaped statements (`faults`, `panics`, ...: `∀ ret, RetAddr .. -> ∀ s, CallSetup ..`) are NOT Ensures forms and are
-left alone, with the witness states they use.
+left alone, with the witness states they use. `Ensures.mono`, `Ensures0.of_summary0`, `Ensures.toSummaryIn`, `janus_intro`,
+`janus64_intro` keep their v0.3 signatures and need no rewrite.
 """
-import re, sys
+import re, sys, os
+
+FORCE = set(filter(None, os.environ.get('JANUS_MIG_FORCE', '').split(',')))   # witness items to rewrite although no application of a main theorem is seen in them
 
 HEADS = ['Ensures', 'EnsuresResults', 'EnsuresWithin', 'EnsuresGo', 'EnsuresGoX', 'RunsAtLeastOnCall',
-         # phase 1b: the other main-theorem forms (ABI0, C ABI, cgo contracts, syscalls, stack growth)
          'Ensures0', 'EnsuresResults0', 'CEnsures', 'CEnsuresResults', 'CEnsuresA', 'CEnsuresR', 'EnsuresC',
          'CEnsuresC', 'EnsuresK', 'EnsuresGrow', 'EnsuresGrow64']
-HEADRE = re.compile(r'(?<![\w.])(?:' + '|'.join(HEADS) + r')(?![\w])')
+HEADRE = re.compile(r'(?<![\w.])(?:' + '|'.join(HEADS) + r')(?![\w.])')
+CONCL = re.compile(r'^\s*((?:\w+\.)*)(' + '|'.join(HEADS) + r')(?![\w.])')
 
-def split_blocks(t):
-    starts = [m.start() for m in re.finditer(r'^(?:theorem|lemma|def|abbrev|namespace|end|set_option [^\n]* in\n(?=(?:set_option|/--|theorem|lemma)))', t, re.M)]
-    return starts
+OPEN, CLOSE = '([{⟨', ')]}⟩'
 
-SETUP_RE = re.compile(r'\b(CallSetup0|CallSetup|CCallA|CCall)\b ((?:\((?:[^()]|\([^()]*\))*?\.withExit \w+\)))\s*')
+def depth_scan(s, start=0):
+    """Yield (index, char, depth-before) skipping `--` comments."""
+    d = 0
+    i = start
+    n = len(s)
+    while i < n:
+        c = s[i]
+        if c == '-' and s[i:i + 2] == '--':
+            j = s.find('\n', i)
+            i = n if j < 0 else j
+            continue
+        if c in OPEN: d += 1
+        elif c in CLOSE: d -= 1
+        yield i, c, d
+        i += 1
+
+def split_sig(it):
+    """(sig, body_start): the signature of a `theorem`/`lemma` item up to its top-level `:=`, and the index just after it."""
+    d = 0
+    i = 0
+    n = len(it)
+    while i < n:
+        c = it[i]
+        if c == '-' and it[i:i + 2] == '--':
+            j = it.find('\n', i); i = n if j < 0 else j; continue
+        if c in OPEN: d += 1
+        elif c in CLOSE: d -= 1
+        elif c == ':' and d == 0 and it[i:i + 2] == ':=':
+            return it[:i], i + 2
+        i += 1
+    return None, None
+
+def top_colon(sig):
+    """Index of the top-level `:` that starts the conclusion."""
+    d = 0
+    i = 0
+    n = len(sig)
+    # skip the name
+    while i < n:
+        c = sig[i]
+        if c == '-' and sig[i:i + 2] == '--':
+            j = sig.find('\n', i); i = n if j < 0 else j; continue
+        if c in OPEN: d += 1
+        elif c in CLOSE: d -= 1
+        elif c == ':' and d == 0 and sig[i:i + 2] != ':=': return i
+        i += 1
+    return -1
+
+def tokens(s, i=0):
+    """Whitespace-separated balanced tokens starting at index i, until a `,`/`:=`/closer/`|` at depth 0.
+    Returns [(tok, start, end)] and the index where scanning stopped."""
+    out = []
+    n = len(s)
+    while i < n:
+        while i < n and s[i] in ' \t\n': i += 1
+        if i >= n: break
+        if s[i] in CLOSE or s[i] == ',' or s[i:i + 2] == ':=' or s[i] == '|': break
+        st = i
+        d = 0
+        while i < n:
+            c = s[i]
+            if c == '-' and s[i:i + 2] == '--' and d == 0: break
+            if c in OPEN: d += 1
+            elif c in CLOSE:
+                if d == 0: break
+                d -= 1
+            elif d == 0 and (c in ' \t\n,' or s[i:i + 2] == ':='): break
+            i += 1
+        if i == st: break
+        out.append((s[st:i], st, i))
+    return out, i
+
+def split_top(s, sep=','):
+    """Split `s` at top-level `sep` (depth 0)."""
+    parts = []
+    d = 0
+    last = 0
+    for i, c, dep in depth_scan(s):
+        if c in OPEN: pass
+        if c == sep and dep == 0:
+            parts.append(s[last:i]); last = i + 1
+    parts.append(s[last:])
+    return parts
+
+def conclusion(it):
+    """(head_prefix, head, conclusion_text, sig, body_start) for a theorem whose conclusion is an Ensures form, else None."""
+    sig, bs = split_sig(it)
+    if sig is None: return None
+    ci = top_colon(sig)
+    if ci < 0: return None
+    concl = sig[ci + 1:]
+    m = CONCL.match(concl)
+    if not m: return None
+    return m.group(1), m.group(2), concl, sig, bs, ci
+
+def is_generic(head, concl, sig):
+    """`Ensures P entry args pre post` with `pre` a bound identifier of the signature: a generic helper."""
+    if head != 'Ensures': return None
+    m = CONCL.match(concl)
+    toks, _ = tokens(concl, m.end())
+    if len(toks) != 5: return None
+    P, ent, args, pre, post = [t[0] for t in toks]
+    if not re.fullmatch(r"[A-Za-z_][\w']*", pre): return None
+    if not re.search(r'[({{\[]\s*(?:[\w\']+\s+)*' + re.escape(pre) + r'(?:\s+[\w\']+)*\s*:', sig): return None
+    return P, ent, args, pre
+
+SETUP_RE = re.compile(r'\b(CallSetup0|CallSetup|CCallA|CCall)\b\s+(\()')
 SETUP_NEW = {'CallSetup': 'CallSetup0', 'CallSetup0': 'CallSetupF', 'CCall': 'CCallF', 'CCallA': 'CCallAF'}
 
 def fix_setups(text):
-    """`CallSetup (P.withExit ret) E …` -> `CallSetup0 E …` (and CCall -> CCallF, CCallA -> CCallAF, ABI0 CallSetup0 -> CallSetupF)."""
-    return SETUP_RE.sub(lambda m: SETUP_NEW[m.group(1)] + ' ', text)
+    """`CallSetup (P.withExit ret) E …` -> `CallSetup0 E …` (and CCall -> CCallF, CCallA -> CCallAF, ABI0 CallSetup0 -> CallSetupF).
+    The program argument is a balanced parenthesised term ending in `.withExit R)`."""
+    out = []
+    i = 0
+    while True:
+        m = SETUP_RE.search(text, i)
+        if not m:
+            out.append(text[i:]); break
+        out.append(text[i:m.start()])
+        # balanced paren starting at m.start(2)
+        d = 0
+        j = m.start(2)
+        while j < len(text):
+            if text[j] == '(': d += 1
+            elif text[j] == ')':
+                d -= 1
+                if d == 0: break
+            j += 1
+        inner = text[m.start(2):j + 1]
+        if '.withExit' in inner:
+            out.append(SETUP_NEW[m.group(1)] + ' ')
+            i = j + 1
+            while i < len(text) and text[i] == ' ': i += 1
+        else:
+            out.append(text[m.start():m.end()]); i = m.end()
+    return ''.join(out)
 
-def migrate(t, amd0):
+def first_tactic_pos(it, bs):
+    """Position (index in `it`) and indentation of the first tactic of a `:= by` body, or None."""
+    m = re.match(r'\s*by\b[ \t]*', it[bs:])
+    if not m: return None
+    j = bs + m.end()
+    # the first tactic is on the same line (`:= by tac`) or on the next non-empty line
+    rest = it[j:]
+    if rest.startswith('\n') or rest.strip() == '' or rest.lstrip(' \t').startswith('\n'):
+        mm = re.match(r'[ \t]*\n((?:[ \t]*\n)*)([ \t]*)', rest)
+        if not mm: return None
+        return j + mm.end(1) + len(rest[:mm.end(1)]) - len(rest[:mm.end(1)]) if False else (j + mm.end(), len(mm.group(2)), True)
+    return (j, None, False)
+
+
+def lambda_binders(s, i):
+    """Binder tokens of the `fun b1 b2 … =>` starting at index i (`fun` at i); returns ([(tok,start,end)], index of `=>`)."""
+    toks, stop = tokens(s, i + 3)
+    out = []
+    for tk in toks:
+        if tk[0] == '=>' : break
+        out.append(tk)
+    # the `=>` is a token on its own at top level
+    j = s.find('=>', out[-1][2] if out else i + 3)
+    return out, j
+
+def fix_mono(it, warn):
+    """`Ensures.mono h hpre hpost` / `(h …).mono hpre hpost` with the v0.3 `hpost` (`fun s s' hp hq`): the first binder `_`
+    (or unused) -> `mono_ret` with one more `_` (the new `hpost` also binds `ret`)."""
+    out = []
+    pos = 0
+    pat = re.compile(r'(?<![\w.\'])((?:[\w]+\.)*Ensures0?)\.mono(?![\w\'])|\)\.mono(?![\w\'])')
+    while True:
+        m = pat.search(it, pos)
+        if not m: break
+        toks, stop = tokens(it, m.end())
+        dot = m.group(1) is None
+        # locate the hpost lambda: the last argument, `(fun …)` or an unparenthesised `fun …`
+        k = None
+        for q, tk in enumerate(toks):
+            if tk[0] == 'fun' and q >= (1 if dot else 2):
+                k = q; break
+            if tk[0].startswith('(fun ') and q >= (1 if dot else 2):
+                k = q; break
+        if k is None or (k != (1 if dot else 2)):
+            out.append(it[pos:m.end()]); pos = m.end(); continue
+        if dot:
+            # `.mono (fun s hp => …) fun s s' hp hq => …`: the first argument must be a lambda
+            if not toks[0][0].startswith('(fun '):
+                out.append(it[pos:m.end()]); pos = m.end(); continue
+        tk = toks[k]
+        if tk[0].startswith('(fun '):
+            fpos = tk[1] + 1                  # `fun` after the `(`
+        else:
+            fpos = tk[1]
+        bt, arrow = lambda_binders(it, fpos)
+        if len(bt) < 3:
+            out.append(it[pos:m.end()]); pos = m.end(); continue
+        first = bt[0][0]
+        body = it[arrow + 2:tk[2]]
+        if first != '_' and re.search(r'(?<![\w.\'])' + re.escape(first) + r'(?![\w\'])', body):
+            warn.append('Ensures.mono with a named state binder `%s` used in the postcondition proof: adjust by hand (mono_ret binds the state without the return address)' % first)
+            out.append(it[pos:m.end()]); pos = m.end(); continue
+        newname = ('Ensures0.mono_ret' if (m.group(1) or '').endswith('Ensures0') else (m.group(1) + '.mono_ret' if m.group(1) else ').mono_ret'))
+        out.append(it[pos:m.start()])
+        out.append(newname)
+        # copy up to the end of the first binder, then add `_`
+        out.append(it[m.end():bt[0][2]])
+        out.append(' _')
+        pos = bt[0][2]
+    out.append(it[pos:])
+    return ''.join(out)
+
+def add_hlen(it, amd, warn, name):
+    """arm64 generic wrapper over an `Ensures` hypothesis with generic `args`: `Ensures.toSummaryIn h …` needs
+    `args.length ≤ numIntRegs`; the wrapper gets it as an (auto-)parameter and passes it on."""
+    if amd: return it
+    sig, bs = split_sig(it)
+    if sig is None or 'Ensures.toSummaryIn' not in it[bs:]: return it
+    if not re.search(r'\{args\s*:\s*List', sig): return it
+    if 'hlen' in sig: return it
+    ci = top_colon(sig)
+    sig2 = sig[:ci].rstrip() + ' (hlen : args.length ≤ numIntRegs := by simp [numIntRegs]) ' + sig[ci:]
+    body = it[bs:].replace('Ensures.toSummaryIn ', 'Ensures.toSummaryIn (hlen := hlen) ')
+    return sig2 + ':=' + body
+
+class Reg:
+    names = set()       # theorem names (as written) whose conclusion is an Ensures form
+    generic = set()
+    imports = {}        # file -> [imported module names]
+    modfile = {}        # module name -> file
+    defs = {}           # last component of a def/abbrev name -> [(file, body text)] for the Prop-valued ones
+
+DEFRE = re.compile(r'(?m)^(?:@\[[^\]]*\]\s*)?(?:private |protected |noncomputable )*(?:def|abbrev) ([\w.\']+)')
+
+def collect_defs(t, f, reg):
+    parts = re.split(r'(?m)^(?=(?:theorem |lemma |example |def |abbrev |namespace |end |set_option |/--|@\[|private |protected |noncomputable |structure |instance |attribute |open |section ))', t)
+    for it in parts:
+        m = DEFRE.match(it)
+        if not m: continue
+        sig, bs = split_sig(it)
+        if sig is None: continue
+        ci = top_colon(sig)
+        if ci < 0: continue
+        concl = sig[ci + 1:].strip()
+        # a definition that reads the state or its memory (`win s stk above`, `CallEnv R L s …`, `stLen m st`, `NatLive m …`):
+        # installing the return address changes its argument, so it is unfolded; the others (`Serves R`, `Held R L p n`) cannot change
+        if not re.search(r'[:\s(]\s*(?:Janus\.)?(?:Amd64\.|Arm64\.)?(?:State|Memory)\b', sig[:ci]): continue
+        reg.defs.setdefault(m.group(1).split('.')[-1], []).append((f, it[bs:]))
+
+def modname(path):
+    p = path.replace('\\', '/')
+    i = p.find('lean/')
+    p = p[i + 5:] if i >= 0 and p.rfind('lean/') == i else p
+    return p[:-5].replace('/', '.') if p.endswith('.lean') else p
+
+def import_closure(f, reg):
+    out = set()
+    stack = [f]
+    while stack:
+        g = stack.pop()
+        if g in out: continue
+        out.add(g)
+        for m in reg.imports.get(g, []):
+            h = reg.modfile.get(m)
+            if h: stack.append(h)
+    return out
+
+def unfold_list(pre_text, reg, f, bound=()):
+    """The consumer's Prop-valued defs reachable from `pre_text` (same file preferred, else unique in the tree)."""
+    closure = import_closure(f, reg)
+    seen = []
+    todo = list(dict.fromkeys(re.findall(r"[A-Za-z_][\w']*(?:\.[A-Za-z_][\w']*)*", pre_text)))
+    seen_set = set()
+    while todo:
+        w = todo.pop(0)
+        if '.' in w and len(w.split('.')[0]) <= 1: continue      # `R.ok`: a field of a bound variable
+        if w in bound: continue
+        base = w.split('.')[-1]
+        if base in seen_set or base not in reg.defs: continue
+        cands = reg.defs[base]
+        same = [c for c in cands if c[0] == f]
+        vis = [c for c in cands if c[0] in closure]
+        if len(vis) > 1:       # the definition closest in the directory tree to this file
+            vis.sort(key=lambda c: -len(os.path.commonprefix([c[0], f])))
+        pick = same[0] if same else (vis[0] if vis else (cands[0] if len(cands) == 1 else None))
+        if pick is None: continue
+        seen_set.add(base)
+        seen.append(w)
+        for w2 in re.findall(r"[A-Za-z_][\w']*(?:\.[A-Za-z_][\w']*)*", pick[1]):
+            if w2.split('.')[-1] not in seen_set: todo.append(w2)
+    return seen
+
+def collect(t, reg):
+    items = re.split(r'(?m)^(?=(?:theorem |lemma |example |def |abbrev |namespace |end |set_option |/--|@\[|private |protected ))', t)
+    for it in items:
+        m = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
+        if not m: continue
+        c = conclusion(it)
+        if not c: continue
+        reg.names.add(m.group(1))
+        if is_generic(c[1], c[2], c[3]): reg.generic.add(m.group(1))
+
+def tac_with_defs(tac, head, concl, reg, fname, sig=''):
+    """`janus_ensures_old [Pre, CallEnv, …]`: the consumer's Prop-valued definitions reachable from the precondition."""
+    m = CONCL.match(concl)
+    toks, _ = tokens(concl, m.end())
+    if not toks: return tac
+    pre_text = concl[m.end():] if head == 'EnsuresK' else (toks[-2][0] if len(toks) >= 2 else concl)
+    bound = set(w for grp in re.findall(r"[({\[]\s*((?:[\w'.]+\s+)+?)[\w'.]*\s*:", sig) for w in grp.split())
+    names = unfold_list(pre_text, reg, fname, bound)
+    return tac + (' [' + ', '.join(names) + ']' if names else '')
+
+NEW_SHAPED = {'Ensures0.of_summary0', 'Ensures0.of_summary0_at', 'Ensures0.of_summary', 'Ensures.mono', 'Ensures.mono_ret',
+              'Ensures0.mono', 'Ensures0.mono_ret', 'Ensures.of_old', 'Ensures0.of_old', 'CEnsures.of_summary', 'CEnsuresA.of_summary',
+              'EnsuresC.of_ensures', 'EnsuresGrow.of_old', 'EnsuresGrow.of_old_with'}
+
+def proof_kind(body, reg):
+    """'old' if the tactic proof starts (after rw/unfold/… and comments) with `intro … ret hret`, 'new' if it starts from a
+    new-shaped lemma (`refine/exact/apply <Ensures-form theorem or helper>`), else 'none'."""
+    lines = body.split('\n')[1:] if body.lstrip().startswith('by') and '\n' in body else [re.sub(r'^\s*by\s*', '', body)]
+    first = body.lstrip()[2:].lstrip(' \t')
+    if first and not first.startswith('\n'): lines = [first] + body.split('\n')[1:]
+    n = 0
+    for ln in lines:
+        s = ln.strip()
+        if not s or s.startswith('--'): continue
+        n += 1
+        if n > 30: break
+        if re.match(r'(?:intro|rintro|intros)\b[^\n]*?\bret\s+hret\b', s): return 'old'
+        m = re.match(r'(?:refine|exact|apply|refine\'|exact_mod_cast)\s+\(?([\w.\']+)', s)
+        if m:
+            nm = m.group(1)
+            if nm in NEW_SHAPED or nm in reg.names or any(nm.endswith('.' + x) for x in reg.names) or nm.split('.')[-1] in {x.split('.')[-1] for x in reg.names}:
+                return 'new'
+        if re.match(r'(?:fun\s+ret\s+hret)', s): return 'old'
+    return 'old' if re.search(r'\bret\s+hret\b', body) else 'none'
+
+def indent_of(it, pos):
+    ls = it.rfind('\n', 0, pos) + 1
+    return len(it[ls:pos]) - len(it[ls:pos].lstrip(' '))
+
+def migrate(t, amd0, reg, fname=''):
     warn = []
-    # split into top-level items: each starts at a line beginning with theorem/lemma/def/namespace/end/set_option/`/--`
-    items = re.split(r'(?m)^(?=(?:theorem |lemma |example |def |abbrev |namespace |end |set_option |/--))', t)
-    # the ISA of each item: the last `open ...` line seen decides (a file may hold both an arm64 and an amd64 section)
+    RAW = re.search(r'∀ ret, RetAddr|\bret hret\b[^\n]*→ ∀ s', t) is not None   # a raw old-shaped statement (faults, panics, ...) in the file
+    # split into top-level items
+    items = re.split(r'(?m)^(?=(?:theorem |lemma |example |def |abbrev |namespace |end |set_option |/--|@\[|private |protected ))', t)
     isa = []
     cur = amd0
     for it in items:
         for ol in re.findall(r'(?m)^open [^\n]*', it):
             if 'Janus.Amd64' in ol: cur = True
             elif 'Janus.Arm64' in ol or 'Janus.GoABI' in ol: cur = False
+        if re.search(r'Janus\.Amd64\.GoABI\.(?:Ensures|CallSetup)', it.split(':=', 1)[0]): cur = True
         isa.append(cur)
-    # pass 1: Ensures-head theorems
-    ens = {}
+    inw, w = [], False
+    for it in items:
+        if re.match(r'namespace Witness\b', it): w = True
+        if re.match(r'end Witness\b', it): w = False
+        inw.append(w)
+    ens = {}      # row theorem name -> is EnsuresK
+    # ---- pass 1: row theorems and generic helpers
     for i, it in enumerate(items):
         amd = isa[i]
         tac = 'janus64_ensures_old' if amd else 'janus_ensures_old'
-        m = re.match(r'(?:theorem|lemma) ([\w.]+)', it) or re.match(r'(example)\b', it)
-        if m and ':=' in it and ':= by' not in it and HEADRE.search(it.split(':=', 1)[0]) and 'Witness' not in it.split(':=', 1)[0]:
-            # a term-mode proof of a main theorem (`:= (go_spec x y).refine refines`): registered, nothing to insert
-            if m.group(1) != 'example':
-                ens[m.group(1)] = bool(re.search(r'(?<![\w.])EnsuresK(?![\w])', it.split(':=', 1)[0]))
-        if m and ':= by' in it:
-            head = it.split(':= by', 1)[0]
-            if HEADRE.search(head) and 'Witness' not in head:
-                if re.search(r'(?<![\w.])EnsuresGrow(64)?(?![\w])', head):
-                    warn.append('theorem %s: EnsuresGrow needs the manual `caller` split (see CHANGELOG, v0.4.0: GCaller, correctness_old + of_old_with); not rewritten' % m.group(1))
-                    continue
-                if m.group(1) != 'example': ens[m.group(1)] = bool(re.search(r'(?<![\w.])EnsuresK(?![\w])', head))
-                if re.search(r':= by\n[ \t]*janus6?4?_ensures_old', it):
-                    it2, n = it, 1
+        m = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it) or re.match(r'(example)\b', it)
+        if not m: continue
+        name = m.group(1)
+        c = conclusion(it)
+        if not c: continue
+        pre_, head, concl, sig, bs, ci = c
+        tac = tac_with_defs(tac, head, concl, reg, fname, sig)
+        if 'Witness' in sig.split(':', 1)[0] and False: continue
+        if head in ('EnsuresGrow', 'EnsuresGrow64'):
+            warn.append('theorem %s: EnsuresGrow needs the manual `caller` split (see CHANGELOG, v0.4.0: GCaller, correctness_old + of_old_with); not rewritten' % name)
+            continue
+        if name != 'example': ens[name] = (head == 'EnsuresK')
+        gen = is_generic(head, concl, sig)
+        body = it[bs:]
+        bstripped = body.lstrip()
+        nm = (re.match(r'\s*', body).end())
+        if gen:
+            P, ent, args, pre = gen
+            hn = 'hinv'
+            if re.search(r'\bhinv\b', it): hn = 'hinv\''
+            ptac = 'janus64_pre_setRet' if amd else 'janus_pre_setRet'
+            prefix = pre_ + 'Ensures'
+            binder = ' (%s : %s.SetRetInv %s %s %s %s := by %s)' % (hn, prefix, P, ent, args, pre, ptac)
+            sig2 = sig[:ci].rstrip() + binder + ' ' + sig[ci:]
+            ref = 'refine %s.of_old %s ?_' % (prefix, hn)
+            if bstripped.startswith('by'):
+                pos = first_tactic_pos(it, bs)
+                if pos is None:
+                    warn.append('theorem %s: cannot find the first tactic' % name); continue
+                p, ind, nl = pos
+                if nl:
+                    items[i] = sig2 + ':=' + it[bs:p] + ' ' * 0 + ref + '\n' + ' ' * ind + it[p:]
                 else:
-                    def ins(mm):   # `intro h₁ h₂ ret hret …`: the leading names (the statement's hypotheses) are introduced first
-                        pre = mm.group(3).strip()
-                        return mm.group(1) + (mm.group(2) + 'intro ' + pre + '\n' if pre else '') + mm.group(2) + tac + '\n' + mm.group(2) + 'intro ret hret'
-                    it2, n = re.subn(r'(:= by\n)([ \t]*)intro ((?:[\w\'_]+ )*?)ret hret', ins, it, count=1)
-                if n == 0: warn.append('theorem %s: no `intro ret hret` right after `:= by`' % (m.group(1)))
-                items[i] = it2
-    # pass 2: applications `thm args RET hret s0 setup pre` (EnsuresK: `RET hret s0 k0 setup pre`) of Ensures-head theorems
+                    indent = indent_of(it, bs) + 2
+                    items[i] = sig2 + ':= by\n' + ' ' * indent + ref + '\n' + ' ' * indent + it[p:].lstrip()
+            else:
+                tb = body.rstrip()
+                trail = body[len(tb):]
+                items[i] = sig2 + ':= by\n  ' + ref + '\n  exact (' + tb.lstrip() + ')' + trail
+            continue
+        # a row theorem
+        if bstripped.startswith('by'):
+            if re.match(r'\s*by\s*\n\s*(?:--[^\n]*\n\s*)*janus6?4?_ensures_old', body): continue
+            kind = proof_kind(body, reg)
+            if kind == 'new': continue          # starts from a new-shaped lemma (`refine Ensures0.of_summary0 …`, a helper): unchanged
+            if kind == 'none':
+                warn.append('theorem %s: the proof is neither old-shaped (`intro ret hret …`) nor a new-shaped lemma application; adjust by hand' % name)
+                continue
+            pos = first_tactic_pos(it, bs)
+            if pos is None:
+                warn.append('theorem %s: cannot find the first tactic' % name); continue
+            p, ind, nl = pos
+            # statement-level hypotheses: `intro h₁ h₂ ret hret …` introduces them first
+            rest = it[p:]
+            mi = re.match(r'intro ((?:[\w\'_]+ )*?)ret hret', rest)
+            if mi and mi.group(1).strip():
+                items[i] = it[:p] + 'intro ' + mi.group(1).strip() + '\n' + ' ' * (ind or 2) + tac + '\n' + ' ' * (ind or 2) + 'intro ret hret' + rest[mi.end():]
+            elif nl:
+                items[i] = it[:p] + tac + '\n' + ' ' * ind + rest
+            else:
+                indent = indent_of(it, bs) + 2
+                items[i] = it[:bs] + ' by\n' + ' ' * indent + tac + '\n' + ' ' * indent + rest.lstrip() if False else \
+                    it[:p] + '\n' + ' ' * indent + tac + '\n' + ' ' * indent + rest.lstrip()
+        elif re.match(r'\s*fun ret hret\b', body):
+            tb = body.rstrip()
+            trail = body[len(tb):]
+            items[i] = sig + ':= by\n  ' + tac + '\n  exact (' + tb.lstrip() + ')' + trail
+        # else: a term that applies another (migrated) theorem or helper: unchanged
+    for i, it in enumerate(items):
+        m = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
+        if not m: continue
+        it = fix_mono(it, warn)
+        cc = conclusion(it)
+        if cc and re.search(r'(?<![\w.\'])(?:\w+\.)*Ensures0?\.mono(?![\w\'])', it[split_sig(it)[1] or 0:]):
+            ptac = 'janus64_pre_setRet' if isa[i] else 'janus_pre_setRet'
+            dl = tac_with_defs(ptac, cc[1], cc[2], reg, fname, cc[3])
+            if dl != ptac:
+                it = re.sub(r'(?<![\w.\'])((?:\w+\.)*Ensures0?\.mono)(?![\w\'_])', lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[split_sig(it)[1] or 0:]) if False else \
+                    it[:split_sig(it)[1]] + re.sub(r'(?<![\w.\'])((?:\w+\.)*Ensures0?\.mono)(?![\w\'_])', lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[split_sig(it)[1]:])
+        it = add_hlen(it, isa[i], warn, m.group(1))
+        items[i] = it
+    # ---- pass 2: old-shaped applications of Ensures-form theorems -> `(thm args).toOld ret hret …`
+    appnames = set(reg.names) | set(ens)
+    if appnames:
+        nre = '|'.join(re.escape(n) for n in sorted(appnames, key=len, reverse=True))
+        are = re.compile(r'(?<![\w.\'])((?:[\w]+\.)*(?:' + nre + r'))(?![\w\'])')
+        for i, it in enumerate(items):
+            out = []
+            pos = 0
+            changed = False
+            sigend = split_sig(it)[1] if split_sig(it)[0] is not None else 0
+            while True:
+                m = are.search(it, max(pos, sigend))
+                if not m: break
+                toks, stop = tokens(it, m.end())
+                idx = None
+                for k in range(len(toks) - 1):
+                    if toks[k][0] == 'ret' and toks[k + 1][0] == 'hret' and k + 2 < len(toks) + 1:
+                        idx = k; break
+                if idx is None:
+                    out.append(it[pos:m.end()]); pos = m.end(); continue
+                argtoks = toks[:idx]
+                if argtoks:
+                    argend = argtoks[-1][2]
+                else:
+                    argend = m.end()
+                out.append(it[pos:m.start()])
+                out.append('(' + it[m.start():argend] + ').toOld')
+                pos = argend
+                changed = True
+            if changed:
+                out.append(it[pos:])
+                items[i] = ''.join(out)
+    # ---- pass 3: witnesses
     def app_re(names):
         if not names: return None
-        return re.compile(r'(?<![\w.])((?:Proof\.)?(?:' + '|'.join(re.escape(n) for n in sorted(names)) + r')) ((?:\([^()]*\) |[^\s()⟨⟩]+ )*?)(\w+) hret (\w+) ')
-    plain = {n for n, k in ens.items() if not k}
+        return re.compile(r'(?<![\w.\'])((?:[\w]+\.)*(?:' + '|'.join(re.escape(n) for n in sorted(names, key=len, reverse=True)) + r'))(?![\w\'])')
+    plain = {n for n, k in ens.items() if not k} | {n for n in reg.names}
     kern = {n for n, k in ens.items() if k}
+
     def find_apps(it):
+        """Applications `thm args RET hret S SETUP PRE` (EnsuresK: `RET hret S K SETUP PRE`): (m, args_tokens, ret, s, k?, setup, pre, end)."""
         out = []
         for names, isk in ((plain, False), (kern, True)):
             r = app_re(names)
             if not r: continue
-            tail = r'(\w+) (\w+) (⟨[^⟩]*⟩|\([^)]*\)|[^\s⟩,)]+)' if isk else r'(\w+) (⟨[^⟩]*⟩|\([^)]*\)|[^\s⟩,)]+)'
-            r2 = re.compile(r.pattern + tail)
-            for m in r2.finditer(it): out.append((m, isk))
+            for m in r.finditer(it):
+                toks, stop = tokens(it, m.end())
+                for k in range(len(toks) - 3):
+                    if toks[k + 1][0] == 'hret' and re.fullmatch(r"[\w']+", toks[k][0]):
+                        need = 5 if isk else 4          # ret hret s [k] setup  (+ pre follows)
+                        if k + need <= len(toks):
+                            out.append((m, toks, k, isk))
+                        break
         return out
     used_setups = set()
     for it in items:
-        for m, isk in find_apps(it): used_setups.add(m.group(6 if isk else 5))
+        for m, toks, k, isk in find_apps(it):
+            sidx = k + (4 if isk else 3)
+            if sidx < len(toks): used_setups.add(toks[sidx][0])
     for i, it in enumerate(items):
         amd = isa[i]
-        m = re.match(r'(?:theorem|lemma) ([\w.]+)', it)
+        m = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
         if not m: continue
         name = m.group(1)
         if name in used_setups and SETUP_RE.search(it):
             it = fix_setups(it)
-            if amd:
-                it = re.sub(r'⟨rfl, (?:by decide|rfl), ', '⟨rfl, ', it, count=1)   # amd64: drop the `[RSP] = ret` field
-            elif 'CallSetupF' in it:      # ABI0 (arm64): pc, lr, argWords, frame, spAligned -> pc, argWords, frame, spAligned
-                it = re.sub(r'⟨rfl, rfl, by', '⟨rfl, by', it)
-            else:
-                it = re.sub(r'⟨rfl, rfl, by', '⟨rfl, by decide, by', it)
-            if SETUP_RE.search(it): warn.append('setup %s not rewritten' % name)
+            it = fix_setup_body(it, amd, warn, name)
+            if re.search(r'\b(?:CallSetup0?|CCallA?)\b\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\.withExit', it): warn.append('setup %s not rewritten' % name)
             items[i] = it
             continue
-        # any other item that applies an Ensures-head theorem: a witness (`∃ …`) or a `returns` statement
         apps = find_apps(it)
-        exw = '∃' in it.split(':=', 1)[0] and SETUP_RE.search(it) is not None   # a witness statement that states a call
-        if (apps or exw) and name not in ens:
-            it = fix_setups(it)
-            states = {'s'} | {mm.group(4) for mm, isk in apps}
-            hm = re.search(r'RetAddr \S+ (\w+)', it.split(':=', 1)[0])
-            retv = hm.group(1) if '∃' in it.split(':=', 1)[0] and hm else (apps[0][0].group(3) if apps else 'ret')
-            lines = it.split('\n')
-            k = 0
-            while k < len(lines):
-                if re.search(r'(Returns\w*|GrownReturns\w*|RunsAtLeast \d+|ReturnsWithin \d+) \((?:[^()]|\([^()]*\))*?\.withExit \w+\)', lines[k]) and 'setRet' not in lines[k]:
-                    j = k
-                    while True:
-                        for st in states:
-                            lines[j] = re.sub(r'(?<![\w.\'])' + re.escape(st) + r'(?![\w\'])', '(' + st + '.setRet ' + retv + ')', lines[j])
-                        if ':=' in lines[j] or j + 1 >= len(lines) or not lines[j + 1].strip(): break
-                        j += 1
-                    k = j
-                k += 1
-            it = '\n'.join(lines)
-            def sub_plain(mm):
-                return f'{mm.group(1)} {mm.group(2)}{mm.group(4)} {mm.group(5)} {mm.group(6)} {mm.group(3)} hret'
-            def sub_k(mm):
-                return f'{mm.group(1)} {mm.group(2)}{mm.group(4)} {mm.group(5)} {mm.group(6)} {mm.group(7)} {mm.group(3)} hret'
-            for names, isk in ((plain, False), (kern, True)):
-                r = app_re(names)
-                if not r: continue
-                tail = r'(\w+) (\w+) (⟨[^⟩]*⟩|\([^)]*\)|[^\s⟩,)]+)' if isk else r'(\w+) (⟨[^⟩]*⟩|\([^)]*\)|[^\s⟩,)]+)'
-                r2 = re.compile(r.pattern + tail)
-                it = r2.sub(sub_k if isk else sub_plain, it)
+        sig0 = it.split(':=', 1)[0]
+        exw = '∃' in sig0 and SETUP_RE.search(it) is not None
+        if (apps or (exw and inw[i] and (name in FORCE or (ens and not RAW)))) and (name not in ens or inw[i]) and not conclusion(it) is not None:
+            it = rewrite_witness(it, apps, amd, name, warn, plain, kern)
             items[i] = it
     return ''.join(items), warn
 
-for f in sys.argv[1:]:
-    t = open(f).read()
-    amd = 'Janus.Amd64' in t
-    t2, warn = migrate(t, amd)
-    open(f, 'w').write(t2)
-    print(f, ('WARN: ' + '; '.join(warn)) if warn else 'ok')
+def fix_setup_body(it, amd, warn, name):
+    """Drop/replace the return-address field of the anonymous constructor that proves a `CallSetup`."""
+    sig, bs = split_sig(it)
+    if sig is None: return it
+    body = it[bs:]
+    k = body.find('⟨')
+    if k < 0 or body[:k].strip() not in ('', 'by', 'by exact'):
+        if 'CallSetup0' in sig or 'CallSetupF' in sig:
+            warn.append('setup %s: not an anonymous constructor; adjust the return-address field by hand' % name)
+        return it
+    # matching close
+    d = 0
+    j = k
+    while j < len(body):
+        if body[j] == '⟨': d += 1
+        elif body[j] == '⟩':
+            d -= 1
+            if d == 0: break
+        j += 1
+    inner = body[k + 1:j]
+    parts = split_top(inner)
+    if len(parts) < 3: return it
+    abi0 = 'CallSetupF' in sig
+    if amd:
+        # CallSetup (rip, ret, zero, len, args, df) / ABI0 CallSetup0 (rip, ret, argWords, frame, df): drop `ret`
+        parts = [parts[0]] + parts[2:]
+    elif abi0:
+        parts = [parts[0]] + parts[2:]        # (pc, lr, argWords, frame, spAligned) -> (pc, argWords, frame, spAligned)
+    else:
+        parts = [parts[0], ' by decide'] + parts[2:]   # (pc, lr, args) -> (pc, len, args)
+    return it[:bs] + body[:k + 1] + ','.join(parts) + body[j:]
+
+def rewrite_witness(it, apps, amd, name, warn, plain, kern):
+    it = fix_setups(it)
+    sig_end = split_sig(it)[1] if split_sig(it)[0] is not None else len(it)
+    stmt = it[:sig_end]
+    # states set up by the statement, and the return-address variable
+    states = {'s'}
+    for mm in re.finditer(r"(?:CallSetup0|CallSetupF|CCallF|CCallAF)\b[^\n]*?\s(\w+'?)(?=\s*(?:∧|$|:=))", stmt, re.M):
+        states.add(mm.group(1))
+    for m, toks, k, isk in apps:
+        sidx = k + 2
+        if sidx < len(toks): states.add(toks[sidx][0])
+    states.discard('_')
+    hm = re.search(r'RetAddr\s+', stmt)
+    retv = None
+    if hm:
+        tk, _ = tokens(stmt, hm.end())
+        if len(tk) >= 2 and re.fullmatch(r"[\w']+", tk[1][0]): retv = tk[1][0]
+    if retv is None and apps:
+        m, toks, k, isk = apps[0]
+        retv = toks[k][0]
+    if retv is None: retv = 'ret'
+    lines = it.split('\n')
+    k = 0
+    while k < len(lines):
+        if re.search(r'(Returns\w*|GrownReturns\w*|RunsAtLeast \d+|ReturnsWithin \d+) \((?:[^()]|\([^()]*\)|\((?:[^()]|\([^()]*\))*\))*?\.withExit \w+\)', lines[k]) and 'setRet' not in lines[k]:
+            j = k
+            while True:
+                for st in states:
+                    lines[j] = re.sub(r'(?<![\w.\'])' + re.escape(st) + r'(?![\w\'])', '(' + st + '.setRet ' + retv + ')', lines[j])
+                if ':=' in lines[j] or j + 1 >= len(lines) or not lines[j + 1].strip(): break
+                j += 1
+            k = j
+        k += 1
+    it = '\n'.join(lines)
+    # applications: `thm args RET hret S SETUP PRE` -> `thm args S SETUP PRE RET hret`
+    sig_end = split_sig(it)[1] if split_sig(it)[0] is not None else 0
+    for names, isk in ((plain, False), (kern, True)):
+        r = re.compile(r'(?<![\w.\'])((?:[\w]+\.)*(?:' + '|'.join(re.escape(n) for n in sorted(names, key=len, reverse=True)) + r'))(?![\w\'])') if names else None
+        if not r: continue
+        pos = sig_end
+        while True:
+            m = r.search(it, pos)
+            if not m: break
+            toks, stop = tokens(it, m.end())
+            kk = None
+            for q in range(len(toks) - 1):
+                if toks[q + 1][0] == 'hret' and re.fullmatch(r"[\w']+", toks[q][0]):
+                    kk = q; break
+            need = 5 if isk else 4
+            if kk is None or kk + need > len(toks):
+                pos = m.end(); continue
+            ret_t, hret_t = toks[kk], toks[kk + 1]
+            lastidx = kk + (4 if isk else 3)      # the setup token; the precondition proof follows
+            if lastidx + 1 < len(toks):
+                lastidx += 1                       # include the precondition proof
+            rest_start = hret_t[2]
+            rest_end = toks[lastidx][2]
+            moved = it[ret_t[1]:hret_t[2]]
+            new = it[rest_start:rest_end].lstrip() + ' ' + moved
+            # keep line structure: put the moved pair on the same line as the end
+            it = it[:ret_t[1]] + new + it[rest_end:]
+            pos = ret_t[1] + len(new)
+    return it
+
+def main(files):
+    reg = Reg()
+    texts = {}
+    for f in files:
+        t = open(f).read()
+        texts[f] = t
+        collect(t, reg)
+        collect_defs(t, f, reg)
+        reg.imports[f] = re.findall(r'(?m)^import\s+([\w.]+)', t)
+        reg.modfile[modname(f)] = f
+        reg.modfile[f.replace('/', '.')[:-5]] = f
+    for f in files:
+        t = texts[f]
+        amd = 'Janus.Amd64' in t
+        t2, warn = migrate(t, amd, reg, f)
+        if t2 != t: open(f, 'w').write(t2)
+        print(f, ('WARN: ' + '; '.join(warn)) if warn else 'ok')
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

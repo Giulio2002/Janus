@@ -1063,7 +1063,7 @@ theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
       (PreH0 FT pool rt H lo hi) (GCaller FT hi fs)
       (fun _ s' => s'.regs 0 = hres x) :=
   EnsuresGrow64.of_old_with (Pold := PreH FT pool rt H)
-    (fun s ret hret hp hc => by
+    (fun s ret _ hret hp hc => by
       have h1 := PreH0.setRet (ret := ret) henv.2.2.2.2 hp
       obtain ⟨c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16⟩ := h1
       have hu : (s.setRet ret).mem.readLE ((s.setRet ret).regs 4).toNat 8 < 2 ^ 47 := by

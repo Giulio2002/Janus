@@ -343,7 +343,7 @@ theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
       (fun s => FT.Agrees Extracted.frames ∧ GPre0 FT pool rt H lo hi s) (GCaller FT hi fs)
       (fun _ s' => s'.regs 0 = if i.toNat % 16 = 0 then x else 0) :=
   EnsuresGrow.of_old_with (Pold := fun s => FT.Agrees Extracted.frames ∧ GPre FT pool rt H s)
-    (fun s ret _ hp hc => by
+    (fun s ret _ _ hp hc => by
       obtain ⟨hA, h0⟩ := hp
       have h1 : GPre0 FT pool rt H lo hi (s.setRet ret) := h0
       obtain ⟨c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19⟩ := h1

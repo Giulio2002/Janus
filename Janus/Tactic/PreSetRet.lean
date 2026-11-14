@@ -34,6 +34,10 @@ namespace Janus.Tactic
 
 open Lean Elab Tactic Meta
 
+/-- Keeps a copy of a hypothesis out of `omega`'s sight (it flattens every conjunction of the context, and a second copy of a
+precondition doubles the disjunction case splits of each side condition). Unfolds at default transparency (`exact`). -/
+def Hide (p : Prop) : Prop := p
+
 /-- Destructure every hypothesis of the form `A ∧ B` or `∃ x, A` of the local context, repeatedly
 (except the one named by `keep`). With `deep`, a hypothesis whose type *unfolds* (default transparency) to a
 structure-like proposition (`∧`, `∃`, `StackGuardOK`, a consumer's `CallEnv`, …) is split too. -/
@@ -66,6 +70,32 @@ elab_rules : tactic
       let subs ← g.cases fv
       replaceMainGoal (subs.map (·.mvarId)).toList
 
+/-- `janus_disj_omega`: a side condition `a + n ≤ RSP ∨ RSP + 8 ≤ a` that follows from ONE disjunction of the context
+(`x + n ≤ RSP - k ∨ RSP + m ≤ x`, an unfolded `Outside`/`Apart` of the precondition): split that disjunction, clear the other
+disjunctions and close both branches with `omega`. A plain `omega` splits every disjunction of the context (exponential in
+their number for a big precondition); this tries each disjunction on its own, which is linear in their number. -/
+elab "janus_disj_omega" : tactic => do
+  let g ← getMainGoal
+  let hyps ← g.withContext do
+    let mut acc : Array FVarId := #[]
+    for d in (← getLCtx) do
+      if d.isImplementationDetail then continue
+      let ty ← whnfR (← instantiateMVars d.type)
+      if ty.isAppOfArity ``Or 2 then acc := acc.push d.fvarId
+    return acc
+  for hy in hyps do
+    let st ← saveState
+    try
+      let mut g' := g
+      for o in hyps do
+        if o != hy then g' ← g'.tryClear o
+      replaceMainGoal [g']
+      let hs ← g'.withContext (Term.exprToSyntax (mkFVar hy))
+      Tactic.withoutRecover <| evalTactic (← `(tactic| rcases $hs:term with h | h <;> omega))
+      return
+    catch _ => st.restore
+  throwError "janus_disj_omega: no single disjunction of the context closes the goal"
+
 /-- `janus_have_rsp8 h : T`: add `h : s.mem.accessible (s.regs 4).toNat 8 true = true` (the return slot is writable)
 when some hypothesis `m.accessible a n true = true` of the context contains `[RSP, RSP + 8)` (syntactic scan of
 the hypotheses, then `accessible_mono` with the two bounds closed by `omega`); no-op if none does. -/
@@ -82,14 +112,19 @@ elab_rules : tactic
         if ty.isAppOfArity ``Eq 3 && (ty.getArg! 1).isAppOfArity ``Janus.Arm64.Memory.accessible 4 then
           acc := acc.push d.toExpr
       return acc
-    for hy in hyps do
-      let hs ← g.withContext (Term.exprToSyntax hy)
-      let st ← saveState
-      try
-        Tactic.withoutRecover <|
-          evalTactic (← `(tactic| have $h : $T := Janus.Arm64.Memory.accessible_mono _ $hs (by omega) (by omega)))
-        return
-      catch _ => st.restore
+    -- first without splitting the context's disjunctions (a failing `omega` is exponential in their number), then with
+    for full in [false, true] do
+      for hy in hyps do
+        let hs ← g.withContext (Term.exprToSyntax hy)
+        let st ← saveState
+        try
+          Tactic.withoutRecover <|
+            evalTactic (← if full then
+              `(tactic| have $h : $T := Janus.Arm64.Memory.accessible_mono _ $hs (by omega) (by omega))
+            else
+              `(tactic| have $h : $T := Janus.Arm64.Memory.accessible_mono _ $hs (by omega -splitDisjunctions) (by omega -splitDisjunctions)))
+          return
+        catch _ => st.restore
 
 /-- The body of `janus_pre_setRet`, on the introduced `s ret hret hp` (names passed in so that the
 variants for preconditions with more arguments, `janus_pre_setRet_k`, share it). -/

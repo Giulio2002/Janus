@@ -375,7 +375,7 @@ theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
       (GPre0 FT pool rt H lo hi) (GCaller FT hi fs)
       (fun _ s' => s'.regs 0 = if i.toNat % 16 = 0 then x else 0) :=
   EnsuresGrow64.of_old_with (Pold := GPre FT pool rt H)
-    (fun s ret hret hp hc => by
+    (fun s ret _ hret hp hc => by
       have h1 := GPre0.setRet (ret := ret) hp
       obtain ⟨c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18⟩ := h1
       exact ⟨lo, hi, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, ⟨fs, hc.1, hc.2.1, hc.2.2.1, hc.2.2.2.1, hc.2.2.2.2⟩, c13, c14, c15, c16, c17, c18⟩)

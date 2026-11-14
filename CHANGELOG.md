@@ -144,6 +144,51 @@ Direct style (no bridge; for a new proof or a precondition the bridge cannot dis
   three fields: `tlsG_setRet_iff` needs `fsBase ≤ RSP ∨ RSP + 16 ≤ fsBase` (a precondition conjunct, as in `proofs-sys/amd64/Pid`).
   The `RTPre`/`CallerOK`/`PanicPre`/`EqPre` families discharge the new field from their `Disjoint (g + 16) …` conjunct.
 
+### Phase 1d: the inner proofs keep compiling (pilot on fv-modexp, 2026-11-14)
+
+A consumer migrates a *row* (the final `Ensures…` theorem) and its witness; everything else (summaries, `janus_intro`, `Summary.returns`,
+`Ensures.toSummaryIn`, `Ensures.mono`, `Ensures0.of_summary0`, generic wrappers) keeps its v0.3 signature. One scripted transformation:
+`find lean -name '*.lean' | xargs scripts/dev/migrate-v040.py` (it needs the whole tree in one call: the first pass collects the theorems
+whose conclusion is an `Ensures` form).
+
+- **`hinv` gets the call setup.** Every `of_old` bridge takes `hinv : ∀ s ret, <ret-free setup> s → RetAddr p ret → pre s → pre (s.setRet ret)`
+  (`CallSetup0` / ABI0 `CallSetupF` / C `CCallF`, `CCallAF`), the tactics introduce `s ret hs hret hp`. A precondition may use
+  the call facts (`hs.args`, the frame, `DF`, `X15`) to be invariant.
+- **Where the amd64 apartness of the `g` guard word lives.** It stays a field of `StackGuardOK` (phase 1c). Putting it into
+  `CallSetup0` instead was tried and rejected: `Ensures.toSummaryIn` builds the callee's `CallSetup` from a summary
+  precondition, which knows nothing about `R14`, so EVERY call of a callee (even one with `pre = True`) would have had to prove
+  it (`test/lean/JanusTests/CallPre64`, `InternalCall` failed to elaborate); in `StackGuardOK` it is part of the precondition of the callees that read the
+  guard and of no others. The 3-field patterns `⟨a, b, c⟩ := h` still work (the 4th field is an inaccessible hypothesis, which
+  `omega` uses); only constructions `⟨a, b, c⟩ : StackGuardOK s adj` get a 4th component (in an environment transfer lemma).
+- **`janus_intro` / `janus64_intro` / `janus_intro0` / `janus64_intro0`** accept the ret-free setup (`hs : CallSetup0 …`,
+  `CallSetupF …`) too: with `hret : RetAddr P ret` in the context they work on `hs.setRet ret`, the state the run starts from
+  (`intro s hs hpre ret hret; janus_intro hs`, the "direct style"). On a `CallSetup (P.withExit ret) …` they are unchanged.
+- **ABI0.** `CallSetupF` answers `.arg`, `.frameWord_eq`, `.pc_toNat` / `.rip_toNat`, `.frame_accessible`, `.frame_bound`, as
+  `CallSetup0` does. `Ensures0.of_summary0` keeps its v0.3 signature (`hpre`/`hpost` over `CallSetup0 (P.withExit ret) …`, the state
+  with the return address installed) and takes the new obligation as a trailing argument proved by default
+  (`hinv := by janus_pre_setRet`); the new-shaped lemma is `Ensures0.of_summary0_at`. `Ensures0.toOld` / `Ensures.toOld`:
+  the old-shaped statement of a theorem, for applying it as `(thm args).toOld ret hret s hs hp` (the script rewrites
+  such applications).
+- **`Ensures.mono`, `Ensures0.mono`** keep the v0.3 `hpost : ∀ s s', pre' s → post s s' → post' s s'` (about the state with the return
+  address installed) plus a trailing `hinv` for `pre'` (default `janus_pre_setRet`); `Ensures.mono_ret` / `Ensures0.mono_ret` state `hpost` at
+  `s.setRet ret` (`∀ s ret s', …`). The script rewrites `mono` whose `hpost` ignores the state (`fun _ _ _ h => h.1`) into `mono_ret` with
+  one more `_`: no obligation about `pre'`.
+- **Generic wrappers** (a theorem `… : Ensures P entry args pre post` with `pre` a variable, such as `Ensures.full64`,
+  `ensures_of_summary`): add `(hinv : Ensures.SetRetInv P entry args pre := by janus64_pre_setRet)` as the last binder and
+  start with `refine Ensures.of_old hinv ?_`; the call sites do not change (the default tactic proves `hinv` for their concrete
+  `pre`). The script does exactly this. (`Ensures.SetRetInv` is `∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s →
+  pre (s.setRet ret)`.)
+- **arm64 `hlen`.** `Ensures.toOld`, `Ensures.toSummaryIn` take `(hlen : args.length ≤ numIntRegs := by simp [numIntRegs])`
+  (the new `CallSetup0` has `len`, as `setRet` writes `X30`). A generic wrapper with a *variable* `args` passes its own
+  `hlen`; the script adds `(hlen : args.length ≤ numIntRegs := by simp [numIntRegs])` to the wrapper and passes it on
+  (`Ensures.toSummaryIn (hlen := hlen) h …`).
+- **`janus64_pre_setRet` also discharges** (all tested in `JanusTests/RetAddr`): explicit reads `readLE (RSP + 8 / 16 / 24) 8`
+  together with the old-word bound `readLE RSP 8 < 2^47` (re-proved from `RetAddr`: after `setRet` the word is `ret`),
+  `Janus.Spec.Ptr` and `Buffer` (pure `accessible`: simp lemmas `ptr_setRet`, `buffer_setRet`), `StackGuardOK`, `TlsG`
+  (with its `fsBase` conjunct), `DataLoaded`, and `R.inv b L g (view R.rt L s.mem)` (`view_setRet`: the return slot is outside
+  `R.rt`, which `janus_outside_slot` takes from any `Outside a n R.rt` hypothesis whose range contains `[RSP, RSP + 8)`, such as a
+  `win` conjunct of the environment). Environment predicates of the consumer are passed as `janus64_ensures_old [CallEnv, …]`.
+
 ### v0.3.4 items (merged)
 
 Auditor and CLI fixes requested by fv-modexp.

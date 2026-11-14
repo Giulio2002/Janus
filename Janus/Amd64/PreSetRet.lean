@@ -66,7 +66,11 @@ elab "janus_outside_slot" : tactic => do
 syntax (name := janus64PreSetRetCore) "janus64_pre_setRet_core " ident ident ident ident ident " [" Lean.Parser.Tactic.simpLemma,* "]" : tactic
 
 macro_rules (kind := janus64PreSetRetCore)
-  | `(tactic| janus64_pre_setRet_core $s $ret $hs $hret $hp [$ds,*]) => `(tactic|
+  | `(tactic| janus64_pre_setRet_core $s $ret $hs $hret $hp [$ds,*]) => do
+    -- lemmas of modules that are imported after this one: identifiers built with `mkIdent` resolve where the tactic is used
+    let v1 := mkIdent `Janus.Contracts.view_setRet
+    let v2 := mkIdent `Janus.Contracts.StackAmd64.rtView_setRet
+    `(tactic|
       (have hu := ($hret).user
        try simp only [Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.SPAligned,
          Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.Disjoint, Janus.Amd64.GoABI.valueAt,
@@ -75,10 +79,10 @@ macro_rules (kind := janus64PreSetRetCore)
          Janus.Amd64.GoABI.ClosureCtx, Janus.Spec.Disjoint, Janus.Apart, Janus.outside_nil,
          Janus.outside_cons, $ds,*] at $hp:ident ⊢
        all_goals
-        (have hp0 := $hp
+        (have hp0 : Janus.Tactic.Hide _ := $hp
          janus_split_hyps keep hp0
          janus_have_rsp8 hacc8 : ($s).mem.accessible (($s).regs 4).toNat 8 true = true
-         try simp (disch := first | omega | assumption)
+         try simp (disch := first | assumption | janus_disj_omega | omega)
            only [Janus.Amd64.GoABI.setRet_regs,
            Janus.Amd64.GoABI.setRet_rip, Janus.Amd64.GoABI.setRet_flags,
            Janus.Amd64.GoABI.setRet_xmm, Janus.Amd64.GoABI.setRet_ymmHi,
@@ -91,9 +95,9 @@ macro_rules (kind := janus64PreSetRetCore)
            Janus.Amd64.GoABI.stackGuardOK_setRet, Janus.Amd64.GoABI.tlsG_setRet_iff,
            Janus.Amd64.GoABI.buffer_setRet, Janus.Amd64.GoABI.ptr_setRet] at ⊢
          try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
-         try simp (disch := first | omega | assumption | janus_outside_slot) only [Janus.Contracts.view_setRet,
-           Janus.Contracts.rtView_setRet] at ⊢
-         all_goals first | with_reducible exact hp0 | (and_intros <;> first | with_reducible assumption | omega))))
+         try simp (disch := first | assumption | janus_outside_slot) only [$v1:ident] at ⊢
+         try simp (disch := first | assumption | janus_outside_slot) only [$v2:ident] at ⊢
+         all_goals first | exact hp0 | (and_intros <;> first | with_reducible assumption | omega | (trace_state; fail "janus_pre_setRet: this conjunct of the precondition is not invariant under setRet (see the goal above; pass the predicate definitions to the tactic, e.g. `janus64_ensures_old [Pre, CallEnv]`, and make a pointer read apart from the return slot)")))))
 
 syntax (name := janus64PreSetRet) "janus64_pre_setRet" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 
