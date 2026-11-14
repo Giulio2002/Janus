@@ -666,7 +666,7 @@ def fix_stackguard(t):
     `⟨…, hg1, hg2, hg3, …⟩` of another state still need their own proof of `hg4` (reported)."""
     return re.sub(r'⟨hg1, hg2, hg3⟩', '⟨hg1, hg2, hg3, hg4⟩', t)
 
-SG_CLOSER = "first | omega | (simp only [stackguard0Offset, regG, regSP, *]; omega)"
+SG_CLOSER = "first | omega | (simp_all only [stackguard0Offset, regG, regSP]; omega)"
 
 def fix_stackguard_construct(t):
     """`refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, …⟩` (an environment transfer lemma: a `CallEnv` whose first component is a
