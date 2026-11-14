@@ -36,11 +36,10 @@ def wstate (r : Nat → W64) : Janus.Amd64.State :=
 
 theorem wstate_eqPre (r : Nat → W64) (n : Nat) (hn : n ≤ 4) : EqPre 64 n (wstate r) := by
   have hw : wmem.accessible (IfaceModel.wsp - 64) (64 + 8 + 8 * 4) true = true := by decide
-  refine ⟨⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, rfl, rfl, ?_⟩, ?_⟩
+  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, rfl, rfl, ?_⟩, ?_⟩
   · show IfaceModel.wg + 16 + 8 ≤ 2 ^ 48; decide
   · show wmem.accessible (IfaceModel.wg + 16) 8 false = true; decide
   · show wmem.readLE (IfaceModel.wg + 16) 8 + 64 < IfaceModel.wsp; decide
-  · show IfaceModel.wg + 16 + 8 ≤ IfaceModel.wsp ∨ IfaceModel.wsp + 8 ≤ IfaceModel.wg + 16; decide
   · show IfaceModel.wsp % 8 = 0; decide
   · show 64 ≤ IfaceModel.wsp; decide
   · show IfaceModel.wsp + 8 + 8 * n ≤ 2 ^ 48; simp [IfaceModel.wsp]; omega

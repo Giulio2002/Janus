@@ -558,11 +558,10 @@ theorem wwb64 (l : List Nat) :
 
 theorem wguardE64 (l : List Nat) (n : Nat) (hn : n ≤ 5) : MemPre64 4096 n (wst l) := by
   have hw : wmem.accessible (wsp - 4096) (4096 + 8 + 8 * 5) true = true := by decide
-  refine ⟨⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩
+  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩
   · simp only [regG, stackguard0Offset, w14, wgn]; decide
   · simp only [regG, stackguard0Offset, w14, wgn, wmem_eq]; decide
   · simp only [stackguard0, regG, regSP, stackguard0Offset, w14, w4, wgn, wspn, wmem_eq]; decide
-  · simp only [regG, regSP, stackguard0Offset, w14, w4, wgn, wspn]; decide
   · simp only [w4, wspn]; decide
   · simp only [w4, wspn]; decide
   · simp only [w4, wspn]; simp [wsp]; omega

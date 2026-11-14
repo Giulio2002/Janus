@@ -662,12 +662,11 @@ theorem sstate_pre {T : List FuncInfo} {m : Janus.Arm64.Memory} (nargs : Nat) (h
   have hm : (sstate pc m x0 x1).mem = m := rfl
   have hgn : (BitVec.ofNat 64 swg).toNat = swg := by decide
   have hspn : (BitVec.ofNat 64 swsp).toNat = swsp := by decide
-  refine ⟨henv, ⟨?_, ?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩
+  refine ⟨henv, ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩
   · simp only [regG, stackguard0Offset, hg14, hgn]; decide
   · simp only [regG, stackguard0Offset, hg14, hm, hgn]; exact hgr
   · simp only [stackguard0, regG, regSP, stackguard0Offset, hg14, hm, hsp, P0_depth, hgn, hspn, hg0]
     simp only [swsp]; omega
-  · simp only [regG, regSP, stackguard0Offset, hg14, hsp, hgn, hspn]; decide
   · simp only [hsp, hspn]; decide
   · simp only [hsp, hspn, P0_depth]; decide
   · simp only [hsp, hspn, P0_depth]; simp only [swsp]; omega

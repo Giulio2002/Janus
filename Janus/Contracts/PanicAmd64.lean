@@ -115,13 +115,12 @@ theorem PanicPre.of_parts {P : PanicRuntime} {s S : State} {frame above nargs : 
     (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg : S.regs 14 = s.regs 14)
     (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
     (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame + above) : PanicPre P nargs S := by
-  obtain ⟨-, ⟨hg1, hg2, hg3, -⟩, hal, hd, hb, hst, hout, hdj, -⟩ := hc
+  obtain ⟨-, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, -, -⟩ := hc
   simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3
-  refine ⟨henv, ⟨?_, ?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, hx, hdf, hra, ?_⟩
+  refine ⟨henv, ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, hx, hdf, hra, ?_⟩
   · simp only [regG, stackguard0Offset, hg]; omega
   · simp only [regG, stackguard0Offset, hg, hacc]; exact hg2
   · simp only [stackguard0, regG, regSP, stackguard0Offset, hg, hguard, hsp]; omega
-  · simp only [regG, regSP, stackguard0Offset, Spec.Disjoint, hg, hsp] at hdj ⊢; omega
   · rw [hsp]; omega
   · rw [hsp]; omega
   · rw [hsp]; omega
@@ -165,15 +164,14 @@ theorem PanicPre.of_within {P : PanicRuntime} {s S : State} {frame above nargs :
     (hal : (S.regs 4).toNat % 8 = 0) (hg : S.regs 14 = s.regs 14)
     (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47) :
     PanicPre P nargs S := by
-  obtain ⟨-, ⟨hg1, hg2, hg3, -⟩, -, hd, hb, hst, hout, hgd, hgo⟩ := hc
+  obtain ⟨-, ⟨hg1, hg2, hg3⟩, -, hd, hb, hst, hout, hgd, hgo⟩ := hc
   simp only [regG, regSP, stackguard0Offset, stackguard0, Spec.Disjoint] at hg1 hg2 hg3 hgd
   have hguard : S.mem.readLE ((s.regs 14).toNat + 16) 8 = s.mem.readLE ((s.regs 14).toNat + 16) 8 :=
     hf.readLE _ _ (by rw [outside_append]; exact ⟨hgo, by simp only [outside_cons, outside_nil, and_true]; omega⟩)
-  refine ⟨henv, ⟨?_, ?_, ?_, ?_⟩, hal, ?_, ?_, ?_, hx, hdf, hra, ?_⟩
+  refine ⟨henv, ⟨?_, ?_, ?_⟩, hal, ?_, ?_, ?_, hx, hdf, hra, ?_⟩
   · simp only [regG, stackguard0Offset, hg]; omega
   · simp only [regG, stackguard0Offset, hg, hf.accessible]; exact hg2
   · simp only [stackguard0, regG, regSP, stackguard0Offset, hg, hguard]; omega
-  · simp only [regG, regSP, stackguard0Offset, hg]; omega
   · omega
   · omega
   · rw [hf.accessible]; exact Janus.Arm64.Memory.accessible_mono _ hst (by omega) (by omega)

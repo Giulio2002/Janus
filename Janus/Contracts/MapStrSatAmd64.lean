@@ -73,7 +73,7 @@ theorem access2Str64_satisfiable : ∃ (M : MapModel (Nat × Nat) (BitVec 64))
         else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
       rip := BitVec.ofNat 64 A0, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0,
       mem := Janus.Contracts.EqHashModel.wmem64 }, rfl,
-    ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩, by decide, by decide, by decide,
+    ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide,
       by decide, rfl, rfl, by decide, ?_⟩, trivial, by simp [IsMap], by decide, by decide, ?_⟩⟩
   · simp only [MS0, outside_cons, outside_nil, and_true]; decide
   · simp only [Contracts.MapAmd64.calleeStack, MS0, outside_cons, outside_nil, and_true]; decide
@@ -109,12 +109,11 @@ theorem mstate64_rtpre {K V : Type} (M : MapModel K V) (hp : M.priv = priv0) (hd
   have h4 : (mstate64 m r).regs 4 = BitVec.ofNat 64 wsp := rfl
   have h14 : (mstate64 m r).regs 14 = BitVec.ofNat 64 wg := rfl
   have hm : (mstate64 m r).mem = m := rfl
-  refine ⟨by rw [h14, hm]; exact he, ⟨?_, ?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩
+  refine ⟨by rw [h14, hm]; exact he, ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩
   · simp only [regG, stackguard0Offset, h14]; decide
   · simp only [regG, stackguard0Offset, h14, hm, hacc]; decide
   · simp only [stackguard0, regG, regSP, stackguard0Offset, h14, h4, hm, hd]
     rw [show (BitVec.ofNat 64 wg).toNat = wg from rfl, hg]; decide
-  · simp only [regG, regSP, stackguard0Offset, h14, h4]; decide
   · simp only [h4]; decide
   · simp only [h4, hd]; decide
   · simp only [h4]; simp [wsp]; omega
