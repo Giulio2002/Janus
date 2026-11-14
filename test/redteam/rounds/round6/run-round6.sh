@@ -63,7 +63,7 @@ if grep -qE 'code .* runtime\.panicky/lib\.Zero' <<<"$xo" && ! grep -qE 'stub .*
   echo "  F3 extraction                        ok       runtime.panicky/lib.Zero is code, not a panic stub"
 else echo "  F3 extraction: misclassified   <-- BROKEN"; echo "$xo" | sed 's/^/    /'; broken+=(F3-extract); fi
 v F3a_stub_by_module_path $W/StubAdd; row F3a_stub_by_module_path blocked
-vw F3b_stubmod_returns $W/StubAdd;    row F3b_stubmod_returns Verified 'ABIReturn s s'"'"' ∧ s'"'"'.regs 0 = x + y'
+vw F3b_stubmod_returns $W/StubAdd;    row F3b_stubmod_returns Verified 'ABIReturn (s.setRet ret) s'"'"' ∧ s'"'"'.regs 0 = x + y'
 if command -v qemu-aarch64 >/dev/null; then
   q="$(qemu-aarch64 $W/stubmod 2>&1)"
   [ "$q" = 3 ] && echo "  F3 hardware (qemu-aarch64)           ok       Add(1, 2) returned 3" ||
