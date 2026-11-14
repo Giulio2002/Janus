@@ -55,14 +55,11 @@ func TestWithinAuditSourcePins(t *testing.T) {
 			t.Errorf("Audit.lean: the run-claim list lost %s", c)
 		}
 	}
-	// the precondition scan (the [RSP]-word rule) covers EnsuresWithin (pre = arg 4 of 6) and RunsAtLeastOnCall (arg 4 of 5)
-	for _, c := range []string{
-		"`Janus.GoABI.EnsuresWithin || n == `Janus.Amd64.GoABI.EnsuresWithin) && e.getAppNumArgs == 6 then acc.push (e.getArg! 4)",
-		"`Janus.GoABI.RunsAtLeastOnCall || n == `Janus.Amd64.GoABI.RunsAtLeastOnCall) && e.getAppNumArgs == 5 then acc.push (e.getArg! 4)",
-		"`Janus.GoABI.Ensures || n == `Janus.Amd64.GoABI.Ensures) && e.getAppNumArgs == 5 then acc.push (e.getArg! 3)", // unchanged
-	} {
-		if !strings.Contains(audit, c) {
-			t.Errorf("Audit.lean: precondition scan lost %q", c)
+	// v0.4.0: the precondition scan (the [RSP]-word rule) is gone: the precondition is evaluated before the return
+	// address is installed (State.setRet), so no precondition restricts it
+	for _, c := range []string{"isSpRead", "mentionsSpWord", "constReadsSp", "ensuresPres"} {
+		if strings.Contains(audit, c) {
+			t.Errorf("Audit.lean: the removed [RSP]-word rule is back (%q)", c)
 		}
 	}
 	// the witness rule: a lower bound needs a returning run, a ReturnsWithin main is witnessed by Returns or ReturnsWithin
@@ -76,14 +73,14 @@ func TestWithinAuditSourcePins(t *testing.T) {
 		"Janus/GoABI.lean": {
 			"∃ s', p.run (n + 1) s = .ok (.returned s') ∧ post s'",
 			"p.run m s = .error .outOfFuel",
-			"ReturnsWithin (bound s) (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')",
-			"RunsAtLeast (lower s) (p.withExit ret) s",
+			"ReturnsWithin (bound (s.setRet ret)) (p.withExit ret) (s.setRet ret)",
+			"RunsAtLeast (lower (s.setRet ret)) (p.withExit ret) (s.setRet ret)",
 		},
 		"Janus/Amd64/GoABI.lean": {
 			"∃ s', p.run (n + 1) s = .ok (.returned s') ∧ post s'",
 			"p.run m s = .error .outOfFuel",
-			"ReturnsWithin (bound s) (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')",
-			"RunsAtLeast (lower s) (p.withExit ret) s",
+			"ReturnsWithin (bound (s.setRet ret)) (p.withExit ret) (s.setRet ret)",
+			"RunsAtLeast (lower (s.setRet ret)) (p.withExit ret) (s.setRet ret)",
 		},
 	}
 	for f, ss := range defs {

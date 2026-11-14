@@ -298,7 +298,9 @@ def toWord (v : BitVec 64) : WordLib.Word := ⟨v⟩
 
 theorem correctness : ∀ x y : BitVec 64, Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
     (fun _ s' => s'.regs 0 = (WordLib.Word.add (toWord x) (toWord y)).val) := by
-  intro x y ret hret s hs _
+  intro x y
+  janus_ensures_old
+  intro ret hret s hs _
   janus_intro hs
   janus_run [toWord, WordLib.Word.add_val]
 
@@ -327,17 +329,17 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(3 : BitVec 64), (4 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(3 : BitVec 64), (4 : BitVec 64)] s0 :=
+  ⟨rfl, by decide, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
 
 -- All the hypotheses of correctness hold together at a concrete call, and it returns.
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ True ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => ABIReturn s s' ∧ s'.regs 0 = (WordLib.Word.add (toWord x) (toWord y)).val) :=
-  ⟨ret, s0, 3, 4, hret, setup, trivial, correctness 3 4 ret hret s0 setup trivial⟩
+    CallSetup0 Extracted.entry [x, y] s ∧ True ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => ABIReturn (s.setRet ret) s' ∧ s'.regs 0 = (WordLib.Word.add (toWord x) (toWord y)).val) :=
+  ⟨ret, s0, 3, 4, hret, setup, trivial, correctness 3 4 s0 setup trivial ret hret⟩
 
 end Witness
 
@@ -555,7 +557,9 @@ theorem correctness :
     ∀ x : BitVec 64, Function.Bijective (fun y : BitVec 64 => x + y) := by
   refine ⟨?_, fun x => ⟨fun a b h => (BitVec.add_right_inj x).mp h,
     fun z => ⟨z - x, by simp only; rw [BitVec.add_comm]; exact BitVec.sub_add_cancel z x⟩⟩⟩
-  intro x y ret hret s hs _
+  intro x y
+  janus_ensures_old
+  intro ret hret s hs _
   janus_intro hs
   janus_run
 

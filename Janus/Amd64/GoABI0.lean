@@ -82,6 +82,27 @@ structure CallSetup0 (p : Program) (entry : Nat) (args : List W64) (nres : Nat) 
   frame : FrameOK s (args.length + nres)
   df : s.df = false
 
+/-- `CallSetup0` without the return address: the ABI0 call state before the caller's `CALL` pushes it
+at `[RSP]` (`State.setRet`). `Ensures0` evaluates its precondition on such a state, so it cannot
+restrict the caller's return address. -/
+structure CallSetupF (entry : Nat) (args : List W64) (nres : Nat) (s : State) : Prop where
+  rip : s.rip = BitVec.ofNat 64 entry
+  argWords : FrameArgs s args
+  frame : FrameOK s (args.length + nres)
+  df : s.df = false
+
+theorem CallSetupF.setRet {p : Program} {entry : Nat} {args : List W64} {nres : Nat} {s : State}
+    (h : CallSetupF entry args nres s) {ret : Nat} (hret : ret < 2 ^ 64) :
+    CallSetup0 (p.withExit ret) entry args nres (s.setRet ret) where
+  rip := h.rip
+  ret := GoABI.readLE_setRet_sp hret
+  argWords := fun i hi => by
+    rw [GoABI.readLE_setRet_of_disjoint]
+    · exact h.argWords i hi
+    · simp only [regSP, GoABI.setRet_regs]; omega
+  frame := ⟨h.frame.1, by simpa using h.frame.2⟩
+  df := h.df
+
 /-- What an ABI0 function restores on return, relative to its call state `s₀`: `RSP` (popped
 past the return address), the frame pointer `RBP`, the `FS` base and the direction flag. Not
 `R14` or `X15`. -/
@@ -103,14 +124,15 @@ def results0 (s₀ s₁ : State) (nargs nres : Nat) : List W64 :=
 
 /-! ## Specifications -/
 
-/-- ABI0 function contract: for **every** admissible return address `ret` and **every** ABI0
-call state with these argument words (and `nres` result words of frame) satisfying `pre`, the
-call returns to `ret` (never faulting or panicking), restores what ABI0 requires
-(`ABIReturn0`), and satisfies `post s₀ s₁`. -/
+/-- ABI0 function contract: for **every** ABI0 call state with these argument words (and `nres` result
+words of frame) satisfying `pre` (`CallSetupF`: the state before the return address is pushed) and
+**every** admissible return address `ret`, the call from `s₀ = s.setRet ret` returns to `ret` (never
+faulting or panicking), restores what ABI0 requires (`ABIReturn0`), and satisfies `post s₀ s₁`. `pre`
+cannot restrict `ret`. -/
 def Ensures0 (p : Program) (entry : Nat) (args : List W64) (nres : Nat) (pre : State → Prop)
     (post : State → State → Prop) : Prop :=
-  ∀ ret, RetAddr p ret → ∀ s, CallSetup0 (p.withExit ret) entry args nres s → pre s →
-    Returns (p.withExit ret) s (fun s' => ABIReturn0 s s' ∧ post s s')
+  ∀ s, CallSetupF entry args nres s → pre s → ∀ ret, RetAddr p ret →
+    Returns (p.withExit ret) (s.setRet ret) (fun s' => ABIReturn0 (s.setRet ret) s' ∧ post (s.setRet ret) s')
 
 /-- `Ensures0` stated on the result words of the frame. -/
 def EnsuresResults0 (p : Program) (entry : Nat) (args : List W64) (nres : Nat)
@@ -263,33 +285,45 @@ theorem Ret0.mem {s s' : State} {Q : Memory → Prop} (h : Ret0 s s' Q) : Q s'.m
 
 theorem Ensures0.returns {pre : State → Prop} {post : State → State → Prop} {ret : Nat}
     (h : Ensures0 p entry args nres pre post) (hret : RetAddr p ret)
-    (hs : CallSetup0 (p.withExit ret) entry args nres s) (hpre : pre s) :
-    Returns (p.withExit ret) s (fun s' => ABIReturn0 s s' ∧ post s s') := h ret hret s hs hpre
+    (hs : CallSetupF entry args nres s) (hpre : pre s) :
+    Returns (p.withExit ret) (s.setRet ret)
+      (fun s' => ABIReturn0 (s.setRet ret) s' ∧ post (s.setRet ret) s') := h s hs hpre ret hret
 
 theorem Ensures0.neverPanics {pre : State → Prop} {post : State → State → Prop} {ret : Nat}
     (h : Ensures0 p entry args nres pre post) (hret : RetAddr p ret)
-    (hs : CallSetup0 (p.withExit ret) entry args nres s) (hpre : pre s) :
-    NeverPanics (p.withExit ret) s := (h ret hret s hs hpre).neverPanics
+    (hs : CallSetupF entry args nres s) (hpre : pre s) :
+    NeverPanics (p.withExit ret) (s.setRet ret) := (h s hs hpre ret hret).neverPanics
 
 theorem Ensures0.mono {pre pre' : State → Prop} {post post' : State → State → Prop}
     (h : Ensures0 p entry args nres pre post) (hpre : ∀ s, pre' s → pre s)
-    (hpost : ∀ s s', pre' s → post s s' → post' s s') : Ensures0 p entry args nres pre' post' :=
-  fun ret hret s hs hp => (h ret hret s hs (hpre s hp)).mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ hp hq⟩
+    (hpost : ∀ s ret s', pre' s → post (s.setRet ret) s' → post' (s.setRet ret) s') :
+    Ensures0 p entry args nres pre' post' :=
+  fun s hs hp ret hret => (h s hs (hpre s hp) ret hret).mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ _ hp hq⟩
+
+/-- Migration bridge: the pre-v0.4.0 statement (the precondition seeing the state with `[RSP] = ret`)
+and `pre s → pre (s.setRet ret)` give the new `Ensures0` (`janus64_ensures_old` does this). -/
+theorem Ensures0.of_old {pre : State → Prop} {post : State → State → Prop}
+    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup0 (p.withExit ret) entry args nres s → pre s →
+      Returns (p.withExit ret) s (fun s' => ABIReturn0 s s' ∧ post s s')) :
+    Ensures0 p entry args nres pre post :=
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
 
 /-- A callee `Summary` of an ABI0 function (precondition `spre`, implied by every ABI0 call
 state satisfying `pre`) is an `Ensures0` when its postcondition implies `ABIReturn0`. -/
 theorem Ensures0.of_summary {pre spre : State → Prop} {post post' : State → State → Prop}
     (hsum : Summary p entry spre post')
-    (hpre : ∀ ret s, RetAddr p ret → CallSetup0 (p.withExit ret) entry args nres s → pre s →
-      spre s)
-    (hpost : ∀ ret s s', RetAddr p ret → CallSetup0 (p.withExit ret) entry args nres s → pre s →
-      post' s s' → ABIReturn0 s s' ∧ post s s') :
+    (hpre : ∀ ret s, RetAddr p ret → CallSetupF entry args nres s → pre s →
+      spre (s.setRet ret))
+    (hpost : ∀ ret s s', RetAddr p ret → CallSetupF entry args nres s → pre s →
+      post' (s.setRet ret) s' → ABIReturn0 (s.setRet ret) s' ∧ post (s.setRet ret) s') :
     Ensures0 p entry args nres pre post := by
-  intro ret hret s hs hp
-  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hs.rip (hpre ret s hret hs hp)
+  intro s hs hp ret hret
+  have hs1 : CallSetup0 (p.withExit ret) entry args nres (s.setRet ret) := hs.setRet hret.lt64
+  obtain ⟨k, s', hst, hr, hq⟩ := hsum (s.setRet ret) hs1.rip (hpre ret s hret hs hp)
   have hst' := hst.withExit hret.fetch_none
   refine returns_of_steps hst' ?_ (hpost ret s s' hret hs hp hq)
-  rw [hr, retAddrOf, hs.ret]
+  rw [hr, retAddrOf, hs1.ret]
   simp only [Program.withExit, BitVec.toNat_ofNat]
   exact Nat.mod_eq_of_lt hret.lt64
 
@@ -297,10 +331,10 @@ theorem Ensures0.of_summary {pre spre : State → Prop} {post post' : State → 
 the contract's postcondition. -/
 theorem Ensures0.of_summary0 {pre spre : State → Prop} {post : State → State → Prop}
     {Q : State → Memory → Prop} (hsum : Summary0 p entry spre Q)
-    (hpre : ∀ ret s, RetAddr p ret → CallSetup0 (p.withExit ret) entry args nres s → pre s →
-      spre s)
-    (hpost : ∀ ret s s', RetAddr p ret → CallSetup0 (p.withExit ret) entry args nres s → pre s →
-      Q s s'.mem → post s s') :
+    (hpre : ∀ ret s, RetAddr p ret → CallSetupF entry args nres s → pre s →
+      spre (s.setRet ret))
+    (hpost : ∀ ret s s', RetAddr p ret → CallSetupF entry args nres s → pre s →
+      Q (s.setRet ret) s'.mem → post (s.setRet ret) s') :
     Ensures0 p entry args nres pre post :=
   Ensures0.of_summary hsum hpre fun ret s s' hret hs hp hr =>
     ⟨ABIReturn0.of_ret0 hr, hpost ret s s' hret hs hp hr.mem⟩

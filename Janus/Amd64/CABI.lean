@@ -82,6 +82,26 @@ structure CCall (p : Program) (entry : Nat) (args : List W64) (s : State) : Prop
   spAligned : (s.regs regSP).toNat % 16 = 8
   df : s.df = false
 
+/-- `CCall` without the return address: the C call state before the caller's `CALL` pushes it at
+`[RSP]` (`State.setRet`). `CEnsures` evaluates its precondition on such a state, so it cannot
+restrict the caller's return address. -/
+structure CCallF (entry : Nat) (args : List W64) (s : State) : Prop where
+  rip : s.rip = BitVec.ofNat 64 entry
+  len : args.length ≤ numArgRegs
+  args : ∀ i (h : i < args.length), s.regs (argReg i) = args[i]
+  spAligned : (s.regs regSP).toNat % 16 = 8
+  df : s.df = false
+
+theorem CCallF.setRet {p : Program} {entry : Nat} {args : List W64} {s : State}
+    (h : CCallF entry args s) {ret : Nat} (hret : ret < 2 ^ 64) :
+    CCall (p.withExit ret) entry args (s.setRet ret) :=
+  ⟨h.rip, GoABI.readLE_setRet_sp hret, h.len, h.args, h.spAligned, h.df⟩
+
+/-- A `CCall` state is a `CCallF` state (forget the return address). -/
+theorem CCall.toF {p : Program} {entry : Nat} {args : List W64} {s : State}
+    (h : CCall p entry args s) : CCallF entry args s :=
+  ⟨h.rip, h.len, h.args, h.spAligned, h.df⟩
+
 /-- What every System V function must restore on return, relative to its call state `s₀`:
 `RSP` (popped past the return address), `RBX RBP R12 R13 R14 R15`, and a clear direction
 flag. -/
@@ -113,14 +133,15 @@ def results (k : Nat) (s : State) : List W64 := (resultRegs.take k).map s.regs
 
 /-! ## Specifications -/
 
-/-- The C contract: for **every** admissible return address `ret` and **every** C call state
-with these arguments and `[RSP] = ret` satisfying `pre`, the call returns to `ret` (never
-faulting), restores `RSP`, the callee-saved registers and `DF` (`CReturn`), and satisfies
-`post s₀ s₁`. -/
+/-- The C contract: for **every** C call state with these arguments (`CCallF`, before the return
+address is pushed) satisfying `pre`, and **every** admissible return address `ret`, the call from
+`s₀ = s.setRet ret` (`[RSP] = ret`) returns to `ret` (never faulting), restores `RSP`, the
+callee-saved registers and `DF` (`CReturn`), and satisfies `post s₀ s₁`. -/
 def CEnsures (p : Program) (entry : Nat) (args : List W64) (pre : State → Prop)
     (post : State → State → Prop) : Prop :=
-  ∀ ret, GoABI.RetAddr p ret → ∀ s, CCall (p.withExit ret) entry args s → pre s →
-    GoABI.Returns (p.withExit ret) s (fun s' => CReturn s s' ∧ post s s')
+  ∀ s, CCallF entry args s → pre s → ∀ ret, GoABI.RetAddr p ret →
+    GoABI.Returns (p.withExit ret) (s.setRet ret)
+      (fun s' => CReturn (s.setRet ret) s' ∧ post (s.setRet ret) s')
 
 def CEnsuresResults (p : Program) (entry : Nat) (args : List W64) (nres : Nat)
     (pre : State → Prop) (post : List W64 → Prop) : Prop :=
@@ -157,13 +178,24 @@ theorem CReturn.saved {s₀ s₁ : State} (h : CReturn s₀ s₁) {r : Nat} (hr 
 
 theorem CEnsures.returns {pre : State → Prop} {post : State → State → Prop} {ret : Nat}
     (h : CEnsures p entry args pre post) (hret : GoABI.RetAddr p ret)
-    (hs : CCall (p.withExit ret) entry args s) (hpre : pre s) :
-    GoABI.Returns (p.withExit ret) s (fun s' => CReturn s s' ∧ post s s') := h ret hret s hs hpre
+    (hs : CCallF entry args s) (hpre : pre s) :
+    GoABI.Returns (p.withExit ret) (s.setRet ret)
+      (fun s' => CReturn (s.setRet ret) s' ∧ post (s.setRet ret) s') := h s hs hpre ret hret
 
 theorem CEnsures.mono {pre pre' : State → Prop} {post post' : State → State → Prop}
     (h : CEnsures p entry args pre post) (hpre : ∀ s, pre' s → pre s)
-    (hpost : ∀ s s', pre' s → post s s' → post' s s') : CEnsures p entry args pre' post' :=
-  fun ret hret s hs hp => (h ret hret s hs (hpre s hp)).mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ hp hq⟩
+    (hpost : ∀ s ret s', pre' s → post (s.setRet ret) s' → post' (s.setRet ret) s') :
+    CEnsures p entry args pre' post' :=
+  fun s hs hp ret hret => (h s hs (hpre s hp) ret hret).mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ _ hp hq⟩
+
+/-- Migration bridge (see `GoABI.Ensures.of_old`): the pre-v0.4.0 statement plus
+`pre s → pre (s.setRet ret)` give the new `CEnsures`. -/
+theorem CEnsures.of_old {pre : State → Prop} {post : State → State → Prop}
+    (hinv : ∀ s ret, GoABI.RetAddr p ret → pre s → pre (s.setRet ret))
+    (h : ∀ ret, GoABI.RetAddr p ret → ∀ s, CCall (p.withExit ret) entry args s → pre s →
+      GoABI.Returns (p.withExit ret) s (fun s' => CReturn s s' ∧ post s s')) :
+    CEnsures p entry args pre post :=
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
 
 end Lemmas
 
@@ -224,6 +256,52 @@ def RetBuf (s : State) (sig : SysV.Sig) : Prop :=
       ((s.regs 7).toNat + CType.size t ≤ (s.regs regSP).toNat ∨
         (s.regs regSP).toNat + 8 ≤ (s.regs 7).toNat)
 
+/-- The argument `ArgAt`, with the by-reference copy (never produced by `SysV.passing`) also apart from
+the return slot `[RSP, RSP + 8)`: the form of the call state BEFORE the return address is pushed. -/
+def ArgAtF (s : State) (t : CType) (v : Nat) : Passing → Prop
+  | .direct ps => PiecesAt s v ps
+  | .indirect l => ArgAt s t v (.indirect l) ∧
+      ∀ q, PieceAt s q ⟨0, 8, l⟩ → (q + CType.size t ≤ (s.regs regSP).toNat ∨ (s.regs regSP).toNat + 8 ≤ q)
+
+def ArgsAtF (s : State) : List CType → List Nat → List Passing → Prop
+  | t :: ts, v :: vs, p :: ps => ArgAtF s t v p ∧ ArgsAtF s ts vs ps
+  | [], [], [] => True
+  | _, _, _ => False
+
+theorem PieceAt.setRet {s : State} {v : Nat} {pc : Piece} {ret : Nat} :
+    PieceAt (s.setRet ret) v pc ↔ PieceAt s v pc := by
+  unfold PieceAt
+  split
+  · simp
+  · simp
+  · rename_i o _
+    simp only [GoABI.setRet_regs, GoABI.setRet_accessible]
+    rw [GoABI.readLE_setRet_of_disjoint]
+    simp only [regSP]; omega
+  · simp
+
+theorem PiecesAt.setRet {s : State} {v : Nat} {ret : Nat} :
+    ∀ ps : List Piece, PiecesAt (s.setRet ret) v ps ↔ PiecesAt s v ps
+  | [] => Iff.rfl
+  | pc :: ps => by simp only [PiecesAt]; rw [PieceAt.setRet, PiecesAt.setRet ps]
+
+theorem ArgAtF.setRet {s : State} {t : CType} {v : Nat} {ret : Nat} {p : Passing}
+    (h : ArgAtF s t v p) : ArgAt (s.setRet ret) t v p := by
+  cases p with
+  | direct ps => exact (PiecesAt.setRet ps).2 h
+  | indirect l =>
+    obtain ⟨⟨q, h1, h2, h3, h4⟩, hap⟩ := h
+    refine ⟨q, PieceAt.setRet.2 h1, h2, by simpa using h3, ?_⟩
+    rw [GoABI.readLE_setRet_of_disjoint]
+    · exact h4
+    · have := hap q h1; simp only [regSP] at this ⊢; omega
+
+theorem ArgsAtF.setRet {s : State} {ret : Nat} :
+    ∀ {ts : List CType} {vs : List Nat} {ps : List Passing},
+      ArgsAtF s ts vs ps → ArgsAt (s.setRet ret) ts vs ps
+  | t :: ts, v :: vs, p :: ps, h => ⟨h.1.setRet, ArgsAtF.setRet h.2⟩
+  | [], [], [], _ => trivial
+
 /-- `AL` for a variadic callee: an upper bound, at most 8, on the vector registers used. -/
 def VarargAL (s : State) (sig : SysV.Sig) : Prop :=
   sig.named.isSome → sig.vecRegs ≤ (s.regs 0).toNat % 256 ∧ (s.regs 0).toNat % 256 ≤ 8
@@ -238,6 +316,28 @@ structure CCallA (p : Program) (entry : Nat) (sig : SysV.Sig) (vals : List Nat) 
   args : ArgsAt s sig.args vals sig.passing
   retBuf : RetBuf s sig
   al : VarargAL s sig
+
+/-- `CCallA` without the return address (the state before `State.setRet` pushes it). -/
+structure CCallAF (entry : Nat) (sig : SysV.Sig) (vals : List Nat) (s : State) : Prop where
+  rip : s.rip = BitVec.ofNat 64 entry
+  spAligned : (s.regs regSP).toNat % 16 = 8
+  df : s.df = false
+  args : ArgsAtF s sig.args vals sig.passing
+  retBuf : RetBuf s sig
+  al : VarargAL s sig
+
+theorem CCallAF.setRet {p : Program} {entry : Nat} {sig : SysV.Sig} {vals : List Nat} {s : State}
+    (h : CCallAF entry sig vals s) {ret : Nat} (hret : ret < 2 ^ 64) :
+    CCallA (p.withExit ret) entry sig vals (s.setRet ret) where
+  rip := h.rip
+  ret := GoABI.readLE_setRet_sp hret
+  spAligned := h.spAligned
+  df := h.df
+  args := h.args.setRet
+  retBuf := fun t ht hi => by
+    obtain ⟨a, b, c⟩ := h.retBuf t ht hi
+    exact ⟨a, by simpa using b, c⟩
+  al := h.al
 
 /-- The result `v` of type `t`, passed as `p`, is returned in `s₁` by the call made in `s₀`:
 in its registers, or (MEMORY) in the buffer whose address `RDI` held at the call, with that
@@ -254,8 +354,9 @@ def Returned (sig : SysV.Sig) (s₀ s₁ : State) (v : Nat) : Prop :=
 /-- The C contract for a classified call. -/
 def CEnsuresA (p : Program) (entry : Nat) (sig : SysV.Sig) (vals : List Nat)
     (pre : State → Prop) (post : State → State → Prop) : Prop :=
-  ∀ ret, GoABI.RetAddr p ret → ∀ s, CCallA (p.withExit ret) entry sig vals s → pre s →
-    GoABI.Returns (p.withExit ret) s (fun s' => CReturn s s' ∧ post s s')
+  ∀ s, CCallAF entry sig vals s → pre s → ∀ ret, GoABI.RetAddr p ret →
+    GoABI.Returns (p.withExit ret) (s.setRet ret)
+      (fun s' => CReturn (s.setRet ret) s' ∧ post (s.setRet ret) s')
 
 /-- `CEnsuresA` with the result. -/
 def CEnsuresR (p : Program) (entry : Nat) (sig : SysV.Sig) (vals : List Nat)
@@ -521,22 +622,34 @@ theorem CCallA.ret_lt {sig : SysV.Sig} {vals : List Nat} {ret : Nat} (hret : GoA
 theorem CEnsuresA.of_summary {sig : SysV.Sig} {vals : List Nat}
     {pre spre : State → Prop} {post post' : State → State → Prop}
     (hsum : Janus.Amd64.Tactic.Summary p entry spre post')
-    (hpre : ∀ ret s, GoABI.RetAddr p ret → CCallA (p.withExit ret) entry sig vals s → pre s → spre s)
-    (hpost : ∀ s s', pre s → post' s s' → CReturn s s' ∧ post s s') :
+    (hpre : ∀ ret s, GoABI.RetAddr p ret → CCallAF entry sig vals s → pre s → spre (s.setRet ret))
+    (hpost : ∀ s ret s', pre s → post' (s.setRet ret) s' →
+      CReturn (s.setRet ret) s' ∧ post (s.setRet ret) s') :
     CEnsuresA p entry sig vals pre post := by
-  intro ret hret s hs hp
-  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hs.rip (hpre ret s hret hs hp)
+  intro s hs hp ret hret
+  have hs1 : CCallA (p.withExit ret) entry sig vals (s.setRet ret) := hs.setRet hret.lt64
+  obtain ⟨k, s', hst, hr, hq⟩ := hsum (s.setRet ret) hs1.rip (hpre ret s hret hs hp)
   have hst' := hst.withExit hret.fetch_none
-  refine GoABI.returns_of_steps hst' ?_ (hpost s s' hp hq)
-  rw [hr, Janus.Amd64.Tactic.retAddrOf, hs.ret]
+  refine GoABI.returns_of_steps hst' ?_ (hpost s ret s' hp hq)
+  rw [hr, Janus.Amd64.Tactic.retAddrOf, hs1.ret]
   simp only [Program.withExit, BitVec.toNat_ofNat]
   exact Nat.mod_eq_of_lt hret.lt64
 
 theorem CEnsuresA.mono {sig : SysV.Sig} {vals : List Nat} {pre pre' : State → Prop}
     {post post' : State → State → Prop} (h : CEnsuresA p entry sig vals pre post)
-    (hpre : ∀ s, pre' s → pre s) (hpost : ∀ s s', pre' s → post s s' → post' s s') :
+    (hpre : ∀ s, pre' s → pre s)
+    (hpost : ∀ s ret s', pre' s → post (s.setRet ret) s' → post' (s.setRet ret) s') :
     CEnsuresA p entry sig vals pre' post' :=
-  fun ret hret s hs hp => (h ret hret s hs (hpre s hp)).mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ hp hq⟩
+  fun s hs hp ret hret => (h s hs (hpre s hp) ret hret).mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ _ hp hq⟩
+
+/-- Migration bridge (see `GoABI.Ensures.of_old`). -/
+theorem CEnsuresA.of_old {sig : SysV.Sig} {vals : List Nat} {pre : State → Prop}
+    {post : State → State → Prop}
+    (hinv : ∀ s ret, GoABI.RetAddr p ret → pre s → pre (s.setRet ret))
+    (h : ∀ ret, GoABI.RetAddr p ret → ∀ s, CCallA (p.withExit ret) entry sig vals s → pre s →
+      GoABI.Returns (p.withExit ret) s (fun s' => CReturn s s' ∧ post s s')) :
+    CEnsuresA p entry sig vals pre post :=
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
 
 end Classified
 

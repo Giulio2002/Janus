@@ -79,36 +79,68 @@ elab_rules : tactic
         return
       catch _ => st.restore
 
+/-- The body of `janus_pre_setRet`, on the introduced `s ret hret hp` (names passed in so that the
+variants for preconditions with more arguments, `janus_pre_setRet_k`, share it). -/
+syntax "janus_pre_setRet_core " ident ident ident ident " [" Lean.Parser.Tactic.simpLemma,* "]" : tactic
+
+macro_rules
+  | `(tactic| janus_pre_setRet_core $s $ret $hret $hp [$ds,*]) => `(tactic|
+      (try simp only [Janus.GoABI.StackWritable, Janus.GoABI.SPAligned, Janus.GoABI.FPConvention,
+         Janus.GoABI.ClosureCtx, Janus.GoABI.StackWords, Janus.GoABI.stackWord, Janus.GoABI.stackArgOffset,
+         Janus.GoABI.StackGuardOK, Janus.GoABI.stackguard0, $ds,*] at $hp:ident ⊢
+       try simp only [Janus.GoABI.setRet_pc, Janus.GoABI.setRet_sp, Janus.GoABI.setRet_flags,
+         Janus.GoABI.setRet_mem, Janus.GoABI.setRet_dczid, Janus.GoABI.setRet_vregs,
+         Janus.GoABI.setRet_tpidr, Janus.GoABI.setRet_fpcr, Janus.GoABI.setRet_fpsr,
+         Janus.GoABI.setRet_excl, Janus.GoABI.setRet_exclPass] at $hp:ident ⊢
+       try simp (disch := first | decide | simp) only [Janus.GoABI.setRet_regs_of_ne] at $hp:ident ⊢
+       all_goals first | exact $hp | assumption | simpa using $hp))
+
 syntax "janus_pre_setRet" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 
 macro_rules
   | `(tactic| janus_pre_setRet) => `(tactic| janus_pre_setRet [])
   | `(tactic| janus_pre_setRet [$ds,*]) => `(tactic|
       (intro s ret hret hp
-       try simp only [Janus.GoABI.StackWritable, Janus.GoABI.SPAligned, Janus.GoABI.FPConvention,
-         Janus.GoABI.ClosureCtx, Janus.GoABI.StackWords, Janus.GoABI.stackWord, Janus.GoABI.stackArgOffset,
-         Janus.GoABI.StackGuardOK, Janus.GoABI.stackguard0, $ds,*] at hp ⊢
-       try simp only [Janus.GoABI.setRet_pc, Janus.GoABI.setRet_sp, Janus.GoABI.setRet_flags,
-         Janus.GoABI.setRet_mem, Janus.GoABI.setRet_dczid, Janus.GoABI.setRet_vregs,
-         Janus.GoABI.setRet_tpidr, Janus.GoABI.setRet_fpcr, Janus.GoABI.setRet_fpsr,
-         Janus.GoABI.setRet_excl, Janus.GoABI.setRet_exclPass] at hp ⊢
-       try simp (disch := first | decide | simp) only [Janus.GoABI.setRet_regs_of_ne] at hp ⊢
-       all_goals first | exact hp | assumption | simpa using hp))
+       janus_pre_setRet_core s ret hret hp [$ds,*]))
 
-/-- `janus_ensures_old [defs]`: reduce a goal `Ensures … pre post` (or `EnsuresWithin`, `EnsuresGo`,
-`EnsuresGoX`, `RunsAtLeastOnCall`) to the pre-v0.4.0 statement `∀ ret, RetAddr … → ∀ s, CallSetup … →
-pre s → …` (the goal an old proof starts from: `intro ret hret s hs hpre` follows), proving the
-invariance of `pre` under `setRet` with `janus_pre_setRet [defs]`. -/
-syntax "janus_ensures_old" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
+/-- `janus_pre_setRet_k`: as `janus_pre_setRet` for a precondition on a state and a kernel state
+(`EnsuresK`: `pre s k`, goal `∀ s k ret, RetAddr p ret → pre s k → pre (s.setRet ret) k`). -/
+syntax "janus_pre_setRet_k" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 
 macro_rules
+  | `(tactic| janus_pre_setRet_k) => `(tactic| janus_pre_setRet_k [])
+  | `(tactic| janus_pre_setRet_k [$ds,*]) => `(tactic|
+      (intro s k ret hret hp
+       janus_pre_setRet_core s ret hret hp [$ds,*]))
+
+/-- `janus_ensures_old [defs]`: reduce a goal `Ensures … pre post` (or `EnsuresWithin`, `EnsuresGo`,
+`EnsuresGoX`, `RunsAtLeastOnCall`, and the other main-theorem forms `Ensures0`, `CEnsures`, `CEnsuresA`,
+`EnsuresC`, `CEnsuresC`, `EnsuresK`, `EnsuresGrow`) to the pre-v0.4.0 statement `∀ ret, RetAddr … → ∀ s,
+<setup> … → pre s → …` (the goal an old proof starts from: `intro ret hret s hs hpre` follows), proving the
+invariance of `pre` under `setRet` with `janus_pre_setRet [defs]`. The form's module must be imported
+(the alternatives name each form's bridge). -/
+syntax "janus_ensures_old" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
+
+/-- The bridge of each main-theorem form (arm64) and the pre-setRet tactic that proves its `hinv`. The names
+are resolved where `janus_ensures_old` is used (the form's module need not be imported here). -/
+def ensuresOldForms : List (Name × Bool) :=
+  [(`Janus.GoABI.Ensures.of_old, false), (`Janus.GoABI.EnsuresWithin.of_old, false),
+   (`Janus.GoABI.EnsuresGoX.of_old, false), (`Janus.GoABI.EnsuresGo.of_old, false),
+   (`Janus.GoABI.RunsAtLeastOnCall.of_old, false), (`Janus.GoABI0.Ensures0.of_old, false),
+   (`Janus.CABI.CEnsures.of_old, false), (`Janus.CABI.CEnsuresA.of_old, false),
+   (`Janus.FFI.EnsuresC.of_old, false), (`Janus.FFI.CEnsuresC.of_old, false),
+   (`Janus.Kernel.EnsuresK.of_old, true), (`Janus.Contracts.Stack.EnsuresGrow.of_old, false)]
+
+open Lean Macro in
+macro_rules
   | `(tactic| janus_ensures_old) => `(tactic| janus_ensures_old [])
-  | `(tactic| janus_ensures_old [$ds,*]) => `(tactic|
-      first
-        | refine Janus.GoABI.Ensures.of_old (by janus_pre_setRet [$ds,*]) ?_
-        | refine Janus.GoABI.EnsuresWithin.of_old (by janus_pre_setRet [$ds,*]) ?_
-        | refine Janus.GoABI.EnsuresGoX.of_old (by janus_pre_setRet [$ds,*]) ?_
-        | refine Janus.GoABI.EnsuresGo.of_old (by janus_pre_setRet [$ds,*]) ?_
-        | refine Janus.GoABI.RunsAtLeastOnCall.of_old (by janus_pre_setRet [$ds,*]) ?_)
+  | `(tactic| janus_ensures_old [$ds,*]) => do
+    let mut acc ← `(Lean.Parser.Tactic.tacticSeq| fail "janus_ensures_old: the goal is not a main-theorem form with an `of_old` bridge")
+    for (n, isK) in ensuresOldForms.reverse do
+      let alt ← if isK then
+          `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus_pre_setRet_k [$ds,*]) ?_)
+        else `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus_pre_setRet [$ds,*]) ?_)
+      acc ← `(Lean.Parser.Tactic.tacticSeq| first | $alt | $acc)
+    `(tactic| ($acc))
 
 end Janus.Tactic

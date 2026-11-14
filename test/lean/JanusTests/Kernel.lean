@@ -22,6 +22,7 @@ def pidProg : Program :=
 theorem pid_spec (E : KEnv) :
     EnsuresK pidProg E 0x2000 [] (fun _ _ => True)
       (fun _ k s' k' => k' = k ∧ s'.regs 0 = BitVec.ofNat 64 k.pid) := by
+  janus_ensures_old
   intro ret hret s k hs _
   apply ReturnsK.of_reaches
   janus_intro hs

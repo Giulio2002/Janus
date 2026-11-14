@@ -80,4 +80,30 @@ theorem d3 : RunsAtLeastOnCall (fun _ => 0) Extracted.program Extracted.entry []
     (fun s => s.mem.readLE (s.regs 4).toNat 8 = 0 ∧ False) := by
   intro s hs hp ret hret; exact hp.2.elim
 
+/-! v0.4.0 phase 1b: the other main-theorem forms evaluate their precondition before the return address is written too. -/
+
+/-- d4: ABI0 (`Ensures0`). -/
+theorem d4 : Janus.Amd64.GoABI0.Ensures0 Extracted.program Extracted.entry [] 0
+    (fun s => s.mem.readLE (s.regs 4).toNat 8 = 0 ∧ False) (fun _ _ => True) := by
+  intro s hs hp ret hret; exact hp.2.elim
+
+/-- d5: the C ABI (`CEnsures`). -/
+theorem d5 : Janus.Amd64.CABI.CEnsures Extracted.program Extracted.entry []
+    (fun s => s.mem.readLE (s.regs 4).toNat 8 = 0 ∧ False) (fun _ _ => True) := by
+  intro s hs hp ret hret; exact hp.2.elim
+
+/-- d6: the kernel semantics (`EnsuresK`). -/
+theorem d6 (E : Janus.Kernel.KEnv) : Janus.Amd64.Kernel.EnsuresK Extracted.program E Extracted.entry []
+    (fun s _ => s.mem.readLE (s.regs 4).toNat 8 = 0 ∧ False) (fun _ _ _ _ => True) := by
+  intro s k hs hp ret hret; exact hp.2.elim
+
+/-- d7: the cgo contract forms (`EnsuresC`, `CEnsuresC`). -/
+theorem d7 (C : Janus.Amd64.FFI.Contract) : Janus.Amd64.FFI.EnsuresC Extracted.program C Extracted.entry []
+    (fun s => s.mem.readLE (s.regs 4).toNat 8 = 0 ∧ False) (fun _ _ => True) := by
+  intro s hs hp ret hret; exact hp.2.elim
+
+theorem d8 (C : Janus.Amd64.FFI.Contract) : Janus.Amd64.FFI.CEnsuresC Extracted.program C Extracted.entry []
+    (fun s => s.mem.readLE (s.regs 4).toNat 8 = 0 ∧ False) (fun _ _ => True) := by
+  intro s hs hp ret hret; exact hp.2.elim
+
 end Proof

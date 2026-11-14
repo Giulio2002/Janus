@@ -304,8 +304,21 @@ with the full `GoABI.ABIReturn` (`RSP + 8`, `RBP`, `R14`, `X15`). -/
 def EnsuresK (p : Program) (E : KEnv) (entry : Nat) (args : List W64)
     (pre : State → Kern → Prop) (post : State → Kern → State → Kern → Prop)
     (onExit : State → Kern → Nat → Kern → Prop := fun _ _ _ _ => False) : Prop :=
-  ∀ ret, RetAddr p ret → ∀ s k, CallSetup (p.withExit ret) entry args s → pre s k →
-    ReturnsK (p.withExit ret) E (fun s' k' => ABIReturn s s' ∧ post s k s' k') (onExit s k) s k
+  ∀ s k, CallSetup0 entry args s → pre s k → ∀ ret, RetAddr p ret →
+    ReturnsK (p.withExit ret) E
+      (fun s' k' => ABIReturn (s.setRet ret) s' ∧ post (s.setRet ret) k s' k')
+      (onExit (s.setRet ret) k) (s.setRet ret) k
+
+/-- Migration bridge (see `GoABI.Ensures.of_old`): the pre-v0.4.0 statement (the precondition seeing the
+state with `[RSP] = ret`) and `pre s k → pre (s.setRet ret) k` give the new `EnsuresK`. -/
+theorem EnsuresK.of_old {p : Program} {E : KEnv} {entry : Nat} {args : List W64}
+    {pre : State → Kern → Prop} {post : State → Kern → State → Kern → Prop}
+    {onExit : State → Kern → Nat → Kern → Prop}
+    (hinv : ∀ s k ret, RetAddr p ret → pre s k → pre (s.setRet ret) k)
+    (h : ∀ ret, RetAddr p ret → ∀ s k, CallSetup (p.withExit ret) entry args s → pre s k →
+      ReturnsK (p.withExit ret) E (fun s' k' => ABIReturn s s' ∧ post s k s' k') (onExit s k) s k) :
+    EnsuresK p E entry args pre post onExit :=
+  fun s k hs hp ret hret => h ret hret _ k (hs.setRet hret.lt64) (hinv s k ret hret hp)
 
 /-! ## Traps -/
 

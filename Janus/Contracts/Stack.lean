@@ -444,7 +444,16 @@ grown counterpart of `GoABI.Ensures`. -/
 /-- The grown contract of a Go function, under the `morestack` contract `reloc`. -/
 def EnsuresGrow (p : Program) (reloc : State → State → Prop) (entry : Nat) (args : List W64)
     (pre : State → Prop) (post : State → State → Prop) : Prop :=
-  ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
-    GrownReturns (p.withExit ret) reloc s (fun s' => post s s')
+  ∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret →
+    GrownReturns (p.withExit ret) reloc (s.setRet ret) (fun s' => post (s.setRet ret) s')
+
+/-- Migration bridge (see `GoABI.Ensures.of_old`). -/
+theorem EnsuresGrow.of_old {p : Program} {reloc : State → State → Prop} {entry : Nat} {args : List W64}
+    {pre : State → Prop} {post : State → State → Prop}
+    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+      GrownReturns (p.withExit ret) reloc s (fun s' => post s s')) :
+    EnsuresGrow p reloc entry args pre post :=
+  fun s hs hp ret hret => h ret hret _ (hs.setRet ret) (hinv s ret hret hp)
 
 end Janus.Contracts.Stack

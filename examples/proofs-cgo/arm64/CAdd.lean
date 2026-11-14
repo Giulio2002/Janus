@@ -18,6 +18,7 @@ namespace Proof
 theorem correctness (a b : BitVec 64) :
     CEnsures Extracted.program Extracted.entry [a, b] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = (a.toNat + b.toNat) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs.call
   janus_run
@@ -35,15 +36,15 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
 
-theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [a0, b0] s0 :=
-  ⟨⟨rfl, rfl, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩, by decide, by decide⟩
+theorem call : CCallF Extracted.entry [a0, b0] s0 :=
+  ⟨⟨rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩, by decide, by decide⟩
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (a b : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [a, b] s ∧ True ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+    CCallF Extracted.entry [a, b] s ∧ True ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
       (s'.regs 0).toNat = (a.toNat + b.toNat) % 2 ^ 64) :=
-  ⟨a0, b0, RET, s0, hret, call, trivial, correctness a0 b0 RET hret s0 call trivial⟩
+  ⟨a0, b0, RET, s0, hret, call, trivial, correctness a0 b0 s0 call trivial RET hret⟩
 
 end Witness
 

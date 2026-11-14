@@ -265,7 +265,7 @@ func TestAuditUndefinedStreamPins(t *testing.T) {
 		return "import Extracted\nnamespace Proof\nopen Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic\n" +
 			"theorem correctness (x y : BitVec 64) :\n    EnsuresResults Extracted.program Extracted.entry [x, y] 1\n" +
 			"      (fun s => StackWritable s 0 8 ∧ " + pre + ") (fun r => r = [x + y]) := by\n" +
-			"  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
+			"  janus64_ensures_old\n  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
 			"  simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw\n  janus64_run\nend Proof\n"
 	}
 	// proofW: the same main theorem together with its tied Witness.nonvacuous (a main theorem is verified only with one):
@@ -281,16 +281,16 @@ def s0 : State :=
   { regs := fun i => if i = 0 then x else if i = 3 then y else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [x, y] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 theorem hpre : StackWritable s0 0 8 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
   all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (StackWritable s 0 8 ∧ ` + pre + `) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' => ABIReturn s s' ∧ (results 1 s') = [x + y]) :=
-  ⟨ret, s0, x, y, hret, setup, ⟨hpre, by first | rfl | exact fun _ _ => rfl⟩, correctness x y ret hret s0 setup ⟨hpre, by first | rfl | exact fun _ _ => rfl⟩⟩
+    CallSetup0 Extracted.entry [x, y] s ∧ (StackWritable s 0 8 ∧ ` + pre + `) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ (results 1 s') = [x + y]) :=
+  ⟨ret, s0, x, y, hret, setup, ⟨hpre, by first | rfl | exact fun _ _ => rfl⟩, correctness x y s0 setup ⟨hpre, by first | rfl | exact fun _ _ => rfl⟩ ret hret⟩
 end Witness
 end Proof
 `
@@ -368,7 +368,7 @@ func TestAuditWitnessNamedMainNotExempt(t *testing.T) {
 		return "import Extracted\nnamespace Proof\nopen Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic\n" + open +
 			"theorem " + name + " (x y : BitVec 64) :\n    EnsuresResults Extracted.program Extracted.entry [x, y] 1\n" +
 			"      (fun s => StackWritable s 0 8 ∧ " + pin + ") (fun r => r = [x + y]) := by\n" +
-			"  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
+			"  janus64_ensures_old\n  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
 			"  simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw\n  janus64_run\n" + close + "end Proof\n"
 	}
 	cases := map[string]string{

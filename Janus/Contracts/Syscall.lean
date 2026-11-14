@@ -689,9 +689,23 @@ return). -/
 def EnsuresK (p : Program) (E : KEnv) (entry : Nat) (args : List W64)
     (pre : State → Kern → Prop) (post : State → Kern → State → Kern → Prop)
     (onExit : State → Kern → Nat → Kern → Prop := fun _ _ _ _ => False) : Prop :=
-  ∀ ret, GoABI.RetAddr p ret → ∀ s k, GoABI.CallSetup (p.withExit ret) entry args s → pre s k →
-    ReturnsK (p.withExit ret) E (fun s' k' => FFI.ABIReturnC s s' ∧ post s k s' k')
-      (onExit s k) s k
+  ∀ s k, GoABI.CallSetup0 entry args s → pre s k → ∀ ret, GoABI.RetAddr p ret →
+    ReturnsK (p.withExit ret) E
+      (fun s' k' => FFI.ABIReturnC (s.setRet ret) s' ∧ post (s.setRet ret) k s' k')
+      (onExit (s.setRet ret) k) (s.setRet ret) k
+
+/-- Migration bridge (see `GoABI.Ensures.of_old`): the pre-v0.4.0 statement (the precondition seeing the
+state with `X30 = ret`) and `pre s k → pre (s.setRet ret) k` give the new `EnsuresK`. The precondition and the
+kernel state `k` are evaluated before the return address is installed. -/
+theorem EnsuresK.of_old {p : Program} {E : KEnv} {entry : Nat} {args : List W64}
+    {pre : State → Kern → Prop} {post : State → Kern → State → Kern → Prop}
+    {onExit : State → Kern → Nat → Kern → Prop}
+    (hinv : ∀ s k ret, GoABI.RetAddr p ret → pre s k → pre (s.setRet ret) k)
+    (h : ∀ ret, GoABI.RetAddr p ret → ∀ s k, GoABI.CallSetup (p.withExit ret) entry args s → pre s k →
+      ReturnsK (p.withExit ret) E (fun s' k' => FFI.ABIReturnC s s' ∧ post s k s' k')
+        (onExit s k) s k) :
+    EnsuresK p E entry args pre post onExit :=
+  fun s k hs hp ret hret => h ret hret _ k (hs.setRet ret) (hinv s k ret hret hp)
 
 /-! ## Traps -/
 

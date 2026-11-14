@@ -258,7 +258,7 @@ func TestASLParseCoverage(t *testing.T) {
 func TestASLAssumptions(t *testing.T) {
 	a := aslAssumptions("… (h : JanusASL.Proofs.Rel js s) (hc : JanusASL.Proofs.LinuxEL0Config s) …")
 	joined := strings.Join(a, "\n")
-	for _, want := range []string{"Rel js s:", "LinuxEL0Config s:", "program's own fetch"} {
+	for _, want := range []string{"Rel (js₀.setRet ret) s:", "LinuxEL0Config s:", "program's own fetch"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("assumptions lack %q", want)
 		}
@@ -304,7 +304,7 @@ func TestASLExamples(t *testing.T) {
 				t.Errorf("corollary %q of %q", a.Theorem, a.Of)
 			}
 			for _, want := range []string{"JanusASL.Proofs.aslRun (Extracted.program.withExit ret) fuel s = JanusASL.Proofs.AslOutcome.returned s'",
-				"JanusASL.Proofs.Rel js s", "JanusASL.Proofs.LinuxEL0Config s", "Janus.GoABI.CallSetup (Extracted.program.withExit ret) Extracted.entry", post} {
+				"JanusASL.Proofs.Rel (js₀.setRet ret) s", "JanusASL.Proofs.LinuxEL0Config s", "Janus.GoABI.CallSetup0 Extracted.entry", post} {
 				if !strings.Contains(a.Statement, want) {
 					t.Errorf("statement lacks %q:\n%s", want, a.Statement)
 				}

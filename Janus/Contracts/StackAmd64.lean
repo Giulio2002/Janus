@@ -296,8 +296,17 @@ theorem grow_rec64 {p : Amd64.Program} {reloc : State → State → Prop} {Cfg :
 /-- The grown contract of a Go function on amd64, under the `morestack` contract `reloc`. -/
 def EnsuresGrow64 (p : Amd64.Program) (reloc : State → State → Prop) (entry : Nat) (args : List W64)
     (pre : State → Prop) (post : State → State → Prop) : Prop :=
-  ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
-    GrownReturns64 (p.withExit ret) reloc s (fun s' => post s s')
+  ∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret →
+    GrownReturns64 (p.withExit ret) reloc (s.setRet ret) (fun s' => post (s.setRet ret) s')
+
+/-- Migration bridge (see `GoABI.Ensures.of_old`). -/
+theorem EnsuresGrow64.of_old {p : Amd64.Program} {reloc : State → State → Prop} {entry : Nat}
+    {args : List W64} {pre : State → Prop} {post : State → State → Prop}
+    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+      GrownReturns64 (p.withExit ret) reloc s (fun s' => post s s')) :
+    EnsuresGrow64 p reloc entry args pre post :=
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
 
 /-! ## amd64 frames keep their words above their stack pointer -/
 

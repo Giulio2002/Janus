@@ -30,8 +30,7 @@ Per ISA (`Janus.GoABI`, `Janus.Amd64.GoABI`):
   `RunsAtLeastOnCall.of_old` (a proof of the old statement plus `hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret)`
   give the new one), and the reverse `Ensures.toOld` (the old-shaped statement for a state that already holds `ret`;
   arm64 also needs `args.length ≤ numIntRegs`, an auto-parameter closed by `simp [numIntRegs]`). `Ensures.toSummary`,
-  `Ensures.toSummaryIn` and `EnsuresC.of_ensures` use it, so their statements are unchanged (arm64: they gain the
-  auto-parameter `hlen`).
+  `Ensures.toSummaryIn` use it, so their statements are unchanged (arm64: they gain the auto-parameter `hlen`).
 - Simp lemmas `setRet_*` (registers other than `X30`, `SP`/`RSP`, pc/rip, flags, xmm, mem regions, `accessible`
   unchanged); amd64 `readLE_setRet_of_disjoint` (a read of `[a, a + n)` outside `[RSP, RSP + 8)`), `readLE_setRet_sp`
   (the return slot holds `ret`), `bytes_setRet_of_outside`; `CallSetup.setRet_eq`; `Memory.writeLE_readLE_self`.
@@ -47,12 +46,28 @@ Per ISA (`Janus.GoABI`, `Janus.Amd64.GoABI`):
   rule accepts `State.setRet s ret` (it changes only the memory).
 - The v0.3.4 items below are part of this release.
 
-### Not changed (known remainder)
+### The other main-theorem forms (same change)
 
-`Ensures0`/`EnsuresResults0` (ABI0), `EnsuresC`/`CEnsuresC`/`CEnsures`/`CCall` (C ABI and cgo), `EnsuresK`
-(syscalls) and `EnsuresGrow`/`EnsuresGrow64` (stack growth) keep their old shape: a precondition of those forms is still
-evaluated on the state with the return address installed. They are not the Go ABIInternal forms of the main theorems
-the design covers; they move in a later release if the same hole matters there.
+Every other form that quantified `∀ ret, RetAddr p ret → ∀ s, <setup> s → pre s → …` is now
+`∀ s, <setup without the return address> s → pre s → ∀ ret, RetAddr p ret → <run claim from s.setRet ret>`, with `s.setRet ret` in
+the run claim, the post, the class and the relocation, and an `.of_old` bridge:
+
+| Form (module) | Ret-free setup | Return address |
+| --- | --- | --- |
+| `GoABI0.Ensures0`, `EnsuresResults0` (both ISAs) | `GoABI0.CallSetupF` | arm64 `X30`, amd64 `[RSP]` |
+| `CABI.CEnsures`, `CEnsuresResults`, `CEnsuresA`, `CEnsuresR` (both ISAs) | `CABI.CCallF`, `CABI.CCallAF` | arm64 `X30`, amd64 `[RSP]` (System V) |
+| `FFI.EnsuresC`, `FFI.CEnsuresC` (both ISAs) | `GoABI.CallSetup0`, `CABI.CCallF` | as above |
+| `Kernel.EnsuresK` (both ISAs; `pre s k`, `post s k s' k'`, `onExit s k`) | `GoABI.CallSetup0` | as above |
+| `Contracts.Stack.EnsuresGrow`, `StackAmd64.EnsuresGrow64` | `GoABI.CallSetup0` | as above |
+
+Notes: `CCallAF` (classified C calls) states the by-reference argument copies of the amd64 call apart from `[RSP, RSP + 8)`
+(`ArgAtF`; System V never passes a copy by reference, so nothing changes for a real prototype); on arm64 it needs no extra
+condition (`assignAll_low`: no argument lives in `X30`). Each form also has the `.of_old` bridge, the `toOld` direction for
+`EnsuresC`/`CEnsuresC` (used by `CgoCall.refines`/`CgoCallback.refines`), `CCall.toF`; `Ensures0.of_summary`,
+`of_summary0`, `CEnsures.of_summary`, `CEnsuresA.of_summary` take their call-site hypotheses on the pre-setRet state
+(`hpre : … → spre (s.setRet ret)`). `EnsuresC.of_ensures` no longer needs the arm64 `hlen`. `janus_ensures_old` and
+`janus64_ensures_old` dispatch on all these heads; `janus_pre_setRet_k` / `janus64_pre_setRet_k` are the variants for `EnsuresK`
+(`pre s k`). `scripts/dev/migrate-v040.py` rewrites them all.
 
 ### Migration guide
 
@@ -70,11 +85,14 @@ theorem correctness : Ensures P E [x, y] pre post := by      theorem correctness
 
 `janus_ensures_old` is `refine Ensures.of_old (by janus_pre_setRet) ?_`; the remaining goal is the old statement, so the
 old proof is unchanged (`intro ret hret s hs hpre` still takes the state with the return address installed). The same
-line works for `EnsuresResults`, `EnsuresWithin`, `EnsuresGo`, `EnsuresGoX`, `RunsAtLeastOnCall`. A proof that is not
+line works for `EnsuresResults`, `EnsuresWithin`, `EnsuresGo`, `EnsuresGoX`, `RunsAtLeastOnCall`, `Ensures0`/`EnsuresResults0`, `CEnsures`,
+`CEnsuresA`, `EnsuresC`, `CEnsuresC`, `EnsuresK` (`intro ret hret s k hs …` follows) and `EnsuresGrow(64)`. A proof that is not
 introduced by `intro ret hret …` (a hand-written `fun ret hret s hs hp => …`) uses the bridge lemma directly:
 `Ensures.of_old (by janus_pre_setRet) (fun ret hret s hs hp => …)`.
 
-Witnesses (`Witness.nonvacuous` and friends): `CallSetup (P.withExit ret) E args s` becomes `CallSetup0 E args s`
+Witnesses (`Witness.nonvacuous` and friends): `CallSetup (P.withExit ret) E args s` becomes `CallSetup0 E args s` (ABI0
+`GoABI0.CallSetup0 (P.withExit ret) E args nres s` becomes `CallSetupF E args nres s`, `CCall` becomes `CCallF`, `CCallA` becomes `CCallAF`;
+the ABI0/C setup proofs drop the return-address field as well)
 (the setup lemma drops the return-address field `⟨rfl, rfl, …⟩` on arm64: `⟨rfl, by decide, …⟩` with the `len` field; amd64:
 `⟨rfl, by decide, rfl, by decide, args, rfl⟩` becomes `⟨rfl, rfl, by decide, args, rfl⟩`), the run claim is stated at
 `s.setRet ret` (`Returns (P.withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ …`, with `s` in the
@@ -99,6 +117,17 @@ Direct style (no bridge; for a new proof or a precondition the bridge cannot dis
   `Apart ptr n RSP 8` (or `Disjoint`) in the precondition. A precondition that reads `[RSP]` itself keeps its reads
   of `ret`: `[RSP] < 2^47` is derived from `RetAddr`; a pin (`[RSP] = 0`, a bound on `ret`) fails, correctly.
 - Post conditions that read the initial memory at the return slot see `ret`, as the callee does.
+- Predicates that live in other modules or are proof-local are not unfolded by default: pass them, e.g.
+  `janus64_ensures_old [Janus.Amd64.CABI.CStack]`, `janus_ensures_old [GPre]`. (The default list is the `GoABI` predicates.)
+- **amd64 `StackGuardOK` and `TlsG`** read memory at `g + 16` and `FS - 8` with nothing keeping those words apart from `[RSP, RSP + 8)`
+  (the old statement had them read after `ret` was written): `janus64_pre_setRet` cannot discharge them. State
+  `Janus.Apart (g.toNat + 16) 8 RSP 8` (and for `TlsG` a bound such as `fsBase ≤ RSP ∨ RSP + 16 ≤ fsBase`, which `omega` uses) as an
+  extra conjunct. Phase 2 must decide whether `StackGuardOK` itself should carry the apartness (BREAKING for its 3-field patterns).
+- **`EnsuresGrow(64)` examples (`BigLocal`, `SumRec`, `HoldPtr`, both ISAs) do not migrate by the bridge.** Their precondition
+  `GPre` walks the caller's frames from `X30` / `[RSP]` (`Chain … (s.regs 30).toNat …`): it is a statement about the return address
+  itself, which the new shape forbids by design. Their statements need a redesign (the caller-chain hypothesis has to become an
+  explicit, visible hypothesis about the caller, not part of `pre`). The forms themselves are migrated and tested
+  (`JanusTests.RetAddr` a7, m13).
 
 ### v0.3.4 items (merged)
 
@@ -119,8 +148,11 @@ Auditor and CLI fixes requested by fv-modexp.
 
 - Phase-1 migration scope: the `janus_*`/`Within` tests of `test/lean/JanusTests`, round n9 and `rounderrorf`'s a9/a10, and
   six pilot examples (`Add`, `Max`, `LoadThird` on both ISAs). The other examples, the other red-team rounds
-  (`test/redteam`), the embedded proofs of `cmd/janus/*_test.go`, `models/asl` (`Ensures.toASL` is updated but not rebuilt:
+  (`test/redteam`), `models/asl` (`Ensures.toASL` is updated but not rebuilt:
   Sail is not part of this tree's build) and the docs' code snippets still hold the old shape.
+- Phase 1b: pilots `proofs-cgo/arm64/CAdd` and `GoAdd`, `proofs-sys/arm64/Pid` (`EnsuresK`), `proofs/BigLocal` (`EnsuresGrow`),
+  `asm/proofs/arm64/AddAsm` (`Ensures0`); `cmd/janus` tests (`asl_test.go`, `deps_test.go`, `hardening_test.go`, `round2_test.go`,
+  `within_test.go`) updated to the new shape.
 - New `test/redteam/rounds/roundretaddr/` (both ISAs) and `test/lean/JanusTests/RetAddr.lean`: preconditions that pin
   the return address (`(s.regs 30).toNat = 0`, `readLE RSP 8 = 0`, the probe forms `RspBypass64.lean` and `LrPin.lean` of
   v0.3.3) are accepted and harmless: the theorem still covers every admissible `ret`.

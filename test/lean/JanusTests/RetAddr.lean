@@ -48,6 +48,40 @@ theorem a4_pin_not_invariant :
   have := h { regs := fun _ => 0, sp := 0, pc := 0, flags := ⟨false, false, false, false⟩, mem := default } 4 rfl
   simp at this
 
+/-- a6: the other main-theorem forms (phase 1b) cover every admissible `ret` under an `X30` pin as well: `Ensures0` (ABI0), `CEnsures` (C ABI),
+`EnsuresK` (kernel semantics), `EnsuresC` / `CEnsuresC` (cgo). -/
+theorem a6_ensures0 {p : Program} {entry : Nat} {args : List W64} {nres : Nat} {post : State → State → Prop}
+    (h : GoABI0.Ensures0 p entry args nres (fun s => (s.regs 30).toNat = 0) post)
+    {s : State} (hs : GoABI0.CallSetupF entry args nres s) (hp : (s.regs 30).toNat = 0) {r₁ r₂ : Nat}
+    (h₁ : RetAddr p r₁) (h₂ : RetAddr p r₂) :
+    Returns (p.withExit r₁) (s.setRet r₁) (fun s' => GoABI0.ABIReturn0 (s.setRet r₁) s' ∧ post (s.setRet r₁) s') ∧
+    Returns (p.withExit r₂) (s.setRet r₂) (fun s' => GoABI0.ABIReturn0 (s.setRet r₂) s' ∧ post (s.setRet r₂) s') :=
+  ⟨h s hs hp r₁ h₁, h s hs hp r₂ h₂⟩
+
+theorem a6_cEnsures {p : Program} {entry : Nat} {args : List W64} {post : State → State → Prop}
+    (h : CABI.CEnsures p entry args (fun s => (s.regs 30).toNat = 0) post)
+    {s : State} (hs : CABI.CCallF entry args s) (hp : (s.regs 30).toNat = 0) {r₁ r₂ : Nat}
+    (h₁ : RetAddr p r₁) (h₂ : RetAddr p r₂) :
+    Returns (p.withExit r₁) (s.setRet r₁) (fun s' => CABI.CReturn (s.setRet r₁) s' ∧ post (s.setRet r₁) s') ∧
+    Returns (p.withExit r₂) (s.setRet r₂) (fun s' => CABI.CReturn (s.setRet r₂) s' ∧ post (s.setRet r₂) s') :=
+  ⟨h s hs hp r₁ h₁, h s hs hp r₂ h₂⟩
+
+theorem a6_ensuresK {p : Program} {E : Kernel.KEnv} {entry : Nat} {args : List W64}
+    {post : State → Kernel.Kern → State → Kernel.Kern → Prop}
+    (h : Kernel.EnsuresK p E entry args (fun s _ => (s.regs 30).toNat = 0) post)
+    {s : State} {k : Kernel.Kern} (hs : CallSetup0 entry args s) (hp : (s.regs 30).toNat = 0) {r : Nat}
+    (hr : RetAddr p r) :
+    Kernel.ReturnsK (p.withExit r) E (fun s' k' => FFI.ABIReturnC (s.setRet r) s' ∧ post (s.setRet r) k s' k')
+      (fun _ _ => False) (s.setRet r) k := by
+  simpa using h s k hs hp r hr
+
+theorem a6_ensuresC {p : Program} {C : FFI.Contract} {entry : Nat} {args : List W64}
+    {post : State → State → Prop}
+    (h : FFI.EnsuresC p C entry args (fun s => (s.regs 30).toNat = 0) post)
+    {s : State} (hs : CallSetup0 entry args s) (hp : (s.regs 30).toNat = 0) {r : Nat} (hr : RetAddr p r) :
+    FFI.ReturnsC (p.withExit r) C (fun s' => FFI.ABIReturnC (s.setRet r) s' ∧ post (s.setRet r) s') (s.setRet r) :=
+  h s hs hp r hr
+
 /-- a4b: and the tactic correctly fails on it. -/
 example (p : Program) : True := by
   fail_if_success (have _h : ∀ s ret, RetAddr p ret → (fun s : State => (s.regs 30).toNat = 0) s →
@@ -65,6 +99,16 @@ example : Ensures retProg 0x1000 [] (fun s => (s.regs 30).toNat = 0) (fun _ _ =>
   have hs1 := hs.setRet (p := retProg) ret
   generalize s.setRet ret = s1 at hs1 ⊢
   janus_intro hs1
+  janus_run
+
+/-- a7: `EnsuresGrow` (stack growth) migrates with the same one line; the precondition is evaluated before `X30` is installed. -/
+example (reloc : State → State → Prop) :
+    Janus.Contracts.Stack.EnsuresGrow retProg reloc 0x1000 [] (fun s => (s.regs 5).toNat < 7)
+      (fun _ _ => True) := by
+  janus_ensures_old
+  intro ret hret s hs _
+  apply Janus.Contracts.Stack.GrownReturns.done
+  janus_intro hs
   janus_run
 
 /-- a5: a precondition on any other register or on the memory survives `setRet`: `janus_pre_setRet` proves it. -/
@@ -147,8 +191,45 @@ example (p : Program) : ∀ s ret, RetAddr p ret →
     (fun s : State => s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47) (s.setRet ret) := by
   janus64_pre_setRet
 
+/-- m12: the other main-theorem forms (phase 1b) cover every admissible `ret` under a `[RSP]` pin as well. -/
+theorem m12_ensures0 {p : Program} {entry : Nat} {args : List W64} {nres : Nat} {post : State → State → Prop}
+    (h : GoABI0.Ensures0 p entry args nres (fun s => s.mem.readLE (s.regs 4).toNat 8 = 0) post)
+    {s : State} (hs : GoABI0.CallSetupF entry args nres s) (hp : s.mem.readLE (s.regs 4).toNat 8 = 0)
+    {r₁ r₂ : Nat} (h₁ : RetAddr p r₁) (h₂ : RetAddr p r₂) :
+    Returns (p.withExit r₁) (s.setRet r₁) (fun s' => GoABI0.ABIReturn0 (s.setRet r₁) s' ∧ post (s.setRet r₁) s') ∧
+    Returns (p.withExit r₂) (s.setRet r₂) (fun s' => GoABI0.ABIReturn0 (s.setRet r₂) s' ∧ post (s.setRet r₂) s') :=
+  ⟨h s hs hp r₁ h₁, h s hs hp r₂ h₂⟩
+
+theorem m12_cEnsures {p : Program} {entry : Nat} {args : List W64} {post : State → State → Prop}
+    (h : CABI.CEnsures p entry args (fun s => s.mem.readLE (s.regs 4).toNat 8 = 0) post)
+    {s : State} (hs : CABI.CCallF entry args s) (hp : s.mem.readLE (s.regs 4).toNat 8 = 0) {r₁ r₂ : Nat}
+    (h₁ : RetAddr p r₁) (h₂ : RetAddr p r₂) :
+    Returns (p.withExit r₁) (s.setRet r₁) (fun s' => CABI.CReturn (s.setRet r₁) s' ∧ post (s.setRet r₁) s') ∧
+    Returns (p.withExit r₂) (s.setRet r₂) (fun s' => CABI.CReturn (s.setRet r₂) s' ∧ post (s.setRet r₂) s') :=
+  ⟨h s hs hp r₁ h₁, h s hs hp r₂ h₂⟩
+
+theorem m12_ensuresC {p : Program} {C : FFI.Contract} {entry : Nat} {args : List W64}
+    {post : State → State → Prop}
+    (h : FFI.EnsuresC p C entry args (fun s => s.mem.readLE (s.regs 4).toNat 8 = 0) post)
+    {s : State} (hs : CallSetup0 entry args s) (hp : s.mem.readLE (s.regs 4).toNat 8 = 0) {r : Nat}
+    (hr : RetAddr p r) :
+    FFI.ReturnsC (p.withExit r) C (fun s' => ABIReturn (s.setRet r) s' ∧ post (s.setRet r) s') (s.setRet r) :=
+  h s hs hp r hr
+
 /-- A function that is a single `ret` (`0xc3`) at `0x1000`. -/
 def retProg64 : Program := { segments := [⟨"f", 0x1000, [0xc3]⟩], stubs := [], exitAddr := 0 }
+
+/-- m13: `EnsuresGrow64` migrates with the same one line. -/
+example (reloc : State → State → Prop) :
+    Janus.Contracts.StackAmd64.EnsuresGrow64 retProg64 reloc 0x1000 [] (fun s => StackWritable s 0 8)
+      (fun _ _ => True) := by
+  janus64_ensures_old
+  intro ret hret s hs hpre
+  apply Janus.Contracts.StackAmd64.GrownReturns64.done
+  janus64_intro hs
+  obtain ⟨-, hnw, hacc⟩ := hpre
+  simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
+  janus64_run
 
 /-- m11: the old attack's statement (a pin of `[RSP]`) is a true theorem about every admissible return address, proved
 directly in the new shape: `hs.setRet` is the old-shaped `CallSetup` of `s.setRet ret`, the run starts there, and the facts

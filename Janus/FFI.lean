@@ -342,60 +342,98 @@ attribute [janus_post] abiReturnC_iff CABI.cReturn_iff
 theorem ABIReturnC.of_abiReturn {s₀ s₁ : State} (h : ABIReturn s₀ s₁) : ABIReturnC s₀ s₁ :=
   ⟨h.sp, h.g, h.fp⟩
 
-/-- The Go function contract under a contract `C` for its external calls: for **every**
-admissible return address and **every** Go call state with these arguments satisfying `pre`,
-every run returns to `ret` (`ReturnsC`), restores `SP`, `g` and `FP` (`ABIReturnC`) and
-satisfies `post s₀ s₁`. -/
+/-- The Go function contract under a contract `C` for its external calls: for **every** Go call
+state with these arguments satisfying `pre` (`CallSetup0`, before the return address is installed)
+and **every** admissible return address, every run from `s₀ = s.setRet ret` returns to `ret`
+(`ReturnsC`), restores `SP`, `g` and `FP` (`ABIReturnC`) and satisfies `post s₀ s₁`. -/
 def EnsuresC (p : Program) (C : Contract) (entry : Nat) (args : List W64) (pre : State → Prop)
     (post : State → State → Prop) : Prop :=
-  ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
-    ReturnsC (p.withExit ret) C (fun s' => ABIReturnC s s' ∧ post s s') s
+  ∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret →
+    ReturnsC (p.withExit ret) C
+      (fun s' => ABIReturnC (s.setRet ret) s' ∧ post (s.setRet ret) s') (s.setRet ret)
 
 /-- The C function contract under a contract `C` for its external calls (`CABI.CEnsures` with
 `ReturnsC` in place of `Returns`). -/
 def CEnsuresC (p : Program) (C : Contract) (entry : Nat) (args : List W64) (pre : State → Prop)
     (post : State → State → Prop) : Prop :=
-  ∀ ret, RetAddr p ret → ∀ s, CCall (p.withExit ret) entry args s → pre s →
-    ReturnsC (p.withExit ret) C (fun s' => CReturn s s' ∧ post s s') s
+  ∀ s, CCallF entry args s → pre s → ∀ ret, RetAddr p ret →
+    ReturnsC (p.withExit ret) C (fun s' => CReturn (s.setRet ret) s' ∧ post (s.setRet ret) s') (s.setRet ret)
+
+/-- Migration bridges (see `GoABI.Ensures.of_old`). -/
+theorem EnsuresC.of_old {p : Program} {C : Contract} {entry : Nat} {args : List W64}
+    {pre : State → Prop} {post : State → State → Prop}
+    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+      ReturnsC (p.withExit ret) C (fun s' => ABIReturnC s s' ∧ post s s') s) :
+    EnsuresC p C entry args pre post :=
+  fun s hs hp ret hret => h ret hret _ (hs.setRet ret) (hinv s ret hret hp)
+
+theorem CEnsuresC.of_old {p : Program} {C : Contract} {entry : Nat} {args : List W64}
+    {pre : State → Prop} {post : State → State → Prop}
+    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (h : ∀ ret, RetAddr p ret → ∀ s, CCall (p.withExit ret) entry args s → pre s →
+      ReturnsC (p.withExit ret) C (fun s' => CReturn s s' ∧ post s s') s) :
+    CEnsuresC p C entry args pre post :=
+  fun s hs hp ret hret => h ret hret _ (hs.setRet ret) (hinv s ret hret hp)
+
+/-- The old-shaped statement (the state already holds `ret` in `X30`): what a callee summary or a
+call-site composition (`CgoCall.refines`) uses. -/
+theorem CEnsuresC.toOld {p : Program} {C : Contract} {entry : Nat} {args : List W64}
+    {pre : State → Prop} {post : State → State → Prop} (h : CEnsuresC p C entry args pre post) :
+    ∀ ret, RetAddr p ret → ∀ s, CCall (p.withExit ret) entry args s → pre s →
+      ReturnsC (p.withExit ret) C (fun s' => CReturn s s' ∧ post s s') s := by
+  intro ret hret s hs hp
+  have := h s hs.toF hp ret hret
+  rwa [hs.call.setRet_eq] at this
+
+theorem EnsuresC.toOld {p : Program} {C : Contract} {entry : Nat} {args : List W64}
+    {pre : State → Prop} {post : State → State → Prop} (h : EnsuresC p C entry args pre post)
+    (hlen : args.length ≤ GoABI.numIntRegs := by simp [GoABI.numIntRegs]) :
+    ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+      ReturnsC (p.withExit ret) C (fun s' => ABIReturnC s s' ∧ post s s') s := by
+  intro ret hret s hs hp
+  have := h s ⟨hs.pc, hlen, hs.args⟩ hp ret hret
+  rwa [hs.setRet_eq] at this
 
 /-- A Go theorem under a contract holds under every refinement of the contract. -/
 theorem EnsuresC.refine {p : Program} {C₁ C₂ : Contract} {entry : Nat} {args : List W64}
     {pre : State → Prop} {post : State → State → Prop} (hR : C₁.Refines C₂)
     (h : EnsuresC p C₂ entry args pre post) : EnsuresC p C₁ entry args pre post :=
-  fun ret hret s hs hp => (h ret hret s hs hp).refine hR
+  fun s hs hp ret hret => (h s hs hp ret hret).refine hR
 
 theorem CEnsuresC.refine {p : Program} {C₁ C₂ : Contract} {entry : Nat} {args : List W64}
     {pre : State → Prop} {post : State → State → Prop} (hR : C₁.Refines C₂)
     (h : CEnsuresC p C₂ entry args pre post) : CEnsuresC p C₁ entry args pre post :=
-  fun ret hret s hs hp => (h ret hret s hs hp).refine hR
+  fun s hs hp ret hret => (h s hs hp ret hret).refine hR
 
 /-- A Go `Ensures` theorem holds under any contract. -/
 theorem EnsuresC.of_ensures {p : Program} {C : Contract} {entry : Nat} {args : List W64}
-    {pre : State → Prop} {post : State → State → Prop} (h : Ensures p entry args pre post)
-    (hlen : args.length ≤ GoABI.numIntRegs := by simp [GoABI.numIntRegs]) :
+    {pre : State → Prop} {post : State → State → Prop} (h : Ensures p entry args pre post) :
     EnsuresC p C entry args pre post :=
-  fun ret hret s hs hp => .of_returns ((h.toOld hlen ret hret s hs hp).mono fun _ ⟨ha, hq⟩ =>
+  fun s hs hp ret hret => .of_returns ((h s hs hp ret hret).mono fun _ ⟨ha, hq⟩ =>
     ⟨ABIReturnC.of_abiReturn ha, hq⟩)
 
 theorem CEnsuresC.of_cEnsures {p : Program} {C : Contract} {entry : Nat} {args : List W64}
     {pre : State → Prop} {post : State → State → Prop} (h : CEnsures p entry args pre post) :
     CEnsuresC p C entry args pre post :=
-  fun ret hret s hs hp => .of_returns (h ret hret s hs hp)
+  fun s hs hp ret hret => .of_returns (h s hs hp ret hret)
 
 /-- A callee `Summary` of a C function (precondition `spre`, implied by every C call state
 satisfying `pre`) is a `CEnsures` when its postcondition implies `CReturn`. -/
 theorem CEnsures.of_summary {p : Program} {entry : Nat} {args : List W64}
     {pre spre : State → Prop} {post post' : State → State → Prop}
     (hsum : Summary p entry spre post')
-    (hpre : ∀ ret s, RetAddr p ret → CCall (p.withExit ret) entry args s → pre s → spre s)
-    (hpost : ∀ s s', pre s → post' s s' → CReturn s s' ∧ post s s') :
+    (hpre : ∀ ret s, RetAddr p ret → CCallF entry args s → pre s → spre (s.setRet ret))
+    (hpost : ∀ s ret s', pre s → post' (s.setRet ret) s' →
+      CReturn (s.setRet ret) s' ∧ post (s.setRet ret) s') :
     CEnsures p entry args pre post := by
-  intro ret hret s hs hp
-  have hpc : s.pc = BitVec.ofNat 64 entry := hs.call.pc
-  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc (hpre ret s hret hs hp)
+  intro s hs hp ret hret
+  have hs1 : CCall (p.withExit ret) entry args (s.setRet ret) := hs.setRet ret
+  have hpc : (s.setRet ret).pc = BitVec.ofNat 64 entry := hs1.call.pc
+  obtain ⟨k, s', hst, hr, hq⟩ := hsum (s.setRet ret) hpc (hpre ret s hret hs hp)
   have hst' := hst.withExit hret.fetch_none
-  refine returns_of_steps hst' ?_ (hpost s s' hp hq)
-  rw [hr, hs.call.lr]
+  refine returns_of_steps hst' ?_ (hpost s ret s' hp hq)
+  rw [hr, hs1.call.lr]
   simp only [Program.withExit, BitVec.toNat_ofNat]
   exact Nat.mod_eq_of_lt hret.lt64
 
@@ -600,11 +638,11 @@ theorem CgoCall.refines {p : Program} {fn : Nat} {G : State → Prop} {E : State
       nargs := by simp [numArgRegs]
       spAligned := he.stack.1 }
   refine ⟨⟨hf, fun t ret T he => ?_⟩, ?_⟩
-  · exact (hC T (s.regs 1) ret he.retAddr t (hcall t ret he) (hpre s t ret hG he)).mono
+  · exact ((hC T (s.regs 1)).toOld ret he.retAddr t (hcall t ret he) (hpre s t ret hG he)).mono
       fun _ h => h.1
   · rintro s' ⟨hf', t, ret, T, t', he, hrun, hcr, hres⟩
     refine ⟨hf', ?_⟩
-    have hq := (hC T (s.regs 1) ret he.retAddr t (hcall t ret he) (hpre s t ret hG he)).runsTo hrun
+    have hq := ((hC T (s.regs 1)).toOld ret he.retAddr t (hcall t ret he) (hpre s t ret hG he)).runsTo hrun
     exact hres.memFrame (hE s hG) (hacc s t ret t' hG he hcr hq.2) (hna s hG)
 
 
@@ -987,10 +1025,10 @@ theorem CgoCallback.refines {t : TLSImage} {p : Program} {Cin : Contract} {R : S
         have : i = 0 := by simp at hi; omega
         subst this; simpa using he.arg }
   refine ⟨⟨hf, hstack s hG, hready s hG, fun u ret he hR => ?_⟩, ?_⟩
-  · exact (hGo _ ret he.retAddr u (hcall u ret he) (hpre s u ret hG he hR)).mono fun _ h => h.1
+  · exact ((hGo _).toOld (by simp [GoABI.numIntRegs]) ret he.retAddr u (hcall u ret he) (hpre s u ret hG he hR)).mono fun _ h => h.1
   · rintro s' ⟨hf', u, ret, u', he, hR, hrun, hab, hres⟩
     refine ⟨hf', ?_⟩
-    have hq := (hGo _ ret he.retAddr u (hcall u ret he) (hpre s u ret hG he hR)).runsTo hrun
+    have hq := ((hGo _).toOld (by simp [GoABI.numIntRegs]) ret he.retAddr u (hcall u ret he) (hpre s u ret hG he hR)).runsTo hrun
     exact hres.memFrame (hE s hG) (hacc s u ret u' hG he hR hab hq.2) (hna s hG)
 
 /-! ## `alloca` and variable-length frames

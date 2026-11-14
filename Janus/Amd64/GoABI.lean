@@ -518,6 +518,11 @@ theorem Ensures.neverPanics {pre : State → Prop} {post : State → State → P
     (hs : CallSetup0 entry args s) (hpre : pre s) :
     NeverPanics (p.withExit ret) (s.setRet ret) := (h s hs hpre ret hret).neverPanics
 
+/-- A `CallSetup` state is a `CallSetup0` state (forget the return address). -/
+theorem CallSetup.toSetup0 {p : Program} {entry : Nat} {args : List W64}
+    (h : CallSetup p entry args s) : CallSetup0 entry args s :=
+  ⟨h.rip, h.zero, h.len, h.args, h.df⟩
+
 /-- A call state that already holds `ret` at `[RSP]` is unchanged by writing it. -/
 theorem CallSetup.setRet_eq {p : Program} {entry : Nat} {args : List W64} {ret : Nat}
     (h : CallSetup (p.withExit ret) entry args s) : s.setRet ret = s := by

@@ -34,4 +34,30 @@ theorem e4 : EnsuresWithin (fun _ => 1) Extracted.program Extracted.entry []
     (fun s => (s.regs 30).toNat = 0 ∧ False) (fun _ _ => True) := by
   intro s hs hp ret hret; exact hp.2.elim
 
+/-! v0.4.0 phase 1b: the other main-theorem forms evaluate their precondition before the return address is installed too. -/
+
+/-- e5: ABI0 (`Ensures0`). -/
+theorem e5 : Janus.GoABI0.Ensures0 Extracted.program Extracted.entry [] 0
+    (fun s => (s.regs 30).toNat = 0 ∧ False) (fun _ _ => True) := by
+  intro s hs hp ret hret; exact hp.2.elim
+
+/-- e6: the C ABI (`CEnsures`). -/
+theorem e6 : Janus.CABI.CEnsures Extracted.program Extracted.entry []
+    (fun s => (s.regs 30).toNat = 0 ∧ False) (fun _ _ => True) := by
+  intro s hs hp ret hret; exact hp.2.elim
+
+/-- e7: the kernel semantics (`EnsuresK`; the precondition also sees the kernel state). -/
+theorem e7 (E : Janus.Kernel.KEnv) : Janus.Kernel.EnsuresK Extracted.program E Extracted.entry []
+    (fun s _ => (s.regs 30).toNat = 0 ∧ False) (fun _ _ _ _ => True) := by
+  intro s k hs hp ret hret; exact hp.2.elim
+
+/-- e8: the cgo contract forms (`EnsuresC`, `CEnsuresC`). -/
+theorem e8 (C : Janus.FFI.Contract) : Janus.FFI.EnsuresC Extracted.program C Extracted.entry []
+    (fun s => (s.regs 30).toNat = 0 ∧ False) (fun _ _ => True) := by
+  intro s hs hp ret hret; exact hp.2.elim
+
+theorem e9 (C : Janus.FFI.Contract) : Janus.FFI.CEnsuresC Extracted.program C Extracted.entry []
+    (fun s => (s.regs 30).toNat = 0 ∧ False) (fun _ _ => True) := by
+  intro s hs hp ret hret; exact hp.2.elim
+
 end Proof

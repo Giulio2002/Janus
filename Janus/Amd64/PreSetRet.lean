@@ -42,23 +42,21 @@ namespace Janus.Amd64.Tactic
 
 open Lean Elab Tactic
 
-syntax "janus64_pre_setRet" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
+syntax (name := janus64PreSetRetCore) "janus64_pre_setRet_core " ident ident ident ident " [" Lean.Parser.Tactic.simpLemma,* "]" : tactic
 
-macro_rules
-  | `(tactic| janus64_pre_setRet) => `(tactic| janus64_pre_setRet [])
-  | `(tactic| janus64_pre_setRet [$ds,*]) => `(tactic|
-      (intro s ret hret hp
-       have hu := hret.user
+macro_rules (kind := janus64PreSetRetCore)
+  | `(tactic| janus64_pre_setRet_core $s $ret $hret $hp [$ds,*]) => `(tactic|
+      (have hu := ($hret).user
        try simp only [Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.SPAligned,
          Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.Disjoint, Janus.Amd64.GoABI.valueAt,
          Janus.Amd64.GoABI.StackWords, Janus.Amd64.GoABI.stackWord, Janus.Amd64.GoABI.stackArgOffset,
          Janus.Amd64.GoABI.StackGuardOK, Janus.Amd64.GoABI.stackguard0, Janus.Amd64.GoABI.stackguard0Offset,
          Janus.Amd64.GoABI.ClosureCtx, Janus.Spec.Disjoint, Janus.Apart, Janus.outside_nil,
-         Janus.outside_cons, $ds,*] at hp ⊢
+         Janus.outside_cons, $ds,*] at $hp:ident ⊢
        all_goals
-        (have hp0 := hp
+        (have hp0 := $hp
          janus_split_hyps keep hp0
-         janus_have_rsp8 hacc8 : s.mem.accessible (s.regs 4).toNat 8 true = true
+         janus_have_rsp8 hacc8 : ($s).mem.accessible (($s).regs 4).toNat 8 true = true
          try simp (disch := first | omega | assumption)
            only [Janus.Amd64.GoABI.setRet_regs,
            Janus.Amd64.GoABI.setRet_rip, Janus.Amd64.GoABI.setRet_flags,
@@ -72,17 +70,44 @@ macro_rules
          try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
          all_goals first | with_reducible exact hp0 | (and_intros <;> first | with_reducible assumption | omega))))
 
-/-- `janus64_ensures_old [defs]`: the amd64 twin of `janus_ensures_old`. -/
-syntax "janus64_ensures_old" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
+syntax (name := janus64PreSetRet) "janus64_pre_setRet" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 
-macro_rules
+macro_rules (kind := janus64PreSetRet)
+  | `(tactic| janus64_pre_setRet) => `(tactic| janus64_pre_setRet [])
+  | `(tactic| janus64_pre_setRet [$ds,*]) => `(tactic|
+      (intro s ret hret hp
+       janus64_pre_setRet_core s ret hret hp [$ds,*]))
+
+/-- `janus64_pre_setRet_k`: as `janus64_pre_setRet` for a precondition on a state and a kernel state
+(`EnsuresK`). -/
+syntax (name := janus64PreSetRetK) "janus64_pre_setRet_k" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
+
+macro_rules (kind := janus64PreSetRetK)
+  | `(tactic| janus64_pre_setRet_k) => `(tactic| janus64_pre_setRet_k [])
+  | `(tactic| janus64_pre_setRet_k [$ds,*]) => `(tactic|
+      (intro s k ret hret hp
+       janus64_pre_setRet_core s ret hret hp [$ds,*]))
+
+/-- `janus64_ensures_old [defs]`: the amd64 twin of `janus_ensures_old`. -/
+syntax (name := janus64EnsuresOld) "janus64_ensures_old" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
+
+def ensuresOldForms64 : List (Name × Bool) :=
+  [(`Janus.Amd64.GoABI.Ensures.of_old, false), (`Janus.Amd64.GoABI.EnsuresWithin.of_old, false),
+   (`Janus.Amd64.GoABI.EnsuresGoX.of_old, false), (`Janus.Amd64.GoABI.EnsuresGo.of_old, false),
+   (`Janus.Amd64.GoABI.RunsAtLeastOnCall.of_old, false), (`Janus.Amd64.GoABI0.Ensures0.of_old, false),
+   (`Janus.Amd64.CABI.CEnsures.of_old, false), (`Janus.Amd64.CABI.CEnsuresA.of_old, false),
+   (`Janus.Amd64.FFI.EnsuresC.of_old, false), (`Janus.Amd64.FFI.CEnsuresC.of_old, false),
+   (`Janus.Amd64.Kernel.EnsuresK.of_old, true), (`Janus.Contracts.StackAmd64.EnsuresGrow64.of_old, false)]
+
+macro_rules (kind := janus64EnsuresOld)
   | `(tactic| janus64_ensures_old) => `(tactic| janus64_ensures_old [])
-  | `(tactic| janus64_ensures_old [$ds,*]) => `(tactic|
-      first
-        | refine Janus.Amd64.GoABI.Ensures.of_old (by janus64_pre_setRet [$ds,*]) ?_
-        | refine Janus.Amd64.GoABI.EnsuresWithin.of_old (by janus64_pre_setRet [$ds,*]) ?_
-        | refine Janus.Amd64.GoABI.EnsuresGoX.of_old (by janus64_pre_setRet [$ds,*]) ?_
-        | refine Janus.Amd64.GoABI.EnsuresGo.of_old (by janus64_pre_setRet [$ds,*]) ?_
-        | refine Janus.Amd64.GoABI.RunsAtLeastOnCall.of_old (by janus64_pre_setRet [$ds,*]) ?_)
+  | `(tactic| janus64_ensures_old [$ds,*]) => do
+    let mut acc ← `(Lean.Parser.Tactic.tacticSeq| fail "janus64_ensures_old: the goal is not a main-theorem form with an `of_old` bridge")
+    for (n, isK) in ensuresOldForms64.reverse do
+      let alt ← if isK then
+          `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus64_pre_setRet_k [$ds,*]) ?_)
+        else `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus64_pre_setRet [$ds,*]) ?_)
+      acc ← `(Lean.Parser.Tactic.tacticSeq| first | $alt | $acc)
+    `(tactic| ($acc))
 
 end Janus.Amd64.Tactic
