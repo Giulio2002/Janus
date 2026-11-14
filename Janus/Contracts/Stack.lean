@@ -458,21 +458,21 @@ def EnsuresGrow (p : Program) (reloc : State → State → Prop) (entry : Nat) (
 address installed); it follows from `pre s` and `caller (s.setRet ret)`. -/
 theorem EnsuresGrow.of_old_with {p : Program} {reloc : State → State → Prop} {entry : Nat}
     {args : List W64} {pre caller Pold : State → Prop} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → caller (s.setRet ret) → Pold (s.setRet ret))
+    (hinv : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → caller (s.setRet ret) → Pold (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → Pold s →
       GrownReturns (p.withExit ret) reloc s (fun s' => post s s')) :
     EnsuresGrow p reloc entry args pre caller post :=
-  fun s hs hp ret hret hc => h ret hret _ (hs.setRet ret) (hinv s ret hret hp hc)
+  fun s hs hp ret hret hc => h ret hret _ (hs.setRet ret) (hinv s ret hs hret hp hc)
 
 /-- Migration bridge: the pre-v0.4.0 precondition is `pre ∧ caller` (the chain conjuncts split off into
 `caller`). `hinv` needs `pre (s.setRet ret)` from `pre s` and `caller (s.setRet ret)`. -/
 theorem EnsuresGrow.of_old {p : Program} {reloc : State → State → Prop} {entry : Nat} {args : List W64}
     {pre caller : State → Prop} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → caller (s.setRet ret) → pre (s.setRet ret))
+    (hinv : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → caller (s.setRet ret) → pre (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s ∧ caller s →
       GrownReturns (p.withExit ret) reloc s (fun s' => post s s')) :
     EnsuresGrow p reloc entry args pre caller post :=
   EnsuresGrow.of_old_with (Pold := fun s => pre s ∧ caller s)
-    (fun s ret hret hp hc => ⟨hinv s ret hret hp hc, hc⟩) h
+    (fun s ret hs hret hp hc => ⟨hinv s ret hs hret hp hc, hc⟩) h
 
 end Janus.Contracts.Stack

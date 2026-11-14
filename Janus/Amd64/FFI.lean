@@ -608,8 +608,11 @@ theorem CallbackEntry.guardOK {t : TLSImage} {p : Program} {gs : Nat} {s u : Sta
   have hg := he.guard
   refine ⟨by simp only [regG, stackguard0Offset]; unfold gStructSize at h1; omega,
     Janus.Arm64.Memory.accessible_sub _ h2 (by simp) (by simp only [regG, stackguard0Offset]; omega)
-      (by simp only [regG, stackguard0Offset]; unfold gStructSize; omega), ?_⟩
-  simp only [stackguard0, regG, stackguard0Offset, GoABI.regSP, Janus.FFI.stackGuard] at hg hadj ⊢; omega
+      (by simp only [regG, stackguard0Offset]; unfold gStructSize; omega), ?_, ?_⟩
+  · simp only [stackguard0, regG, stackguard0Offset, GoABI.regSP, Janus.FFI.stackGuard] at hg hadj ⊢; omega
+  · have := he.gOff
+    simp only [outside_cons, outside_nil, and_true, regG, GoABI.regSP, stackguard0Offset, gStructSize] at this ⊢
+    omega
 
 /-- How the C caller resumes: at `[RSP]` with `RSP + 8`, `DF` clear, the same thread, the
 `MXCSR` control bits and x87 control word kept; every other register, the flags and the vector

@@ -134,6 +134,22 @@ theorem inRs_of_outside {a n : Nat} {rs : List (Nat × Nat)} (h : Outside a n rs
 @[simp] theorem view_accessible (rt L : List (Nat × Nat)) (m : Memory) (a n : Nat) (w : Bool) :
     (view rt L m).accessible a n w = m.accessible a n w := rfl
 
+/-- A store outside the runtime-owned ranges does not change the (masked) view. -/
+theorem view_writeLE_of_outside {rt L : List (Nat × Nat)} {m : Memory} {a n v : Nat} (h : Outside a n rt) :
+    view rt L (m.writeLE a n v) = view rt L m := by
+  have hb : ∀ x, (view rt L (m.writeLE a n v)).bytes x = (view rt L m).bytes x := by
+    intro x
+    simp only [view]
+    by_cases hx : a ≤ x ∧ x < a + n
+    · rw [inRs_of_outside h hx.1 hx.2]; simp
+    · rw [Janus.Arm64.Memory.bytes_writeLE_outside _ (by omega)]
+  have hr : (view rt L (m.writeLE a n v)).regions = (view rt L m).regions := rfl
+  cases h1 : view rt L (m.writeLE a n v)
+  cases h2 : view rt L m
+  rw [h1, h2] at hb hr
+  simp only at hb hr
+  rw [show _ = _ from funext hb, hr]
+
 /-- With an empty live set the view is round 9's `rtView`. -/
 theorem view_nil (rt : List (Nat × Nat)) (m : Memory) : view rt [] m = rtView rt m := by
   simp only [view, rtView, inRs, List.any_nil, Bool.not_false, Bool.and_true]

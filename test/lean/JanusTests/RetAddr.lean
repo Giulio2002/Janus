@@ -83,8 +83,8 @@ theorem a6_ensuresC {p : Program} {C : FFI.Contract} {entry : Nat} {args : List 
   h s hs hp r hr
 
 /-- a4b: and the tactic correctly fails on it. -/
-example (p : Program) : True := by
-  fail_if_success (have _h : ∀ s ret, RetAddr p ret → (fun s : State => (s.regs 30).toNat = 0) s →
+example (p : Program) (entry : Nat) (args : List W64) : True := by
+  fail_if_success (have _h : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → (fun s : State => (s.regs 30).toNat = 0) s →
     (fun s : State => (s.regs 30).toNat = 0) (s.setRet ret) := by janus_pre_setRet)
   trivial
 
@@ -112,7 +112,7 @@ example (reloc : State → State → Prop) :
   janus_run
 
 /-- a5: a precondition on any other register or on the memory survives `setRet`: `janus_pre_setRet` proves it. -/
-example (p : Program) : ∀ s ret, RetAddr p ret →
+example (p : Program) (entry : Nat) (args : List W64) : ∀ s ret, CallSetup0 entry args s → RetAddr p ret →
     (fun s : State => (s.regs 5).toNat < 7 ∧ s.mem.readLE s.sp.toNat 8 = 3) s →
     (fun s : State => (s.regs 5).toNat < 7 ∧ s.mem.readLE s.sp.toNat 8 = 3) (s.setRet ret) := by
   janus_pre_setRet
@@ -161,32 +161,32 @@ theorem m5_slot_holds_ret {s : State} {ret : Nat} (h : ret < 2 ^ 64) :
     (s.setRet ret).mem.readLE (s.regs 4).toNat 8 = ret := readLE_setRet_sp h
 
 /-- m6: the pinning precondition is not invariant under `setRet`: the tactic fails on it. -/
-example (p : Program) : True := by
-  fail_if_success (have _h : ∀ s ret, RetAddr p ret → (fun s : State => s.mem.readLE (s.regs 4).toNat 8 = 0) s →
+example (p : Program) (entry : Nat) (args : List W64) : True := by
+  fail_if_success (have _h : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → (fun s : State => s.mem.readLE (s.regs 4).toNat 8 = 0) s →
     (fun s : State => s.mem.readLE (s.regs 4).toNat 8 = 0) (s.setRet ret) := by janus64_pre_setRet)
   trivial
 
 /-- m7: stack-argument words at `RSP + 8`, `RSP + 16` survive `setRet`. -/
-example (p : Program) : ∀ s ret, RetAddr p ret →
+example (p : Program) (entry : Nat) (args : List W64) : ∀ s ret, CallSetup0 entry args s → RetAddr p ret →
     (fun s : State => StackWritable s 0 32 ∧ StackWords s 0 [5, 7]) s →
     (fun s : State => StackWritable s 0 32 ∧ StackWords s 0 [5, 7]) (s.setRet ret) := by
   janus64_pre_setRet
 
 /-- m8: a pointer read survives when the precondition keeps the pointer apart from the return slot. -/
-example (p : Program) : ∀ s ret, RetAddr p ret →
+example (p : Program) (entry : Nat) (args : List W64) : ∀ s ret, CallSetup0 entry args s → RetAddr p ret →
     (fun s : State => Janus.Apart (s.regs 0).toNat 8 (s.regs 4).toNat 8 ∧ s.mem.readLE (s.regs 0).toNat 8 = 5) s →
     (fun s : State => Janus.Apart (s.regs 0).toNat 8 (s.regs 4).toNat 8 ∧ s.mem.readLE (s.regs 0).toNat 8 = 5) (s.setRet ret) := by
   janus64_pre_setRet
 
 /-- m9: a pointer read with nothing keeping it off the return slot is NOT discharged (extra conjunct needed). -/
-example (p : Program) : True := by
-  fail_if_success (have _h : ∀ s ret, RetAddr p ret →
+example (p : Program) (entry : Nat) (args : List W64) : True := by
+  fail_if_success (have _h : ∀ s ret, CallSetup0 entry args s → RetAddr p ret →
     (fun s : State => Buffer s (s.regs 0) 8 false ∧ s.mem.readLE (s.regs 0).toNat 8 = 5) s →
     (fun s : State => Buffer s (s.regs 0) 8 false ∧ s.mem.readLE (s.regs 0).toNat 8 = 5) (s.setRet ret) := by janus64_pre_setRet)
   trivial
 
 /-- m10: `[RSP] < 2^47` (a `CallOK64`-style conjunct) is not a pin: it follows from `RetAddr`. -/
-example (p : Program) : ∀ s ret, RetAddr p ret →
+example (p : Program) (entry : Nat) (args : List W64) : ∀ s ret, CallSetup0 entry args s → RetAddr p ret →
     (fun s : State => s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47) s →
     (fun s : State => s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47) (s.setRet ret) := by
   janus64_pre_setRet
@@ -248,6 +248,37 @@ example : Ensures retProg64 0x1000 [] (fun s => s.mem.readLE (s.regs 4).toNat 8 
   clear h4 hsr hacc hnw
   janus64_intro hs1
   janus64_run
+
+/-- m14: explicit stack-argument reads at `RSP + 8/16/24` together with the `[RSP] < 2^47` bound conjunct (the old word, a
+fact about the return address) need no extra conjunct: the reads are apart from the slot, the bound is re-proved from
+`RetAddr` (`[RSP]` is `ret < 2^47` after `setRet`). -/
+example (p : Program) (entry : Nat) (args : List W64) (yp yl yc : Nat) : ∀ s ret, CallSetup0 entry args s → RetAddr p ret →
+    (fun s : State => s.mem.readLE ((s.regs 4).toNat + 8) 8 = yp ∧ s.mem.readLE ((s.regs 4).toNat + 16) 8 = yl ∧
+      s.mem.readLE ((s.regs 4).toNat + 24) 8 = yc ∧ s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47) s →
+    (fun s : State => s.mem.readLE ((s.regs 4).toNat + 8) 8 = yp ∧ s.mem.readLE ((s.regs 4).toNat + 16) 8 = yl ∧
+      s.mem.readLE ((s.regs 4).toNat + 24) 8 = yc ∧ s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47) (s.setRet ret) := by
+  janus64_pre_setRet
+
+/-- m15: `Ptr` and `Buffer` are pure `accessible`: invariant under `setRet` (`Ptr` is the `Janus.Spec` predicate). -/
+example (p : Program) (entry : Nat) (args : List W64) (x : W64) (n : Nat) : ∀ s ret, CallSetup0 entry args s → RetAddr p ret →
+    (fun s : State => Janus.Spec.Ptr s.mem x n false ∧ Buffer s x n true) s →
+    (fun s : State => Janus.Spec.Ptr s.mem x n false ∧ Buffer s x n true) (s.setRet ret) := by
+  janus64_pre_setRet
+
+/-- m16: `StackGuardOK` (it carries the apartness of the guard word from the return slot) survives `setRet`
+without any extra conjunct. -/
+example (p : Program) (entry : Nat) (args : List W64) (adj : Nat) : ∀ s ret, CallSetup0 entry args s → RetAddr p ret →
+    (fun s : State => StackGuardOK s adj) s → (fun s : State => StackGuardOK s adj) (s.setRet ret) := by
+  janus64_pre_setRet
+
+/-- m17: a generic wrapper migrates by adding one `hinv` argument (the default tactic proves it at the call site);
+`Ensures.mono` keeps its v0.3 signature (the postcondition about the state with the return address). -/
+example {p : Program} {entry : Nat} {args : List W64} {post post' : State → State → Prop}
+    (h : Ensures p entry args (fun s => (s.regs 5).toNat < 7) post)
+    (hp : ∀ s s', (s.regs 5).toNat < 3 → post s s' → post' s s') :
+    Ensures p entry args (fun s => (s.regs 5).toNat < 3) post' :=
+  Ensures.mono h (fun s hs => by omega) hp
+
 
 end Amd64
 

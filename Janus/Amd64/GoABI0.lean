@@ -1,5 +1,6 @@
 import Janus.Amd64.GoABI
 import Janus.Amd64.Tactic
+import Janus.Amd64.PreSetRet
 
 /-!
 # Go ABI0 on amd64: hand-written assembly, and the ABI wrappers
@@ -234,6 +235,44 @@ theorem CallSetup0.frame_accessible (h : CallSetup0 p entry args nres s) :
 theorem CallSetup0.frame_bound (h : CallSetup0 p entry args nres s) :
     (s.regs regSP).toNat + 8 + 8 * (args.length + nres) ≤ 2 ^ 48 := h.frame.1
 
+/-! ### The ret-free call state (`CallSetupF`) answers to the same questions as `CallSetup0` -/
+
+theorem CallSetupF.arg (h : CallSetupF entry args nres s) {i : Nat} (hi : i < args.length) :
+    s.mem.readLE ((s.regs regSP).toNat + 8 + 8 * i) 8 = args[i].toNat := h.argWords i hi
+
+theorem CallSetupF.frameWord_eq (h : CallSetupF entry args nres s) {i : Nat}
+    (hi : i < args.length) : frameWord s.mem (s.regs regSP) i = args[i] := by
+  simp only [frameWord, frameOffset, h.arg hi, BitVec.ofNat_toNat, BitVec.setWidth_eq]
+
+theorem CallSetupF.rip_toNat (h : CallSetupF entry args nres s) (he : entry < 2 ^ 64) :
+    s.rip.toNat = entry := by
+  rw [h.rip, BitVec.toNat_ofNat, Nat.mod_eq_of_lt he]
+
+theorem CallSetupF.frame_accessible (h : CallSetupF entry args nres s) :
+    s.mem.accessible (s.regs regSP).toNat (8 + 8 * (args.length + nres)) true = true :=
+  h.frame.2
+
+theorem CallSetupF.frame_bound (h : CallSetupF entry args nres s) :
+    (s.regs regSP).toNat + 8 + 8 * (args.length + nres) ≤ 2 ^ 48 := h.frame.1
+
+/-- A call state that already holds `ret` at `[RSP]` is unchanged by writing it. -/
+theorem CallSetup0.setRet_eq {ret : Nat} (h : CallSetup0 (p.withExit ret) entry args nres s) :
+    s.setRet ret = s := by
+  have e := Janus.Arm64.Memory.writeLE_readLE_self s.mem (s.regs regSP).toNat 8
+  have hr : s.mem.readLE (s.regs regSP).toNat 8 = ret := h.ret
+  rw [hr] at e
+  show ({ s with mem := s.mem.writeLE (s.regs regSP).toNat 8 ret } : State) = s
+  rw [e]
+
+/-- The old-shaped statement of an `Ensures0` theorem (see `GoABI.Ensures.toOld`). -/
+theorem Ensures0.toOld {pre : State → Prop} {post : State → State → Prop}
+    (h : Ensures0 p entry args nres pre post) :
+    ∀ ret, RetAddr p ret → ∀ s, CallSetup0 (p.withExit ret) entry args nres s → pre s →
+      Returns (p.withExit ret) s (fun s' => ABIReturn0 s s' ∧ post s s') := by
+  intro ret hret s hs hp
+  have := h s ⟨hs.rip, hs.argWords, hs.frame, hs.df⟩ hp ret hret
+  rwa [hs.setRet_eq] at this
+
 theorem ABIReturn0.refl_pop {s₀ s₁ : State} (h1 : s₁.regs regSP = s₀.regs regSP + 8)
     (h2 : s₁.regs regFP = s₀.regs regFP) (h3 : s₁.fsBase = s₀.fsBase) (h4 : s₁.df = s₀.df) :
     ABIReturn0 s₀ s₁ := ⟨h1, h2, h3, h4⟩
@@ -294,20 +333,31 @@ theorem Ensures0.neverPanics {pre : State → Prop} {post : State → State → 
     (hs : CallSetupF entry args nres s) (hpre : pre s) :
     NeverPanics (p.withExit ret) (s.setRet ret) := (h s hs hpre ret hret).neverPanics
 
-theorem Ensures0.mono {pre pre' : State → Prop} {post post' : State → State → Prop}
+theorem Ensures0.mono_ret {pre pre' : State → Prop} {post post' : State → State → Prop}
     (h : Ensures0 p entry args nres pre post) (hpre : ∀ s, pre' s → pre s)
     (hpost : ∀ s ret s', pre' s → post (s.setRet ret) s' → post' (s.setRet ret) s') :
     Ensures0 p entry args nres pre' post' :=
   fun s hs hp ret hret => (h s hs (hpre s hp) ret hret).mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ _ hp hq⟩
 
+/-- Weaken the precondition and the postcondition with the pre-v0.4.0 `hpost` (about the state that already holds the
+return address). The invariance of `pre'` under `setRet` is the new obligation, proved by default with `janus64_pre_setRet`. -/
+theorem Ensures0.mono {pre pre' : State → Prop} {post post' : State → State → Prop}
+    (h : Ensures0 p entry args nres pre post) (hpre : ∀ s, pre' s → pre s)
+    (hpost : ∀ s s', pre' s → post s s' → post' s s')
+    (hinv : ∀ s ret, CallSetupF entry args nres s → RetAddr p ret → pre' s → pre' (s.setRet ret) := by
+      janus64_pre_setRet) :
+    Ensures0 p entry args nres pre' post' :=
+  fun s hs hp ret hret => (h s hs (hpre s hp) ret hret).mono fun _ ⟨ha, hq⟩ =>
+    ⟨ha, hpost _ _ (hinv s ret hs hret hp) hq⟩
+
 /-- Migration bridge: the pre-v0.4.0 statement (the precondition seeing the state with `[RSP] = ret`)
 and `pre s → pre (s.setRet ret)` give the new `Ensures0` (`janus64_ensures_old` does this). -/
 theorem Ensures0.of_old {pre : State → Prop} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (hinv : ∀ s ret, CallSetupF entry args nres s → RetAddr p ret → pre s → pre (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup0 (p.withExit ret) entry args nres s → pre s →
       Returns (p.withExit ret) s (fun s' => ABIReturn0 s s' ∧ post s s')) :
     Ensures0 p entry args nres pre post :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hs hret hp)
 
 /-- A callee `Summary` of an ABI0 function (precondition `spre`, implied by every ABI0 call
 state satisfying `pre`) is an `Ensures0` when its postcondition implies `ABIReturn0`. -/
@@ -328,8 +378,8 @@ theorem Ensures0.of_summary {pre spre : State → Prop} {post post' : State → 
   exact Nat.mod_eq_of_lt hret.lt64
 
 /-- `Summary0` version of `Ensures0.of_summary`: the summary's memory postcondition `Q` gives
-the contract's postcondition. -/
-theorem Ensures0.of_summary0 {pre spre : State → Prop} {post : State → State → Prop}
+the contract's postcondition (`hpre`/`hpost` at the state `s.setRet ret`; `Ensures0.of_summary0` takes the pre-v0.4.0 form). -/
+theorem Ensures0.of_summary0_at {pre spre : State → Prop} {post : State → State → Prop}
     {Q : State → Memory → Prop} (hsum : Summary0 p entry spre Q)
     (hpre : ∀ ret s, RetAddr p ret → CallSetupF entry args nres s → pre s →
       spre (s.setRet ret))
@@ -338,6 +388,20 @@ theorem Ensures0.of_summary0 {pre spre : State → Prop} {post : State → State
     Ensures0 p entry args nres pre post :=
   Ensures0.of_summary hsum hpre fun ret s s' hret hs hp hr =>
     ⟨ABIReturn0.of_ret0 hr, hpost ret s s' hret hs hp hr.mem⟩
+
+/-- `Ensures0.of_summary0`, source-compatible with v0.3.x: `hpre`/`hpost` see the ABI0 call state with the return address
+already written (`CallSetup0 (p.withExit ret) …`), as before. `hinv` (default: `janus64_pre_setRet`) is `pre s → pre
+(s.setRet ret)`: the only new obligation. -/
+theorem Ensures0.of_summary0 {pre spre : State → Prop} {post : State → State → Prop}
+    {Q : State → Memory → Prop} (hsum : Summary0 p entry spre Q)
+    (hpre : ∀ ret s, RetAddr p ret → CallSetup0 (p.withExit ret) entry args nres s → pre s → spre s)
+    (hpost : ∀ ret s s', RetAddr p ret → CallSetup0 (p.withExit ret) entry args nres s → pre s →
+      Q s s'.mem → post s s')
+    (hinv : ∀ s ret, CallSetupF entry args nres s → RetAddr p ret → pre s → pre (s.setRet ret) := by
+      janus64_pre_setRet) :
+    Ensures0 p entry args nres pre post :=
+  Ensures0.of_summary0_at hsum (fun ret s hret hs hp => hpre ret _ hret (hs.setRet hret.lt64) (hinv s ret hs hret hp))
+    (fun ret s s' hret hs hp hq => hpost ret _ s' hret (hs.setRet hret.lt64) (hinv s ret hs hret hp) hq)
 
 theorem Summary0.mono {pre pre' : State → Prop} {Q Q' : State → Memory → Prop}
     (hsum : Summary0 p entry pre Q) (hpre : ∀ s, pre' s → pre s)

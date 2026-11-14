@@ -42,10 +42,31 @@ namespace Janus.Amd64.Tactic
 
 open Lean Elab Tactic
 
-syntax (name := janus64PreSetRetCore) "janus64_pre_setRet_core " ident ident ident ident " [" Lean.Parser.Tactic.simpLemma,* "]" : tactic
+/-- `janus_outside_slot`: prove `Outside a n rs` from a hypothesis `Outside b k rs` of the context whose range contains it
+(`Outside.of_sub`, the two bounds closed by `omega`): the return slot `[RSP, RSP + 8)` is outside the runtime-owned ranges
+when the precondition says its stack window is. -/
+elab "janus_outside_slot" : tactic => do
+  let g ← getMainGoal
+  let hyps ← g.withContext do
+    let mut acc : Array Expr := #[]
+    for d in (← getLCtx) do
+      if d.isImplementationDetail then continue
+      let ty ← instantiateMVars d.type
+      if ty.isAppOfArity ``Janus.Outside 3 then acc := acc.push d.toExpr
+    return acc
+  for hy in hyps do
+    let st ← saveState
+    try
+      let hs ← g.withContext (Term.exprToSyntax hy)
+      Tactic.withoutRecover <| evalTactic (← `(tactic| exact Janus.Outside.of_sub $hs (by omega) (by omega)))
+      return
+    catch _ => st.restore
+  throwError "janus_outside_slot: no hypothesis `Outside` contains the goal"
+
+syntax (name := janus64PreSetRetCore) "janus64_pre_setRet_core " ident ident ident ident ident " [" Lean.Parser.Tactic.simpLemma,* "]" : tactic
 
 macro_rules (kind := janus64PreSetRetCore)
-  | `(tactic| janus64_pre_setRet_core $s $ret $hret $hp [$ds,*]) => `(tactic|
+  | `(tactic| janus64_pre_setRet_core $s $ret $hs $hret $hp [$ds,*]) => `(tactic|
       (have hu := ($hret).user
        try simp only [Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.SPAligned,
          Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.Disjoint, Janus.Amd64.GoABI.valueAt,
@@ -67,8 +88,11 @@ macro_rules (kind := janus64PreSetRetCore)
            Janus.Amd64.GoABI.setRet_fpucw, Janus.Amd64.GoABI.setRet_mem_regions,
            Janus.Amd64.GoABI.setRet_accessible, Janus.Amd64.GoABI.readLE_setRet_of_disjoint,
            Janus.Amd64.GoABI.bytes_setRet_of_outside, Janus.Amd64.GoABI.dataLoaded_setRet_iff,
-           Janus.Amd64.GoABI.stackGuardOK_setRet, Janus.Amd64.GoABI.tlsG_setRet_iff] at ⊢
+           Janus.Amd64.GoABI.stackGuardOK_setRet, Janus.Amd64.GoABI.tlsG_setRet_iff,
+           Janus.Amd64.GoABI.buffer_setRet, Janus.Amd64.GoABI.ptr_setRet] at ⊢
          try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
+         try simp (disch := first | omega | assumption | janus_outside_slot) only [Janus.Contracts.view_setRet,
+           Janus.Contracts.rtView_setRet] at ⊢
          all_goals first | with_reducible exact hp0 | (and_intros <;> first | with_reducible assumption | omega))))
 
 syntax (name := janus64PreSetRet) "janus64_pre_setRet" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
@@ -76,8 +100,8 @@ syntax (name := janus64PreSetRet) "janus64_pre_setRet" (" [" Lean.Parser.Tactic.
 macro_rules (kind := janus64PreSetRet)
   | `(tactic| janus64_pre_setRet) => `(tactic| janus64_pre_setRet [])
   | `(tactic| janus64_pre_setRet [$ds,*]) => `(tactic|
-      (intro s ret hret hp
-       janus64_pre_setRet_core s ret hret hp [$ds,*]))
+      (intro s ret hs hret hp
+       janus64_pre_setRet_core s ret hs hret hp [$ds,*]))
 
 /-- `janus64_pre_setRet_k`: as `janus64_pre_setRet` for a precondition on a state and a kernel state
 (`EnsuresK`). -/
@@ -86,8 +110,8 @@ syntax (name := janus64PreSetRetK) "janus64_pre_setRet_k" (" [" Lean.Parser.Tact
 macro_rules (kind := janus64PreSetRetK)
   | `(tactic| janus64_pre_setRet_k) => `(tactic| janus64_pre_setRet_k [])
   | `(tactic| janus64_pre_setRet_k [$ds,*]) => `(tactic|
-      (intro s k ret hret hp
-       janus64_pre_setRet_core s ret hret hp [$ds,*]))
+      (intro s k ret hs hret hp
+       janus64_pre_setRet_core s ret hs hret hp [$ds,*]))
 
 /-- `janus64_pre_setRet_c`: as `janus64_pre_setRet` for a precondition with a `caller` hypothesis (`EnsuresGrow`: the goal is
 `∀ s ret, RetAddr p ret → pre s → caller (s.setRet ret) → pre (s.setRet ret)`; `hc` is available to the proof). -/
@@ -96,8 +120,8 @@ syntax (name := janus64PreSetRetC) "janus64_pre_setRet_c" (" [" Lean.Parser.Tact
 macro_rules (kind := janus64PreSetRetC)
   | `(tactic| janus64_pre_setRet_c) => `(tactic| janus64_pre_setRet_c [])
   | `(tactic| janus64_pre_setRet_c [$ds,*]) => `(tactic|
-      (intro s ret hret hp hc
-       janus64_pre_setRet_core s ret hret hp [$ds,*]))
+      (intro s ret hs hret hp hc
+       janus64_pre_setRet_core s ret hs hret hp [$ds,*]))
 
 /-- `janus64_ensures_old [defs]`: the amd64 twin of `janus_ensures_old`. -/
 syntax (name := janus64EnsuresOld) "janus64_ensures_old" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
@@ -124,3 +148,21 @@ macro_rules (kind := janus64EnsuresOld)
     `(tactic| ($acc))
 
 end Janus.Amd64.Tactic
+
+namespace Janus.Amd64.GoABI
+
+open Janus Janus.Amd64 Janus.Amd64.Tactic
+
+/-- Weaken the precondition and the postcondition, with the pre-v0.4.0 `hpost` (about the state that already holds the
+return address in `[RSP]`: `pre' s → post s s' → post' s s'`). The invariance of `pre'` under `setRet` is the new
+obligation, proved by default with `janus64_pre_setRet`. (`Ensures.mono_ret` states `hpost` at `s.setRet ret`.) -/
+theorem Ensures.mono {p : Program} {entry : Nat} {args : List W64} {pre pre' : State → Prop}
+    {post post' : State → State → Prop}
+    (h : Ensures p entry args pre post) (hpre : ∀ s, pre' s → pre s)
+    (hpost : ∀ s s', pre' s → post s s' → post' s s')
+    (hinv : Ensures.SetRetInv p entry args pre' := by janus64_pre_setRet) :
+    Ensures p entry args pre' post' :=
+  fun s hs hp ret hret => (h s hs (hpre s hp) ret hret).mono fun _ ⟨ha, hq⟩ =>
+    ⟨ha, hpost _ _ (hinv s ret hs hret hp) hq⟩
+
+end Janus.Amd64.GoABI

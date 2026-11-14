@@ -489,16 +489,16 @@ theorem CallSetup.setRet_eq {p : Program} {entry : Nat} {args : List W64} {ret :
 holds `ret` in `X30`, the run claim of the pre-v0.4.0 `Ensures`. (Used to feed `Summary`s and the
 contract bridges, which still speak about the state with the return address installed.) -/
 theorem Ensures.toOld {pre : State → Prop} {post : State → State → Prop}
-    (h : Ensures p entry args pre post) (hlen : args.length ≤ numIntRegs) :
+    (h : Ensures p entry args pre post) (hlen : args.length ≤ numIntRegs := by simp [numIntRegs]) :
     ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
       Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s') := by
   intro ret hret s hs hp
   have := h s ⟨hs.pc, hlen, hs.args⟩ hp ret hret
   rwa [hs.setRet_eq] at this
 
-/-- Weaken the precondition and the postcondition. The postcondition is compared on the state
-with the return address installed (`s.setRet ret`), for a precondition-satisfying `s`. -/
-theorem Ensures.mono {pre pre' : State → Prop} {post post' : State → State → Prop}
+/-- Weaken the precondition and the postcondition, the postcondition compared on the state with the return address
+installed (`s.setRet ret`), for a precondition-satisfying `s` (`Ensures.mono` is the pre-v0.4.0 form of this). -/
+theorem Ensures.mono_ret {pre pre' : State → Prop} {post post' : State → State → Prop}
     (h : Ensures p entry args pre post) (hpre : ∀ s, pre' s → pre s)
     (hpost : ∀ s ret s', pre' s → post (s.setRet ret) s' → post' (s.setRet ret) s') :
     Ensures p entry args pre' post' :=
@@ -511,12 +511,19 @@ pre s → …`: the precondition saw the state with `X30 = ret` installed. `Ensu
 new statement from the old-shaped proof, given that `pre` survives installing a return address
 (`hinv`; `janus_pre_setRet` proves it for the usual preconditions). -/
 
+/-- What a *generic* wrapper over `Ensures` (one that takes an arbitrary `pre`) needs to migrate: the invariance of
+`pre` under installing the return address. Add `(hinv : Ensures.SetRetInv p entry args pre := by janus_pre_setRet)`
+as the last binder and start the old-shaped body with `refine Ensures.of_old hinv ?_`; call sites keep working
+(the default tactic proves it for the concrete `pre`). -/
+abbrev Ensures.SetRetInv (p : Program) (entry : Nat) (args : List W64) (pre : State → Prop) : Prop :=
+  ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → pre (s.setRet ret)
+
 theorem Ensures.of_old {pre : State → Prop} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (hinv : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → pre (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
       Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')) :
     Ensures p entry args pre post :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet ret) (hinv s ret hret hp)
+  fun s hs hp ret hret => h ret hret _ (hs.setRet ret) (hinv s ret hs hret hp)
 
 /-! ### Return addresses -/
 
@@ -981,7 +988,7 @@ variable {p : Program} {entry : Nat} {args : List W64} {pre : State → Prop}
 
 theorem EnsuresGo.of_old {C : State → GoClass} {ret : State → State → Prop}
     {pan : State → Eface → State → Prop}
-    (hinv : ∀ s r, RetAddr p r → pre s → pre (s.setRet r))
+    (hinv : ∀ s r, CallSetup0 entry args s → RetAddr p r → pre s → pre (s.setRet r))
     (h : ∀ r, RetAddr p r → ∀ s, CallSetup (p.withExit r) entry args s → pre s →
       GoReturns (p.withExit r) (C s) s fun o =>
         match o with
@@ -989,11 +996,11 @@ theorem EnsuresGo.of_old {C : State → GoClass} {ret : State → State → Prop
         | .panicked v s' => pan s v s'
         | .goexited _ => False) :
     EnsuresGo p entry args pre C ret pan :=
-  fun s hs hp r hr => h r hr _ (hs.setRet r) (hinv s r hr hp)
+  fun s hs hp r hr => h r hr _ (hs.setRet r) (hinv s r hs hr hp)
 
 theorem EnsuresGoX.of_old {C : State → GoClass} {ret : State → State → Prop}
     {pan : State → Eface → State → Prop} {gox : State → State → Prop}
-    (hinv : ∀ s r, RetAddr p r → pre s → pre (s.setRet r))
+    (hinv : ∀ s r, CallSetup0 entry args s → RetAddr p r → pre s → pre (s.setRet r))
     (h : ∀ r, RetAddr p r → ∀ s, CallSetup (p.withExit r) entry args s → pre s →
       GoReturns (p.withExit r) (C s) s fun o =>
         match o with
@@ -1001,21 +1008,21 @@ theorem EnsuresGoX.of_old {C : State → GoClass} {ret : State → State → Pro
         | .panicked v s' => pan s v s'
         | .goexited s' => gox s s') :
     EnsuresGoX p entry args pre C ret pan gox :=
-  fun s hs hp r hr => h r hr _ (hs.setRet r) (hinv s r hr hp)
+  fun s hs hp r hr => h r hr _ (hs.setRet r) (hinv s r hs hr hp)
 
 theorem EnsuresWithin.of_old {bound : State → Nat} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (hinv : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → pre (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
       ReturnsWithin (bound s) (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')) :
     EnsuresWithin bound p entry args pre post :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet ret) (hinv s ret hret hp)
+  fun s hs hp ret hret => h ret hret _ (hs.setRet ret) (hinv s ret hs hret hp)
 
 theorem RunsAtLeastOnCall.of_old {lower : State → Nat}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (hinv : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → pre (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
       RunsAtLeast (lower s) (p.withExit ret) s) :
     RunsAtLeastOnCall lower p entry args pre :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet ret) (hinv s ret hret hp)
+  fun s hs hp ret hret => h ret hret _ (hs.setRet ret) (hinv s ret hs hret hp)
 
 end OldShape
 

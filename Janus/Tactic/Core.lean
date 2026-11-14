@@ -1480,15 +1480,35 @@ with `k` replaced by the literal everywhere (if `k` is a variable; otherwise as 
 `hk : k = i`). Used for loads at a symbolic index from a small constant table. -/
 elab "janus_cases " h:ident : tactic => Common.casesBound "janus_cases" h
 
+/-- A call-state hypothesis without the return address (`CallSetup0`, v0.4.0: the state *before* `CALL`/`BL`
+installs `ret`) becomes the old-shaped `CallSetup (P.withExit ret) entry args (s.setRet ret)` for the `ret` of the
+`RetAddr P ret` hypothesis of the context (`hret`, introduced by `intro s hs hpre ret hret`); the facts `janus_intro`
+then adds are about the state `s.setRet ret` that the run starts from. Other hypotheses are returned unchanged. -/
+def liftRetFreeSetup (hE : Expr) (setupName : Name) (setRetName : Name) : TacticM Expr := do
+  let ty ← whnfR (← instantiateMVars (← inferType hE))
+  unless ty.getAppFn.isConstOf setupName do return hE
+  let mut found : Option (Expr × Expr) := none
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let dty ← instantiateMVars d.type
+    if dty.isAppOfArity ``GoABI.RetAddr 2 then found := some (dty.getArg! 0, dty.getArg! 1)
+  let some (P, ret) := found |
+    throwError "janus_intro: the hypothesis is a call state without a return address, but there is no `RetAddr P ret` in the context (introduce it with `intro s hs hpre ret hret …`)"
+  let ps ← Term.exprToSyntax P
+  let hs ← Term.exprToSyntax hE
+  let rs ← Term.exprToSyntax ret
+  let stx ← `($(mkIdent setRetName) (p := $ps) $hs $rs)
+  Tactic.elabTerm stx none
+
 /-- From `hs : CallSetup p entry [a₀, …] s`, add `h_pc : s.pc = BitVec.ofNat 64 entry`,
 `h_lr : s.regs 30 = BitVec.ofNat 64 p.exitAddr` and `h_x<i> : s.regs i = aᵢ`. For a call with a
 symbolic return address (`p = Program.withExit p₀ ret`, with `hret : RetAddr p₀ ret` in the
 context) `h_lr` is `s.regs 30 = BitVec.ofNat 64 ret`; `janus_run` uses `hret` itself. -/
 elab "janus_intro " h:ident : tactic => withMainContext do
-  let hE ← elabTerm h none
+  let hE ← liftRetFreeSetup (← elabTerm h none) ``GoABI.CallSetup0 ``GoABI.CallSetup0.setRet
   let ty ← whnfR (← instantiateMVars (← inferType hE))
   let (``GoABI.CallSetup, #[_, _, args, s]) := ty.getAppFnArgs |
-    throwError "janus_intro: expected a `CallSetup` hypothesis"
+    throwError "janus_intro: expected a `CallSetup` (or `CallSetup0`) hypothesis"
   let some (_, elemsL) := (← instantiateMVars args).listLit? |
     throwError "janus_intro: the argument list must be a list literal"
   let elems := elemsL.toArray

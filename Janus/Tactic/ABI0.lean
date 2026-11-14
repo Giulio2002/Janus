@@ -67,12 +67,30 @@ private def assertHyp (g : MVarId) (name : Name) (ty pf : Expr) : MetaM MVarId :
 private def addLit (base : Expr) (k : Nat) : MetaM Expr :=
   if k == 0 then pure base else mkAppM ``HAdd.hAdd #[base, mkNatLit k]
 
+/-- An ABI0 call state without the return address (`CallSetupF`, v0.4.0) becomes the old-shaped `CallSetup0 (P.withExit
+ret) … (s.setRet ret)` for the `ret` of the `RetAddr P ret` hypothesis of the context. Other hypotheses are unchanged. -/
+def liftRetFreeSetupF (hE : Expr) : TacticM Expr := do
+  let ty ← whnfR (← instantiateMVars (← inferType hE))
+  unless ty.getAppFn.isConstOf ``GoABI0.CallSetupF do return hE
+  let mut found : Option (Expr × Expr) := none
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let dty ← instantiateMVars d.type
+    if dty.isAppOfArity ``GoABI.RetAddr 2 then found := some (dty.getArg! 0, dty.getArg! 1)
+  let some (P, ret) := found |
+    throwError "janus_intro0: the hypothesis is a call state without a return address, but there is no `RetAddr P ret` in the context"
+  let ps ← Term.exprToSyntax P
+  let hs ← Term.exprToSyntax hE
+  let rs ← Term.exprToSyntax ret
+  let stx ← `(Janus.GoABI0.CallSetupF.setRet (p := $ps) $hs $rs)
+  Tactic.elabTerm stx none
+
 /-- From `hs : GoABI0.CallSetup0 p entry [a₀, …] nres s`, add `h_pc`, `h_lr`, `h_al`,
 `h_rd_arg<i> : s.mem.readLE (s.sp.toNat + 8(i+1)) 8 = aᵢ.toNat`, `h_fb` and `h_facc` (see the module
 doc). For a call with a symbolic return address (`p = Program.withExit p₀ ret`) `h_lr` is
 `s.regs 30 = BitVec.ofNat 64 ret` and `hret : RetAddr p₀ ret` must be in the context. -/
 elab "janus_intro0 " h:ident : tactic => withMainContext do
-  let hE ← elabTerm h none
+  let hE ← liftRetFreeSetupF (← elabTerm h none)
   let ty ← whnfR (← instantiateMVars (← inferType hE))
   let (``GoABI0.CallSetup0, #[prog, entry, args, nres, s]) := ty.getAppFnArgs |
     throwError "janus_intro0: expected a `GoABI0.CallSetup0` hypothesis"
@@ -137,12 +155,30 @@ private def assertHyp (g : MVarId) (name : Name) (ty pf : Expr) : MetaM MVarId :
 private def addLit (base : Expr) (k : Nat) : MetaM Expr :=
   if k == 0 then pure base else mkAppM ``HAdd.hAdd #[base, mkNatLit k]
 
+/-- amd64 twin of `liftRetFreeSetupF`. -/
+def liftRetFreeSetupF (hE : Expr) : TacticM Expr := do
+  let ty ← whnfR (← instantiateMVars (← inferType hE))
+  unless ty.getAppFn.isConstOf ``Amd64.GoABI0.CallSetupF do return hE
+  let mut found : Option (Expr × Expr × Expr) := none
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let dty ← instantiateMVars d.type
+    if dty.isAppOfArity ``Amd64.GoABI.RetAddr 2 then found := some (d.toExpr, dty.getArg! 0, dty.getArg! 1)
+  let some (hr, P, ret) := found |
+    throwError "janus64_intro0: the hypothesis is a call state without a return address, but there is no `RetAddr P ret` in the context"
+  let ps ← Term.exprToSyntax P
+  let hs ← Term.exprToSyntax hE
+  let rs ← Term.exprToSyntax ret
+  let hrs ← Term.exprToSyntax hr
+  let stx ← `(Janus.Amd64.GoABI0.CallSetupF.setRet (p := $ps) $hs (ret := $rs) (Janus.Amd64.GoABI.RetAddr.lt64 $hrs))
+  Tactic.elabTerm stx none
+
 /-- From `hs : Amd64.GoABI0.CallSetup0 p entry [a₀, …] nres s`, add `h_rip`, `h_ret`
 (`s.mem.readLE (s.regs 4).toNat 8 = ret`), `h_df`, `h_rd_arg<i> : s.mem.readLE ((s.regs 4).toNat +
 8(i+1)) 8 = aᵢ.toNat`, `h_fb` and `h_facc`. For `p = Program.withExit p₀ ret` the hypothesis
 `hret : RetAddr p₀ ret` must be in the context. -/
 elab "janus64_intro0 " h:ident : tactic => withMainContext do
-  let hE ← elabTerm h none
+  let hE ← liftRetFreeSetupF (← elabTerm h none)
   let ty ← whnfR (← instantiateMVars (← inferType hE))
   let (``Amd64.GoABI0.CallSetup0, #[prog, entry, args, nres, s]) := ty.getAppFnArgs |
     throwError "janus64_intro0: expected an `Amd64.GoABI0.CallSetup0` hypothesis"

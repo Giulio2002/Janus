@@ -191,11 +191,11 @@ theorem CEnsures.mono {pre pre' : State → Prop} {post post' : State → State 
 /-- Migration bridge (see `GoABI.Ensures.of_old`): the pre-v0.4.0 statement plus
 `pre s → pre (s.setRet ret)` give the new `CEnsures`. -/
 theorem CEnsures.of_old {pre : State → Prop} {post : State → State → Prop}
-    (hinv : ∀ s ret, GoABI.RetAddr p ret → pre s → pre (s.setRet ret))
+    (hinv : ∀ s ret, CCallF entry args s → GoABI.RetAddr p ret → pre s → pre (s.setRet ret))
     (h : ∀ ret, GoABI.RetAddr p ret → ∀ s, CCall (p.withExit ret) entry args s → pre s →
       GoABI.Returns (p.withExit ret) s (fun s' => CReturn s s' ∧ post s s')) :
     CEnsures p entry args pre post :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hs hret hp)
 
 end Lemmas
 
@@ -645,11 +645,11 @@ theorem CEnsuresA.mono {sig : SysV.Sig} {vals : List Nat} {pre pre' : State → 
 /-- Migration bridge (see `GoABI.Ensures.of_old`). -/
 theorem CEnsuresA.of_old {sig : SysV.Sig} {vals : List Nat} {pre : State → Prop}
     {post : State → State → Prop}
-    (hinv : ∀ s ret, GoABI.RetAddr p ret → pre s → pre (s.setRet ret))
+    (hinv : ∀ s ret, CCallAF entry sig vals s → GoABI.RetAddr p ret → pre s → pre (s.setRet ret))
     (h : ∀ ret, GoABI.RetAddr p ret → ∀ s, CCallA (p.withExit ret) entry sig vals s → pre s →
       GoABI.Returns (p.withExit ret) s (fun s' => CReturn s s' ∧ post s s')) :
     CEnsuresA p entry sig vals pre post :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hs hret hp)
 
 end Classified
 

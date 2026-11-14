@@ -22,6 +22,12 @@ namespace Janus.Contracts
 
 open Janus Janus.Amd64 Janus.Amd64.Tactic Janus.Spec
 
+/-- Installing the return address does not change what the runtime sees (the return slot is outside `rt`): the
+masked view of a precondition survives `State.setRet` (used by `janus64_pre_setRet`). -/
+theorem view_setRet {rt L : List (Nat × Nat)} {s : State} {ret : Nat} (hout : Outside (s.regs 4).toNat 8 rt) :
+    view rt L (s.setRet ret).mem = view rt L s.mem :=
+  view_writeLE_of_outside hout
+
 /-- The window a live amd64 contract keeps the live set and the new objects apart from, and
 requires outside `R.rt`: the callee's stack (`calleeStack64`) and the return-address slot
 `[RSP, RSP + 8)` (the caller's own `RET` reads it after the call). -/

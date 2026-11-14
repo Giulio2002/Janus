@@ -303,21 +303,21 @@ def EnsuresGrow64 (p : Amd64.Program) (reloc : State → State → Prop) (entry 
 
 theorem EnsuresGrow64.of_old_with {p : Amd64.Program} {reloc : State → State → Prop} {entry : Nat}
     {args : List W64} {pre caller Pold : State → Prop} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → caller (s.setRet ret) → Pold (s.setRet ret))
+    (hinv : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → caller (s.setRet ret) → Pold (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → Pold s →
       GrownReturns64 (p.withExit ret) reloc s (fun s' => post s s')) :
     EnsuresGrow64 p reloc entry args pre caller post :=
-  fun s hs hp ret hret hc => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp hc)
+  fun s hs hp ret hret hc => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hs hret hp hc)
 
 /-- Migration bridge: the pre-v0.4.0 precondition is `pre ∧ caller`. -/
 theorem EnsuresGrow64.of_old {p : Amd64.Program} {reloc : State → State → Prop} {entry : Nat}
     {args : List W64} {pre caller : State → Prop} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → caller (s.setRet ret) → pre (s.setRet ret))
+    (hinv : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → caller (s.setRet ret) → pre (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s ∧ caller s →
       GrownReturns64 (p.withExit ret) reloc s (fun s' => post s s')) :
     EnsuresGrow64 p reloc entry args pre caller post :=
   EnsuresGrow64.of_old_with (Pold := fun s => pre s ∧ caller s)
-    (fun s ret hret hp hc => ⟨hinv s ret hret hp hc, hc⟩) h
+    (fun s ret hs hret hp hc => ⟨hinv s ret hs hret hp hc, hc⟩) h
 
 /-! ## The return-address slot inside the goroutine stack: what installing the return address leaves unchanged
 

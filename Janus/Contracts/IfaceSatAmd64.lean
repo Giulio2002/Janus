@@ -48,10 +48,11 @@ theorem wstate_rtpre (r : Nat → W64) (n : Nat) (hn : n ≤ 3) : RTPre R0 n (ws
   have h4 : (wstate r).regs 4 = BitVec.ofNat 64 wsp := rfl
   have h14 : (wstate r).regs 14 = BitVec.ofNat 64 wg := rfl
   have hm : (wstate r).mem = wmem := rfl
-  refine ⟨wmem_env ((wstate r).regs 14), ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩
+  refine ⟨wmem_env ((wstate r).regs 14), ⟨?_, ?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩
   · simp only [regG, stackguard0Offset, h14]; decide
   · simp only [regG, stackguard0Offset, h14, hm]; decide
   · simp only [stackguard0, regG, regSP, stackguard0Offset, h14, h4, hm, R0_depth]; decide
+  · simp only [regG, regSP, stackguard0Offset, h14, h4]; decide
   · simp only [h4]; decide
   · simp only [h4, R0_depth]; decide
   · simp only [h4]; simp [wsp]; omega

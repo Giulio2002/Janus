@@ -59,8 +59,8 @@ theorem deferprocat_contract {p : Program} (hp : EngineAt p) (T : List FuncInfo)
 
 theorem PanicPre.rip {P : PanicRuntime} {n : Nat} {s : State} (q : W64) (h : PanicPre P n s) :
     PanicPre P n { s with rip := q } := by
-  obtain ⟨a, ⟨b1, b2, b3⟩, c, d, e, f, g, h, i, j⟩ := h
-  exact ⟨a, ⟨b1, b2, b3⟩, c, d, e, f, g, h, i, j⟩
+  obtain ⟨a, ⟨b1, b2, b3, b4⟩, c, d, e, f, g, h, i, j⟩ := h
+  exact ⟨a, ⟨b1, b2, b3, b4⟩, c, d, e, f, g, h, i, j⟩
 
 theorem GopanicPre.rip {P : PanicRuntime} {fi : FuncInfo} {s : State} (q : W64) (h : GopanicPre P fi s) :
     GopanicPre P fi { s with rip := q } := by

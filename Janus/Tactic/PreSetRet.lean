@@ -18,8 +18,8 @@ theorem correctness : Ensures prog entry args pre post :=
   )
 ```
 
-`janus_pre_setRet` proves the first argument of `Ensures.of_old` (`∀ s ret, RetAddr p ret → pre s →
-pre (s.setRet ret)`): it introduces `s ret hret hp`, unfolds the listed definitions and the
+`janus_pre_setRet` proves the first argument of `Ensures.of_old` (`∀ s ret, CallSetup0 entry args s → RetAddr p ret →
+pre s → pre (s.setRet ret)`): it introduces `s ret hs hret hp`, unfolds the listed definitions and the
 standard memory predicates, and rewrites `s.setRet ret` away with the `setRet_*` simp lemmas (on
 arm64 only `X30` changes, so every register, `SP`, the flags and the memory are untouched), then
 closes the goal from `hp`. It fails, by design, on a precondition that constrains `X30` itself: such
@@ -35,21 +35,32 @@ namespace Janus.Tactic
 open Lean Elab Tactic Meta
 
 /-- Destructure every hypothesis of the form `A ∧ B` or `∃ x, A` of the local context, repeatedly
-(except the one named by `keep`). -/
-syntax "janus_split_hyps" (&" keep " ident)? : tactic
+(except the one named by `keep`). With `deep`, a hypothesis whose type *unfolds* (default transparency) to a
+structure-like proposition (`∧`, `∃`, `StackGuardOK`, a consumer's `CallEnv`, …) is split too. -/
+syntax "janus_split_hyps" (&" deep")? (&" keep " ident)? : tactic
 
 elab_rules : tactic
-  | `(tactic| janus_split_hyps $[keep $k:ident]?) => do
+  | `(tactic| janus_split_hyps $[deep%$dp]? $[keep $k:ident]?) => do
     let keepName : Option Name := k.map (·.getId)
-    let mut fuel := 200
+    let deep := dp.isSome
+    let mut fuel := if deep then 400 else 200
     while fuel > 0 do
       fuel := fuel - 1
       let g ← getMainGoal
       let some fv ← g.withContext do
           for d in (← getLCtx) do
             if d.isImplementationDetail || keepName == some d.userName then continue
-            let ty ← whnfR (← instantiateMVars d.type)
-            if ty.isAppOfArity ``And 2 || ty.isAppOfArity ``Exists 2 then return some d.fvarId
+            let ty ← instantiateMVars d.type
+            if deep then
+              let ty' ← whnfD ty
+              let some c := ty'.getAppFn.constName? | continue
+              unless (← isProp ty') do continue
+              let some (.inductInfo ii) := (← getEnv).find? c | continue
+              if ii.ctors.length == 1 && ii.numIndices == 0 && !ii.isRec && c != ``Eq && c != ``HEq && c != ``Iff
+                  && c != ``True && c != ``Acc && c != ``Subtype then return some d.fvarId
+            else
+              let ty ← whnfR ty
+              if ty.isAppOfArity ``And 2 || ty.isAppOfArity ``Exists 2 then return some d.fvarId
           return none
         | break
       let subs ← g.cases fv
@@ -75,7 +86,8 @@ elab_rules : tactic
       let hs ← g.withContext (Term.exprToSyntax hy)
       let st ← saveState
       try
-        evalTactic (← `(tactic| have $h : $T := Janus.Arm64.Memory.accessible_mono _ $hs (by omega) (by omega)))
+        Tactic.withoutRecover <|
+          evalTactic (← `(tactic| have $h : $T := Janus.Arm64.Memory.accessible_mono _ $hs (by omega) (by omega)))
         return
       catch _ => st.restore
 
@@ -100,27 +112,27 @@ syntax "janus_pre_setRet" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 macro_rules
   | `(tactic| janus_pre_setRet) => `(tactic| janus_pre_setRet [])
   | `(tactic| janus_pre_setRet [$ds,*]) => `(tactic|
-      (intro s ret hret hp
+      (intro s ret hs hret hp
        janus_pre_setRet_core s ret hret hp [$ds,*]))
 
 /-- `janus_pre_setRet_k`: as `janus_pre_setRet` for a precondition on a state and a kernel state
-(`EnsuresK`: `pre s k`, goal `∀ s k ret, RetAddr p ret → pre s k → pre (s.setRet ret) k`). -/
+(`EnsuresK`: `pre s k`, goal `∀ s k ret, CallSetup0 … s → RetAddr p ret → pre s k → pre (s.setRet ret) k`). -/
 syntax "janus_pre_setRet_k" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 
 macro_rules
   | `(tactic| janus_pre_setRet_k) => `(tactic| janus_pre_setRet_k [])
   | `(tactic| janus_pre_setRet_k [$ds,*]) => `(tactic|
-      (intro s k ret hret hp
+      (intro s k ret hs hret hp
        janus_pre_setRet_core s ret hret hp [$ds,*]))
 
 /-- `janus_pre_setRet_c`: as `janus_pre_setRet` for a precondition with a `caller` hypothesis (`EnsuresGrow`: the goal is
-`∀ s ret, RetAddr p ret → pre s → caller (s.setRet ret) → pre (s.setRet ret)`; `hc` is available to the proof). -/
+`∀ s ret, CallSetup0 … s → RetAddr p ret → pre s → caller (s.setRet ret) → pre (s.setRet ret)`; `hc` is available to the proof). -/
 syntax "janus_pre_setRet_c" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 
 macro_rules 
   | `(tactic| janus_pre_setRet_c) => `(tactic| janus_pre_setRet_c [])
   | `(tactic| janus_pre_setRet_c [$ds,*]) => `(tactic|
-      (intro s ret hret hp hc
+      (intro s ret hs hret hp hc
        janus_pre_setRet_core s ret hret hp [$ds,*]))
 
 /-- `janus_ensures_old [defs]`: reduce a goal `Ensures … pre post` (or `EnsuresWithin`, `EnsuresGo`,
@@ -156,3 +168,21 @@ macro_rules
     `(tactic| ($acc))
 
 end Janus.Tactic
+
+namespace Janus.GoABI
+
+open Janus Janus.Arm64 Janus.Tactic
+
+/-- Weaken the precondition and the postcondition, with the pre-v0.4.0 `hpost` (about the state that already holds the
+return address in `X30`: `pre' s → post s s' → post' s s'`). The invariance of `pre'` under `setRet` is the new
+obligation, proved by default with `janus_pre_setRet`. (`Ensures.mono_ret` states `hpost` at `s.setRet ret`.) -/
+theorem Ensures.mono {p : Program} {entry : Nat} {args : List W64} {pre pre' : State → Prop}
+    {post post' : State → State → Prop}
+    (h : Ensures p entry args pre post) (hpre : ∀ s, pre' s → pre s)
+    (hpost : ∀ s s', pre' s → post s s' → post' s s')
+    (hinv : Ensures.SetRetInv p entry args pre' := by janus_pre_setRet) :
+    Ensures p entry args pre' post' :=
+  fun s hs hp ret hret => (h s hs (hpre s hp) ret hret).mono fun _ ⟨ha, hq⟩ =>
+    ⟨ha, hpost _ _ (hinv s ret hs hret hp) hq⟩
+
+end Janus.GoABI

@@ -1,6 +1,7 @@
 import Janus.Amd64.Run
 import Janus.Eface
 import Janus.Arm64.MemoryLemmas
+import Janus.Spec.Basic
 
 /-!
 # Go ABIInternal on amd64, and the specification vocabulary
@@ -245,6 +246,16 @@ read-only region overlapping them) and lie below `2^48` (implied by `accessible`
 destructuring gives `omega` the no-wrap fact). -/
 def Buffer (s : State) (ptr : W64) (n : Nat) (w : Bool) : Prop :=
   ptr.toNat + n ≤ 2 ^ 48 ∧ s.mem.accessible ptr.toNat n w = true
+
+/-- `Buffer` is pure `accessible`: installing the return address leaves it unchanged. -/
+@[simp] theorem buffer_setRet {s : State} {ret : Nat} {ptr : W64} {n : Nat} {w : Bool} :
+    Buffer (s.setRet ret) ptr n w ↔ Buffer s ptr n w := by
+  unfold Buffer; simp
+
+/-- `Janus.Spec.Ptr` is pure `accessible` too. -/
+@[simp] theorem ptr_setRet {s : State} {ret : Nat} {ptr : W64} {n : Nat} {w : Bool} :
+    Janus.Spec.Ptr (s.setRet ret).mem ptr n w ↔ Janus.Spec.Ptr s.mem ptr n w := by
+  unfold Janus.Spec.Ptr; simp
 
 /-- The byte ranges `[a, a + n)` and `[b, b + k)` do not overlap. -/
 def Disjoint (a : W64) (n : Nat) (b : W64) (k : Nat) : Prop :=
@@ -588,9 +599,9 @@ theorem Ensures.toOld {pre : State → Prop} {post : State → State → Prop}
   have := h s ⟨hs.rip, hs.zero, hs.len, hs.args, hs.df⟩ hp ret hret
   rwa [hs.setRet_eq] at this
 
-/-- Weaken the precondition and the postcondition. The postcondition is compared on the state
-with the return address installed (`s.setRet ret`), for a precondition-satisfying `s`. -/
-theorem Ensures.mono {pre pre' : State → Prop} {post post' : State → State → Prop}
+/-- Weaken the precondition and the postcondition, the postcondition compared on the state with the return address
+installed (`s.setRet ret`), for a precondition-satisfying `s` (`Ensures.mono` is the pre-v0.4.0 form of this). -/
+theorem Ensures.mono_ret {pre pre' : State → Prop} {post post' : State → State → Prop}
     (h : Ensures p entry args pre post) (hpre : ∀ s, pre' s → pre s)
     (hpost : ∀ s ret s', pre' s → post (s.setRet ret) s' → post' (s.setRet ret) s') :
     Ensures p entry args pre' post' :=
@@ -603,12 +614,19 @@ pre s → …`: the precondition saw the state with `[RSP] = ret` written. `Ensu
 new statement from the old-shaped proof, given that `pre` survives writing a return address
 (`hinv`; `janus64_pre_setRet` proves it for the usual preconditions). -/
 
+/-- What a *generic* wrapper over `Ensures` (one that takes an arbitrary `pre`) needs to migrate: the invariance of
+`pre` under installing the return address. Add `(hinv : Ensures.SetRetInv p entry args pre := by janus64_pre_setRet)`
+as the last binder and start the old-shaped body with `refine Ensures.of_old hinv ?_`; call sites keep working
+(the default tactic proves it for the concrete `pre`). -/
+abbrev Ensures.SetRetInv (p : Program) (entry : Nat) (args : List W64) (pre : State → Prop) : Prop :=
+  ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → pre (s.setRet ret)
+
 theorem Ensures.of_old {pre : State → Prop} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (hinv : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → pre (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
       Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')) :
     Ensures p entry args pre post :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet (by have := hret.user; omega)) (hinv s ret hret hp)
+  fun s hs hp ret hret => h ret hret _ (hs.setRet (by have := hret.user; omega)) (hinv s ret hs hret hp)
 
 /-! ### Return addresses -/
 
@@ -1071,7 +1089,7 @@ variable {p : Program} {entry : Nat} {args : List W64} {pre : State → Prop}
 
 theorem EnsuresGo.of_old {C : State → GoClass} {ret : State → State → Prop}
     {pan : State → Eface → State → Prop}
-    (hinv : ∀ s r, RetAddr p r → pre s → pre (s.setRet r))
+    (hinv : ∀ s r, CallSetup0 entry args s → RetAddr p r → pre s → pre (s.setRet r))
     (h : ∀ r, RetAddr p r → ∀ s, CallSetup (p.withExit r) entry args s → pre s →
       GoReturns (p.withExit r) (C s) s fun o =>
         match o with
@@ -1079,11 +1097,11 @@ theorem EnsuresGo.of_old {C : State → GoClass} {ret : State → State → Prop
         | .panicked v s' => pan s v s'
         | .goexited _ => False) :
     EnsuresGo p entry args pre C ret pan :=
-  fun s hs hp r hr => h r hr _ (hs.setRet hr.lt64) (hinv s r hr hp)
+  fun s hs hp r hr => h r hr _ (hs.setRet hr.lt64) (hinv s r hs hr hp)
 
 theorem EnsuresGoX.of_old {C : State → GoClass} {ret : State → State → Prop}
     {pan : State → Eface → State → Prop} {gox : State → State → Prop}
-    (hinv : ∀ s r, RetAddr p r → pre s → pre (s.setRet r))
+    (hinv : ∀ s r, CallSetup0 entry args s → RetAddr p r → pre s → pre (s.setRet r))
     (h : ∀ r, RetAddr p r → ∀ s, CallSetup (p.withExit r) entry args s → pre s →
       GoReturns (p.withExit r) (C s) s fun o =>
         match o with
@@ -1091,21 +1109,21 @@ theorem EnsuresGoX.of_old {C : State → GoClass} {ret : State → State → Pro
         | .panicked v s' => pan s v s'
         | .goexited s' => gox s s') :
     EnsuresGoX p entry args pre C ret pan gox :=
-  fun s hs hp r hr => h r hr _ (hs.setRet hr.lt64) (hinv s r hr hp)
+  fun s hs hp r hr => h r hr _ (hs.setRet hr.lt64) (hinv s r hs hr hp)
 
 theorem EnsuresWithin.of_old {bound : State → Nat} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (hinv : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → pre (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
       ReturnsWithin (bound s) (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')) :
     EnsuresWithin bound p entry args pre post :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hs hret hp)
 
 theorem RunsAtLeastOnCall.of_old {lower : State → Nat}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (hinv : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → pre (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
       RunsAtLeast (lower s) (p.withExit ret) s) :
     RunsAtLeastOnCall lower p entry args pre :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hs hret hp)
 
 end OldShape
 

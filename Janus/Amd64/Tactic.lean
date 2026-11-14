@@ -1780,6 +1780,27 @@ def findRetAddr (base ret : Expr) : MetaM Expr := do
       if ← withReducible (isDefEq ty want) then return d.toExpr
   throwError "{tacName}: the program is{indentExpr (← mkAppM ``Program.withExit #[base, ret])}\nbut there is no hypothesis{indentExpr want}\nin the context (introduce it with `intro ret hret …`)"
 
+/-- A call-state hypothesis without the return address (`CallSetup0`, v0.4.0: the state *before* `CALL` writes `ret`
+at `[RSP]`) becomes the old-shaped `CallSetup (P.withExit ret) entry args (s.setRet ret)` for the `ret` of the
+`RetAddr P ret` hypothesis of the context (`hret`, from `intro s hs hpre ret hret`): the facts `janus64_intro` then
+adds are about the state `s.setRet ret` the run starts from. Any other hypothesis is returned unchanged. -/
+def liftRetFreeSetup (hE : Expr) (setupName : Name) (setRetName : Name) : TacticM Expr := do
+  let ty ← whnfR (← instantiateMVars (← inferType hE))
+  unless ty.getAppFn.isConstOf setupName do return hE
+  let mut found : Option (Expr × Expr × Expr) := none
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let dty ← instantiateMVars d.type
+    if dty.isAppOfArity ``GoABI.RetAddr 2 then found := some (d.toExpr, dty.getArg! 0, dty.getArg! 1)
+  let some (hr, P, ret) := found |
+    throwError "{tacName}: the hypothesis is a call state without a return address, but there is no `RetAddr P ret` in the context (introduce it with `intro s hs hpre ret hret …`)"
+  let ps ← Term.exprToSyntax P
+  let hs ← Term.exprToSyntax hE
+  let rs ← Term.exprToSyntax ret
+  let hrs ← Term.exprToSyntax hr
+  let stx ← `($(mkIdent setRetName) (p := $ps) $hs (ret := $rs) (GoABI.RetAddr.lt64 $hrs))
+  Tactic.elabTerm stx none
+
 /-- `pc` is syntactically `BitVec.ofNat 64 ret`. -/
 def isRetPC (pc ret : Expr) : MetaM Bool := do
   let pc ← instantiateMVars pc
@@ -2623,10 +2644,10 @@ elab "janus64_data " h:ident ws:janus64DataWith : tactic => withMainContext do
 `p = Program.withExit p₀ ret` (with `hret : RetAddr p₀ ret` in the context) `h_ret` is
 `s.mem.readLE (s.regs 4).toNat 8 = ret`. -/
 elab "janus64_intro " h:ident : tactic => withMainContext do
-  let hE ← elabTerm h none
+  let hE ← liftRetFreeSetup (← elabTerm h none) ``GoABI.CallSetup0 ``GoABI.CallSetup0.setRet
   let ty ← whnfR (← instantiateMVars (← inferType hE))
   let (``GoABI.CallSetup, #[prog, entry, args, s]) := ty.getAppFnArgs |
-    throwError "janus64_intro: expected a `CallSetup` hypothesis"
+    throwError "janus64_intro: expected a `CallSetup` (or `CallSetup0`) hypothesis"
   let some (_, elemsL) := (← instantiateMVars args).listLit? |
     throwError "janus64_intro: the argument list must be a list literal"
   let elems := elemsL.toArray
