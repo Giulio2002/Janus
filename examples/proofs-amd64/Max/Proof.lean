@@ -10,6 +10,7 @@ theorem correctness (x y : BitVec 64) :
     EnsuresResults Extracted.program Extracted.entry [x, y] 1
       (fun s => StackWritable s 0 8)
       (fun r => r = [if y.toNat < x.toNat then x else y]) := by
+  janus64_ensures_old
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre
@@ -23,6 +24,7 @@ theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y]
       (fun s => StackWritable s 0 8)
       (fun _ s' => results 1 s' = [if y.toNat < x.toNat then x else y]) := by
+  janus64_ensures_old
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre
@@ -34,6 +36,7 @@ theorem within (x y : BitVec 64) :
 theorem atLeast (x y : BitVec 64) :
     RunsAtLeastOnCall (fun _ => 3) Extracted.program Extracted.entry [x, y]
       (fun s => StackWritable s 0 8) := by
+  janus64_ensures_old
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre
@@ -54,8 +57,8 @@ def s0 : State :=
   { regs := fun i => if i = 0 then x else if i = 3 then y else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [x, y] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 theorem hpre : (fun s => StackWritable s 0 8) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
@@ -63,25 +66,25 @@ theorem hpre : (fun s => StackWritable s 0 8) s0 := by
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ (results 1 s') = [if y.toNat < x.toNat then x else y]) :=
-  ⟨ret, s0, x, y, hret, setup, hpre, correctness x y ret hret s0 setup hpre⟩
+    CallSetup0 Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ (results 1 s') = [if y.toNat < x.toNat then x else y]) :=
+  ⟨ret, s0, x, y, hret, setup, hpre, correctness x y s0 setup hpre ret hret⟩
 
 /-- `within` is not vacuous: a concrete call (`Max(3, 4)`) returns within 4 instructions with the guarantee. -/
 theorem within : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧
-    (ReturnsWithin 4 (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ (results 1 s') = [if y.toNat < x.toNat then x else y]) :=
-  ⟨ret, s0, x, y, hret, setup, hpre, Proof.within x y ret hret s0 setup hpre⟩
+    CallSetup0 Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧
+    (ReturnsWithin 4 (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ (results 1 s') = [if y.toNat < x.toNat then x else y]) :=
+  ⟨ret, s0, x, y, hret, setup, hpre, Proof.within x y s0 setup hpre ret hret⟩
 
 /-- `atLeast` is not vacuous: the same call is still running after 3 instructions and returns. -/
 theorem atLeast : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧
-    RunsAtLeast 3 (Extracted.program.withExit ret) s ∧
-    (Returns (Extracted.program.withExit ret) s fun s' => ABIReturn s s') :=
-  ⟨ret, s0, x, y, hret, setup, hpre, Proof.atLeast x y ret hret s0 setup hpre,
-    (Proof.correctness x y ret hret s0 setup hpre).mono fun _ h => h.1⟩
+    CallSetup0 Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧
+    RunsAtLeast 3 (Extracted.program.withExit ret) (s.setRet ret) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s') :=
+  ⟨ret, s0, x, y, hret, setup, hpre, Proof.atLeast x y s0 setup hpre ret hret,
+    (Proof.correctness x y s0 setup hpre ret hret).mono fun _ h => h.1⟩
 
 end Witness
 

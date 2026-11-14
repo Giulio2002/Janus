@@ -23,6 +23,7 @@ theorem correctness (p : BitVec 64) :
       (fun s => StackWritable s 0 8 ∧ s.mem.accessible (p.toNat + 16) 8 false = true ∧
         p.toNat + 16 + 8 ≤ 2 ^ 48)
       (fun s s' => (s'.regs 0).toNat = s.mem.readLE (p.toNat + 16) 8) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨hst, hacc', hlim⟩
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hst
@@ -80,8 +81,8 @@ def s0 : State :=
   { regs := fun i => if i = 0 then p else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [p] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [p] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 theorem hpre : (fun s => StackWritable s 0 8 ∧ s.mem.accessible (p.toNat + 16) 8 false = true ∧
         p.toNat + 16 + 8 ≤ 2 ^ 48) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
@@ -90,11 +91,11 @@ theorem hpre : (fun s => StackWritable s 0 8 ∧ s.mem.accessible (p.toNat + 16)
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (p : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [p] s ∧ (StackWritable s 0 8 ∧ s.mem.accessible (p.toNat + 16) 8 false = true ∧
+    CallSetup0 Extracted.entry [p] s ∧ (StackWritable s 0 8 ∧ s.mem.accessible (p.toNat + 16) 8 false = true ∧
         p.toNat + 16 + 8 ≤ 2 ^ 48) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ (s'.regs 0).toNat = s.mem.readLE (p.toNat + 16) 8) :=
-  ⟨ret, s0, p, hret, setup, hpre, correctness p ret hret s0 setup hpre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ (s'.regs 0).toNat = (s.setRet ret).mem.readLE (p.toNat + 16) 8) :=
+  ⟨ret, s0, p, hret, setup, hpre, correctness p s0 setup hpre ret hret⟩
 
 
 def sF : State := { s0 with regs := fun i => if i = 0 then 0 else s0.regs i }

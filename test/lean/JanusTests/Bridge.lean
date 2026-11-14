@@ -10,6 +10,7 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 def retProg : Program := { segments := [⟨"f", 0x1000, [0xd65f03c0]⟩], stubs := [], exitAddr := 0 }
 
 theorem ens (x : W64) : Ensures retProg 0x1000 [x] (fun _ => True) (fun _ s' => s'.regs 0 = x) := by
+  janus_ensures_old
   intro ret hret s hs _; janus_intro hs; janus_run
 
 theorem noExitCode : retProg.fetch retProg.exitAddr = none := by decide
@@ -44,6 +45,7 @@ def retProg : Janus.Amd64.Program := { segments := [⟨"f", 0x1000, [0xc3]⟩], 
 
 theorem ens (x : W64) : Ensures retProg 0x1000 [x] (fun s => StackWritable s 0 8)
     (fun _ s' => s'.regs 0 = x) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨hle, hnw, hacc⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw

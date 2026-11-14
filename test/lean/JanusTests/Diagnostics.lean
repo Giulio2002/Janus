@@ -53,6 +53,7 @@ def undec : Program where
 /-- error: janus_run: stuck at pc 0x10004 (undec+0x4): the word 0xd4400000 does not decode -/
 #guard_msgs (substring := true) in
 example : Ensures undec 0x10000 [] (fun _ => True) (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -66,6 +67,7 @@ def nocode : Program where
 /-- error: janus_run: stuck after 1 instructions: pc 0x10100 is not in the extracted code (segments: nocode [0x10000, 0x10004)) -/
 #guard_msgs (substring := true) in
 example : Ensures nocode 0x10000 [] (fun _ => True) (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -81,6 +83,7 @@ def indirect : Program where
 #guard_msgs (substring := true) in
 example : Ensures indirect 0x10000 []
     (fun s => (s.regs 5).toNat < 2 ^ 56 ∧ (s.regs 5).toNat % 4 = 0) (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs ⟨h1, h2⟩
   janus_intro hs
   janus_run
@@ -90,6 +93,7 @@ example : Ensures indirect 0x10000 []
 /-- hbr : `72057594037927936 ≤ BitVec.toNat (s.regs 5)` -/
 #guard_msgs (substring := true) in
 example : Ensures indirect 0x10000 [] (fun _ => True) (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -105,6 +109,7 @@ def load : Program where
 #guard_msgs (substring := true) in
 example (x p : BitVec 64) :
     Ensures load 0x10000 [x, p] (fun _ => True) (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -115,6 +120,7 @@ example (x p : BitVec 64) :
 example (x p : BitVec 64) :
     Ensures load 0x10000 [x, p] (fun s => s.mem.accessible p.toNat 4 false = true)
       (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs hp
   janus_intro hs
   janus_run
@@ -123,6 +129,7 @@ example (x p : BitVec 64) :
 #guard_msgs (substring := true) in
 example (x y : W64) :
     Ensures JanusTests.Tactic.straight 0x10000 [x, y] (fun _ => True) (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run (budget := 1)
@@ -140,6 +147,7 @@ theorem g_summary_strict :
 #guard_msgs (substring := true) in
 example (x : W64) :
     Ensures JanusTests.Tactic.callp 0x50000 [x] (fun s => StackOK s 16 0) (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hal, hb, ha, hw⟩
   janus_intro hs
   janus_run calls [g_summary_strict]
@@ -152,6 +160,7 @@ example (x : W64) :
 #guard_msgs (substring := true) in
 example (x : W64) :
     Ensures JanusTests.Tactic.callp 0x50000 [x] (fun s => StackOK s 16 0) (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hal, hb, ha, hw⟩
   janus_intro hs
   set_option janus.calls.trace true in
@@ -171,6 +180,7 @@ example (a b v : BitVec 64) :
       (fun s => s.mem.accessible a.toNat 8 true = true ∧ s.mem.accessible b.toNat 8 false = true ∧
         a.toNat + 8 ≤ 2 ^ 48 ∧ b.toNat + 8 ≤ 2 ^ 48)
       (fun _ s' => (s'.regs 0).toNat ≤ 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs ⟨ha, hb, ha', hb'⟩
   janus_intro hs
   janus_run
@@ -192,6 +202,7 @@ def undec64 : Program where
 /-- error: janus64_run: stuck at rip 0x1003 (undec+0x3): the bytes [0xf, 0x34] do not decode -/
 #guard_msgs (substring := true) in
 example (a b : BitVec 64) : Ensures undec64 0x1000 [a, b] (fun _ => True) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs _
   janus64_intro hs
   janus64_run
@@ -205,6 +216,7 @@ def nocode64 : Program where
 /-- error: janus64_run: stuck after 1 instructions: rip 0x1105 is not in the extracted code -/
 #guard_msgs (substring := true) in
 example : Ensures nocode64 0x1000 [] (fun _ => True) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs _
   janus64_intro hs
   janus64_run
@@ -220,6 +232,7 @@ def load64 : Program where
 #guard_msgs (substring := true) in
 example (a p : BitVec 64) :
     Ensures load64 0x1000 [a, p] (fun s => StackWritable s 0 8) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs hpre
   janus64_intro hs
   janus64_run
@@ -228,6 +241,7 @@ example (a p : BitVec 64) :
 #guard_msgs (substring := true) in
 example (a p : BitVec 64) :
     Ensures load64 0x1000 [a, p] (fun s => StackWritable s 0 8) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs hpre
   janus64_intro hs
   janus64_run (budget := 1)

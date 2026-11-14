@@ -29,6 +29,7 @@ example (m : Nat) (p : Program) (s : State) :
 
 theorem within4 (x y : W64) : EnsuresWithin (fun _ => 4) maxProg 0x1000 [x, y] (fun _ => True)
     (fun _ s' => s'.regs 0 = if y.toNat < x.toNat then x else y) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -37,6 +38,7 @@ theorem within4 (x y : W64) : EnsuresWithin (fun _ => 4) maxProg 0x1000 [x, y] (
 /-- A state-dependent bound that evaluates to a numeral. -/
 theorem within4' (x y : W64) : EnsuresWithin (fun s => 2 + (s.regs 30).toNat * 0 + 2) maxProg 0x1000 [x, y] (fun _ => True)
     (fun _ s' => s'.regs 0 = if y.toNat < x.toNat then x else y) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   simp only [Nat.zero_add, Nat.mul_zero]
@@ -58,6 +60,7 @@ example (x y : W64) (ret : Nat) (hret : RetAddr maxProg ret) (s : State)
   janus_intro hs; janus_run
 
 theorem atLeast3 (x y : W64) : RunsAtLeastOnCall (fun _ => 3) maxProg 0x1000 [x, y] (fun _ => True) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -96,10 +99,10 @@ example {bound : State → Nat} {entry : Nat} {args : List W64} {pre : State →
     (h : EnsuresWithin bound p entry args pre post) : Ensures p entry args pre post := h.ensures
 example {bound : State → Nat} {entry : Nat} {args : List W64} {pre : State → Prop} {post : State → State → Prop}
     (h : EnsuresWithin bound p entry args pre post) : EnsuresWithin (fun s => bound s + 1) p entry args pre post :=
-  h.mono_bound fun _ _ => Nat.le_succ _
+  h.mono_bound fun _ _ _ => Nat.le_succ _
 example {lower : State → Nat} {entry : Nat} {args : List W64} {pre : State → Prop}
     (h : RunsAtLeastOnCall lower p entry args pre) : RunsAtLeastOnCall (fun s => lower s - 1) p entry args pre :=
-  h.mono fun _ _ => Nat.sub_le _ _
+  h.mono fun _ _ _ => Nat.sub_le _ _
 
 /-- Bound and correctness proved apart. -/
 example {bound : State → Nat} {entry : Nat} {args : List W64} {pre : State → Prop} {post : State → State → Prop}
@@ -126,6 +129,7 @@ example (n : Nat) (p : Janus.Amd64.Program) (s : Janus.Amd64.State) (Q : State �
 
 theorem within4 (x y : W64) : EnsuresWithin (fun _ => 4) maxProg 0x1000 [x, y] (fun s => StackWritable s 0 8)
     (fun _ s' => results 1 s' = [if y.toNat < x.toNat then x else y]) := by
+  janus64_ensures_old
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre
@@ -144,6 +148,7 @@ example (x y : W64) (ret : Nat) (hret : RetAddr maxProg ret) (s : State)
   trivial
 
 theorem atLeast3 (x y : W64) : RunsAtLeastOnCall (fun _ => 3) maxProg 0x1000 [x, y] (fun s => StackWritable s 0 8) := by
+  janus64_ensures_old
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre

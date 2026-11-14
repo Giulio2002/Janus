@@ -28,6 +28,7 @@ theorem noExit : P0.fetch P0.exitAddr = none := by decide
 
 theorem calleeEns (x : W64) :
     Ensures P0 0x1000 [x] (fun _ => True) (fun s s' => s'.regs 0 = x + 1 ∧ s'.mem = s.mem) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -38,6 +39,7 @@ def calleeSum (x : W64) := Ensures.toSummaryIn (calleeEns x) noExit hc
 /-- The caller, with the callee as a summary. -/
 theorem callerEns (x : W64) :
     Ensures Pw 0x2000 [x] (fun s => StackOK s 16 0) (fun _ s' => s'.regs 0 = x + 2) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hal, hb, ha, hw⟩
   janus_intro hs
   janus_run calls [calleeSum x]
@@ -100,6 +102,7 @@ theorem noExit : P0.fetch P0.exitAddr = none := by decide
 
 theorem calleeEns (x : W64) :
     Ensures P0 0x1000 [x] (fun s => StackWritable s 0 8) (fun s s' => s'.regs 0 = x + 1 ∧ s'.mem = s.mem) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨hb, ha, hw⟩
   janus64_intro hs
   simp only [regSP] at hb ha hw
@@ -111,6 +114,7 @@ def calleeSum (x : W64) := Ensures.toSummaryIn (calleeEns x) noExit (by show 1 �
 theorem callerEns (x : W64) :
     Ensures Pw 0x2000 [x] (fun s => StackWritable s 8 8 ∧ (s.regs 4).toNat % 8 = 0)
       (fun _ s' => s'.regs 0 = x + 2) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hb, ha, hw⟩, hal⟩
   janus64_intro hs
   simp only [regSP] at hb ha hw hal

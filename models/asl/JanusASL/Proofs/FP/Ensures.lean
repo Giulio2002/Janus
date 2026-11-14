@@ -15,11 +15,11 @@ theorem Ensures.toASL_fp {p : Program} {entry : Nat} {args : List W64} {pre : St
     (hp : ∀ w ∈ p.segments.flatMap (·.words), FPStepOK w)
     (hcode : ∀ seg ∈ p.segments, seg.base + 4 * seg.words.length < 2 ^ 56)
     (hstub : ∀ st ∈ p.stubs, st.addr < 2 ^ 56)
-    {ret : Nat} (hret : RetAddr p ret) {js : State} (hs : CallSetup (p.withExit ret) entry args js) (hpre : pre js)
-    {s : SState} (h : Rel js s) (hf : FPRel js s) (hc : LinuxEL0Config s) (hfc : FPConfig s) :
+    {ret : Nat} (hret : RetAddr p ret) {js₀ : State} (hs : CallSetup0 entry args js₀) (hpre : pre js₀)
+    {s : SState} (h : Rel (js₀.setRet ret) s) (hf : FPRel (js₀.setRet ret) s) (hc : LinuxEL0Config s) (hfc : FPConfig s) :
     ∃ fuel s' js', aslRun (p.withExit ret) fuel s = .returned s' ∧ Rel js' s' ∧ FPRel js' s' ∧ LinuxEL0Config s' ∧
-      FPConfig s' ∧ ABIReturn js js' ∧ post js js' := by
-  obtain ⟨fuel, js', hrun, hpost⟩ := hE ret hret js hs hpre
+      FPConfig s' ∧ ABIReturn (js₀.setRet ret) js' ∧ post (js₀.setRet ret) js' := by
+  obtain ⟨fuel, js', hrun, hpost⟩ := hE js₀ hs hpre ret hret
   have hp' : ∀ pc w, (p.withExit ret).fetch pc = some w → FPStepOK w := by
     intro pc w hf'
     obtain ⟨seg, hm, _, hw⟩ := fetchIn_some hf'
@@ -32,7 +32,7 @@ theorem Ensures.toASL_fp {p : Program} {entry : Nat} {args : List W64} {pre : St
       have := List.find?_some hst
       simp only [decide_eq_true_eq] at this
       rw [← this]; exact hstub st hm
-  have := run_agree_fp (p.withExit ret) hp' hu fuel js s _ h hf hc hfc hrun
+  have := run_agree_fp (p.withExit ret) hp' hu fuel (js₀.setRet ret) s _ h hf hc hfc hrun
   revert this
   cases hr : aslRun (p.withExit ret) fuel s with
   | returned s' => intro ⟨hrel, hfrel, hcf, hfcf⟩; exact ⟨fuel, s', js', hr, hrel, hfrel, hcf, hfcf, hpost⟩

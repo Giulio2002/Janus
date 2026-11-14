@@ -27,6 +27,7 @@ theorem straight_spec (x y : W64) :
     Ensures straight 0x10000 [x, y] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + 24 * y.toNat) % 2 ^ 64 ∧
         (s'.regs 4).toNat = (x.toNat + 23 * y.toNat) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -803,6 +804,7 @@ def large : Program := { segments := [seg0, seg2, seg1], stubs := [], exitAddr :
 theorem large_spec (x y : W64) :
     Ensures large 0x10000 [x, y] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + 24 * y.toNat) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -820,6 +822,7 @@ def divp : Program where
 theorem div_returns (x y : W64) :
     Ensures divp 0x20000 [x, y] (fun _ => y.toNat ≠ 0)
       (fun _ s' => (s'.regs 0).toNat = x.toNat / y.toNat) := by
+  janus_ensures_old
   intro ret hret s hs hy
   janus_intro hs
   janus_run [hy]
@@ -845,6 +848,7 @@ theorem swap_spec (p q : W64) :
       (fun s => Ptr s.mem p 8 true ∧ Ptr s.mem q 8 true ∧ (p = q ∨ Disjoint p.toNat 8 q.toNat 8))
       (fun s s' => s'.mem.readLE p.toNat 8 = s.mem.readLE q.toNat 8 ∧
         s'.mem.readLE q.toNat 8 = s.mem.readLE p.toNat 8) := by
+  janus_ensures_old
   intro ret hret s hs ⟨⟨hp, hp'⟩, ⟨hq, hq'⟩, hpq⟩
   janus_intro hs
   rcases hpq with rfl | hpq
@@ -867,6 +871,7 @@ def tablep : Program where
 theorem table_spec (i : W64) :
     Ensures tablep 0x40000 [i] (fun s => tablep.DataLoaded s.mem)
       (fun _ s' => (s'.regs 0).toNat = [1, 2, 3, 255][i.toNat % 4]!) := by
+  janus_ensures_old
   intro ret hret s hs hd
   janus_intro hs
   janus_data hd
@@ -894,6 +899,7 @@ theorem g_summary :
 theorem call_spec (x : W64) :
     Ensures callp 0x50000 [x] (fun s => StackOK s 16 0)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + 2) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hal, hb, ha, hw⟩
   janus_intro hs
   janus_run calls [g_summary]
@@ -915,6 +921,7 @@ summary's author chose. -/
 theorem call_spec_named (x : W64) :
     Ensures callp 0x50000 [x] (fun s => StackOK s 16 0)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + 2) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hal, hb, ha, hw⟩
   janus_intro hs
   janus_run until [0x50008] calls [hS := g_summary2]
@@ -940,6 +947,7 @@ def g_framed : Prop :=
 set_option janus.callRegions true in
 theorem call_regions_named (hg : g_framed) (x : W64) :
     Ensures callp 0x50000 [x] (fun s => StackOK s 16 0) (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hal, hb, ha, hw⟩
   janus_intro hs
   janus_run until [0x50008] calls [hS := hg]
@@ -959,6 +967,7 @@ set_option janus.callRegions true in
 /-- The unnamed form: `hrg1` after the first call, `hrg2` after the second. -/
 theorem call_regions_unnamed (hg : g_framed) (x : W64) :
     Ensures callp 0x50000 [x] (fun s => StackOK s 16 0) (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hal, hb, ha, hw⟩
   janus_intro hs
   janus_run until [0x50008] calls [hg]
@@ -971,6 +980,7 @@ theorem call_regions_unnamed (hg : g_framed) (x : W64) :
 /-- Default (off): no `hrg` hypothesis; the explicit lemma `Summary.regions` gives the same fact. -/
 theorem call_regions_off (hg : g_framed) (x : W64) :
     Ensures callp 0x50000 [x] (fun s => StackOK s 16 0) (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hal, hb, ha, hw⟩
   janus_intro hs
   janus_run until [0x50008] calls [hg]
@@ -981,6 +991,7 @@ theorem call_regions_off (hg : g_framed) (x : W64) :
 theorem call_spec_inline (x : W64) :
     Ensures callp 0x50000 [x] (fun s => StackOK s 16 0)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + 2) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hal, hb, ha, hw⟩
   janus_intro hs
   janus_run
@@ -1019,6 +1030,7 @@ theorem loop_inv (N : Nat) (hN : N < 2 ^ 62) (ret : Nat) (hret : RetAddr loopp r
 theorem loop_spec (x : W64) (hx : x.toNat < 2 ^ 62) :
     Ensures loopp 0x60000 [x] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = 2 * x.toNat) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run until [0x60008]
@@ -1048,6 +1060,7 @@ def diamondp : Program where
 theorem diamond_spec (x y z : W64) :
     Ensures diamondp 0x70000 [x, y, z] (fun _ => True)
       (fun _ s' => s'.regs 0 = x + z + 4#64) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   -- stop at the second join: the four paths arrive there as one goal (without merging, four
@@ -1083,6 +1096,7 @@ def lsrp : Program where
 theorem lsr_spec (p : W64) :
     Ensures lsrp 0x50000 [p] (fun s => Ptr s.mem p 8 false)
       (fun s s' => (s'.regs 0).toNat = s.mem.readLE p.toNat 8 / 8) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hp, hp'⟩
   janus_intro hs
   janus_run [lsr3_ofNat]

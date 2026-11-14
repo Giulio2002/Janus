@@ -32,6 +32,7 @@ def zq : Janus.Amd64.Program where
 -- discharger of a callee's precondition) and `toNat` of it reduces with the post simp set.
 example (p : BitVec 64) :
     Ensures zq 0x1000 [p] (fun s => StackWritable s 0 8) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨hle, hnw, hacc⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw

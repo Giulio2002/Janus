@@ -51,23 +51,26 @@ macro_rules
        have hu := hret.user
        try simp only [Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.SPAligned,
          Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.Disjoint, Janus.Amd64.GoABI.valueAt,
-         Janus.Amd64.GoABI.StackWords, Janus.Amd64.GoABI.stackWord,
-         Janus.Amd64.GoABI.StackGuardOK, Janus.Amd64.GoABI.stackguard0,
+         Janus.Amd64.GoABI.StackWords, Janus.Amd64.GoABI.stackWord, Janus.Amd64.GoABI.stackArgOffset,
+         Janus.Amd64.GoABI.StackGuardOK, Janus.Amd64.GoABI.stackguard0, Janus.Amd64.GoABI.stackguard0Offset,
          Janus.Amd64.GoABI.ClosureCtx, Janus.Spec.Disjoint, Janus.Apart, Janus.outside_nil,
          Janus.outside_cons, $ds,*] at hp ⊢
-       have hp0 := hp
-       janus_split_hyps keep hp0
-       try simp (disch := first | omega | decide) only [Janus.Amd64.GoABI.setRet_regs,
-         Janus.Amd64.GoABI.setRet_rip, Janus.Amd64.GoABI.setRet_flags,
-         Janus.Amd64.GoABI.setRet_xmm, Janus.Amd64.GoABI.setRet_ymmHi,
-         Janus.Amd64.GoABI.setRet_zmmHi, Janus.Amd64.GoABI.setRet_kreg,
-         Janus.Amd64.GoABI.setRet_fsBase, Janus.Amd64.GoABI.setRet_df,
-         Janus.Amd64.GoABI.setRet_mxcsr, Janus.Amd64.GoABI.setRet_x87,
-         Janus.Amd64.GoABI.setRet_fpucw, Janus.Amd64.GoABI.setRet_mem_regions,
-         Janus.Amd64.GoABI.setRet_accessible, Janus.Amd64.GoABI.readLE_setRet_of_disjoint,
-         Janus.Amd64.GoABI.bytes_setRet_of_outside] at ⊢
-       try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
-       all_goals first | with_reducible exact hp0 | (and_intros <;> first | with_reducible assumption | omega)))
+       all_goals
+        (have hp0 := hp
+         janus_split_hyps keep hp0
+         janus_have_rsp8 hacc8 : s.mem.accessible (s.regs 4).toNat 8 true = true
+         try simp (disch := first | omega | assumption)
+           only [Janus.Amd64.GoABI.setRet_regs,
+           Janus.Amd64.GoABI.setRet_rip, Janus.Amd64.GoABI.setRet_flags,
+           Janus.Amd64.GoABI.setRet_xmm, Janus.Amd64.GoABI.setRet_ymmHi,
+           Janus.Amd64.GoABI.setRet_zmmHi, Janus.Amd64.GoABI.setRet_kreg,
+           Janus.Amd64.GoABI.setRet_fsBase, Janus.Amd64.GoABI.setRet_df,
+           Janus.Amd64.GoABI.setRet_mxcsr, Janus.Amd64.GoABI.setRet_x87,
+           Janus.Amd64.GoABI.setRet_fpucw, Janus.Amd64.GoABI.setRet_mem_regions,
+           Janus.Amd64.GoABI.setRet_accessible, Janus.Amd64.GoABI.readLE_setRet_of_disjoint,
+           Janus.Amd64.GoABI.bytes_setRet_of_outside, Janus.Amd64.GoABI.dataLoaded_setRet_iff] at ⊢
+         try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
+         all_goals first | with_reducible exact hp0 | (and_intros <;> first | with_reducible assumption | omega))))
 
 /-- `janus64_ensures_old [defs]`: the amd64 twin of `janus_ensures_old`. -/
 syntax "janus64_ensures_old" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic

@@ -12,7 +12,7 @@ const extractorVersion = "0.2.0"
 
 // releaseVersion is the Janus release this binary belongs to, printed by `janus --version`. It is independent of
 // extractorVersion, which versions the extraction format (artifacts record it, and changing it invalidates them).
-const releaseVersion = "0.3.4"
+const releaseVersion = "0.4.0"
 
 const defaultMaxFunctions = 64
 

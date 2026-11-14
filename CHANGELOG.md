@@ -1,23 +1,132 @@
 # Changelog
 
-## v0.3.4 (unreleased)
+## v0.4.0 (unreleased)
 
-Auditor and CLI fixes requested by fv-modexp. No contract or statement form changed. Existing proofs need no edits.
+**BREAKING: `Ensures` and its sibling forms evaluate the precondition BEFORE the return address is installed.**
+No precondition can restrict the caller's return address any more, by construction. This closes the known gap of
+v0.3.3 (a precondition that pins `[RSP]` on amd64 in a spelling the auditor's syntactic rule did not recognise, or
+`X30` on arm64, where there was no rule at all).
 
-- **`StackWords` is accepted as a stack-argument form.** `Janus.GoABI.StackWords` and `Janus.Amd64.GoABI.StackWords`
-  join the ABI predicates that the amd64 `[RSP]`-word rule treats as opaque. Every word they read is at
-  `RSP + 8 + skip + 8 * i`, never inside `[RSP, RSP + 8)`. `stackWord s off` is not listed, because `off = 0` is `[RSP]`.
+### What changed
+
+Per ISA (`Janus.GoABI`, `Janus.Amd64.GoABI`):
+
+- `State.setRet s ret` installs the return address: arm64 sets `X30 := ret`; amd64 writes the 8-byte little-endian
+  word `ret` at `[RSP]` (what `CALL` pushes). Nothing else changes; the memory regions (accessibility) are kept.
+- `CallSetup0 entry args s` is `CallSetup` without the return-address field (arm64: `pc`, `len`, `args`; amd64:
+  `rip`, `zero`, `len`, `args`, `df`). `CallSetup0.setRet : CallSetup0 .. s → CallSetup (p.withExit ret) .. (s.setRet ret)`.
+  (arm64 `CallSetup0` has the field `len : args.length ≤ numIntRegs` that amd64 `CallSetup` always had: arguments live
+  in `R0 .. R15`, never in the link register that `setRet` overwrites.)
+- `Ensures`, `EnsuresWithin`, `EnsuresGo`, `EnsuresGoX` and `RunsAtLeastOnCall` (and so `EnsuresResults`) are now
+
+  ```
+  ∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret →
+    Returns (p.withExit ret) (s.setRet ret) (fun s' => ABIReturn (s.setRet ret) s' ∧ post (s.setRet ret) s')
+  ```
+
+  `pre` sees `s` (the call state before the return address exists); `post`, `bound`, the classifier, `ret`/`pan`/`gox`
+  see `s.setRet ret`, so every existing postcondition keeps its meaning. `Summary` (callee contracts) is unchanged.
+- Bridges: `Ensures.of_old`, `EnsuresWithin.of_old`, `EnsuresGo.of_old`, `EnsuresGoX.of_old`,
+  `RunsAtLeastOnCall.of_old` (a proof of the old statement plus `hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret)`
+  give the new one), and the reverse `Ensures.toOld` (the old-shaped statement for a state that already holds `ret`;
+  arm64 also needs `args.length ≤ numIntRegs`, an auto-parameter closed by `simp [numIntRegs]`). `Ensures.toSummary`,
+  `Ensures.toSummaryIn` and `EnsuresC.of_ensures` use it, so their statements are unchanged (arm64: they gain the
+  auto-parameter `hlen`).
+- Simp lemmas `setRet_*` (registers other than `X30`, `SP`/`RSP`, pc/rip, flags, xmm, mem regions, `accessible`
+  unchanged); amd64 `readLE_setRet_of_disjoint` (a read of `[a, a + n)` outside `[RSP, RSP + 8)`), `readLE_setRet_sp`
+  (the return slot holds `ret`), `bytes_setRet_of_outside`; `CallSetup.setRet_eq`; `Memory.writeLE_readLE_self`.
+- Tactics: `janus_pre_setRet` / `janus64_pre_setRet` prove `hinv` for the common preconditions; `janus_ensures_old` /
+  `janus64_ensures_old` do `refine Ensures.of_old (by janus_pre_setRet) ?_` (or the `Within`/`Go`/`GoX`/`RunsAtLeast`
+  form), leaving the old-shaped goal. Optional `[defs]` lists proof-local definitions to unfold.
+- **Auditor:** the amd64 `[RSP]`-word rule (`the precondition constrains the memory word at the entry RSP`, and its
+  helpers `isSpRead`, `constReadsSp`, `mentionsSpWord`, `ensuresPres`) is removed: the precondition cannot see the
+  return address, so no spelling of a restriction exists. `ErrorfAmd64.RetLow` as a precondition conjunct is therefore
+  accepted (and harmless). The witness rules are unchanged in meaning: the statement of a witness exhibits
+  `CallSetup0 … s`, the precondition at `s`, a `RetAddr` and the returning run at `s.setRet ret`; the matching is
+  still definitional unification of the unfolded conclusion's premises and final run claim. The amd64 undefined-value
+  rule accepts `State.setRet s ret` (it changes only the memory).
+- The v0.3.4 items below are part of this release.
+
+### Not changed (known remainder)
+
+`Ensures0`/`EnsuresResults0` (ABI0), `EnsuresC`/`CEnsuresC`/`CEnsures`/`CCall` (C ABI and cgo), `EnsuresK`
+(syscalls) and `EnsuresGrow`/`EnsuresGrow64` (stack growth) keep their old shape: a precondition of those forms is still
+evaluated on the state with the return address installed. They are not the Go ABIInternal forms of the main theorems
+the design covers; they move in a later release if the same hole matters there.
+
+### Migration guide
+
+A proof of the old statement migrates by adding ONE line, and its witness by a mechanical rewrite
+(`scripts/dev/migrate-v040.py FILE.lean` does both for the usual shapes):
+
+```
+-- arm64 and amd64 before                         -- after (arm64; amd64: janus64_ensures_old)
+theorem correctness : Ensures P E [x, y] pre post := by      theorem correctness : Ensures P E [x, y] pre post := by
+  intro ret hret s hs hpre                                      janus_ensures_old
+  janus_intro hs                                                intro ret hret s hs hpre
+  janus_run                                                     janus_intro hs
+                                                                janus_run
+```
+
+`janus_ensures_old` is `refine Ensures.of_old (by janus_pre_setRet) ?_`; the remaining goal is the old statement, so the
+old proof is unchanged (`intro ret hret s hs hpre` still takes the state with the return address installed). The same
+line works for `EnsuresResults`, `EnsuresWithin`, `EnsuresGo`, `EnsuresGoX`, `RunsAtLeastOnCall`. A proof that is not
+introduced by `intro ret hret …` (a hand-written `fun ret hret s hs hp => …`) uses the bridge lemma directly:
+`Ensures.of_old (by janus_pre_setRet) (fun ret hret s hs hp => …)`.
+
+Witnesses (`Witness.nonvacuous` and friends): `CallSetup (P.withExit ret) E args s` becomes `CallSetup0 E args s`
+(the setup lemma drops the return-address field `⟨rfl, rfl, …⟩` on arm64: `⟨rfl, by decide, …⟩` with the `len` field; amd64:
+`⟨rfl, by decide, rfl, by decide, args, rfl⟩` becomes `⟨rfl, rfl, by decide, args, rfl⟩`), the run claim is stated at
+`s.setRet ret` (`Returns (P.withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ …`, with `s` in the
+post replaced by `s.setRet ret`), and the proof term applies the theorem as `thm args s0 setup hpre ret hret` (was
+`thm args ret hret s0 setup hpre`). The precondition conjunct of the witness stays at `s`.
+
+Direct style (no bridge; for a new proof or a precondition the bridge cannot discharge): `intro s hs hp ret hret`,
+`have hs1 := hs.setRet ret` (arm64; amd64: `hs.setRet hret.lt64`) is the old-shaped `CallSetup (p.withExit ret) … (s.setRet ret)`,
+`generalize hsr : s.setRet ret = s1 at hs1 ⊢`, state what the run needs about `s1` from the precondition on `s` with the
+`setRet_*` simp lemmas, `clear hsr`, then `janus_intro hs1` and `janus_run` as before (see `test/lean/JanusTests/RetAddr.lean`,
+`a4c` and `m11`: the old attack statements, proved for every return address).
+
+`janus_pre_setRet` discharges `pre s → pre (s.setRet ret)` by rewriting `s.setRet ret` away:
+- arm64: every register but `X30`, `SP`, the flags and the memory are unchanged, so everything but a statement about
+  `X30` goes through. A precondition that pins or bounds `X30` is not invariant: the tactic fails, and the theorem no
+  longer needs it (state it without the `X30` conjunct; it was a restriction of the return address).
+- amd64: `setRet` changes only the 8 bytes `[RSP, RSP + 8)`. Reads of memory at `RSP + k` with `k ≥ 8` (stack
+  arguments, `StackWords`), reads below `RSP`, and reads at a pointer the precondition keeps apart from the return slot
+  (an `Apart`/`Disjoint`/`Outside` conjunct over a window containing `[RSP, RSP + 8)`) are discharged by `omega` from
+  the precondition. A read at a pointer the precondition only places in a buffer (`Buffer`, `Ptr`, `accessible`), or
+  outside the callee's writable windows (`calleeStack64` leaves the return slot out), needs an extra conjunct
+  `Apart ptr n RSP 8` (or `Disjoint`) in the precondition. A precondition that reads `[RSP]` itself keeps its reads
+  of `ret`: `[RSP] < 2^47` is derived from `RetAddr`; a pin (`[RSP] = 0`, a bound on `ret`) fails, correctly.
+- Post conditions that read the initial memory at the return slot see `ret`, as the callee does.
+
+### v0.3.4 items (merged)
+
+Auditor and CLI fixes requested by fv-modexp.
+
+- **`StackWords` is accepted as a stack-argument form.** (The amd64 `[RSP]`-word rule it was added to is removed in
+  this release; `StackWords s skip words` reads only `RSP + 8 + skip + 8 * i`, so `janus64_pre_setRet` discharges it.)
 - **The statement round-trip check tries a print with binder types** (`pp.funBinderTypes`) after the plain and the
   `pp.numericTypes` prints. Before, `∃ yp : W64, … = yp.toNat` printed as `∃ yp, … yp.toNat` and was refused with
   "the printed statement does not elaborate back". The annotated print must still elaborate back to a definitionally
   equal statement.
-- **`janus --version`** prints the release (`janus 0.3.4 (extractor 0.2.0)`). Before, it printed only the
+- **`janus --version`** prints the release (`janus 0.4.0 (extractor 0.2.0)`). Before, it printed only the
   extraction-format version, `0.2.0`.
-- Round n9 rows:
-  - b17 (`StackWords`): control, verifies.
-  - b18 (`StackWords` with a `[RSP]` read in one definition): blocked.
-  - b19 (`stackWord s 0`): blocked.
-  - b20 (the `∃`-bound `yp.toNat` statement): control, verifies.
+- Round n9: b17 (`StackWords`) and b20 (the `∃`-bound `yp.toNat` statement) are controls that verify. b18 and b19
+  were blocked by the removed `[RSP]` rule: now see below.
+
+### Red-team round `roundretaddr` and round n9
+
+- Phase-1 migration scope: the `janus_*`/`Within` tests of `test/lean/JanusTests`, round n9 and `rounderrorf`'s a9/a10, and
+  six pilot examples (`Add`, `Max`, `LoadThird` on both ISAs). The other examples, the other red-team rounds
+  (`test/redteam`), the embedded proofs of `cmd/janus/*_test.go`, `models/asl` (`Ensures.toASL` is updated but not rebuilt:
+  Sail is not part of this tree's build) and the docs' code snippets still hold the old shape.
+- New `test/redteam/rounds/roundretaddr/` (both ISAs) and `test/lean/JanusTests/RetAddr.lean`: preconditions that pin
+  the return address (`(s.regs 30).toNat = 0`, `readLE RSP 8 = 0`, the probe forms `RspBypass64.lean` and `LrPin.lean` of
+  v0.3.3) are accepted and harmless: the theorem still covers every admissible `ret`.
+- Round n9 rows whose expectation changed (the rule that blocked them is gone, and none of them restricts the return
+  address any more): b1-b7, b9-b11, b13-b16, b18, b19 were `blocked`, are now `Verified` (audit-only). b8, b12, b17, b20
+  stay `Verified`.
 
 ## v0.3.3 (2026-11-13)
 

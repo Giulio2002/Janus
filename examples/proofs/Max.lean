@@ -16,6 +16,7 @@ namespace Proof
 theorem correctness (x y : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => s'.regs 0 = if y.toNat < x.toNat then x else y) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -27,6 +28,7 @@ unit is instructions of the model, not cycles (docs/SOUNDNESS.md, "Instruction-c
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => s'.regs 0 = if y.toNat < x.toNat then x else y) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -35,6 +37,7 @@ theorem within (x y : BitVec 64) :
 /-- SPEED (lower bound): every call executes at least 3 instructions before it returns (`CMP; B.cond; RET` on the shorter path). -/
 theorem atLeast (x y : BitVec 64) :
     RunsAtLeastOnCall (fun _ => 3) Extracted.program Extracted.entry [x, y] (fun _ => True) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -61,8 +64,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(3 : BitVec 64), (5 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(3 : BitVec 64), (5 : BitVec 64)] s0 :=
+  ⟨rfl, by decide, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
@@ -71,10 +74,10 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (True) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (s'.regs 0 = if y.toNat < x.toNat then x else y)) := by
-  refine ⟨ret, s0, (3), (5), hret, setup, ?pre, correctness (3) (5) ret hret s0 setup ?pre⟩
+    CallSetup0 Extracted.entry [x, y] s ∧ (True) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (s'.regs 0 = if y.toNat < x.toNat then x else y)) := by
+  refine ⟨ret, s0, (3), (5), hret, setup, ?pre, correctness (3) (5) s0 setup ?pre ret hret⟩
   case pre =>
     try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp]
     all_goals decide
@@ -83,20 +86,20 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- `within` is not vacuous: a concrete call (`Max(3, 5)`, the longer path) returns within 4 instructions with the guarantee. -/
 theorem within : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (True) ∧
-    (ReturnsWithin 4 (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (s'.regs 0 = if y.toNat < x.toNat then x else y)) :=
-  ⟨ret, s0, (3), (5), hret, setup, trivial, Proof.within (3) (5) ret hret s0 setup trivial⟩
+    CallSetup0 Extracted.entry [x, y] s ∧ (True) ∧
+    (ReturnsWithin 4 (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (s'.regs 0 = if y.toNat < x.toNat then x else y)) :=
+  ⟨ret, s0, (3), (5), hret, setup, trivial, Proof.within (3) (5) s0 setup trivial ret hret⟩
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- `atLeast` is not vacuous: the same call is still running after 3 instructions and returns. -/
 theorem atLeast : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (True) ∧
-    RunsAtLeast 3 (Extracted.program.withExit ret) s ∧
-    (Returns (Extracted.program.withExit ret) s fun s' => ABIReturn s s') :=
-  ⟨ret, s0, (3), (5), hret, setup, trivial, Proof.atLeast (3) (5) ret hret s0 setup trivial,
-    (Proof.correctness (3) (5) ret hret s0 setup trivial).mono fun _ h => h.1⟩
+    CallSetup0 Extracted.entry [x, y] s ∧ (True) ∧
+    RunsAtLeast 3 (Extracted.program.withExit ret) (s.setRet ret) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s') :=
+  ⟨ret, s0, (3), (5), hret, setup, trivial, Proof.atLeast (3) (5) s0 setup trivial ret hret,
+    (Proof.correctness (3) (5) s0 setup trivial ret hret).mono fun _ h => h.1⟩
 
 end Witness
 

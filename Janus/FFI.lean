@@ -372,7 +372,7 @@ theorem CEnsuresC.refine {p : Program} {C₁ C₂ : Contract} {entry : Nat} {arg
 /-- A Go `Ensures` theorem holds under any contract. -/
 theorem EnsuresC.of_ensures {p : Program} {C : Contract} {entry : Nat} {args : List W64}
     {pre : State → Prop} {post : State → State → Prop} (h : Ensures p entry args pre post)
-    (hlen : args.length ≤ GoABI.numIntRegs := by decide) :
+    (hlen : args.length ≤ GoABI.numIntRegs := by simp [GoABI.numIntRegs]) :
     EnsuresC p C entry args pre post :=
   fun ret hret s hs hp => .of_returns ((h.toOld hlen ret hret s hs hp).mono fun _ ⟨ha, hq⟩ =>
     ⟨ABIReturnC.of_abiReturn ha, hq⟩)

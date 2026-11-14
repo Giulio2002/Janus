@@ -17,6 +17,7 @@ Note: This linter can be disabled with `set_option linter.janusAssumption false`
 #guard_msgs in
 theorem warned (x : W64) (h : x.toNat < 5) :
     Ensures P 0x1000 [x] (fun _ => True) (fun _ s' => s'.regs 2 = if x = 0 then 3 else 2) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run join [0x1014]
@@ -26,6 +27,7 @@ theorem warned (x : W64) (h : x.toNat < 5) :
 #guard_msgs in
 theorem notWarned (x : W64) (h : x.toNat < 5) :
     Ensures P 0x1000 [x] (fun _ => True) (fun _ s' => s'.regs 2 = if x = 0 then 3 else 2) := by
+  janus_ensures_old
   intro ret hret s hs _
   have : x.toNat < 5 := ‹_›
   janus_intro hs
@@ -37,6 +39,7 @@ set_option linter.janusAssumption false in
 #guard_msgs in
 theorem disabled (x : W64) (h : x.toNat < 5) :
     Ensures P 0x1000 [x] (fun _ => True) (fun _ s' => s'.regs 2 = if x = 0 then 3 else 2) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run join [0x1014]

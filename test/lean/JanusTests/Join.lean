@@ -22,6 +22,7 @@ def P : Program := { segments := [seg], stubs := [], exitAddr := 0 }
 /-- The continuation needs the branch fact: `x2 = x1 + 1` and `x1` depends on the arm. One continuation run, then `hjoin` splits. -/
 theorem diamond (x : W64) :
     Ensures P 0x1000 [x] (fun _ => True) (fun _ s' => s'.regs 2 = if x = 0 then 3 else 2) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run join [0x1014]
@@ -30,6 +31,7 @@ theorem diamond (x : W64) :
 /-- Both arms reach `0x1014`: exactly one goal is left after the join (two without it). -/
 example (x : W64) :
     Ensures P 0x1000 [x] (fun _ => True) (fun _ s' => s'.regs 2 = if x = 0 then 3 else 2) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run join [0x1014]
@@ -57,6 +59,7 @@ def P2 : Program := { segments := [seg2], stubs := [], exitAddr := 0 }
 theorem storeOne (x v p : W64) :
     Ensures P2 0x1000 [x, v, p] (fun s => s.mem.accessible p.toNat 8 true = true ∧ p.toNat % 8 = 0)
       (fun _ s' => s'.regs 0 = x) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hp, hal⟩
   janus_intro hs
   janus_run join [0x100c]
@@ -74,6 +77,7 @@ def P : Janus.Amd64.Program := { segments := [seg], stubs := [], exitAddr := 0 }
 
 theorem diamond (x : W64) :
     Ensures P 0x1000 [x] (fun s => StackWritable s 0 8) (fun _ s' => s'.regs 3 = if x = 0 then 3 else 2) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨hb, ha, hw⟩
   janus64_intro hs
   simp only [regSP] at hb ha hw
@@ -90,6 +94,7 @@ theorem storeOne (x p v : W64) :
     Ensures P2 0x1000 [x, p, v] (fun s => StackWritable s 0 8 ∧ s.mem.accessible p.toNat 8 true = true ∧
       (p.toNat + 8 ≤ (s.regs regSP).toNat ∨ (s.regs regSP).toNat + 8 ≤ p.toNat))
       (fun _ s' => s'.regs 0 = x) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hb, ha, hw⟩, hp, hd⟩
   janus64_intro hs
   simp only [regSP] at hb ha hw hd
@@ -104,9 +109,10 @@ def P3 : Janus.Amd64.Program := { segments := [seg3], stubs := [], exitAddr := 0
 theorem pruneLimb (p q : W64) :
     Ensures P3 0x1000 [p, q] (fun s => StackWritable s 0 8 ∧ s.mem.accessible p.toNat 8 false = true ∧
       s.mem.accessible q.toNat 8 false = true ∧ s.mem.readLE p.toNat 8 ≤ s.mem.readLE q.toNat 8 ∧
-      s.mem.readLE q.toNat 8 ≠ 0)
+      s.mem.readLE q.toNat 8 ≠ 0 ∧ Janus.Apart p.toNat 8 (s.regs 4).toNat 8 ∧ Janus.Apart q.toNat 8 (s.regs 4).toNat 8)
       (fun s s' => s'.regs 2 = s.regs 2) := by
-  intro ret hret s hs ⟨⟨hb, ha, hw⟩, hp, hq, hle, hne⟩
+  janus64_ensures_old
+  intro ret hret s hs ⟨⟨hb, ha, hw⟩, hp, hq, hle, hne, _, _⟩
   janus64_intro hs
   simp only [regSP] at hb ha hw
   janus64_run

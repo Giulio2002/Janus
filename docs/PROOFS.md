@@ -46,6 +46,7 @@ namespace Proof
 theorem correctness (x y : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by
+  janus_ensures_old          -- v0.4.0: reduces to the pre-v0.4.0 goal below (proves `pre s → pre (s.setRet ret)`)
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -53,12 +54,19 @@ theorem correctness (x y : BitVec 64) :
 end Proof
 ```
 
-**The statement.** `GoABI.Ensures p entry args pre post` says: for every admissible return
-address `ret` (`GoABI.RetAddr p ret`: 4-aligned, below `2^48`, outside the extracted code and
-the stubs) and every machine state `s` that is a Go call of `entry` with integer arguments
-`args` in `X0, X1, …` and `ret` in `X30` (`GoABI.CallSetup (p.withExit ret)`) and satisfies
-`pre s`, the program returns to `ret` after finitely many instructions, restores `SP`, `X18`,
-`X28` and `X29` (`GoABI.ABIReturn`), and `post s s'` holds of the final state `s'`. Everything
+(Since v0.4.0 the first line of the proof is `janus_ensures_old` (amd64: `janus64_ensures_old`); the rest is the
+unchanged pre-v0.4.0 proof, which runs on the state with the return address installed. See CHANGELOG.md,
+"v0.4.0", for the migration guide and the `Ensures.of_old` / `janus_pre_setRet` forms.)
+
+**The statement.** `GoABI.Ensures p entry args pre post` says: for every machine state `s`
+that is a Go call of `entry` with integer arguments `args` in `X0, X1, …`
+(`GoABI.CallSetup0 entry args s`: the state before the return address is installed) and
+satisfies `pre s`, and every admissible return address `ret` (`GoABI.RetAddr p ret`: 4-aligned,
+below `2^48`, outside the extracted code and the stubs), the program started from
+`s.setRet ret` (`s` with `ret` in `X30`; on amd64 `ret` written at `[RSP]`) returns to `ret`
+after finitely many instructions, restores `SP`, `X18`, `X28` and `X29` (`GoABI.ABIReturn`),
+and `post (s.setRet ret) s'` holds of the final state `s'`. `pre` is evaluated BEFORE `ret` is
+installed, so it cannot restrict the return address (v0.4.0). Everything
 not mentioned (other registers, flags, `SP`, all of memory) is arbitrary. Faults (an
 undecodable word, a memory access outside the caller's regions, a jump outside the extracted
 code) and panics are not returns, so `Ensures` rules them out. Quantifying over `ret` means

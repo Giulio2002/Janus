@@ -29,6 +29,7 @@ def iface : Program where
 theorem iface_spec (tab x : W64) :
     Ensures iface 0x10000 [tab, x] (fun s => ItabIs iface.data s.mem tab "go:itab.T,I")
       (fun _ s' => s'.regs 0 = x + x) := by
+  janus_ensures_old
   intro ret hret s hs hi
   janus_intro hs
   janus_dyn hi
@@ -66,6 +67,7 @@ theorem closure_spec (f x c : W64) :
     Ensures closure 0x10000 [f, x]
       (fun s => FuncvalIs s.mem f (segAddr closure "F.func1") ∧ ClosureCtx s.mem f [c])
       (fun _ s' => s'.regs 0 = x + c ∧ s'.regs 26 = f) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hf, hc⟩
   janus_intro hs
   janus_dyn hf hc

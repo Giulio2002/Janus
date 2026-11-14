@@ -70,8 +70,12 @@ chk() { # NAME file pattern: a single-theorem run prints the verdict without a p
   if grep -qF -- "$3" "$2" && ! grep -q 'verified ===' "$2"; then printf '  %-12s %-8s %s\n' "$1" blocked "rejected: $3"
   else printf '  %-12s %-8s %s   <-- BROKEN\n' "$1" blocked "$3"; broken+=("$1"); fi
 }
-chk a9 "$W/ErrorfRet64.lean.txt" 'constrains the memory word at the entry'
-chk a10 "$W/ErrorfRet64b.lean.txt" 'constrains the memory word at the entry'
+vchk() { # NAME file: v0.4.0: RetLow in a precondition restricts no return address (Ensures evaluates pre before setRet): Verified
+  if grep -q 'verified ===' "$2" || grep -q '^Verified' "$2"; then printf '  %-12s %-8s %s\n' "$1" Verified "verified"
+  else printf '  %-12s %-8s %s   <-- BROKEN\n' "$1" Verified "(not verified)"; broken+=("$1"); fi
+}
+vchk a9 "$W/ErrorfRet64.lean.txt"
+vchk a10 "$W/ErrorfRet64b.lean.txt"
 echo "== amd64: relying on R15 across the call (the stub's return jumps through R15, so the contract leaves it arbitrary)"
 sed 's/^  (s'"'"'.regs 0).toNat = iWrap ∧ ∃ d, (s'"'"'.regs 3).toNat = d/  s'"'"'.regs 15 = s.regs 15 ∧ (s'"'"'.regs 0).toNat = iWrap ∧ ∃ d, (s'"'"'.regs 3).toNat = d/' examples/proofs-amd64/ErrWrap/Proof.lean > "$W/ErrWrapR15.lean"
 grep -qF "s'.regs 15 = s.regs 15" "$W/ErrWrapR15.lean" || { echo "r15 mutation did not apply"; exit 1; }

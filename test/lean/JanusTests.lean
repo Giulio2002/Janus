@@ -33,6 +33,7 @@ import JanusTests.BitVecLit
 import JanusTests.Errorf
 import JanusTests.Grab
 import JanusTests.RedTeamN9
+import JanusTests.RetAddr
 import JanusTests.AuditPerf
 import JanusTests.Float
 import JanusTests.Dynamic

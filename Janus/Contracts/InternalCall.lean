@@ -211,7 +211,7 @@ return address in `X30` need only be admissible for `p0` (outside the callee's c
 theorem Ensures.toSummaryIn {p0 P : Program} {entry : Nat} {args : List W64} {pre : State → Prop}
     {post : State → State → Prop} (h : Ensures p0 entry args pre post)
     (hx : p0.fetch p0.exitAddr = none) (hc : CodeIn p0 P)
-    (hlen : args.length ≤ numIntRegs := by decide) :
+    (hlen : args.length ≤ numIntRegs := by simp [numIntRegs]) :
     Summary P entry
       (fun s => RetAddr p0 (s.regs regLR).toNat ∧ ArgsFrom s 0 args ∧ pre s)
       (fun s s' => (s'.sp = s.sp ∧ s'.regs 28 = s.regs 28 ∧ s'.regs 29 = s.regs 29 ∧

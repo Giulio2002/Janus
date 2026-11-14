@@ -61,7 +61,7 @@ func nonVacuityVerdict(r *verifiedReport, peers []*verifiedReport, auditOnly boo
 		// precondition makes a contract-free theorem exactly as vacuous.
 		msg := fmt.Sprintf("%s has no kernel-checked non-vacuity witness verified in this run: nothing shows that its precondition is satisfiable and that the program actually returns from a state satisfying it, so the theorem could be vacuous. Every main theorem is verified ONLY together with a verified Witness.nonvacuous that carries the returning run; --allow-no-witness does not bypass this and is ignored.", termSafe(r.Theorem))
 		return "", "", "", &diag{Invalid: true, Stage: "non-vacuity", Msg: msg,
-			Next: "Add a named theorem in the proof's Witness namespace (conventionally Witness.nonvacuous) of the form `∃ ret s <binders>, RetAddr … ∧ CallSetup … ∧ <the precondition> ∧ Returns … s (fun s' => ABIReturn s s' ∧ <the post>)` and verify it in the same run (--theorem " +
+			Next: "Add a named theorem in the proof's Witness namespace (conventionally Witness.nonvacuous) of the form `∃ ret s <binders>, RetAddr … ∧ CallSetup0 … ∧ <the precondition> ∧ Returns … (s.setRet ret) (fun s' => ABIReturn (s.setRet ret) s' ∧ <the post>)` and verify it in the same run (--theorem " +
 				witnessHint(r.Theorem) + ")."}
 	}
 	msg := fmt.Sprintf("%s assumes runtime contracts (%s) but no kernel-checked non-vacuity witness for it was verified in this run: nothing shows that its precondition, those contracts and this program are jointly satisfiable, so the theorem could be vacuous. A theorem that assumes contracts is verified ONLY together with a verified Witness.nonvacuous; --allow-no-witness does not bypass this and is ignored.",

@@ -172,6 +172,7 @@ theorem store_tbl (p v : W64) :
     Ensures storeTbl 0x40000 [p, v]
       (fun s => storeTbl.DataLoaded s.mem ∧ s.mem.accessible p.toNat 8 true = true ∧ p.toNat + 8 ≤ 2 ^ 48)
       (fun _ s' => (s'.regs 0).toNat = 7) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hd, hw, hp⟩
   janus_intro hs
   janus_data hd [*]

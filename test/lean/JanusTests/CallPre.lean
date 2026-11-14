@@ -31,6 +31,7 @@ variable (impl : List Segment)
 theorem calleeEns (x : W64) (b : Nat) :
     Ensures ((P.onlySegments ["callee"]).link impl) 0x1000 [x] (fun s => P.DataLoaded s.mem ∧ 64 ≤ b)
       (fun s s' => s'.regs 0 = x + 1 ∧ s'.mem = s.mem) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -49,6 +50,7 @@ theorem callerEns (hd : (P.segments ++ impl).Pairwise Segment.Apart)
     Ensures (P.link impl) 0x2000 [x]
       (fun s => StackOK s 16 0 ∧ P.DataLoaded s.mem ∧ blockSize 32 false + blockSize 32 true ≤ b)
       (fun _ s' => s'.regs 0 = x + 2) := by
+  janus_ensures_old
   intro ret hret s hs0 ⟨⟨hal, hb, ha, hw⟩, hdl, hbud⟩
   have S := calleeSum impl hx (codeIn_restrict P ["callee"] impl hd hs) x b
   janus_intro hs0

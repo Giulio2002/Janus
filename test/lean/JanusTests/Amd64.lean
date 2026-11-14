@@ -243,6 +243,7 @@ def retProg : Program := { segments := [⟨"f", 0x1000, [0xc3]⟩], stubs := [],
 /-- Returns to every admissible return address read from `[RSP]`. -/
 example (x : BitVec 64) :
     Ensures retProg 0x1000 [x] (fun s => StackWritable s 0 8) (fun _ s' => s'.regs 0 = x) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨hle, hnw, hacc⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -265,6 +266,7 @@ example (p : BitVec 64) :
     Ensures shrProg 0x1000 [p]
       (fun s => StackWritable s 0 8 ∧ s.mem.accessible p.toNat 8 false = true ∧ p.toNat + 8 ≤ 2 ^ 48)
       (fun s s' => (s'.regs 0).toNat = s.mem.readLE p.toNat 8 / 8) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hp, hp'⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -286,6 +288,7 @@ example (hg : Summary (callp64) 0x1006 (fun _ => True)
         (∀ i, i ≠ 0 → i ≠ 4 → s'.regs i = s.regs i)))
     (x : BitVec 64) :
     Ensures callp64 0x1000 [x] (fun s => StackWritable s 8 8) (fun _ s' => True) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨hle, hnw, hacc⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -313,6 +316,7 @@ def g_framed64 : Prop :=
 set_option janus.callRegions true in
 example (hg : g_framed64) (x : BitVec 64) :
     Ensures callp64 0x1000 [x] (fun s => StackWritable s 8 8) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨hle, hnw, hacc⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -325,6 +329,7 @@ example (hg : g_framed64) (x : BitVec 64) :
 set_option janus.callRegions true in
 example (hg : g_framed64) (x : BitVec 64) :
     Ensures callp64 0x1000 [x] (fun s => StackWritable s 8 8) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨hle, hnw, hacc⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw

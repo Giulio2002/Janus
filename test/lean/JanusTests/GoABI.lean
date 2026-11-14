@@ -15,6 +15,7 @@ def retProg : Program := { segments := [⟨"f", 0x1000, [0xd65f03c0]⟩], stubs 
 obeys the ABI, and leaves the argument registers as results. -/
 example (x y : W64) :
     EnsuresResults retProg 0x1000 [x, y] 2 (fun _ => True) (fun r => r = [x, y]) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -44,8 +45,9 @@ example (ret : Nat) (hret : RetAddr panicProg ret) (s : State)
 
 /-- `Ensures` implies `NeverPanics`. -/
 example (x : W64) (ret : Nat) (hret : RetAddr retProg ret) (s : State)
-    (hs : CallSetup (retProg.withExit ret) 0x1000 [x] s) : NeverPanics (retProg.withExit ret) s := by
+    (hs : CallSetup0 0x1000 [x] s) : NeverPanics (retProg.withExit ret) (s.setRet ret) := by
   have h : Ensures retProg 0x1000 [x] (fun _ => True) (fun _ _ => True) := by
+    janus_ensures_old
     intro ret hret s hs _; janus_intro hs; janus_run
   exact h.neverPanics hret hs trivial
 

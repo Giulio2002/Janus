@@ -814,12 +814,18 @@ meaning of the main theorem changes: the ASL stage runs after it and cannot alte
 
 ## What a theorem about `Returns` / `Ensures` says
 
-`GoABI.Ensures p entry args pre post` means: for **every** admissible return address `ret`
-(`GoABI.RetAddr p ret`: `ret` is 4-aligned, below `2^48`, outside every extracted code segment
-and not a stub address) and **every** state `s` with `pc = entry`, `R30 = ret`, `Ri = args[i]`,
-and `pre s` (all other registers, flags, `SP` and memory arbitrary), there exist a finite fuel
-and a state `s'` such that `(p.withExit ret).run fuel s` returns `s'` (reaches `pc = ret`),
-`s'` restores `SP`, `R28` (g), `R29` (FP) and `R18`, and `post s s'` holds. This is total
+`GoABI.Ensures p entry args pre post` means: for **every** state `s` with `pc = entry`, `Ri = args[i]`
+(`CallSetup0`) and `pre s` (all other registers, flags, `SP` and memory arbitrary), and **every**
+admissible return address `ret` (`GoABI.RetAddr p ret`: `ret` is 4-aligned, below `2^48`, outside every
+extracted code segment and not a stub address), there exist a finite fuel and a state `s'` such that
+`(p.withExit ret).run fuel (s.setRet ret)` returns `s'` (reaches `pc = ret`; `s.setRet ret` is `s` with
+`R30 = ret`, on amd64 with the word `ret` at `[RSP]`), `s'` restores `SP`, `R28` (g), `R29` (FP) and
+`R18`, and `post (s.setRet ret) s'` holds. **`pre` is evaluated on `s`, before the return address is
+installed (v0.4.0)**: a precondition cannot restrict the caller's return address, whatever it says
+about `X30` / `[RSP]`; a statement `pre := (s.regs 30).toNat = 0` is about the caller's *old* `X30`,
+which the call overwrites, and the claim holds for every admissible `ret`. (Before v0.4.0 `pre` saw
+the state with `ret` installed and the auditor tried to catch such restrictions by syntax: it caught
+only some amd64 spellings.) This is total
 correctness: termination is part of the claim. Running out of fuel is not success, and neither
 is any fault.
 
@@ -2460,11 +2466,11 @@ allocator (`bad2`) cannot pass as a main theorem either.
 `Witness` component is rejected as a lemma, everything else is a main theorem) and a witness is checked
 against the module's `correctness` theorem (the first theorem named `correctness`; if the module has none,
 any of its non-witness theorems about `Extracted.program`): `nonvacuous` must be `∃ …` with a conjunct for
-EVERY hypothesis of the main theorem and every premise of its unfolded conclusion (`∀ ret, RetAddr … →
-∀ s, CallSetup … entry args s → pre s → …`: the return address, the call state for the same program, entry
-and arguments, each conjunct of the precondition, `H`/readiness included), with the main theorem's
+EVERY hypothesis of the main theorem and every premise of its unfolded conclusion (`∀ s, CallSetup0 entry
+args s → pre s → ∀ ret, RetAddr … → …`: the call state for the same entry and arguments, each conjunct of the
+precondition, `H`/readiness included, the return address), with the main theorem's
 variables unified definitionally with the witness's; `returns` must be, up to that unification, the
-unfolded conclusion `Returns … (fun s' => ABIReturn s s' ∧ post s s')` of the main theorem at a concrete
+unfolded conclusion `Returns … (s.setRet ret) (fun s' => ABIReturn (s.setRet ret) s' ∧ post (s.setRet ret) s')` of the main theorem at a concrete
 start state. When a witness is verified in the same call as main theorems, `janus verify` also requires
 that the main theorem it supports is among them. Residual: a witness is matched against a theorem of the
 proof module, not against the theorem the reader happens to verify alone; the report names the matched

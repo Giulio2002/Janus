@@ -81,7 +81,7 @@ the ABI return rules and the `Ensures` post. (A `Summary` speaks about the state
 address installed: `Ensures.toOld`.) -/
 theorem Ensures.toSummary {p : Program} {entry : Nat} {args : List W64} {pre : State → Prop}
     {post : State → State → Prop} (h : Ensures p entry args pre post)
-    (hx : p.fetch p.exitAddr = none) (hlen : args.length ≤ numIntRegs := by decide) :
+    (hx : p.fetch p.exitAddr = none) (hlen : args.length ≤ numIntRegs := by simp [numIntRegs]) :
     Summary p entry
       (fun s => ∃ ret, RetAddr p ret ∧ CallSetup (p.withExit ret) entry args s ∧ pre s)
       (fun s s' => ABIReturn s s' ∧ post s s') := by

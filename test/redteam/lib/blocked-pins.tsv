@@ -416,26 +416,6 @@ rounds/rounderrorf/run-rounderrorf.sh	a6	.ErrorfLive for the argument `tv` where
 rounds/rounderrorf/run-rounderrorf.sh	a7	the statement uses Janus.Spec.dataAddr with the name
 rounds/rounderrorf/run-rounderrorf.sh	a7	the lookup silently defaults (`False` or `0`) and the stat
 rounds/rounderrorf/run-rounderrorf.sh	a8	.ErrorfLive, the contract of `fmt.errorf`, at the address of `runtime.newobject` (spec binding)
-rounds/roundn9/run-roundn9.sh	b1	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b1	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b2	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b2	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b3	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b3	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b4	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b4	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b5	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b5	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b6	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b6	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b7	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b7	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b9	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b9	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b10	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b10	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b11	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b11	any form: alias, arithmetic, existential): a theorem must n
 rounds/roundspecbind/run-roundspecbind.sh	q1	the statement assumes the runtime contract Janus.Contracts.RtContract at the
 rounds/roundspecbind/run-roundspecbind.sh	q1	describes runtime.growslice / runtime.growsliceNoAlias:
 rounds/roundspecbind/run-roundspecbind.sh	q2	the statement assumes the runtime contract Janus.Contracts.RtLiveContract at
@@ -880,15 +860,3 @@ rounds/roundwithin/run-roundwithin.sh	W6e_bound_in_local_def	the statement has t
 rounds/roundwithin/run-roundwithin.sh	W6e_bound_in_local_def	U-BOUND-PURE
 rounds/roundwithin/run-roundwithin.sh	amd64_W5b_witness_no_run	is not exhibited as a RUN
 rounds/roundwithin/run-roundwithin.sh	amd64_W5b_witness_no_run	U-WITNESS-RUN
-rounds/roundn9/run-roundn9.sh	b13	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b13	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b14	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b14	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b15	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b15	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b16	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b16	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b18	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b18	any form: alias, arithmetic, existential): a theorem must n
-rounds/roundn9/run-roundn9.sh	b19	the statement the precondition constrains the memory word at the entry `RSP`
-rounds/roundn9/run-roundn9.sh	b19	any form: alias, arithmetic, existential): a theorem must n

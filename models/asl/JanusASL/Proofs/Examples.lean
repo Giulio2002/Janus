@@ -42,11 +42,11 @@ theorem Ensures.toASL {p : Program} {entry : Nat} {args : List W64} {pre : State
     (hp : ∀ w ∈ p.segments.flatMap (·.words), StepOK w)
     (hcode : ∀ seg ∈ p.segments, seg.base + 4 * seg.words.length < 2 ^ 56)
     (hstub : ∀ st ∈ p.stubs, st.addr < 2 ^ 56)
-    {ret : Nat} (hret : RetAddr p ret) {js : State} (hs : CallSetup (p.withExit ret) entry args js) (hpre : pre js)
-    {s : SState} (h : Rel js s) (hc : LinuxEL0Config s) :
+    {ret : Nat} (hret : RetAddr p ret) {js₀ : State} (hs : CallSetup0 entry args js₀) (hpre : pre js₀)
+    {s : SState} (h : Rel (js₀.setRet ret) s) (hc : LinuxEL0Config s) :
     ∃ fuel s' js', aslRun (p.withExit ret) fuel s = .returned s' ∧ Rel js' s' ∧ LinuxEL0Config s' ∧
-      ABIReturn js js' ∧ post js js' := by
-  obtain ⟨fuel, js', hrun, hpost⟩ := hE ret hret js hs hpre
+      ABIReturn (js₀.setRet ret) js' ∧ post (js₀.setRet ret) js' := by
+  obtain ⟨fuel, js', hrun, hpost⟩ := hE js₀ hs hpre ret hret
   have hp' : ∀ pc w, (p.withExit ret).fetch pc = some w → StepOK w := by
     intro pc w hf
     obtain ⟨seg, hm, _, hw⟩ := fetchIn_some hf
@@ -59,7 +59,7 @@ theorem Ensures.toASL {p : Program} {entry : Nat} {args : List W64} {pre : State
       have := List.find?_some hst
       simp only [decide_eq_true_eq] at this
       rw [← this]; exact hstub st hm
-  have := run_agree (p.withExit ret) hp' hu fuel js s _ h hc hrun
+  have := run_agree (p.withExit ret) hp' hu fuel (js₀.setRet ret) s _ h hc hrun
   revert this
   cases hr : aslRun (p.withExit ret) fuel s with
   | returned s' => intro ⟨hrel, hcf⟩; exact ⟨fuel, s', js', hr, hrel, hcf, hpost⟩

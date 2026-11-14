@@ -605,6 +605,10 @@ partial def findUndefStream (env : Environment) (witness : Bool) (kregIdx : Nat)
     match fn with
     | .const c _ =>
       if undefStreamConsts.contains c then some e
+      else if c == `Janus.Amd64.State.setRet && args.size == 2 then
+        -- v0.4.0: `s.setRet ret` is the call state with the return address written at `[RSP]` (`Ensures`' own shape): it
+        -- changes only the memory, never the opmask file, so it names no value of the stream; its arguments are checked
+        args.findSome? (findUndefStream kregIdx)
       else if returnsState env c && c != `Janus.Amd64.State.mk then
         -- any state that is not a variable (`setK t 8 5`, `t.strip512`, `retState ..`): the only
         -- states of a statement are the quantified ones (their opmask file is arbitrary)

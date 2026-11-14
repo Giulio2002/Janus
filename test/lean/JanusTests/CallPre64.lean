@@ -27,6 +27,7 @@ theorem calleeEns (x : W64) (b : Nat) :
     Ensures ((P.onlySegments ["callee"]).link impl) 0x1000 [x]
       (fun s => StackWritable s 0 8 ∧ P.DataLoaded s.mem ∧ 64 ≤ b)
       (fun s s' => s'.regs 0 = x + 1 ∧ s'.mem = s.mem) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hb, ha, hw⟩, _⟩
   janus64_intro hs
   simp only [regSP] at hb ha hw
@@ -47,6 +48,7 @@ theorem callerEns (hd : (P.segments ++ impl).Pairwise Janus.Amd64.Segment.Apart)
       (fun s => (StackWritable s 8 8 ∧ (s.regs 4).toNat % 8 = 0) ∧ P.DataLoaded s.mem ∧
         blockSize 32 false + blockSize 32 true ≤ b)
       (fun _ s' => s'.regs 0 = x + 2) := by
+  janus64_ensures_old
   intro ret hret s hs0 ⟨⟨⟨hb, ha, hw⟩, hal⟩, hdl, hbud⟩
   have S := calleeSum impl hx (codeIn_restrict64 P ["callee"] impl hd hs) x b
   janus64_intro hs0

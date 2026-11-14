@@ -81,6 +81,7 @@ def Pre (s : Janus.Amd64.State) (p : BitVec 64) (lo hi : Nat) : Prop :=
 example (v p : BitVec 64) :
     Ensures hi 0x1000 [v, p] (fun s => Pre s p 0 16)
       (fun s s' => (s'.xmm 0).toNat = s.mem.readLE p.toNat 8 + 2 ^ 64 * v.toNat) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -94,6 +95,7 @@ example (v p : BitVec 64) :
     Ensures mid 0x1000 [v, p] (fun s => Pre s p 0 16)
       (fun s s' => (s'.xmm 0).toNat = s.mem.readLE p.toNat 4 +
         2 ^ 32 * (v.toNat + 2 ^ 64 * s.mem.readLE (p.toNat + 12) 4)) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -107,6 +109,7 @@ example (v p : BitVec 64) :
 example (v p : BitVec 64) :
     Ensures over 0x1000 [v, p] (fun s => Pre s p 0 20)
       (fun s s' => (s'.xmm 0).toNat = v.toNat / 2 ^ 32 + 2 ^ 32 * s.mem.readLE (p.toNat + 8) 12) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -119,6 +122,7 @@ example (v p : BitVec 64) :
 example (v p : BitVec 64) :
     Ensures under 0x1000 [v, p] (fun s => Pre s p 0 20)
       (fun s s' => (s'.xmm 0).toNat = s.mem.readLE p.toNat 12 + 2 ^ 96 * (v.toNat % 2 ^ 32)) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -132,6 +136,7 @@ example (v p : BitVec 64) :
 example (v p : BitVec 64) :
     Ensures neg 0x1000 [v, p] (fun s => Pre s p 72 16)
       (fun s s' => (s'.xmm 0).toNat = s.mem.readLE (p.toNat - 72) 8 + 2 ^ 64 * v.toNat) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -149,6 +154,7 @@ def disj : Program := prog "disj" [0x48, 0x89, 0x43, 0x10, 0x0f, 0x10, 0x03]
 example (v p : BitVec 64) :
     Ensures disj 0x1000 [v, p] (fun s => Pre s p 0 32)
       (fun s s' => (s'.xmm 0).toNat = s.mem.readLE p.toNat 16) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -163,6 +169,7 @@ example (v p q : BitVec 64) :
     Ensures unk 0x1000 [v, p, q]
       (fun s => Pre s p 0 16 ∧ s.mem.accessible q.toNat 16 false = true ∧ q.toNat + 16 ≤ 2 ^ 48)
       (fun _ s' => (s'.xmm 0).toNat ≤ 2 ^ 128) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩, hq, hq'⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -180,6 +187,7 @@ def wide : Program := prog "wide" [0x48, 0x89, 0x43, 0x08, 0xc5, 0xfe, 0x6f, 0x0
 example (v p : BitVec 64) :
     Ensures wide 0x1000 [v, p] (fun s => Pre s p 0 32)
       (fun _ s' => (s'.xmm 0).toNat ≤ 2 ^ 128) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -190,6 +198,7 @@ set_option janus.readOverlap.maxWidth 32 in
 example (v p : BitVec 64) :
     Ensures wide 0x1000 [v, p] (fun s => Pre s p 0 32)
       (fun s s' => (s'.xmm 0).toNat = s.mem.readLE p.toNat 8 + 2 ^ 64 * v.toNat) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -214,6 +223,7 @@ example (v p : BitVec 64) :
       (fun s s' => (s'.xmm 1).toNat = v.toNat + 2 ^ 64 * ((s.xmm 0).toNat / 2 ^ 64) ∧
         s'.regs 1 = v ∧ (s'.regs 2).toNat = (s.xmm 0).toNat / 2 ^ 64 ∧
         OnlyWrites s.mem s'.mem (p.toNat - 72) 16) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -233,6 +243,7 @@ example (v p w : BitVec 64) :
     Ensures chain2 0x1000 [v, p, w] (fun s => Pre s p 72 16)
       (fun s s' => (s'.xmm 1).toNat = v.toNat + 2 ^ 64 * w.toNat ∧
         OnlyWrites s.mem s'.mem (p.toNat - 72) 16) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -259,6 +270,7 @@ example (p v : BitVec 64) :
     Ensures armHi 0x10000 [p, v]
       (fun s => s.mem.accessible p.toNat 16 true = true ∧ p.toNat + 16 ≤ 2 ^ 48)
       (fun s s' => (s'.vregs 0).toNat = s.mem.readLE p.toNat 8 + 2 ^ 64 * v.toNat) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hp, hp'⟩
   janus_intro hs
   janus_run

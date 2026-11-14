@@ -2,7 +2,11 @@
 # Red-team round n9 (today's new features: U14 live convT, U-GROWMULTI, ErrorfLive amd64 RetLow/r15, Lake-free verify,
 # janus_grab). Semantic attacks on the contracts are Lean theorems in test/lean/JanusTests/RedTeamN9.lean (built by
 # `lake build JanusTests.RedTeamN9`; a regression there fails the build). This script runs the auditor-level rows:
-# RetLow smuggled into a consumer statement. Rows: b1-b7 and b9 must be rejected by the auditor with the reason checked; b8 (CallOK64 as-is) and b12 (stack-argument words at RSP+8/+16) are controls and verify; b13-b16 (offset < 8, non-numeral, negative offset, mixed definition) must be rejected; b17 (StackWords) is a control and verifies; b18 (StackWords plus a [RSP] read in one definition) and b19 (stackWord s 0) must be rejected; b20 (an ∃-bound stack-argument word used as yp.toNat) is a control and verifies (print round-trip). Exits 1 if a row differs.
+# RetLow smuggled into a consumer statement. v0.4.0: `Ensures` evaluates its precondition before the return address is written, so no
+# precondition restricts the return address and the auditor's [RSP]-word rule is gone: EVERY row b1-b20 is Verified (audit-only). b1-b7, b9-b11,
+# b13-b16, b18, b19 were `blocked` until v0.3.4 (the [RSP] read, in each spelling: alias, numeral, offset < 8, non-numeral or negative offset,
+# mixed definitions, stackWord s 0); b8 (CallOK64 as-is), b12 (stack-argument words at RSP+8/+16), b17 (StackWords) and b20 (an ∃-bound
+# stack-argument word used as yp.toNat, print round-trip) were controls and stay Verified. Exits 1 if a row differs.
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$root" || exit 1
@@ -43,26 +47,25 @@ row() { # NAME blocked pattern
   [ -n "$status" ] && broken+=("$name"); return 0
 }
 echo "== amd64: RetLowAlias64.lean"
-RL='constrains the memory word at the entry `RSP`'
-row b1 blocked "$RL"
-row b2 blocked "$RL"
-row b3 blocked "$RL"
-row b4 blocked "$RL"
-row b5 blocked "$RL"
-row b6 blocked "$RL"
-row b7 blocked "$RL"
+row b1 Verified
+row b2 Verified
+row b3 Verified
+row b4 Verified
+row b5 Verified
+row b6 Verified
+row b7 Verified
 row b8 Verified
-row b9 blocked "$RL"
-row b10 blocked "$RL"
-row b11 blocked "$RL"
+row b9 Verified
+row b10 Verified
+row b11 Verified
 row b12 Verified
-row b13 blocked "$RL"
-row b14 blocked "$RL"
-row b15 blocked "$RL"
-row b16 blocked "$RL"
+row b13 Verified
+row b14 Verified
+row b15 Verified
+row b16 Verified
 row b17 Verified
-row b18 blocked "$RL"
-row b19 blocked "$RL"
+row b18 Verified
+row b19 Verified
 row b20 Verified
 echo
 if [ ${#broken[@]} -gt 0 ]; then echo "round n9: BROKEN rows: ${broken[*]}"; exit 1; fi

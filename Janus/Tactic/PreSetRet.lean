@@ -55,6 +55,30 @@ elab_rules : tactic
       let subs ← g.cases fv
       replaceMainGoal (subs.map (·.mvarId)).toList
 
+/-- `janus_have_rsp8 h : T`: add `h : s.mem.accessible (s.regs 4).toNat 8 true = true` (the return slot is writable)
+when some hypothesis `m.accessible a n true = true` of the context contains `[RSP, RSP + 8)` (syntactic scan of
+the hypotheses, then `accessible_mono` with the two bounds closed by `omega`); no-op if none does. -/
+syntax "janus_have_rsp8 " ident " : " term : tactic
+
+elab_rules : tactic
+  | `(tactic| janus_have_rsp8 $h:ident : $T:term) => do
+    let g ← getMainGoal
+    let hyps ← g.withContext do
+      let mut acc : Array Expr := #[]
+      for d in (← getLCtx) do
+        if d.isImplementationDetail then continue
+        let ty ← instantiateMVars d.type
+        if ty.isAppOfArity ``Eq 3 && (ty.getArg! 1).isAppOfArity ``Janus.Arm64.Memory.accessible 4 then
+          acc := acc.push d.toExpr
+      return acc
+    for hy in hyps do
+      let hs ← g.withContext (Term.exprToSyntax hy)
+      let st ← saveState
+      try
+        evalTactic (← `(tactic| have $h : $T := Janus.Arm64.Memory.accessible_mono _ $hs (by omega) (by omega)))
+        return
+      catch _ => st.restore
+
 syntax "janus_pre_setRet" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 
 macro_rules
@@ -62,7 +86,7 @@ macro_rules
   | `(tactic| janus_pre_setRet [$ds,*]) => `(tactic|
       (intro s ret hret hp
        try simp only [Janus.GoABI.StackWritable, Janus.GoABI.SPAligned, Janus.GoABI.FPConvention,
-         Janus.GoABI.ClosureCtx, Janus.GoABI.StackWords, Janus.GoABI.stackWord,
+         Janus.GoABI.ClosureCtx, Janus.GoABI.StackWords, Janus.GoABI.stackWord, Janus.GoABI.stackArgOffset,
          Janus.GoABI.StackGuardOK, Janus.GoABI.stackguard0, $ds,*] at hp ⊢
        try simp only [Janus.GoABI.setRet_pc, Janus.GoABI.setRet_sp, Janus.GoABI.setRet_flags,
          Janus.GoABI.setRet_mem, Janus.GoABI.setRet_dczid, Janus.GoABI.setRet_vregs,

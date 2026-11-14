@@ -212,6 +212,7 @@ Note: This linter can be disabled with `set_option linter.janusRenameI false`
 #guard_msgs in
 theorem next_flagged (x : W64) (_h : x.toNat < 5) :
     Ensures P 0x1000 [x] (fun _ => True) (fun _ s' => s'.regs 2 = if x = 0 then 3 else 2) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run join [0x1014]
@@ -226,6 +227,7 @@ macro "ren_hidden" : tactic => `(tactic| rename_i _y)
 #guard_msgs in
 theorem hidden_not_flagged (x : W64) (_h : x.toNat < 5) :
     Ensures P 0x1000 [x] (fun _ => True) (fun _ s' => s'.regs 2 = if x = 0 then 3 else 2) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run join [0x1014]

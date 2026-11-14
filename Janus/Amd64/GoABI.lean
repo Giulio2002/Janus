@@ -165,6 +165,35 @@ theorem bytes_setRet_of_outside {a : Nat}
     (s.setRet ret).mem.bytes a = s.mem.bytes a :=
   Janus.Arm64.Memory.bytes_writeLE_outside _ h
 
+/-- The program's data (in read-only regions) is untouched when the return slot lies in writable stack: the
+`DataLoaded` conjunct of a precondition survives `setRet` given `[RSP, RSP + 8)` writable (as `StackWritable` says). -/
+theorem dataLoaded_setRet_iff {p : Program}
+    (hw : s.mem.accessible (s.regs 4).toNat 8 true = true) :
+    p.DataLoaded (s.setRet ret).mem ↔ p.DataLoaded s.mem := by
+  have key : ∀ d ∈ p.data, (s.mem.regions.any fun r => r.base ≤ d.base && d.base + d.bytes.length ≤ r.base + r.size
+      && r.base + r.size ≤ 2 ^ 48 && !r.writable) = true → ∀ i, i < d.bytes.length →
+      (s.setRet ret).mem.bytes (d.base + i) = s.mem.bytes (d.base + i) := by
+    intro d hd hreg i hi
+    simp only [List.any_eq_true, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at hreg
+    obtain ⟨r, hr, ⟨⟨h1, h2⟩, h3⟩, h4⟩ := hreg
+    have hall := ((Janus.Arm64.Memory.accessible_iff _ _ _ _).1 hw).2 rfl r hr
+    apply bytes_setRet_of_outside
+    rcases hall with h | h | h
+    · rw [h] at h4; cases h4
+    · omega
+    · omega
+  constructor
+  · intro h d hd
+    obtain ⟨hreg, hb⟩ := h d hd
+    have hreg' : (s.mem.regions.any fun r => r.base ≤ d.base && d.base + d.bytes.length ≤ r.base + r.size
+      && r.base + r.size ≤ 2 ^ 48 && !r.writable) = true := hreg
+    refine ⟨hreg', fun i hi => ?_⟩
+    rw [← key d hd hreg' i hi]; exact hb i hi
+  · intro h d hd
+    obtain ⟨hreg, hb⟩ := h d hd
+    refine ⟨hreg, fun i hi => ?_⟩
+    rw [key d hd hreg i hi]; exact hb i hi
+
 theorem CallSetup0.setRet {p : Program} {entry : Nat} {args : List W64}
     (h : CallSetup0 entry args s) {ret : Nat} (hret : ret < 2 ^ 64) :
     CallSetup (p.withExit ret) entry args (s.setRet ret) where
