@@ -153,6 +153,7 @@ theorem correctness (x lo hi : BitVec 64) :
         if x.toNat < lo.toNat then lo.toNat
         else if hi.toNat < x.toNat then hi.toNat
         else x.toNat) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -161,10 +162,10 @@ end Proof
 ```
 
 Read the statement before the proof; it is the only part you have to trust.
-`Ensures p entry args pre post` says: for **every** admissible return address `ret` and **every**
-machine state `s` that is a Go call of `entry` with `args` in `X0, X1, …` and `ret` in `X30`, with
-everything else (other registers, flags, `SP`, all of memory) arbitrary, and with `pre s` holding,
-the code reaches `ret` after finitely many instructions, restores `SP`, `X18`, `X28` and `X29`, and
+`Ensures p entry args pre post` says: for **every** machine state `s` that is a Go call of `entry` with
+`args` in `X0, X1, …`, with everything else (other registers, flags, `SP`, all of memory) arbitrary, and
+with `pre s` holding, and **every** admissible return address `ret` (installed in `X30` after `pre` is
+evaluated, `s.setRet ret`), the code reaches `ret` after finitely many instructions, restores `SP`, `X18`, `X28` and `X29`, and
 `post s s'` holds of the final state. A fault or a panic is not a return, so `Ensures` rules both out.
 
 The postcondition is written on `toNat` (natural numbers), which is what `omega` reasons about. The
@@ -172,8 +173,11 @@ precondition is `True`: `Clamp` touches no memory, so it needs nothing from the 
 
 ## 5. Prove it with `janus_run`
 
-The proof so far is three tactics:
+The proof so far is four tactic lines:
 
+* `janus_ensures_old` (v0.4.0) turns the goal into the pre-v0.4.0 one, where the call state `s` already holds
+  the return address (the precondition is proved invariant under installing it, which is why a precondition
+  cannot restrict `ret`);
 * `intro ret hret s hs _` takes the return address, the call state and its hypotheses;
 * `janus_intro hs` turns the call setup into rewrite rules (`h_pc : s.pc = 602304#64`,
   `h_x0 : s.regs 0 = x`, …);
@@ -482,6 +486,7 @@ theorem correctness (dst src : BitVec 64) :
       (fun s s' =>
         s'.mem.readLE dst.toNat 8 = (s.mem.readLE dst.toNat 8 + s.mem.readLE src.toNat 8) % 2 ^ 64 ∧
         OnlyWrites s.mem s'.mem dst.toNat 8) := by
+  janus_ensures_old
   intro ret hret s hs ⟨⟨hd, hd'⟩, ⟨hsrc, hsrc'⟩⟩
   janus_intro hs
   janus_run
@@ -539,6 +544,7 @@ theorem correctness (dst src : BitVec 64) :
       (fun s s' =>
         s'.mem.readLE dst.toNat 8 =
           (s.mem.readLE dst.toNat 8 + 2 * s.mem.readLE src.toNat 8) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs ⟨⟨hd, hd'⟩, ⟨hsrc, hsrc'⟩⟩
   janus_intro hs
   janus_run
@@ -603,6 +609,7 @@ theorem correctness (dst src : BitVec 64) :
           (if dst = src then 4 * s.mem.readLE dst.toNat 8
            else s.mem.readLE dst.toNat 8 + 2 * s.mem.readLE src.toNat 8) % 2 ^ 64 ∧
         OnlyWrites s.mem s'.mem dst.toNat 8) := by
+  janus_ensures_old
   intro ret hret s hs ⟨⟨hd, hd'⟩, ⟨hsrc, hsrc'⟩, halias⟩
   janus_intro hs
   -- one symbolic run per aliasing case

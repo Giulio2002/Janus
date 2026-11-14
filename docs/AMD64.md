@@ -456,7 +456,9 @@ blockers` works on amd64 binaries, judging each x86asm-found instruction with `J
   - the return address `p.exitAddr` is stored at `[RSP]`, as the caller's `CALL` left it.
     Specifications use `p.withExit ret` for a universally quantified admissible `ret`
     (`GoABI.RetAddr`: below `2^47`, outside the extracted code and stubs); `Ensures` does this
-    itself, and direct `Returns`/`Panics` theorems take `ret` and `hret : RetAddr p ret`;
+    itself (since v0.4.0 the precondition is evaluated on `GoABI.CallSetup0`, the call state before the return
+    address is written, and the run starts at `s.setRet ret`), and direct `Returns`/`Panics` theorems take `ret`
+    and `hret : RetAddr p ret`;
   - `X15 = 0`;
   - the direction flag is clear (`df = false`);
   - integer argument `i` is in `GoABI.argReg i`, in the order `RAX RBX RCX RDI RSI R8 R9 R10 R11`.
@@ -516,7 +518,8 @@ blockers` works on amd64 binaries, judging each x86asm-found instruction with `J
 * `janus64_intro hs` turns `hs : GoABI.CallSetup p entry [a₀, …] s` into `h_rip`, `h_ret`
   (the return-address slot, `= ret` for `p = p₀.withExit ret`), `h_x15`, and
   `h_a<i> : s.regs r = aᵢ` with `r` the evaluated `argReg i`. Specs start with
-  `intro ret hret s hs hpre`.
+  `janus64_ensures_old` then `intro ret hret s hs hpre` (v0.4.0: the precondition is evaluated before the return
+  address is installed; `janus64_ensures_old` reduces to the old-shaped goal, in which `hs` holds the return address at `[RSP]`).
 * With a symbolic return address the executor finds `hret : RetAddr p₀ ret` in the context. It
   evaluates the program facts on the closed `p₀`, derives `rip ≠ ret` from `hret` (there is no
   code and no stub at `ret`), installs `(BitVec.ofNat 64 ret).toNat = ret` and

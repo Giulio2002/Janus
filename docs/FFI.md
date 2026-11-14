@@ -29,8 +29,8 @@ obligations on return (`SP`/`RSP` and the callee-saved registers, `DF` on amd64)
 ```lean
 def CEnsures (p : Program) (entry : Nat) (args : List W64) (pre : State → Prop)
     (post : State → State → Prop) : Prop :=
-  ∀ ret, GoABI.RetAddr p ret → ∀ s, CCall (p.withExit ret) entry args s → pre s →
-    GoABI.Returns (p.withExit ret) s (fun s' => CReturn s s' ∧ post s s')
+  ∀ s, CCallF entry args s → pre s → ∀ ret, GoABI.RetAddr p ret →
+    GoABI.Returns (p.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧ post (s.setRet ret) s')
 ```
 
 is the analogue of `GoABI.Ensures`: for every admissible return address and every C call state

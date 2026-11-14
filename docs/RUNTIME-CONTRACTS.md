@@ -566,7 +566,7 @@ and `Summary.of_codeIn` take `S : Summary p a pre post`, while a function theore
 or `Reaches (p.withExit ret) s (IsReturn Q)`. `Reaches.toReachesRet` turns a returning run of
 `p.withExit ret` into `ReachesRet p ret s Q`, and `Ensures.toSummary h hx` (`hx : p.fetch p.exitAddr = none`,
 `by decide` for an extracted program) turns `Ensures p entry args pre post` into a `Summary` whose
-precondition is `∃ ret, RetAddr p ret ∧ CallSetup (p.withExit ret) entry args s ∧ pre s` and whose
+precondition is `∃ ret, RetAddr p ret ∧ CallSetup0 entry args s ∧ pre s` (the call state before the return address is installed; since v0.4.0 `Ensures.toSummary` runs the theorem on `s.setRet ret`) and whose
 postcondition is `ABIReturn s s' ∧ post s s'`.
 
 **Examples** (`examples/rtmisc/live/live.go`; `examples/rtmisc/proofs/{arm64,amd64}`):

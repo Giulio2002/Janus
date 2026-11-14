@@ -201,6 +201,7 @@ theorem native (z x y : BitVec 64) :
         Aliasing z x ∧ Aliasing z y ∧ Aliasing x y)
       (fun s s' => val256 s'.mem z.toNat = (val256 s.mem x.toNat + val256 s.mem y.toNat) % 2 ^ 256 ∧
         OnlyWrites s.mem s'.mem z.toNat 32) := by
+  janus_ensures_old
   intro ret hret s hs ⟨⟨hz, hz'⟩, ⟨hx, hx'⟩, ⟨hy, hy'⟩, hzx, hzy, hxy⟩
   janus_intro hs
   rcases hzx with rfl | hzx <;> rcases hzy with rfl | hzy <;> rcases hxy with h | hxy

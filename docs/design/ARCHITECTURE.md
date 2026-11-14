@@ -196,9 +196,14 @@ quantifies over **every** admissible return address:
 ```lean
 def Ensures (p : Program) (entry : Nat) (args : List W64) (pre : State → Prop)
     (post : State → State → Prop) : Prop :=
-  ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
-    Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')
+  ∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret →
+    Returns (p.withExit ret) (s.setRet ret) (fun s' => ABIReturn (s.setRet ret) s' ∧ post (s.setRet ret) s')
 ```
+
+(Since v0.4.0 `pre` is evaluated on the call state BEFORE the return address is installed
+(`CallSetup0`: `CallSetup` without the return-address field; `State.setRet s ret` installs `ret` in `X30` /
+at `[RSP]`), so a precondition cannot restrict the caller's return address. The postcondition and the
+run see `s.setRet ret`.)
 
 `RetAddr p ret` says `ret` is aligned, a user address, outside every copied segment and not a stub:
 exactly the properties of the instruction after a real `BL`/`CALL` in a caller outside the extracted

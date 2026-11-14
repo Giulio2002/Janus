@@ -895,8 +895,8 @@ faulting calls cannot carry a lower bound.
 **Audit rules (v0.3.0, nothing existing was weakened).** `EnsuresWithin` is an `Ensures`-family
 main theorem: its statement must mention `Extracted.program`/`Extracted.entry`, and the same
 contract, call-site, binder and size-variable rules apply (it unfolds, through proof-local
-definitions too, to the same `∀ ret, RetAddr … → ∀ s, CallSetup … → pre s → …` shape); its
-precondition is scanned by the `[RSP]`-word rule like an `Ensures`'s; `ReturnsWithin` and
+definitions too, to the same `∀ s, CallSetup0 … s → pre s → ∀ ret, RetAddr … → …` shape since v0.4.0); its
+precondition is evaluated before the return address is installed, like an `Ensures`'s (the v0.3.x `[RSP]`-word rule is gone); `ReturnsWithin` and
 `RunsAtLeast` are run claims (a statement that reaches them is never "run-free"); and every such
 theorem needs a witness tied to it by name (`Witness.within` for `within`, strict pairing),
 like any main theorem. The tied witness of an `EnsuresWithin` main states its returning run with

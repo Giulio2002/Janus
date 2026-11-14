@@ -53,8 +53,11 @@ Both ISAs have the same vocabulary (namespaces `Janus.GoABI0` and `Janus.Amd64.G
   (`FrameOK`); arm64 `RSP` 16-byte aligned, amd64 `DF` clear. Nothing else: no register
   arguments, `R14`/`X15` arbitrary. `setup_callSetup0` shows it is satisfiable.
 * `ABIReturn0 s₀ s₁` — the obligations on return (table above). On arm64 it is `GoABI.ABIReturn`.
-* `Ensures0 p entry args nres pre post` — for every admissible return address and every
-  `CallSetup0` state satisfying `pre`, the call returns, obeys `ABIReturn0`, and `post s₀ s₁`.
+* `CallSetupF entry args nres s` (v0.4.0) — `CallSetup0` without the return-address field, the call state before
+  the return address is installed (`State.setRet s ret` installs it).
+* `Ensures0 p entry args nres pre post` — for every `CallSetupF` state `s` satisfying `pre s` and every admissible
+  return address `ret`, the call (run from `s.setRet ret`) returns, obeys `ABIReturn0`, and `post (s.setRet ret) s₁`
+  (`pre` cannot restrict the return address).
   `EnsuresResults0 … post` states `post` on `results0 s₀ s₁ nargs nres`, the result words.
 * `Ret0 s s' Q` / `retState0` — the shape of an ABI0 return: `s'` is `s` with every caller-saved
   register, the flags, the vector registers and the sticky FP status unspecified (existentially

@@ -260,7 +260,9 @@ through: its `b.ls` branch is pruned. Read the stack footprint off the disassemb
 
 A theorem that is not an `Ensures` states the return address itself: take `(ret : Nat)
 (hret : RetAddr Extracted.program ret)` and `hs : CallSetup (Extracted.program.withExit ret) …`,
-and conclude `Returns (Extracted.program.withExit ret) s …` or `Panics (…withExit ret) s` (see
+and conclude `Returns (Extracted.program.withExit ret) s …` or `Panics (…withExit ret) s` (such a raw
+old-shaped statement is not an `Ensures` form: its precondition does see `ret`; the auditor's witness
+rules still apply) (see
 `Div.lean`, `Get.lean`). For panics, prove `Panics p s` with `janus_run` (the path ends at the
 stub), and combine "panics iff" from both directions with `Returns.not_panics`:
 
@@ -285,17 +287,21 @@ instruction (`decide`), then unfold the address computation and `load`, and refu
 
 The prologue's `morestack` branch — the grown case excluded by `GuardOK` above — is covered by
 the `morestack` contract (`Janus/Contracts/Stack.lean`, docs/RUNTIME-CONTRACTS.md "Stack
-growth"). A grown theorem is an `EnsuresGrow p reloc entry args pre post`: like `Ensures`, but
+growth"). A grown theorem is an `EnsuresGrow p reloc entry args pre caller post`: like `Ensures`, but
 the conclusion is `GrownReturns` (a return after any number of stack growths) and `pre` does
-**not** assume the frame fits. It takes a frame table `FT`, the stack pools, the runtime-owned
+**not** assume the frame fits. Since v0.4.0 `pre` is evaluated before the return address is installed;
+the caller's frame chain (a statement about the return address) is the separate argument `caller`, which is
+evaluated at `s.setRet ret` and printed in the verify report (`Assumes of the caller`). It takes a frame table `FT`, the stack pools, the runtime-owned
 memory `rt`, a readiness `H` and the contract `hms : MorestackContract p FT pool rt H reloc` as
 hypotheses.
 
 The proof reuses the ordinary roomy `Summary`:
 
 ```lean
-theorem correctness … (hms : MorestackContract Extracted.program FT pool rt H reloc) … :
-    EnsuresGrow Extracted.program reloc Extracted.entry [x, i] (GPre FT pool rt H) post := by
+-- the old-shaped statement and its proof (the state `s` holds the return address)
+theorem correctness_old … (hms : MorestackContract Extracted.program FT pool rt H reloc) … :
+    ∀ ret, RetAddr Extracted.program ret → ∀ s, CallSetup (Extracted.program.withExit ret) Extracted.entry [x, i] s →
+      GPre FT pool rt H s ∧ GCaller FT hi fs s → GrownReturns (Extracted.program.withExit ret) reloc s (post s) := by
   intro ret hret s hs hpre
   janus_intro hs
   …
@@ -307,6 +313,11 @@ theorem correctness … (hms : MorestackContract Extracted.program FT pool rt H 
     janus_run
     -- … the contract resumes on a larger stack; the glue reloads the args; the Summary applies
     refine grow_branch … (hms …) …
+
+-- the v0.4.0 main theorem: `pre` before the return address, `caller` at `s.setRet ret`
+theorem correctness … :
+    EnsuresGrow Extracted.program reloc Extracted.entry [x, i] (GPre FT pool rt H) (GCaller FT hi fs) post :=
+  EnsuresGrow.of_old_with (Pold := fun s => GPre FT pool rt H s ∧ GCaller FT hi fs s) (by …) correctness_old
 ```
 
 `janus_run` runs the prologue; with room it reaches the return through the body, without room it
@@ -921,6 +932,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (a b : BitVec
     (hnew : NewobjectContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (pre rt) post := by
+  janus_ensures_old
   intro ret hret s hs ⟨…, hd, hout⟩
   janus_intro hs
   janus_data hd [hw]            -- also: the stack window is disjoint from the read-only data
@@ -982,6 +994,7 @@ theorem correctness (P : PanicRuntime) (x etyp edata : BitVec 64) :
       (fun s => GuardOK s 0 ∧ StackOK s 40 32) (fun _ => goClass P)
       (fun _ s' => x.toNat ≤ 10 → s'.regs 0 = x + 1)
       (fun _ v _ => 10 < x.toNat → v = ⟨etyp.toNat, edata.toNat⟩) := by
+  janus_ensures_old
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩⟩
   janus_intro hs
   refine GoReturns.of_reaches ?_      -- now an ordinary `Reaches` goal
@@ -1057,6 +1070,7 @@ SOUNDNESS.md, "Instruction-count bounds"). `examples/proofs/Max.lean` and
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => s'.regs 0 = if y.toNat < x.toNat then x else y) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run              -- ReturnsWithin goal: the fuel is the numeral 4 + 1, each step consumes one unit
@@ -1065,6 +1079,7 @@ theorem within (x y : BitVec 64) :
 /-- SPEED (lower bound): every call executes at least 3 instructions. -/
 theorem atLeast (x y : BitVec 64) :
     RunsAtLeastOnCall (fun _ => 3) Extracted.program Extracted.entry [x, y] (fun _ => True) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run              -- RunsAtLeast goal: every branch must execute 3 instructions without returning

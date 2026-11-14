@@ -44,6 +44,7 @@ func Add(x, y uint64) uint64 { return x + y }     // examples/basic/basic.go
 theorem correctness (x y : BitVec 64) :                        -- examples/proofs/Add.lean
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by
+  janus_ensures_old                                            -- v0.4.0: the precondition is evaluated before `ret` is installed
   intro ret hret s hs _
   janus_intro hs
   janus_run
