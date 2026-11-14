@@ -6,6 +6,7 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 theorem honest (x y : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => s'.regs 0 = x + y) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -14,7 +15,7 @@ namespace Proof
 theorem correctness (x y : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => s'.regs 0 = x + y ∧ @LT.lt Nat ⟨fun a b => a ≤ b⟩ 0 0) := by
-  intro ret hret s hs hp
-  obtain ⟨f, s', h1, h2, h3⟩ := honest x y ret hret s hs hp
+  intro s hs hp ret hret
+  obtain ⟨f, s', h1, h2, h3⟩ := honest x y s hs hp ret hret
   exact ⟨f, s', h1, h2, h3, Nat.le_refl 0⟩
 end Proof
