@@ -272,23 +272,32 @@ DEFRE = re.compile(r'(?m)^(?:@\[[^\]]*\]\s*)?(?:private |protected |noncomputabl
 
 def collect_defs(t, f, reg):
     parts = re.split(r'(?m)^(?=(?:theorem |lemma |example |def |abbrev |namespace |end |set_option |/--|@\[|private |protected |noncomputable |structure |instance |attribute |open |section ))', t)
+    ns = []
     for it in parts:
+        mn = re.match(r'namespace ([\w.]+)', it)
+        if mn: ns.append(mn.group(1)); continue
+        me = re.match(r'end ([\w.]+)', it)
+        if me:
+            if ns and ns[-1] == me.group(1): ns.pop()
+            continue
         m = DEFRE.match(it)
         if not m: continue
+        name = m.group(1)
+        qn = name if name.startswith('_root_.') else '.'.join(ns + [name])
         sig, bs = split_sig(it)
         if sig is None: continue
         ci = top_colon(sig)
         if ci < 0:           # `def Pre := PreS 4440` (no type ascription)
-            reg.aliases.append((m.group(1).split('.')[-1], f, it[bs:]))
+            reg.aliases.append((name.split('.')[-1], f, it[bs:], qn))
             continue
         concl = sig[ci + 1:].strip()
         # a definition that reads the state or its memory (`win s stk above`, `CallEnv R L s …`, `stLen m st`, `NatLive m …`):
         # installing the return address changes its argument, so it is unfolded; the others (`Serves R`, `Held R L p n`) cannot change
         if not re.search(r'[:\s(]\s*(?:Janus\.)?(?:Amd64\.|Arm64\.)?(?:State|Memory)\b', sig[:ci]):
             # an alias of such a definition (`def Pre := PreS 4440`): resolved after every file is collected
-            reg.aliases.append((m.group(1).split('.')[-1], f, it[bs:]))
+            reg.aliases.append((name.split('.')[-1], f, it[bs:], qn))
             continue
-        reg.defs.setdefault(m.group(1).split('.')[-1], []).append((f, it[bs:]))
+        reg.defs.setdefault(name.split('.')[-1], []).append((f, it[bs:], qn))
 
 def modname(path):
     p = path.replace('\\', '/')
@@ -309,7 +318,8 @@ def import_closure(f, reg):
     return out
 
 def unfold_list(pre_text, reg, f, bound=()):
-    """The consumer's Prop-valued defs reachable from `pre_text` (same file preferred, else unique in the tree)."""
+    """The consumer's state-reading definitions reachable from `pre_text`, as fully qualified names (the definition visible
+    from this file: the same file, else the import closure, else the only one)."""
     closure = import_closure(f, reg)
     seen = []
     todo = list(dict.fromkeys(re.findall(r"[A-Za-z_][\w']*(?:\.[A-Za-z_][\w']*)*", pre_text)))
@@ -319,18 +329,21 @@ def unfold_list(pre_text, reg, f, bound=()):
         if '.' in w and len(w.split('.')[0]) <= 1: continue      # `R.ok`: a field of a bound variable
         if w in bound: continue
         base = w.split('.')[-1]
-        if base in seen_set or base not in reg.defs: continue
+        if base not in reg.defs: continue
         cands = reg.defs[base]
+        if '.' in w:
+            q = [c for c in cands if c[2].endswith('.' + w) or c[2] == w]
+            if q: cands = q
         same = [c for c in cands if c[0] == f]
         vis = [c for c in cands if c[0] in closure]
         if len(vis) > 1:       # the definition closest in the directory tree to this file
             vis.sort(key=lambda c: -len(os.path.commonprefix([c[0], f])))
         pick = same[0] if same else (vis[0] if vis else (cands[0] if len(cands) == 1 else None))
-        if pick is None: continue
-        seen_set.add(base)
-        seen.append(w)
+        if pick is None or pick[2] in seen_set: continue
+        seen_set.add(pick[2])
+        seen.append(pick[2])
         for w2 in re.findall(r"[A-Za-z_][\w']*(?:\.[A-Za-z_][\w']*)*", pick[1]):
-            if w2.split('.')[-1] not in seen_set: todo.append(w2)
+            todo.append(w2)
     return seen
 
 def collect(t, reg):
@@ -666,7 +679,7 @@ def fix_stackguard(t):
     `⟨…, hg1, hg2, hg3, …⟩` of another state still need their own proof of `hg4` (reported)."""
     return re.sub(r'⟨hg1, hg2, hg3⟩', '⟨hg1, hg2, hg3, hg4⟩', t)
 
-SG_CLOSER = "first | omega | (simp_all only [stackguard0Offset, regG, regSP]; omega)"
+SG_CLOSER = "first | omega | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega)"
 
 def fix_stackguard_construct(t):
     """`refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, …⟩` (an environment transfer lemma: a `CallEnv` whose first component is a
@@ -717,10 +730,10 @@ def main(files):
         reg.imports[f] = re.findall(r'(?m)^import\s+([\w.]+)', t)
         reg.modfile[modname(f)] = f
         reg.modfile[f.replace('/', '.')[:-5]] = f
-    for nm, f, body in reg.aliases:       # `def Pre := PreS 4440`
+    for nm, f, body, qn in reg.aliases:       # `def Pre := PreS 4440`
         m0 = re.match(r"\s*([A-Za-z_][\w']*)", body)
         if m0 and m0.group(1).split('.')[-1] in reg.defs:
-            reg.defs.setdefault(nm, []).append((f, body))
+            reg.defs.setdefault(nm, []).append((f, body, qn))
     for f in files:
         t = texts[f]
         amd = 'Janus.Amd64' in t
