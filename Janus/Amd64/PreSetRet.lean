@@ -71,14 +71,19 @@ macro_rules (kind := janus64PreSetRetCore)
     let v1 := mkIdent `Janus.Contracts.view_setRet
     let v2 := mkIdent `Janus.Contracts.StackAmd64.rtView_setRet
     let c1 := mkIdent `Janus.Amd64.CABI.CStack
+    -- the definitions the user lists are unfolded one by one: an ambiguous or unknown name fails only its own `simp`
+    let mut us ← `(tactic| skip)
+    for d in ds.getElems do
+      us ← `(tactic| ($us; try simp only [$d] at $hp:ident ⊢))
     `(tactic|
       (have hu := ($hret).user
+       $us
        try simp only [Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.SPAligned,
          Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.Disjoint, Janus.Amd64.GoABI.valueAt,
          Janus.Amd64.GoABI.StackWords, Janus.Amd64.GoABI.stackWord, Janus.Amd64.GoABI.stackArgOffset,
          Janus.Amd64.GoABI.stackguard0, Janus.Amd64.GoABI.stackguard0Offset,
          Janus.Amd64.GoABI.ClosureCtx, Janus.Spec.Disjoint, Janus.Apart, Janus.outside_nil,
-         Janus.outside_cons, $ds,*] at $hp:ident ⊢
+         Janus.outside_cons] at $hp:ident ⊢
        try simp only [$c1:ident] at $hp:ident ⊢
        all_goals
         (have hp0 : Janus.Tactic.Hide _ := $hp
