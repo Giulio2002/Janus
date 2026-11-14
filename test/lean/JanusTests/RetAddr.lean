@@ -124,6 +124,13 @@ example (p : Program) (ret : Nat) (hret : RetAddr p ret) (s : State) (hs : CallS
   janus_intro hs
   exact ⟨h_x0, h_lr⟩
 
+/-- a9: an old-style bound on the link register (`X30 % 4 = 0`, `X30 < 2^48`: what `RetAddr` says of every return address) is
+re-proved from `RetAddr` after `setRet`, so a precondition that still carries it migrates without edits. -/
+example (p : Program) (entry : Nat) (args : List W64) : ∀ s ret, CallSetup0 entry args s → RetAddr p ret →
+    (fun s : State => (s.regs 30).toNat % 4 = 0 ∧ (s.regs 30).toNat < 2 ^ 48 ∧ (s.regs 5).toNat < 7) s →
+    (fun s : State => (s.regs 30).toNat % 4 = 0 ∧ (s.regs 30).toNat < 2 ^ 48 ∧ (s.regs 5).toNat < 7) (s.setRet ret) := by
+  janus_pre_setRet
+
 end Arm64
 
 /-! ## amd64 -/

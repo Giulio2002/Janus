@@ -145,14 +145,23 @@ macro_rules
       ($us
        try simp only [Janus.GoABI.StackWritable, Janus.GoABI.SPAligned, Janus.GoABI.FPConvention,
          Janus.GoABI.ClosureCtx, Janus.GoABI.StackWords, Janus.GoABI.stackWord, Janus.GoABI.stackArgOffset,
-         Janus.GoABI.StackGuardOK, Janus.GoABI.stackguard0] at $hp:ident ⊢
+         Janus.GoABI.StackGuardOK, Janus.GoABI.stackguard0, Janus.Spec.StackOK, Janus.Spec.GuardOK] at $hp:ident ⊢
        try simp only [$c1:ident] at $hp:ident ⊢
        try simp only [Janus.GoABI.setRet_pc, Janus.GoABI.setRet_sp, Janus.GoABI.setRet_flags,
          Janus.GoABI.setRet_mem, Janus.GoABI.setRet_dczid, Janus.GoABI.setRet_vregs,
          Janus.GoABI.setRet_tpidr, Janus.GoABI.setRet_fpcr, Janus.GoABI.setRet_fpsr,
          Janus.GoABI.setRet_excl, Janus.GoABI.setRet_exclPass] at $hp:ident ⊢
        try simp (disch := first | decide | simp) only [Janus.GoABI.setRet_regs_of_ne] at $hp:ident ⊢
-       all_goals first | exact $hp | assumption | simpa using $hp))
+       all_goals (have hu := ($hret).user; have ha4 := ($hret).aligned)
+       try simp (disch := omega) only [Janus.GoABI.setRet_lr_toNat] at ⊢
+       all_goals first
+         | exact $hp
+         | assumption
+         | (simpa using $hp)
+         | (have hp0 : Janus.Tactic.Hide _ := $hp
+            janus_split_hyps keep hp0
+            repeat' (first | with_reducible assumption | with_reducible refine And.intro ?_ ?_ | (refine Exists.intro ?_ ?_; rotate_left))
+            all_goals first | omega | (trace_state; fail "janus_pre_setRet: this conjunct of the precondition is not invariant under setRet (see the goal above; pass the predicate definitions to the tactic, e.g. `janus_ensures_old [Pre, CallEnv]`)"))))
 
 syntax "janus_pre_setRet" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 

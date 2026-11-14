@@ -159,6 +159,11 @@ section SetRet
 
 variable {s : State} {ret : Nat}
 
+/-- The link register of `s.setRet ret` is `ret`: a precondition conjunct that bounds `X30` (`(s.regs 30).toNat < 2^48`,
+`% 4 = 0`) is re-proved from `RetAddr` instead of constraining the caller (`janus_pre_setRet`). -/
+theorem setRet_lr_toNat (h : ret < 2 ^ 64) : ((s.setRet ret).regs 30).toNat = ret := by
+  simp [Arm64.State.setRet, regLR, BitVec.toNat_ofNat, Nat.mod_eq_of_lt h]
+
 @[simp] theorem setRet_pc : (s.setRet ret).pc = s.pc := rfl
 @[simp] theorem setRet_sp : (s.setRet ret).sp = s.sp := rfl
 @[simp] theorem setRet_flags : (s.setRet ret).flags = s.flags := rfl

@@ -248,12 +248,12 @@ def fix_mono(it, warn):
     out.append(it[pos:])
     return ''.join(out)
 
-def add_hlen(it, amd, warn, name):
+def add_hlen(it, amd, warn, name, reg=None):
     """arm64 generic wrapper over an `Ensures` hypothesis with generic `args`: `Ensures.toSummaryIn h …` needs
     `ArgsFit args` (`args.length ≤ numIntRegs`, an instance for every literal list); the wrapper takes `[ArgsFit args]`."""
     if amd: return it
     sig, bs = split_sig(it)
-    if sig is None or 'Ensures.toSummaryIn' not in it[bs:]: return it
+    if sig is None or name.split('.')[-1] not in (reg.argsfit if reg else set()): return it
     if not re.search(r'\{args\s*:\s*List', sig): return it
     if 'ArgsFit' in sig: return it
     ci = top_colon(sig)
@@ -266,9 +266,25 @@ class Reg:
     imports = {}        # file -> [imported module names]
     modfile = {}        # module name -> file
     aliases = []
+    argthms = []        # (name, body) of theorems with a generic `{args : List …}` binder
+    argsfit = set()     # those that (transitively) call `Ensures.toSummaryIn`: they take `[ArgsFit args]`
+    ensdefs = {}        # defs whose body is `∀ …, Ensures …` (a spec: `Hyp2 impl R …`) -> (file, body)
     defs = {}           # last component of a def/abbrev name -> [(file, body text)] for the Prop-valued ones
 
 DEFRE = re.compile(r'(?m)^(?:@\[[^\]]*\]\s*)?(?:private |protected |noncomputable )*(?:def|abbrev) ([\w.\']+)')
+
+ENSDEF = re.compile(r'^\s*(?:∀[^,]*,\s*)*(?:\w+\.)*(?:' + '|'.join(HEADS) + r')(?![\w.])')
+
+def collect_ensdefs(t, reg):
+    parts = re.split(r'(?m)^(?=(?:theorem |lemma |example |def |abbrev |namespace |end |set_option |/--|@\[|private |protected |noncomputable |structure |instance |attribute |open |section ))', t)
+    for it in parts:
+        m = DEFRE.match(it)
+        if not m: continue
+        sig, bs = split_sig(it)
+        if sig is None: continue
+        body = it[bs:].strip()
+        if body.startswith('by'): continue
+        if ENSDEF.match(re.sub(r'^fun [^=]*=>\s*', '', body)): reg.ensdefs[m.group(1).split('.')[-1]] = (None, it[bs:])
 
 def collect_defs(t, f, reg):
     parts = re.split(r'(?m)^(?=(?:theorem |lemma |example |def |abbrev |namespace |end |set_option |/--|@\[|private |protected |noncomputable |structure |instance |attribute |open |section ))', t)
@@ -361,6 +377,9 @@ def collect(t, reg):
     for it in items:
         m = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
         if not m: continue
+        sg0, bs0 = split_sig(it)
+        if sg0 is not None and re.search(r'\{args\s*:\s*List', sg0):
+            reg.argthms.append((m.group(1).split('.')[-1], it[bs0:]))
         c = conclusion(it)
         if not c: continue
         reg.names.add(m.group(1))
@@ -432,7 +451,32 @@ def migrate(t, amd0, reg, fname=''):
         if not m: continue
         name = m.group(1)
         c = conclusion(it)
-        if not c: continue
+        if not c:
+            # a spec definition as the conclusion (`Hyp2 impl R names 4256 64`, unfolding to `∀ …, Ensures …`): the old-shaped
+            # intro of `ret hret` is preceded by `janus_ensures_old`
+            sg, bs0 = split_sig(it)
+            if sg is not None and reg.ensdefs and ':= by' in it[bs0 - 2:bs0 + 8] + it[bs0:bs0 + 8]:
+                ci0 = top_colon(sg)
+                hm = re.match(r'\s*((?:\w+\.)*\w+)', sg[ci0 + 1:]) if ci0 >= 0 else None
+                if hm and hm.group(1).split('.')[-1] in reg.ensdefs and 'janus_ensures_old' not in it and 'janus64_ensures_old' not in it:
+                    mi = re.search(r'(?m)^([ \t]*)intro ((?:[\w\'_]+ )*?)ret hret\b', it[bs0:])
+                    if mi:
+                        pos = bs0 + mi.start()
+                        body_e = reg.ensdefs[hm.group(1).split('.')[-1]][1]
+                        hmm = HEADRE.search(body_e)
+                        if hmm:
+                            cc2 = CONCL.match(body_e[hmm.start():])
+                            if cc2: tac2 = tac_with_defs(tac, cc2.group(2), body_e[hmm.start():], reg, fname, sg)
+                            else: tac2 = tac
+                        else: tac2 = tac
+                        lead = mi.group(2).strip()
+                        if lead:       # `intro H b … ret hret …`: the statement's binders first
+                            endl = pos + len(mi.group(1)) + len('intro ') + len(mi.group(2))
+                            it2 = it[:pos] + mi.group(1) + 'intro ' + lead + '\n' + mi.group(1) + tac2 + '\n' + mi.group(1) + 'intro ' + it[endl:]
+                        else:
+                            it2 = it[:pos] + mi.group(1) + tac2 + '\n' + it[pos:]
+                        items[i] = it2
+            continue
         pre_, head, concl, sig, bs, ci = c
         tac = tac_with_defs(tac, head, concl, reg, fname, sig)
         if 'Witness' in sig.split(':', 1)[0] and False: continue
@@ -516,40 +560,65 @@ def migrate(t, amd0, reg, fname=''):
             if dl != ptac:
                 it = re.sub(r'(?<![\w.\'])((?:\w+\.)*Ensures0?\.mono)(?![\w\'_])', lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[split_sig(it)[1] or 0:]) if False else \
                     it[:split_sig(it)[1]] + re.sub(r'(?<![\w.\'])((?:\w+\.)*Ensures0?\.mono)(?![\w\'_])', lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[split_sig(it)[1]:])
-        it = add_hlen(it, isa[i], warn, m.group(1))
+        it = add_hlen(it, isa[i], warn, m.group(1), reg)
         items[i] = it
-    # ---- pass 2: old-shaped applications of Ensures-form theorems -> `(thm args).toOld ret hret …`
+    # ---- pass 2: old-shaped applications of Ensures-form theorems (and hypotheses) -> `(thm args).toOld ret hret …`
     appnames = set(reg.names) | set(ens)
-    if appnames:
-        nre = '|'.join(re.escape(n) for n in sorted(appnames, key=len, reverse=True))
+    def hyp_names(it):
+        """Hypotheses of the signature whose type is an Ensures form (`(h : ∀ H, Ensures …)`)."""
+        sg = split_sig(it)[0]
+        if sg is None: return set()
+        ci = top_colon(sg)
+        out = set()
+        for mm in re.finditer(r"\((\w+) : ", sg[:ci] if ci >= 0 else sg):
+            toks_, _ = tokens(sg, mm.end())
+            ty = sg[mm.end():]
+            # the type extends to the matching close paren
+            d = 1; k = 0
+            while k < len(ty) and d > 0:
+                if ty[k] in OPEN: d += 1
+                elif ty[k] in CLOSE: d -= 1
+                k += 1
+            if ENSDEF.match(ty[:k - 1]): out.add(mm.group(1))
+        return out
+    for i, it in enumerate(items):
+        names_i = appnames | hyp_names(it)
+        if not names_i: continue
+        nre = '|'.join(re.escape(n) for n in sorted(names_i, key=len, reverse=True))
         are = re.compile(r'(?<![\w.\'])((?:[\w]+\.)*(?:' + nre + r'))(?![\w\'])')
-        for i, it in enumerate(items):
-            out = []
-            pos = 0
-            changed = False
-            sigend = split_sig(it)[1] if split_sig(it)[0] is not None else 0
-            while True:
-                m = are.search(it, max(pos, sigend))
-                if not m: break
-                toks, stop = tokens(it, m.end())
-                idx = None
-                for k in range(len(toks) - 1):
-                    if toks[k][0] == 'ret' and toks[k + 1][0] == 'hret' and k + 2 < len(toks) + 1:
-                        idx = k; break
-                if idx is None:
-                    out.append(it[pos:m.end()]); pos = m.end(); continue
-                argtoks = toks[:idx]
-                if argtoks:
-                    argend = argtoks[-1][2]
-                else:
-                    argend = m.end()
-                out.append(it[pos:m.start()])
-                out.append('(' + it[m.start():argend] + ').toOld')
-                pos = argend
-                changed = True
-            if changed:
-                out.append(it[pos:])
-                items[i] = ''.join(out)
+        out = []
+        pos = 0
+        changed = False
+        sigend = split_sig(it)[1] if split_sig(it)[0] is not None else 0
+        while True:
+            m = are.search(it, max(pos, sigend))
+            if not m: break
+            toks, stop = tokens(it, m.end())
+            idx = None
+            for k in range(len(toks) - 1):
+                if toks[k][0] in ('·', '<;>', 'at', 'with', 'from', 'by', 'then', 'else', '|'): break      # the application ended
+                if toks[k][0] == 'ret' and toks[k + 1][0] == 'hret' and k + 2 < len(toks) + 1:
+                    idx = k; break
+            if idx is None:
+                out.append(it[pos:m.end()]); pos = m.end(); continue
+            argtoks = toks[:idx]
+            argend = argtoks[-1][2] if argtoks else m.end()
+            out.append(it[pos:m.start()])
+            out.append('(' + it[m.start():argend] + ').toOld')
+            pos = argend
+            changed = True
+        if changed:
+            out.append(it[pos:])
+            items[i] = ''.join(out)
+    # arm64 theorems with a generic `args` that now apply `.toOld` need `[ArgsFit args]` as well
+    for i, it in enumerate(items):
+        if isa[i]: continue
+        sg, bs = split_sig(it)
+        if sg is None or 'ArgsFit' in sg or not re.search(r'\{args\s*:\s*List', sg) or '.toOld' not in it[bs:]: continue
+        mm = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ', it)
+        if not mm: continue
+        ci = top_colon(sg)
+        items[i] = sg[:ci].rstrip() + ' [ArgsFit args] ' + sg[ci:] + ':=' + it[bs:]
     # ---- pass 3: witnesses
     def app_re(names):
         if not names: return None
@@ -746,9 +815,16 @@ def main(files):
         texts[f] = t
         collect(t, reg)
         collect_defs(t, f, reg)
+        collect_ensdefs(t, reg)
         reg.imports[f] = re.findall(r'(?m)^import\s+([\w.]+)', t)
         reg.modfile[modname(f)] = f
         reg.modfile[f.replace('/', '.')[:-5]] = f
+    changed = True
+    while changed:                    # theorems with a generic `args` that call `Ensures.toSummaryIn` or such a theorem
+        changed = False
+        for nm, body in reg.argthms:
+            if nm not in reg.argsfit and ('Ensures.toSummaryIn' in body or any(re.search(r'(?<![\w.\'])' + re.escape(x) + r'(?![\w\'])', body) for x in reg.argsfit)):
+                reg.argsfit.add(nm); changed = True
     for nm, f, body, qn in reg.aliases:       # `def Pre := PreS 4440`
         m0 = re.match(r"\s*([A-Za-z_][\w']*)", body)
         if m0 and m0.group(1).split('.')[-1] in reg.defs:
