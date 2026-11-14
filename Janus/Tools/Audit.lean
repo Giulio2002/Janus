@@ -290,7 +290,7 @@ def isGeneratedEqnLemma (env : Environment) (n : Name) : Bool :=
   | .str c l =>
     (l == "eq_def" || (l.startsWith "eq_" && (l.drop 3).all Char.isDigit && (l.drop 3).length > 0)) &&
     (match env.getModuleIdxFor? c with
-      | some i => env.header.moduleNames[i.toNat]? == some `Extracted
+      | some i => (env.header.modules[i.toNat]?.map (·.module)) == some `Extracted
       | none => false) &&
     (match env.find? n with
       | some (.thmInfo ci) =>
@@ -1222,7 +1222,7 @@ def isRuntimeContract (env : Environment) (c : Name) : Bool :=
   match env.getModuleIdxFor? c with
   | none => false
   | some idx =>
-    let mod := env.header.moduleNames[idx.toNat]!
+    let mod := env.header.modules[idx.toNat]!.module
     trustedModule mod && pinnedContracts.contains (mod.toString, c.getString!) &&
     (`Janus).isPrefixOf c && match env.find? c with
     | some (.defnInfo d) => bodyIsSummary d.value ||
@@ -1299,7 +1299,7 @@ def isStaticAddr (env : Environment) (k : Expr) : Bool :=
   | .const c _ =>
       c == staticuint64sConst &&
       match env.getModuleIdxFor? c with
-      | some idx => env.header.moduleNames[idx.toNat]? == some `Extracted
+      | some idx => (env.header.modules[idx.toNat]?.map (·.module)) == some `Extracted
       | none => false
   | _ => false
 
@@ -1309,7 +1309,7 @@ def isExtractedDataAddr (env : Environment) (k : Expr) (name : String) : Bool :=
   | .const c _ =>
       c == .str `Extracted.dataAddr name &&
       match env.getModuleIdxFor? c with
-      | some idx => env.header.moduleNames[idx.toNat]? == some `Extracted
+      | some idx => (env.header.modules[idx.toNat]?.map (·.module)) == some `Extracted
       | none => false
   | _ => false
 
@@ -1473,7 +1473,7 @@ def isExtractedConst (env : Environment) (a : Expr) : Bool :=
   | .const c _ =>
       c.getPrefix == `Extracted && c != `Extracted.program &&
       match env.getModuleIdxFor? c with
-      | some idx => env.header.moduleNames[idx.toNat]? == some `Extracted
+      | some idx => (env.header.modules[idx.toNat]?.map (·.module)) == some `Extracted
       | none => false
   | _ => false
 
@@ -1612,7 +1612,7 @@ def isImplApartPremise (env : Environment) (t : Expr) : Bool :=
     implApartNames.contains c && t.getAppNumArgs == 2 &&
       (t.getArg! 0).consumeMData.isConstOf `Extracted.program && (t.getArg! 1).consumeMData.isFVar &&
       (match env.getModuleIdxFor? c with
-        | some idx => trustedModule env.header.moduleNames[idx.toNat]!
+        | some idx => trustedModule env.header.modules[idx.toNat]!.module
         | none => false)
   | _ => false
 
@@ -2888,7 +2888,7 @@ partial def entryAddrLike (env : Environment) (fuel : Nat) (e : Expr) : MetaM Bo
   match x.getAppFn with
   | .const c _ =>
     let isTrusted := match env.getModuleIdxFor? c with
-      | some i => trustedModule env.header.moduleNames[i.toNat]!
+      | some i => trustedModule env.header.modules[i.toNat]!.module
       | none => false
     if isTrusted then
       return (c.getString! == "contractAddr" || c.getString! == "segAddr") && x.getAppNumArgs == 2
@@ -2921,7 +2921,7 @@ partial def inhabSafe (env : Environment) (t : Expr) : MetaM Bool := do
     if [``Subtype, ``Sigma, ``PSigma, ``PLift, ``ULift, ``Empty, ``PEmpty, ``Exists, ``False, ``Nonempty,
         ``Squash, ``Quot, ``Quotient, ``Eq, ``HEq].contains c then return false
     match env.getModuleIdxFor? c with
-    | some idx => return trustedModule env.header.moduleNames[idx.toNat]!
+    | some idx => return trustedModule env.header.modules[idx.toNat]!.module
     | none => return false
 
 /-- Does the witness conjunct `c` give the premise `p`? Either `c` unifies with `p`, or `c` is a
@@ -3707,7 +3707,7 @@ unsafe def runASLImpl (userThm proofMod corThm corMod marker trusted words : Str
     let cleanState ← (withImporting do
       let (_, st) ← (importModulesCore aslClean).run
       return st : IO ImportState)
-    let moduleOf := fun (n : Name) => (envA.getModuleIdxFor? n).map fun i => envA.header.moduleNames[i.toNat]!
+    let moduleOf := fun (n : Name) => (envA.getModuleIdxFor? n).map fun i => envA.header.modules[i.toNat]!.module
     let some uci := envA.find? userN | fail s!"the proof does not define {userThm}"
     unless uci matches .thmInfo _ do fail s!"{userThm} is not a theorem"
     unless moduleOf userN == some proofModN do
