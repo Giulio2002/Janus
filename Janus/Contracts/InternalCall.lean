@@ -210,8 +210,7 @@ return address in `X30` need only be admissible for `p0` (outside the callee's c
 `2^48`, no stub), not for `P`. -/
 theorem Ensures.toSummaryIn {p0 P : Program} {entry : Nat} {args : List W64} {pre : State → Prop}
     {post : State → State → Prop} (h : Ensures p0 entry args pre post)
-    (hx : p0.fetch p0.exitAddr = none) (hc : CodeIn p0 P)
-    (hlen : args.length ≤ numIntRegs := by simp [numIntRegs]) :
+    (hx : p0.fetch p0.exitAddr = none) (hc : CodeIn p0 P) [ArgsFit args] :
     Summary P entry
       (fun s => RetAddr p0 (s.regs regLR).toNat ∧ ArgsFrom s 0 args ∧ pre s)
       (fun s s' => (s'.sp = s.sp ∧ s'.regs 28 = s.regs 28 ∧ s'.regs 29 = s.regs 29 ∧
@@ -223,7 +222,7 @@ theorem Ensures.toSummaryIn {p0 P : Program} {entry : Nat} {args : List W64} {pr
   have hsu : CallSetup (p0.withExit (s.regs regLR).toNat) entry args s :=
     ⟨hpc, by simp only [Program.exitAddr_withExit]; exact (hlr _).symm,
       fun i hi => by simpa using hargs.index i hi⟩
-  have h2 := (reaches_of_returns (h.toOld hlen _ hret s hsu hpre)).toReachesRet hret hx
+  have h2 := (reaches_of_returns (h.toOld _ hret s hsu hpre)).toReachesRet hret hx
   rw [hlr] at h2
   obtain ⟨k, s', hst, hr, hq⟩ := h2
   exact ⟨k, s', Steps.of_codeIn hc hst, hr, ⟨hq.1.sp, hq.1.g, hq.1.fp, hq.1.platform⟩, hq.2⟩

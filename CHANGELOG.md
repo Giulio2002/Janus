@@ -30,7 +30,7 @@ Per ISA (`Janus.GoABI`, `Janus.Amd64.GoABI`):
   `RunsAtLeastOnCall.of_old` (a proof of the old statement plus `hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret)`
   give the new one), and the reverse `Ensures.toOld` (the old-shaped statement for a state that already holds `ret`;
   arm64 also needs `args.length ≤ numIntRegs`, an auto-parameter closed by `simp [numIntRegs]`). `Ensures.toSummary`,
-  `Ensures.toSummaryIn` use it, so their statements are unchanged (arm64: they gain the auto-parameter `hlen`).
+  `Ensures.toSummaryIn` use it, so their statements are unchanged (arm64: they gain the instance argument `[ArgsFit args]`).
 - Simp lemmas `setRet_*` (registers other than `X30`, `SP`/`RSP`, pc/rip, flags, xmm, mem regions, `accessible`
   unchanged); amd64 `readLE_setRet_of_disjoint` (a read of `[a, a + n)` outside `[RSP, RSP + 8)`), `readLE_setRet_sp`
   (the return slot holds `ret`), `bytes_setRet_of_outside`; `CallSetup.setRet_eq`; `Memory.writeLE_readLE_self`.
@@ -178,10 +178,11 @@ whose conclusion is an `Ensures` form).
   start with `refine Ensures.of_old hinv ?_`; the call sites do not change (the default tactic proves `hinv` for their concrete
   `pre`). The script does exactly this. (`Ensures.SetRetInv` is `∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s →
   pre (s.setRet ret)`.)
-- **arm64 `hlen`.** `Ensures.toOld`, `Ensures.toSummaryIn` take `(hlen : args.length ≤ numIntRegs := by simp [numIntRegs])`
-  (the new `CallSetup0` has `len`, as `setRet` writes `X30`). A generic wrapper with a *variable* `args` passes its own
-  `hlen`; the script adds `(hlen : args.length ≤ numIntRegs := by simp [numIntRegs])` to the wrapper and passes it on
-  (`Ensures.toSummaryIn (hlen := hlen) h …`).
+- **arm64 `ArgsFit`.** `Ensures.toOld`, `Ensures.toSummaryIn`, `Ensures.toSummary`, `EnsuresC.toOld` take an instance argument `[ArgsFit args]`
+  (`args.length ≤ numIntRegs`: the new `CallSetup0` has a `len` field because `setRet` writes `X30`). There is an instance for every list
+  literal of at most 16 elements, so a concrete callee needs nothing, and (an instance argument, not an explicit one) a summary is still
+  applied to its state and precondition: `Ensures.toSummaryIn h hx hc s hpc ⟨…⟩` is unchanged. A generic wrapper with a *variable* `args`
+  takes `[ArgsFit args]` (the script adds it).
 - **`janus64_pre_setRet` also discharges** (all tested in `JanusTests/RetAddr`): explicit reads `readLE (RSP + 8 / 16 / 24) 8`
   together with the old-word bound `readLE RSP 8 < 2^47` (re-proved from `RetAddr`: after `setRet` the word is `ret`),
   `Janus.Spec.Ptr` and `Buffer` (pure `accessible`: simp lemmas `ptr_setRet`, `buffer_setRet`), `StackGuardOK`, `TlsG`

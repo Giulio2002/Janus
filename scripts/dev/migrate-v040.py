@@ -250,22 +250,22 @@ def fix_mono(it, warn):
 
 def add_hlen(it, amd, warn, name):
     """arm64 generic wrapper over an `Ensures` hypothesis with generic `args`: `Ensures.toSummaryIn h …` needs
-    `args.length ≤ numIntRegs`; the wrapper gets it as an (auto-)parameter and passes it on."""
+    `ArgsFit args` (`args.length ≤ numIntRegs`, an instance for every literal list); the wrapper takes `[ArgsFit args]`."""
     if amd: return it
     sig, bs = split_sig(it)
     if sig is None or 'Ensures.toSummaryIn' not in it[bs:]: return it
     if not re.search(r'\{args\s*:\s*List', sig): return it
-    if 'hlen' in sig: return it
+    if 'ArgsFit' in sig: return it
     ci = top_colon(sig)
-    sig2 = sig[:ci].rstrip() + ' (hlen : args.length ≤ numIntRegs := by simp [numIntRegs]) ' + sig[ci:]
-    body = it[bs:].replace('Ensures.toSummaryIn ', 'Ensures.toSummaryIn (hlen := hlen) ')
-    return sig2 + ':=' + body
+    sig2 = sig[:ci].rstrip() + ' [ArgsFit args] ' + sig[ci:]
+    return sig2 + ':=' + it[bs:]
 
 class Reg:
     names = set()       # theorem names (as written) whose conclusion is an Ensures form
     generic = set()
     imports = {}        # file -> [imported module names]
     modfile = {}        # module name -> file
+    aliases = []
     defs = {}           # last component of a def/abbrev name -> [(file, body text)] for the Prop-valued ones
 
 DEFRE = re.compile(r'(?m)^(?:@\[[^\]]*\]\s*)?(?:private |protected |noncomputable )*(?:def|abbrev) ([\w.\']+)')
@@ -278,11 +278,16 @@ def collect_defs(t, f, reg):
         sig, bs = split_sig(it)
         if sig is None: continue
         ci = top_colon(sig)
-        if ci < 0: continue
+        if ci < 0:           # `def Pre := PreS 4440` (no type ascription)
+            reg.aliases.append((m.group(1).split('.')[-1], f, it[bs:]))
+            continue
         concl = sig[ci + 1:].strip()
         # a definition that reads the state or its memory (`win s stk above`, `CallEnv R L s …`, `stLen m st`, `NatLive m …`):
         # installing the return address changes its argument, so it is unfolded; the others (`Serves R`, `Held R L p n`) cannot change
-        if not re.search(r'[:\s(]\s*(?:Janus\.)?(?:Amd64\.|Arm64\.)?(?:State|Memory)\b', sig[:ci]): continue
+        if not re.search(r'[:\s(]\s*(?:Janus\.)?(?:Amd64\.|Arm64\.)?(?:State|Memory)\b', sig[:ci]):
+            # an alias of such a definition (`def Pre := PreS 4440`): resolved after every file is collected
+            reg.aliases.append((m.group(1).split('.')[-1], f, it[bs:]))
+            continue
         reg.defs.setdefault(m.group(1).split('.')[-1], []).append((f, it[bs:]))
 
 def modname(path):
@@ -672,6 +677,10 @@ def main(files):
         reg.imports[f] = re.findall(r'(?m)^import\s+([\w.]+)', t)
         reg.modfile[modname(f)] = f
         reg.modfile[f.replace('/', '.')[:-5]] = f
+    for nm, f, body in reg.aliases:       # `def Pre := PreS 4440`
+        m0 = re.match(r"\s*([A-Za-z_][\w']*)", body)
+        if m0 and m0.group(1).split('.')[-1] in reg.defs:
+            reg.defs.setdefault(nm, []).append((f, body))
     for f in files:
         t = texts[f]
         amd = 'Janus.Amd64' in t

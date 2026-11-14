@@ -64,6 +64,31 @@ namespace GoABI
 
 /-- Integer argument / result registers are `R0 .. R(numIntRegs-1)`. -/
 def numIntRegs : Nat := 16
+
+/-- The argument list fits the integer argument registers (`args.length ≤ numIntRegs`). An instance for every list literal of
+at most 16 elements, so `Ensures.toOld` / `toSummaryIn` need no length argument for a concrete callee; a generic wrapper over a
+variable `args` takes `[ArgsFit args]`. (A class, not an argument: a summary is applied to its state and precondition, which
+an explicit length argument would swallow.) -/
+class ArgsFit (args : List W64) : Prop where
+  le : args.length ≤ numIntRegs
+
+instance ArgsFit.n0  : ArgsFit [] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n1 {a0 : W64} : ArgsFit [a0] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n2 {a0 a1 : W64} : ArgsFit [a0, a1] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n3 {a0 a1 a2 : W64} : ArgsFit [a0, a1, a2] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n4 {a0 a1 a2 a3 : W64} : ArgsFit [a0, a1, a2, a3] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n5 {a0 a1 a2 a3 a4 : W64} : ArgsFit [a0, a1, a2, a3, a4] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n6 {a0 a1 a2 a3 a4 a5 : W64} : ArgsFit [a0, a1, a2, a3, a4, a5] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n7 {a0 a1 a2 a3 a4 a5 a6 : W64} : ArgsFit [a0, a1, a2, a3, a4, a5, a6] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n8 {a0 a1 a2 a3 a4 a5 a6 a7 : W64} : ArgsFit [a0, a1, a2, a3, a4, a5, a6, a7] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n9 {a0 a1 a2 a3 a4 a5 a6 a7 a8 : W64} : ArgsFit [a0, a1, a2, a3, a4, a5, a6, a7, a8] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n10 {a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 : W64} : ArgsFit [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n11 {a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 : W64} : ArgsFit [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n12 {a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 : W64} : ArgsFit [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n13 {a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 : W64} : ArgsFit [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n14 {a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 : W64} : ArgsFit [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n15 {a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 : W64} : ArgsFit [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14] := ⟨by simp [numIntRegs]⟩
+instance ArgsFit.n16 {a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 : W64} : ArgsFit [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15] := ⟨by simp [numIntRegs]⟩
 /-- Platform register; Go never uses it. -/
 abbrev regPlatform : Nat := 18
 /-- Closure context pointer at calls. -/
@@ -489,11 +514,11 @@ theorem CallSetup.setRet_eq {p : Program} {entry : Nat} {args : List W64} {ret :
 holds `ret` in `X30`, the run claim of the pre-v0.4.0 `Ensures`. (Used to feed `Summary`s and the
 contract bridges, which still speak about the state with the return address installed.) -/
 theorem Ensures.toOld {pre : State → Prop} {post : State → State → Prop}
-    (h : Ensures p entry args pre post) (hlen : args.length ≤ numIntRegs := by simp [numIntRegs]) :
+    (h : Ensures p entry args pre post) [inst : ArgsFit args] :
     ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
       Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s') := by
   intro ret hret s hs hp
-  have := h s ⟨hs.pc, hlen, hs.args⟩ hp ret hret
+  have := h s ⟨hs.pc, inst.le, hs.args⟩ hp ret hret
   rwa [hs.setRet_eq] at this
 
 /-- Weaken the precondition and the postcondition, the postcondition compared on the state with the return address

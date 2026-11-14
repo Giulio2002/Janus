@@ -388,11 +388,11 @@ theorem CEnsuresC.toOld {p : Program} {C : Contract} {entry : Nat} {args : List 
 
 theorem EnsuresC.toOld {p : Program} {C : Contract} {entry : Nat} {args : List W64}
     {pre : State → Prop} {post : State → State → Prop} (h : EnsuresC p C entry args pre post)
-    (hlen : args.length ≤ GoABI.numIntRegs := by simp [GoABI.numIntRegs]) :
+    [inst : GoABI.ArgsFit args] :
     ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
       ReturnsC (p.withExit ret) C (fun s' => ABIReturnC s s' ∧ post s s') s := by
   intro ret hret s hs hp
-  have := h s ⟨hs.pc, hlen, hs.args⟩ hp ret hret
+  have := h s ⟨hs.pc, inst.le, hs.args⟩ hp ret hret
   rwa [hs.setRet_eq] at this
 
 /-- A Go theorem under a contract holds under every refinement of the contract. -/
@@ -1025,10 +1025,10 @@ theorem CgoCallback.refines {t : TLSImage} {p : Program} {Cin : Contract} {R : S
         have : i = 0 := by simp at hi; omega
         subst this; simpa using he.arg }
   refine ⟨⟨hf, hstack s hG, hready s hG, fun u ret he hR => ?_⟩, ?_⟩
-  · exact ((hGo _).toOld (by simp [GoABI.numIntRegs]) ret he.retAddr u (hcall u ret he) (hpre s u ret hG he hR)).mono fun _ h => h.1
+  · exact ((hGo _).toOld ret he.retAddr u (hcall u ret he) (hpre s u ret hG he hR)).mono fun _ h => h.1
   · rintro s' ⟨hf', u, ret, u', he, hR, hrun, hab, hres⟩
     refine ⟨hf', ?_⟩
-    have hq := ((hGo _).toOld (by simp [GoABI.numIntRegs]) ret he.retAddr u (hcall u ret he) (hpre s u ret hG he hR)).runsTo hrun
+    have hq := ((hGo _).toOld ret he.retAddr u (hcall u ret he) (hpre s u ret hG he hR)).runsTo hrun
     exact hres.memFrame (hE s hG) (hacc s u ret u' hG he hR hab hq.2) (hna s hG)
 
 /-! ## `alloca` and variable-length frames
