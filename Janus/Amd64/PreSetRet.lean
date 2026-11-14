@@ -72,9 +72,11 @@ macro_rules (kind := janus64PreSetRetCore)
     let v2 := mkIdent `Janus.Contracts.StackAmd64.rtView_setRet
     let c1 := mkIdent `Janus.Amd64.CABI.CStack
     -- the definitions the user lists are unfolded one by one: an ambiguous or unknown name fails only its own `simp`
-    let mut us ← `(tactic| skip)
-    for d in ds.getElems do
-      us ← `(tactic| ($us; try simp only [$d] at $hp:ident ⊢))
+    -- all at once (definitions inside each other unfold to a fixpoint), then one by one twice (what is left when a name is ambiguous)
+    let mut us ← `(tactic| try simp only [$ds,*] at $hp:ident ⊢)
+    for _ in [0:2] do
+      for d in ds.getElems do
+        us ← `(tactic| ($us; try simp only [$d] at $hp:ident ⊢))
     `(tactic|
       (have hu := ($hret).user
        $us
@@ -104,7 +106,10 @@ macro_rules (kind := janus64PreSetRetCore)
          try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$v1:ident] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$v2:ident] at ⊢
-         all_goals first | with_reducible exact Janus.Tactic.Hide.elim hp0 | (and_intros <;> first | with_reducible assumption | omega | (trace_state; fail "janus_pre_setRet: this conjunct of the precondition is not invariant under setRet (see the goal above; pass the predicate definitions to the tactic, e.g. `janus64_ensures_old [Pre, CallEnv]`, and make a pointer read apart from the return slot)")))))
+         all_goals first
+           | with_reducible exact Janus.Tactic.Hide.elim hp0
+           | (repeat' (first | with_reducible assumption | with_reducible refine And.intro ?_ ?_)
+              all_goals first | omega | (trace_state; fail "janus_pre_setRet: this conjunct of the precondition is not invariant under setRet (see the goal above; pass the predicate definitions to the tactic, e.g. `janus64_ensures_old [Pre, CallEnv]`, and make a pointer read apart from the return slot)")))))
 
 syntax (name := janus64PreSetRet) "janus64_pre_setRet" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 

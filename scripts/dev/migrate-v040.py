@@ -293,7 +293,8 @@ def collect_defs(t, f, reg):
         concl = sig[ci + 1:].strip()
         # a definition that reads the state or its memory (`win s stk above`, `CallEnv R L s …`, `stLen m st`, `NatLive m …`):
         # installing the return address changes its argument, so it is unfolded; the others (`Serves R`, `Held R L p n`) cannot change
-        if not re.search(r'[:\s(]\s*(?:Janus\.)?(?:Amd64\.|Arm64\.)?(?:State|Memory)\b', sig[:ci]):
+        nullary = concl == 'Nat' and not re.search(r'[({\[]', re.sub(r'@\[[^\]]*\]', '', sig[:ci]))      # `def gA : Nat := …`: an address constant
+        if not nullary and not re.search(r'[:\s(]\s*(?:Janus\.)?(?:Amd64\.|Arm64\.)?(?:State|Memory)\b', sig[:ci]):
             # an alias of such a definition (`def Pre := PreS 4440`): resolved after every file is collected
             reg.aliases.append((name.split('.')[-1], f, it[bs:], qn))
             continue
@@ -319,31 +320,40 @@ def import_closure(f, reg):
 
 def unfold_list(pre_text, reg, f, bound=()):
     """The consumer's state-reading definitions reachable from `pre_text`, as fully qualified names (the definition visible
-    from this file: the same file, else the import closure, else the only one)."""
+    from this file: the same file, else the import closure, else the only one; inside a definition body, the one in the
+    nearest enclosing namespace)."""
     closure = import_closure(f, reg)
     seen = []
-    todo = list(dict.fromkeys(re.findall(r"[A-Za-z_][\w']*(?:\.[A-Za-z_][\w']*)*", pre_text)))
+    todo = [(w, '') for w in dict.fromkeys(re.findall(r"[A-Za-z_][\w']*(?:\.[A-Za-z_][\w']*)*", pre_text))]
     seen_set = set()
+    def common(a, b):
+        n = 0
+        for x, y in zip(a.split('.'), b.split('.')):
+            if x != y: break
+            n += 1
+        return n
     while todo:
-        w = todo.pop(0)
-        if '.' in w and len(w.split('.')[0]) <= 1: continue      # `R.ok`: a field of a bound variable
+        w, owner = todo.pop(0)
         if w in bound: continue
         base = w.split('.')[-1]
         if base not in reg.defs: continue
         cands = reg.defs[base]
+        if '.' in w and len(w.split('.')[0]) <= 1 and not any(c[2].endswith('.' + w) or c[2] == w for c in cands):
+            continue      # `R.ok`: a field of a bound variable (`Q.NatMul.MPre` is a namespace)
         if '.' in w:
             q = [c for c in cands if c[2].endswith('.' + w) or c[2] == w]
             if q: cands = q
         same = [c for c in cands if c[0] == f]
         vis = [c for c in cands if c[0] in closure]
-        if len(vis) > 1:       # the definition closest in the directory tree to this file
-            vis.sort(key=lambda c: -len(os.path.commonprefix([c[0], f])))
+        key = (lambda c: (-common(c[2], owner), -len(os.path.commonprefix([c[0], f]))))
+        if len(vis) > 1: vis.sort(key=key)
+        if len(same) > 1: same.sort(key=key)
         pick = same[0] if same else (vis[0] if vis else (cands[0] if len(cands) == 1 else None))
         if pick is None or pick[2] in seen_set: continue
         seen_set.add(pick[2])
         seen.append(pick[2])
         for w2 in re.findall(r"[A-Za-z_][\w']*(?:\.[A-Za-z_][\w']*)*", pick[1]):
-            todo.append(w2)
+            todo.append((w2, pick[2]))
     return seen
 
 def collect(t, reg):
@@ -491,6 +501,15 @@ def migrate(t, amd0, reg, fname=''):
         if not m: continue
         it = fix_mono(it, warn)
         cc = conclusion(it)
+        if cc and reg.generic and not is_generic(cc[1], cc[2], cc[3]):
+            # a row that calls a generic helper (`Ensures.full64 hap … ens`): its `hinv` default has no definition list, so the
+            # row's own list is passed
+            ptac = 'janus64_pre_setRet' if isa[i] else 'janus_pre_setRet'
+            dl = tac_with_defs(ptac, cc[1], cc[2], reg, fname, cc[3])
+            if dl != ptac:
+                gre = re.compile(r'(?<![\w.\'])((?:[\w]+\.)*(?:' + '|'.join(re.escape(n) for n in sorted(reg.generic, key=len, reverse=True)) + r'))(?![\w\'])')
+                se = split_sig(it)[1] or 0
+                it = it[:se] + gre.sub(lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[se:])
         if cc and re.search(r'(?<![\w.\'])(?:\w+\.)*Ensures0?\.mono(?![\w\'])', it[split_sig(it)[1] or 0:]):
             ptac = 'janus64_pre_setRet' if isa[i] else 'janus_pre_setRet'
             dl = tac_with_defs(ptac, cc[1], cc[2], reg, fname, cc[3])

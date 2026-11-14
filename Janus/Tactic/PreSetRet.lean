@@ -136,9 +136,11 @@ macro_rules
   | `(tactic| janus_pre_setRet_core $s $ret $hret $hp [$ds,*]) => do
     -- `CStack` lives in a module imported after this one: an identifier built with `mkIdent` resolves where the tactic is used
     let c1 := mkIdent `Janus.CABI.CStack
-    let mut us ← `(tactic| skip)
-    for d in ds.getElems do
-      us ← `(tactic| ($us; try simp only [$d] at $hp:ident ⊢))
+    -- all at once (definitions inside each other unfold to a fixpoint), then one by one twice (what is left when a name is ambiguous)
+    let mut us ← `(tactic| try simp only [$ds,*] at $hp:ident ⊢)
+    for _ in [0:2] do
+      for d in ds.getElems do
+        us ← `(tactic| ($us; try simp only [$d] at $hp:ident ⊢))
     `(tactic|
       ($us
        try simp only [Janus.GoABI.StackWritable, Janus.GoABI.SPAligned, Janus.GoABI.FPConvention,
