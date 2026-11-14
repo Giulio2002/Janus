@@ -57,10 +57,11 @@ theorem wstate_rtpre (a b : Nat) : RTPre64 softEnv 2 (wstate a b) := by
   have h4 : (wstate a b).regs 4 = BitVec.ofNat 64 wsp := rfl
   have h14 : (wstate a b).regs 14 = BitVec.ofNat 64 wg := rfl
   have hm : (wstate a b).mem = wmem := rfl
-  refine ⟨trivial, ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩
+  refine ⟨trivial, ⟨?_, ?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩
   · simp only [regG, stackguard0Offset, h14]; decide
   · simp only [regG, stackguard0Offset, h14, hm]; decide
   · simp only [stackguard0, regG, regSP, stackguard0Offset, h14, h4, hm, softEnv]; decide
+  · simp only [regG, regSP, stackguard0Offset, h14, h4]; decide
   · simp only [h4]; decide
   · simp only [h4, softEnv]; decide
   · simp only [h4]; decide

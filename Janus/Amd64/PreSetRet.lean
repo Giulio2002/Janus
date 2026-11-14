@@ -50,7 +50,7 @@ macro_rules (kind := janus64PreSetRetCore)
        try simp only [Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.SPAligned,
          Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.Disjoint, Janus.Amd64.GoABI.valueAt,
          Janus.Amd64.GoABI.StackWords, Janus.Amd64.GoABI.stackWord, Janus.Amd64.GoABI.stackArgOffset,
-         Janus.Amd64.GoABI.StackGuardOK, Janus.Amd64.GoABI.stackguard0, Janus.Amd64.GoABI.stackguard0Offset,
+         Janus.Amd64.GoABI.stackguard0, Janus.Amd64.GoABI.stackguard0Offset,
          Janus.Amd64.GoABI.ClosureCtx, Janus.Spec.Disjoint, Janus.Apart, Janus.outside_nil,
          Janus.outside_cons, $ds,*] at $hp:ident ⊢
        all_goals
@@ -66,7 +66,8 @@ macro_rules (kind := janus64PreSetRetCore)
            Janus.Amd64.GoABI.setRet_mxcsr, Janus.Amd64.GoABI.setRet_x87,
            Janus.Amd64.GoABI.setRet_fpucw, Janus.Amd64.GoABI.setRet_mem_regions,
            Janus.Amd64.GoABI.setRet_accessible, Janus.Amd64.GoABI.readLE_setRet_of_disjoint,
-           Janus.Amd64.GoABI.bytes_setRet_of_outside, Janus.Amd64.GoABI.dataLoaded_setRet_iff] at ⊢
+           Janus.Amd64.GoABI.bytes_setRet_of_outside, Janus.Amd64.GoABI.dataLoaded_setRet_iff,
+           Janus.Amd64.GoABI.stackGuardOK_setRet, Janus.Amd64.GoABI.tlsG_setRet_iff] at ⊢
          try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
          all_goals first | with_reducible exact hp0 | (and_intros <;> first | with_reducible assumption | omega))))
 
@@ -88,24 +89,36 @@ macro_rules (kind := janus64PreSetRetK)
       (intro s k ret hret hp
        janus64_pre_setRet_core s ret hret hp [$ds,*]))
 
+/-- `janus64_pre_setRet_c`: as `janus64_pre_setRet` for a precondition with a `caller` hypothesis (`EnsuresGrow`: the goal is
+`∀ s ret, RetAddr p ret → pre s → caller (s.setRet ret) → pre (s.setRet ret)`; `hc` is available to the proof). -/
+syntax (name := janus64PreSetRetC) "janus64_pre_setRet_c" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
+
+macro_rules (kind := janus64PreSetRetC)
+  | `(tactic| janus64_pre_setRet_c) => `(tactic| janus64_pre_setRet_c [])
+  | `(tactic| janus64_pre_setRet_c [$ds,*]) => `(tactic|
+      (intro s ret hret hp hc
+       janus64_pre_setRet_core s ret hret hp [$ds,*]))
+
 /-- `janus64_ensures_old [defs]`: the amd64 twin of `janus_ensures_old`. -/
 syntax (name := janus64EnsuresOld) "janus64_ensures_old" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 
-def ensuresOldForms64 : List (Name × Bool) :=
-  [(`Janus.Amd64.GoABI.Ensures.of_old, false), (`Janus.Amd64.GoABI.EnsuresWithin.of_old, false),
-   (`Janus.Amd64.GoABI.EnsuresGoX.of_old, false), (`Janus.Amd64.GoABI.EnsuresGo.of_old, false),
-   (`Janus.Amd64.GoABI.RunsAtLeastOnCall.of_old, false), (`Janus.Amd64.GoABI0.Ensures0.of_old, false),
-   (`Janus.Amd64.CABI.CEnsures.of_old, false), (`Janus.Amd64.CABI.CEnsuresA.of_old, false),
-   (`Janus.Amd64.FFI.EnsuresC.of_old, false), (`Janus.Amd64.FFI.CEnsuresC.of_old, false),
-   (`Janus.Amd64.Kernel.EnsuresK.of_old, true), (`Janus.Contracts.StackAmd64.EnsuresGrow64.of_old, false)]
+def ensuresOldForms64 : List (Name × Nat) :=
+  [(`Janus.Amd64.GoABI.Ensures.of_old, 0), (`Janus.Amd64.GoABI.EnsuresWithin.of_old, 0),
+   (`Janus.Amd64.GoABI.EnsuresGoX.of_old, 0), (`Janus.Amd64.GoABI.EnsuresGo.of_old, 0),
+   (`Janus.Amd64.GoABI.RunsAtLeastOnCall.of_old, 0), (`Janus.Amd64.GoABI0.Ensures0.of_old, 0),
+   (`Janus.Amd64.CABI.CEnsures.of_old, 0), (`Janus.Amd64.CABI.CEnsuresA.of_old, 0),
+   (`Janus.Amd64.FFI.EnsuresC.of_old, 0), (`Janus.Amd64.FFI.CEnsuresC.of_old, 0),
+   (`Janus.Amd64.Kernel.EnsuresK.of_old, 1), (`Janus.Contracts.StackAmd64.EnsuresGrow64.of_old, 2)]
 
 macro_rules (kind := janus64EnsuresOld)
   | `(tactic| janus64_ensures_old) => `(tactic| janus64_ensures_old [])
   | `(tactic| janus64_ensures_old [$ds,*]) => do
     let mut acc ← `(Lean.Parser.Tactic.tacticSeq| fail "janus64_ensures_old: the goal is not a main-theorem form with an `of_old` bridge")
-    for (n, isK) in ensuresOldForms64.reverse do
-      let alt ← if isK then
+    for (n, kind) in ensuresOldForms64.reverse do
+      let alt ← if kind == 1 then
           `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus64_pre_setRet_k [$ds,*]) ?_)
+        else if kind == 2 then
+          `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus64_pre_setRet_c [$ds,*]) ?_)
         else `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus64_pre_setRet [$ds,*]) ?_)
       acc ← `(Lean.Parser.Tactic.tacticSeq| first | $alt | $acc)
     `(tactic| ($acc))

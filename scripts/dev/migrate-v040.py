@@ -60,6 +60,9 @@ def migrate(t, amd0):
         if m and ':= by' in it:
             head = it.split(':= by', 1)[0]
             if HEADRE.search(head) and 'Witness' not in head:
+                if re.search(r'(?<![\w.])EnsuresGrow(64)?(?![\w])', head):
+                    warn.append('theorem %s: EnsuresGrow needs the manual `caller` split (see CHANGELOG, v0.4.0: GCaller, correctness_old + of_old_with); not rewritten' % m.group(1))
+                    continue
                 if m.group(1) != 'example': ens[m.group(1)] = bool(re.search(r'(?<![\w.])EnsuresK(?![\w])', head))
                 if re.search(r':= by\n[ \t]*janus6?4?_ensures_old', it):
                     it2, n = it, 1

@@ -109,6 +109,26 @@ def GPre (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady) (s : Stat
     2 * (hi - lo) ≤ maxstacksize ∧ 2 * ((hi - s.sp.toNat) + 176 + stackGuard) ≤ maxstacksize ∧
     FT.CodeOutside pool ∧ FT.Aligned ∧ H [] (s.regs 28).toNat 0 (rtView rt s.mem) ∧ NoStackPtr s.mem pool rt
 
+/-- The ret-independent part of the grown precondition: `GPre` without the caller's frame chain. `lo` and `hi`
+(the goroutine stack `[lo, hi)`) are parameters of the theorem. -/
+def GPre0 (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady) (lo hi : Nat) (s : State) : Prop :=
+  GStack s.mem (s.regs 28).toNat lo hi ∧ Outside (s.regs 28).toNat 24 pool ∧
+    4096 ≤ lo ∧ lo + 8 ≤ s.sp.toNat ∧ s.sp.toNat + 24 ≤ hi ∧ hi ≤ 2 ^ 48 ∧
+    lo % 16 = 0 ∧ hi % 16 = 0 ∧ s.sp.toNat % 16 = 0 ∧ s.regs 29 = s.sp - 8 ∧
+    InRanges lo (hi - lo) pool ∧ PoolOK s.mem pool ∧ Outside lo (hi - lo) rt ∧
+    2 * (hi - lo) ≤ maxstacksize ∧ 2 * ((hi - s.sp.toNat) + 176 + stackGuard) ≤ maxstacksize ∧
+    FT.CodeOutside pool ∧ FT.Aligned ∧ H [] (s.regs 28).toNat 0 (rtView rt s.mem) ∧ NoStackPtr s.mem pool rt
+
+/-- **The caller assumption** (the `caller` argument of `EnsuresGrow`, evaluated with the return address in
+`X30`): the frame chain from the return address up to the top of the stack `hi` is the walkable chain `fs` of real Go
+frames, none of which holds the callee's spill slots as pointers. This is the only thing the theorem assumes of the
+return address. -/
+def GCaller (FT : FrameTable) (hi : Nat) (fs : List Frame) (s : State) : Prop :=
+  Chain Arch.arm64 FT s.mem hi (s.regs 30).toNat s.sp.toNat none fs ∧
+    (∀ f ∈ fs, f.sp = s.sp.toNat ∨ s.sp.toNat + 24 ≤ f.sp) ∧
+    framesCls Arch.arm64 FT fs (s.sp.toNat + 8) = false ∧
+    framesCls Arch.arm64 FT fs (s.sp.toNat + 16) = false
+
 /-- The growth path: from the prologue's `morestack` call, the contract resumes on a larger stack,
 the glue reloads `x` and `i` from the moved spill slots (copied unchanged: the stack maps call
 them scalars), and the stack now has room, so `summary` applies there. -/
@@ -192,12 +212,14 @@ theorem grow_branch (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
       BitVec.ofNat_toNat, BitVec.ofNat_toNat, BitVec.setWidth_eq, BitVec.setWidth_eq]
 
 /-- **`BigLocal` is correct on a stack of any size, stack growth included.** -/
-theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
+theorem correctness_old (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     (reloc : State → State → Prop) (hms : MorestackContract Extracted.program FT pool rt H reloc)
     (x i : BitVec 64) :
-    EnsuresGrow Extracted.program reloc Extracted.entry [x, i]
-      (fun s => FT.Agrees Extracted.frames ∧ GPre FT pool rt H s)
-      (fun _ s' => s'.regs 0 = if i.toNat % 16 = 0 then x else 0) := by
+    ∀ ret, RetAddr Extracted.program ret → ∀ s,
+      CallSetup (Extracted.program.withExit ret) Extracted.entry [x, i] s →
+      (FT.Agrees Extracted.frames ∧ GPre FT pool rt H s) →
+      GrownReturns (Extracted.program.withExit ret) reloc s
+        (fun s' => s'.regs 0 = if i.toNat % 16 = 0 then x else 0) := by
   intro ret hret s hs ⟨hA, hpre⟩
   have hFT := tableOK_of hA
   janus_intro hs
@@ -312,6 +334,23 @@ theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
 
 /-! ## The theorem is not vacuous -/
 
+/-- **`BigLocal` is correct on a stack of any size, stack growth included.** The precondition is
+evaluated before the return address is installed; the caller's frame chain is the explicit `caller` argument. -/
+theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
+    (reloc : State → State → Prop) (hms : MorestackContract Extracted.program FT pool rt H reloc)
+    (x i : BitVec 64) (lo hi : Nat) (fs : List Frame) :
+    EnsuresGrow Extracted.program reloc Extracted.entry [x, i]
+      (fun s => FT.Agrees Extracted.frames ∧ GPre0 FT pool rt H lo hi s) (GCaller FT hi fs)
+      (fun _ s' => s'.regs 0 = if i.toNat % 16 = 0 then x else 0) :=
+  EnsuresGrow.of_old_with (Pold := fun s => FT.Agrees Extracted.frames ∧ GPre FT pool rt H s)
+    (fun s ret _ hp hc => by
+      obtain ⟨hA, h0⟩ := hp
+      have h1 : GPre0 FT pool rt H lo hi (s.setRet ret) := h0
+      obtain ⟨c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19⟩ := h1
+      exact ⟨hA, lo, hi, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13,
+        ⟨fs, hc.1, hc.2.1, hc.2.2.1, hc.2.2.2⟩, c14, c15, c16, c17, c18, c19⟩)
+    (correctness_old FT pool rt H reloc hms x i)
+
 namespace Witness
 
 open Janus.Contracts.StackSat
@@ -379,6 +418,9 @@ def s0 : State :=
 
 theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [7#64, 0#64] s0 :=
   ⟨rfl, rfl, by intro i h; simp at h; rcases (show i = 0 ∨ i = 1 by omega) with rfl | rfl <;> rfl⟩
+
+theorem setup0 : CallSetup0 Extracted.entry [7#64, 0#64] s0 :=
+  ⟨rfl, by decide, by intro i h; simp at h; rcases (show i = 0 ∨ i = 1 by omega) with rfl | rfl <;> rfl⟩
 
 /-- The frame does not fit: the prologue's check fails, so the call can only return through a
 stack growth. -/
@@ -467,23 +509,36 @@ theorem sm_pre : Janus.Contracts.Stack.MorestackPre Extracted.program FTb pool r
   · rw [readLE_rtView hin0]; exact d1
   · rw [readLE_rtView hin8]; exact d2
 
+/-- The pieces of `pre`: the stack `[lo, hi)`, the ret-independent precondition and the caller's frame chain. -/
+theorem pieces : ∃ lo hi fs, GPre0 FTb pool rt H lo hi s0 ∧ GCaller FTb hi fs s0 := by
+  obtain ⟨lo, hi, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, ⟨fs, k1, k2, k3, k4⟩,
+    c14, c15, c16, c17, c18, c19⟩ := pre
+  exact ⟨lo, hi, fs, ⟨c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19⟩,
+    k1, k2, k3, k4⟩
+
 /-- So the guarantee is reached: from a stack where the frame does not fit, `BigLocal(7, 0)`
 grows the stack and returns `7`. -/
-theorem returns : GrownReturns (Extracted.program.withExit ret) (reloc FTb) s0
-    (fun s' => s'.regs 0 = 7#64) :=
-  (correctness FTb pool rt H (reloc FTb) (contract _ FTb) 7#64 0#64 ret hret s0 setup ⟨agrees, pre⟩).mono
-    (fun s' h => by simpa using h)
+theorem returns : GrownReturns (Extracted.program.withExit ret) (reloc FTb) (s0.setRet ret)
+    (fun s' => s'.regs 0 = 7#64) := by
+  obtain ⟨lo, hi, fs, h0, hc⟩ := pieces
+  exact (correctness FTb pool rt H (reloc FTb) (contract _ FTb) 7#64 0#64 lo hi fs s0 setup0
+    ⟨agrees, h0⟩ ret hret (by rw [setup.setRet_eq]; exact hc)).mono (fun s' h => by simpa using h)
 
 /-- All hypotheses of `correctness` hold together, for a call whose frame does not fit. -/
 theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
-    (reloc : State → State → Prop) (ret : Nat) (s : State),
+    (reloc : State → State → Prop) (ret : Nat) (s : State) (lo hi : Nat) (fs : List Frame),
     MorestackContract Extracted.program FT pool rt H reloc ∧
     RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [7#64, 0#64] s ∧
-    (FT.Agrees Extracted.frames ∧ GPre FT pool rt H s) ∧ ¬ GuardOK s 48 ∧
+    CallSetup0 Extracted.entry [7#64, 0#64] s ∧
+    (FT.Agrees Extracted.frames ∧ GPre0 FT pool rt H lo hi s) ∧ ¬ GuardOK s 48 ∧
     (∃ (g lo hi : Nat) (s_m : State), Janus.Contracts.Stack.MorestackPre Extracted.program FT pool rt H g lo hi s_m) ∧
-    GrownReturns (Extracted.program.withExit ret) reloc s fun s' => s'.regs 0 = if (0#64).toNat % 16 = 0 then 7#64 else 0 :=
-  ⟨FTb, pool, rt, H, reloc FTb, ret, s0, contract _ FTb, hret, setup, ⟨agrees, pre⟩, no_room, ⟨G0, SL, SH, sm, sm_pre⟩, correctness FTb pool rt H (reloc FTb) (contract _ FTb) 7#64 0#64 ret hret s0 setup ⟨agrees, pre⟩⟩
+    GCaller FT hi fs (s.setRet ret) ∧
+    GrownReturns (Extracted.program.withExit ret) reloc (s.setRet ret) fun s' => s'.regs 0 = if (0#64).toNat % 16 = 0 then 7#64 else 0 := by
+  obtain ⟨lo, hi, fs, h0, hc⟩ := pieces
+  have hc' : GCaller FTb hi fs (s0.setRet ret) := by rw [setup.setRet_eq]; exact hc
+  exact ⟨FTb, pool, rt, H, reloc FTb, ret, s0, lo, hi, fs, contract _ FTb, hret, setup0, ⟨agrees, h0⟩, no_room,
+    ⟨G0, SL, SH, sm, sm_pre⟩, hc',
+    correctness FTb pool rt H (reloc FTb) (contract _ FTb) 7#64 0#64 lo hi fs s0 setup0 ⟨agrees, h0⟩ ret hret hc'⟩
 
 end Witness
 

@@ -329,14 +329,15 @@ theorem EqPre.of_caller {s S : State} {d frame above nargs : Nat} (hc : CallerOK
     (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg : S.regs 14 = s.regs 14)
     (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
     (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame + above) : EqPre d nargs S := by
-  obtain ⟨⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout⟩ := hc
+  obtain ⟨⟨hg1, hg2, hg3, -⟩, hal, hd, hb, hst, hout⟩ := hc
   simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3
   simp only [callerWindow, outside_cons, outside_nil, and_true] at hout hf
-  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_⟩
+  refine ⟨⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_⟩
   · simp only [regG, stackguard0Offset, hg]; omega
   · simp only [regG, stackguard0Offset, hg, hf.accessible]; exact hg2
   · simp only [stackguard0, regG, regSP, stackguard0Offset, hg, hsp]
     rw [hf.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]; omega
+  · simp only [regG, regSP, stackguard0Offset, hg, hsp]; omega
   · rw [hsp]; omega
   · rw [hsp]; omega
   · rw [hsp]; omega
@@ -371,13 +372,14 @@ theorem EqPre.of_parts {s S : State} {d frame above nargs : Nat} (hc : CallerOK 
     (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg : S.regs 14 = s.regs 14)
     (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
     (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame + above) : EqPre d nargs S := by
-  obtain ⟨⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout⟩ := hc
+  obtain ⟨⟨hg1, hg2, hg3, -⟩, hal, hd, hb, hst, hout⟩ := hc
   simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3
   simp only [outside_cons, outside_nil, and_true] at hout
-  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_⟩
+  refine ⟨⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_⟩
   · simp only [regG, stackguard0Offset, hg]; omega
   · simp only [regG, stackguard0Offset, hg, hacc]; exact hg2
   · simp only [stackguard0, regG, regSP, stackguard0Offset, hg, hsp, hguard]; omega
+  · simp only [regG, regSP, stackguard0Offset, hg, hsp]; omega
   · rw [hsp]; omega
   · rw [hsp]; omega
   · rw [hsp]; omega

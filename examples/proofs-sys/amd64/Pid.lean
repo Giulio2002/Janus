@@ -10,7 +10,8 @@ theorem correctness (E : KEnv) :
       (fun s _ => StackGuardOK s 0 ∧ StackWritable s 64 8 ∧ TlsG s ∧
         (s.fsBase.toNat ≤ (s.regs regSP).toNat - 64 ∨ (s.regs regSP).toNat + 16 ≤ s.fsBase.toNat))
       (fun _ k s' k' => k' = k ∧ s'.regs 0 = BitVec.ofNat 64 k.pid) := by
-  intro ret hret s k hs ⟨⟨hg1, hg2, hg3⟩, ⟨hb, ha, hw⟩, ⟨htb, htr, htg⟩, htd⟩
+  janus64_ensures_old
+  intro ret hret s k hs ⟨⟨hg1, hg2, hg3, _⟩, ⟨hb, ha, hw⟩, ⟨htb, htr, htg⟩, htd⟩
   apply Janus.Amd64.Kernel.ReturnsK.of_reaches
   janus64_intro hs
   simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3 hb ha hw htg htd
@@ -49,29 +50,29 @@ def pin (_E : KEnv) (_k : Kern) : Prop := True
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h, rfl⟩
 
 theorem pre : StackGuardOK s0 0 ∧ StackWritable s0 64 8 ∧ TlsG s0 ∧
     (s0.fsBase.toNat ≤ (s0.regs regSP).toNat - 64 ∨ (s0.regs regSP).toNat + 16 ≤ s0.fsBase.toNat) := by
-  refine ⟨⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩,
+  refine ⟨⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide, by decide⟩,
     ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, by decide⟩
 
 /-- The theorem fires: `Getpid()` returns the kernel's pid. -/
 theorem returns : Amd64.Kernel.ReturnsK (Extracted.program.withExit ret) E0
-    (fun s' k' => ABIReturn s0 s' ∧ (k' = k0 ∧ s'.regs 0 = BitVec.ofNat 64 k0.pid))
-    (fun _ _ => False) s0 k0 :=
-  correctness E0 ret hret s0 k0 setup pre
+    (fun s' k' => ABIReturn (s0.setRet ret) s' ∧ (k' = k0 ∧ s'.regs 0 = BitVec.ofNat 64 k0.pid))
+    (fun _ _ => False) (s0.setRet ret) k0 :=
+  correctness E0 s0 k0 setup pre ret hret
 
 /-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (E : KEnv) (ret : Nat) (s : Amd64.State) (k : Kern), pin E k ∧
     RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧
+    CallSetup0 Extracted.entry [] s ∧
     (StackGuardOK s 0 ∧ StackWritable s 64 8 ∧ TlsG s ∧
       (s.fsBase.toNat ≤ (s.regs regSP).toNat - 64 ∨ (s.regs regSP).toNat + 16 ≤ s.fsBase.toNat)) ∧
     Amd64.Kernel.ReturnsK (Extracted.program.withExit ret) E
-      (fun s' k' => ABIReturn s s' ∧ (k' = k ∧ s'.regs 0 = BitVec.ofNat 64 k.pid))
-      (fun _ _ => False) s k :=
+      (fun s' k' => ABIReturn (s.setRet ret) s' ∧ (k' = k ∧ s'.regs 0 = BitVec.ofNat 64 k.pid))
+      (fun _ _ => False) (s.setRet ret) k :=
   ⟨E0, ret, s0, k0, trivial, hret, setup, pre, returns⟩
 
 end Witness

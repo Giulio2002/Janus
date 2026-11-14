@@ -260,6 +260,33 @@ structure StackGuardOK (s : State) (adj : Nat) : Prop where
   noWrap : (s.regs regG).toNat + stackguard0Offset + 8 ≤ 2 ^ 48
   readable : s.mem.accessible ((s.regs regG).toNat + stackguard0Offset) 8 false = true
   below : stackguard0 s + adj < (s.regs regSP).toNat
+  /-- The guard word is not the return-address slot `[RSP, RSP + 8)` (the caller's `CALL` writes the return address
+  there, after the precondition's state: a precondition that reads the guard must not read the return address). -/
+  apart : (s.regs regG).toNat + stackguard0Offset + 8 ≤ (s.regs regSP).toNat ∨
+    (s.regs regSP).toNat + 8 ≤ (s.regs regG).toNat + stackguard0Offset
+
+/-- Installing the return address leaves the stack-guard precondition unchanged (the guard word is apart from
+`[RSP, RSP + 8)`, a field of `StackGuardOK`). -/
+@[simp] theorem stackGuardOK_setRet {s : State} {ret adj : Nat} :
+    StackGuardOK (s.setRet ret) adj ↔ StackGuardOK s adj := by
+  have eq : ∀ {t : State}, ((t.regs regG).toNat + stackguard0Offset + 8 ≤ (t.regs regSP).toNat ∨
+      (t.regs regSP).toNat + 8 ≤ (t.regs regG).toNat + stackguard0Offset) →
+      stackguard0 (t.setRet ret) = stackguard0 t := fun h => by
+    unfold stackguard0
+    refine readLE_setRet_of_disjoint ?_
+    simp only [regSP, regG, stackguard0Offset, setRet_regs] at h ⊢; omega
+  constructor
+  · intro h
+    have hap : (s.regs regG).toNat + stackguard0Offset + 8 ≤ (s.regs regSP).toNat ∨
+      (s.regs regSP).toNat + 8 ≤ (s.regs regG).toNat + stackguard0Offset := h.apart
+    refine ⟨h.noWrap, by simpa using h.readable, ?_, hap⟩
+    have := h.below
+    simp only [setRet_regs] at this
+    rwa [eq hap] at this
+  · intro h
+    refine ⟨h.noWrap, by simpa using h.readable, ?_, h.apart⟩
+    simp only [setRet_regs]
+    rw [eq h.apart]; exact h.below
 
 /-- Thread-local storage: Go keeps the current goroutine's `g` pointer in the slot at `FS:-8`
 (`runtime.tlsg`: ABI wrappers and assembly reload `R14` with `MOVQ FS:-8, R14`). `TlsG s` says
@@ -270,6 +297,24 @@ structure TlsG (s : State) : Prop where
   base : 8 ≤ s.fsBase.toNat ∧ s.fsBase.toNat ≤ 2 ^ 48
   readable : s.mem.accessible (s.fsBase.toNat - 8) 8 false = true
   g : s.mem.readLE (s.fsBase.toNat - 8) 8 = (s.regs regG).toNat
+
+/-- Installing the return address leaves `TlsG` unchanged when the TLS slot `[fsBase - 8, fsBase)` is apart from
+`[RSP, RSP + 8)` (the side condition is a precondition conjunct, `fsBase ≤ RSP ∨ RSP + 16 ≤ fsBase`). -/
+theorem tlsG_setRet_iff {s : State} {ret : Nat}
+    (h : s.fsBase.toNat ≤ (s.regs 4).toNat ∨ (s.regs 4).toNat + 16 ≤ s.fsBase.toNat) :
+    TlsG (s.setRet ret) ↔ TlsG s := by
+  have e : 8 ≤ s.fsBase.toNat →
+      (s.setRet ret).mem.readLE (s.fsBase.toNat - 8) 8 = s.mem.readLE (s.fsBase.toNat - 8) 8 := by
+    intro hb
+    refine readLE_setRet_of_disjoint ?_
+    omega
+  constructor
+  · intro ⟨a, b, c⟩
+    have e' := e a.1
+    exact ⟨a, by simpa using b, by simpa [e'] using c⟩
+  · intro ⟨a, b, c⟩
+    have e' := e a.1
+    exact ⟨a, by simpa using b, by simpa [e'] using c⟩
 
 /-- The address `FS:-8` (`fsBase + sext(-8)`, as the decoder produces it) is `fsBase - 8`. -/
 theorem TlsG.addr {s : State} (h : TlsG s) :
@@ -385,7 +430,7 @@ theorem stackguard0_lt : stackguard0 s < 2 ^ 64 := Janus.Arm64.Memory.readLE_lt 
 
 theorem StackGuardOK.mono {adj adj' : Nat} (h : StackGuardOK s adj) (hle : adj' ≤ adj) :
     StackGuardOK s adj' :=
-  ⟨h.noWrap, h.readable, by have := h.below; omega⟩
+  ⟨h.noWrap, h.readable, by have := h.below; omega, h.apart⟩
 
 /-! ### Read-only data -/
 

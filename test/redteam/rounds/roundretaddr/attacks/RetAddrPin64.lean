@@ -106,4 +106,10 @@ theorem d8 (C : Janus.Amd64.FFI.Contract) : Janus.Amd64.FFI.CEnsuresC Extracted.
     (fun s => s.mem.readLE (s.regs 4).toNat 8 = 0 ∧ False) (fun _ _ => True) := by
   intro s hs hp ret hret; exact hp.2.elim
 
+/-- d9: stack growth (`EnsuresGrow64`): a `caller` that pins the return address (`[RSP] = 0`) verifies, and the pin is printed in
+the statement's `caller` slot and disclosed by the report (`Assumes of the caller`). -/
+theorem d9 (reloc : State → State → Prop) : Janus.Contracts.StackAmd64.EnsuresGrow64 Extracted.program reloc Extracted.entry []
+    (fun _ => True) (fun s => s.mem.readLE (s.regs 4).toNat 8 = 0 ∧ False) (fun _ _ => True) := by
+  intro s hs hp ret hret hc; exact hc.2.elim
+
 end Proof

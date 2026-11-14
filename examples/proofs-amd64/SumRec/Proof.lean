@@ -157,6 +157,33 @@ def Pre (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady) (s : State
     2 * ((hi - (s.regs 4).toNat) + 24 * (s.regs 0).toNat + 24 + stackGuard) ≤ maxstacksize ∧
     H [] (s.regs 14).toNat 0 (rtView rt s.mem) ∧ NoStackPtr s.mem pool rt
 
+/-- The ret-independent part of the grown precondition: `Pre` without the caller's frame chain and the range fact of the
+return address (that comes from `RetAddr`). The goroutine stack `[lo, hi)` is given by the theorem's parameters. -/
+def Pre0 (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady) (lo hi : Nat) (s : State) : Prop :=
+  GStack s.mem (s.regs 14).toNat lo hi ∧ Outside (s.regs 14).toNat 24 pool ∧
+    4096 ≤ lo ∧ lo + 8 ≤ (s.regs 4).toNat ∧ (s.regs 4).toNat + 16 ≤ hi ∧ hi ≤ 2 ^ 48 ∧
+    lo % 16 = 0 ∧ hi % 16 = 0 ∧ (s.regs 4).toNat % 8 = 0 ∧
+    InRanges lo (hi - lo) pool ∧ PoolOK s.mem pool ∧ BPOK pool lo hi (s.regs 5).toNat ∧
+    2 * ((hi - (s.regs 4).toNat) + 24 * (s.regs 0).toNat + 24 + stackGuard) ≤ maxstacksize ∧
+    H [] (s.regs 14).toNat 0 (rtView rt s.mem) ∧ NoStackPtr s.mem pool rt
+
+/-- **The caller assumption** (the `caller` argument of `EnsuresGrow64`, evaluated with the return address written at
+`[RSP]`): the frame chain from the return address up to the top of the stack `hi` is the walkable chain `fs` of real Go
+frames. This is the only thing the theorem assumes of the return address. -/
+def GCaller (FT : FrameTable) (hi : Nat) (fs : List Frame) (s : State) : Prop :=
+  Chain Arch.amd64 FT s.mem hi (s.mem.readLE (s.regs 4).toNat 8) ((s.regs 4).toNat + 8) none fs ∧
+    (∀ f ∈ fs, FT.stop f.pc = false → (s.regs 4).toNat + 16 ≤ f.fp - 8) ∧
+      framesCls Arch.amd64 FT fs ((s.regs 4).toNat + 8) = false
+
+/-- Installing the return address leaves the ret-independent precondition unchanged (the slot is inside the stack, a
+pool range apart from the `g` struct and the runtime's memory). -/
+theorem Pre0.setRet {FT : FrameTable} {pool rt : List (Nat × Nat)} {H : RtReady} {lo hi : Nat} {s : State} {ret : Nat}
+    (hrt : ∀ a n, InRanges a n pool → Outside a n rt) (h : Pre0 FT pool rt H lo hi s) : Pre0 FT pool rt H lo hi (s.setRet ret) := by
+  obtain ⟨c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15⟩ := h
+  have hslot : InRanges (s.regs 4).toNat 8 pool := inRanges_slot c10 (by omega) (by omega)
+  have hout : Outside (s.regs 4).toNat 8 rt := hrt _ _ hslot
+  exact ⟨gStack_setRet c1 c2 hslot, c2, c3, c4, c5, c6, c7, c8, c9, c10, (fun r hr => by simpa using c11 r hr), c12, c13, (by show H [] (s.regs 14).toNat 0 (rtView rt (s.setRet ret).mem); rw [rtView_setRet hout]; exact c14), noStackPtr_setRet c15 hslot⟩
+
 /-- What a call `SumRec(n)` does, through any number of growths: it returns `sumTo n` with the
 stack `[lo, hi)` grown to `[lo', hi')` (possibly the same), `RSP` popped and moved, `RBP` restored
 and adjusted, `g` kept, the caller's frames moved (`Moved` from `RSP + 8`, the spill slot free),
@@ -663,11 +690,12 @@ theorem gsum (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
       (by simp [setRegF]) (by simp [setRegF]) rfl
 
 /-- **`SumRec` is correct on a stack of any size, stack growth included** (amd64). -/
-theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
+theorem correctness_old (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     (reloc : State → State → Prop) (hms : MorestackContract64 Extracted.program FT pool rt H reloc)
     (henv : Env FT pool rt) (n : BitVec 64) :
-    EnsuresGrow64 Extracted.program reloc Extracted.entry [n] (Pre FT pool rt H)
-      (fun _ s' => s'.regs 0 = BitVec.ofNat 64 (sumTo n.toNat)) := by
+    ∀ ret, RetAddr Extracted.program ret → ∀ s,
+      CallSetup (Extracted.program.withExit ret) Extracted.entry [n] s → Pre FT pool rt H s →
+      GrownReturns64 (Extracted.program.withExit ret) reloc s (fun s' => s'.regs 0 = BitVec.ofNat 64 (sumTo n.toNat)) := by
   intro ret hret s hs hpre
   janus64_intro hs
   have hg := gsum FT pool rt H reloc hms henv s (by rw [h_rip]; rfl) hpre
@@ -676,6 +704,26 @@ theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
     (by have := hret.user; omega)).mono fun s' h => ?_
   obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, h0, _⟩ := h
   rw [h0, h_a0]
+
+
+/-- **The theorem.** The precondition is evaluated before the return address is written; the caller's frame chain is the
+explicit `caller` argument. -/
+theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
+    (reloc : State → State → Prop) (hms : MorestackContract64 Extracted.program FT pool rt H reloc)
+    (henv : Env FT pool rt) (n : BitVec 64) (lo hi : Nat) (fs : List Frame) :
+    EnsuresGrow64 Extracted.program reloc Extracted.entry [n]
+      (Pre0 FT pool rt H lo hi) (GCaller FT hi fs)
+      (fun _ s' => s'.regs 0 = BitVec.ofNat 64 (sumTo n.toNat)) :=
+  EnsuresGrow64.of_old_with (Pold := Pre FT pool rt H)
+    (fun s ret hret hp hc => by
+      have h1 := Pre0.setRet (ret := ret) henv.2.2.2.2 hp
+      obtain ⟨c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15⟩ := h1
+      have hu : (s.setRet ret).mem.readLE ((s.setRet ret).regs 4).toNat 8 < 2 ^ 47 := by
+        have := GoABI.readLE_setRet_sp (s := s) hret.lt64
+        have := hret.user
+        simp only [GoABI.setRet_regs]; omega
+      exact ⟨lo, hi, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, hu, ⟨fs, hc.1, hc.2.1, hc.2.2⟩, c13, c14, c15⟩)
+    (correctness_old FT pool rt H reloc hms henv n)
 
 /-! ## The theorem is not vacuous -/
 
@@ -753,6 +801,9 @@ def s0 : State :=
 
 theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [3#64] s0 :=
   ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+
+theorem setup0 : CallSetup0 Extracted.entry [3#64] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
 theorem memw_desc : memw.readLE G0 8 = SL ∧ memw.readLE (G0 + 8) 8 = SH ∧
     memw.readLE (G0 + 16) 8 = SL + stackGuard := by
@@ -862,22 +913,32 @@ theorem sm_pre : Janus.Contracts.StackAmd64.MorestackPre64 Extracted.program FTs
   · exact (mem0_noptr.writeLE _ ⟨(SL, SH), by simp [pool], by decide, by decide⟩).writeLE _
       ⟨(SL, SH), by simp [pool], by decide, by decide⟩
 
+/-- The pieces of `pre`: the stack `[lo, hi)`, the ret-independent precondition and the caller's frame chain. -/
+theorem pieces : ∃ lo hi fs, Pre0 FTs pool rt H lo hi s0 ∧ GCaller FTs hi fs s0 := by
+  obtain ⟨lo, hi, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, hu, ⟨fs, k1, k2, k3⟩, c13, c14, c15⟩ := pre
+  exact ⟨lo, hi, fs, ⟨c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15⟩, k1, k2, k3⟩
+
 /-- So the guarantee is reached: from a stack where not even the first frame fits, `SumRec(3)`
 grows the stack and returns `6`. -/
-theorem returns : GrownReturns64 (Extracted.program.withExit ret) (reloc FTs) s0
-    (fun s' => s'.regs 0 = 6#64) :=
-  (correctness FTs pool rt H (reloc FTs) (contract64 _ FTs) env 3#64 ret hret s0 setup pre).mono
-    fun s' h => by rw [h]; rfl
+theorem returns : GrownReturns64 (Extracted.program.withExit ret) (reloc FTs) (s0.setRet ret)
+    (fun s' => s'.regs 0 = 6#64) := by
+  obtain ⟨lo, hi, fs, h0, hc⟩ := pieces
+  exact (correctness FTs pool rt H (reloc FTs) (contract64 _ FTs) env 3#64 lo hi fs s0 setup0
+    h0 ret hret (by rw [setup.setRet_eq]; exact hc)).mono fun s' h => by rw [h]; rfl
 
 /-- All hypotheses of `correctness` hold together, for a call whose first frame does not fit. -/
 theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
-    (reloc : State → State → Prop) (ret : Nat) (s : State),
+    (reloc : State → State → Prop) (ret : Nat) (s : State) (lo hi : Nat) (fs : List Frame),
     MorestackContract64 Extracted.program FT pool rt H reloc ∧ Env FT pool rt ∧
-    RetAddr Extracted.program ret ∧ CallSetup (Extracted.program.withExit ret) Extracted.entry [3#64] s ∧
-    Pre FT pool rt H s ∧ ¬ s.mem.readLE ((s.regs 14).toNat + 16) 8 < (s.regs 4).toNat ∧
+    RetAddr Extracted.program ret ∧ CallSetup0 Extracted.entry [3#64] s ∧
+    Pre0 FT pool rt H lo hi s ∧ ¬ s.mem.readLE ((s.regs 14).toNat + 16) 8 < (s.regs 4).toNat ∧
     (∃ (g lo hi : Nat) (s_m : State), Janus.Contracts.StackAmd64.MorestackPre64 Extracted.program FT pool rt H g lo hi s_m) ∧
-    GrownReturns64 (Extracted.program.withExit ret) reloc s fun s' => s'.regs 0 = BitVec.ofNat 64 (sumTo (3#64).toNat) :=
-  ⟨FTs, pool, rt, H, reloc FTs, ret, s0, contract64 _ FTs, env, hret, setup, pre, no_room, ⟨G0, SL, SH, sm, sm_pre⟩, correctness FTs pool rt H (reloc FTs) (contract64 _ FTs) env 3#64 ret hret s0 setup pre⟩
+    GCaller FT hi fs (s.setRet ret) ∧
+    GrownReturns64 (Extracted.program.withExit ret) reloc (s.setRet ret) fun s' => s'.regs 0 = BitVec.ofNat 64 (sumTo (3#64).toNat) := by
+  obtain ⟨lo, hi, fs, h0, hc⟩ := pieces
+  have hc' : GCaller FTs hi fs (s0.setRet ret) := by rw [setup.setRet_eq]; exact hc
+  exact ⟨FTs, pool, rt, H, reloc FTs, ret, s0, lo, hi, fs, contract64 _ FTs, env, hret, setup0, h0, no_room, ⟨G0, SL, SH, sm, sm_pre⟩, hc',
+    correctness FTs pool rt H (reloc FTs) (contract64 _ FTs) env 3#64 lo hi fs s0 setup0 h0 ret hret hc'⟩
 
 end Witness
 

@@ -60,4 +60,11 @@ theorem e9 (C : Janus.FFI.Contract) : Janus.FFI.CEnsuresC Extracted.program C Ex
     (fun s => (s.regs 30).toNat = 0 ∧ False) (fun _ _ => True) := by
   intro s hs hp ret hret; exact hp.2.elim
 
+/-- e10: stack growth (`EnsuresGrow`): the ONE place a theorem may assume something about the return address is its `caller`
+argument, evaluated with the return address installed. A `caller` that pins `ret = 0` verifies, and the pin is printed in the
+statement's `caller` slot and disclosed by the report (`Assumes of the caller`); `pre` still cannot pin it. -/
+theorem e10 (reloc : State → State → Prop) : Janus.Contracts.Stack.EnsuresGrow Extracted.program reloc Extracted.entry []
+    (fun _ => True) (fun s => (s.regs 30).toNat = 0 ∧ False) (fun _ _ => True) := by
+  intro s hs hp ret hret hc; exact hc.2.elim
+
 end Proof

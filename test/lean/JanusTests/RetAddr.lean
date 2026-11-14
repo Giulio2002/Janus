@@ -104,7 +104,7 @@ example : Ensures retProg 0x1000 [] (fun s => (s.regs 30).toNat = 0) (fun _ _ =>
 /-- a7: `EnsuresGrow` (stack growth) migrates with the same one line; the precondition is evaluated before `X30` is installed. -/
 example (reloc : State → State → Prop) :
     Janus.Contracts.Stack.EnsuresGrow retProg reloc 0x1000 [] (fun s => (s.regs 5).toNat < 7)
-      (fun _ _ => True) := by
+      (fun _ => True) (fun _ _ => True) := by
   janus_ensures_old
   intro ret hret s hs _
   apply Janus.Contracts.Stack.GrownReturns.done
@@ -222,9 +222,9 @@ def retProg64 : Program := { segments := [⟨"f", 0x1000, [0xc3]⟩], stubs := [
 /-- m13: `EnsuresGrow64` migrates with the same one line. -/
 example (reloc : State → State → Prop) :
     Janus.Contracts.StackAmd64.EnsuresGrow64 retProg64 reloc 0x1000 [] (fun s => StackWritable s 0 8)
-      (fun _ _ => True) := by
+      (fun _ => True) (fun _ _ => True) := by
   janus64_ensures_old
-  intro ret hret s hs hpre
+  intro ret hret s hs ⟨hpre, _⟩
   apply Janus.Contracts.StackAmd64.GrownReturns64.done
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre

@@ -293,20 +293,72 @@ theorem grow_rec64 {p : Amd64.Program} {reloc : State → State → Prop} {Cfg :
       exact step lo hi (fun lo₂ hi₂ s₂ hlt₂ hgt hcfg₂ => ih lo₂ hi₂ (by omega) s₂ hcfg₂ hlt₂) s hcfg hlt
   exact fun s hcfg hlt => key (maxstacksize - (hi - lo)) lo hi (Nat.le_refl _) s hcfg hlt
 
-/-- The grown contract of a Go function on amd64, under the `morestack` contract `reloc`. -/
+/-- The grown contract of a Go function on amd64, under the `morestack` contract `reloc`
+(see `Stack.EnsuresGrow`: `pre` is evaluated before the return address is written; `caller` is evaluated
+with it written, an explicit part of the statement). -/
 def EnsuresGrow64 (p : Amd64.Program) (reloc : State → State → Prop) (entry : Nat) (args : List W64)
-    (pre : State → Prop) (post : State → State → Prop) : Prop :=
-  ∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret →
+    (pre : State → Prop) (caller : State → Prop) (post : State → State → Prop) : Prop :=
+  ∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret → caller (s.setRet ret) →
     GrownReturns64 (p.withExit ret) reloc (s.setRet ret) (fun s' => post (s.setRet ret) s')
 
-/-- Migration bridge (see `GoABI.Ensures.of_old`). -/
-theorem EnsuresGrow64.of_old {p : Amd64.Program} {reloc : State → State → Prop} {entry : Nat}
-    {args : List W64} {pre : State → Prop} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
-    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+theorem EnsuresGrow64.of_old_with {p : Amd64.Program} {reloc : State → State → Prop} {entry : Nat}
+    {args : List W64} {pre caller Pold : State → Prop} {post : State → State → Prop}
+    (hinv : ∀ s ret, RetAddr p ret → pre s → caller (s.setRet ret) → Pold (s.setRet ret))
+    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → Pold s →
       GrownReturns64 (p.withExit ret) reloc s (fun s' => post s s')) :
-    EnsuresGrow64 p reloc entry args pre post :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
+    EnsuresGrow64 p reloc entry args pre caller post :=
+  fun s hs hp ret hret hc => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp hc)
+
+/-- Migration bridge: the pre-v0.4.0 precondition is `pre ∧ caller`. -/
+theorem EnsuresGrow64.of_old {p : Amd64.Program} {reloc : State → State → Prop} {entry : Nat}
+    {args : List W64} {pre caller : State → Prop} {post : State → State → Prop}
+    (hinv : ∀ s ret, RetAddr p ret → pre s → caller (s.setRet ret) → pre (s.setRet ret))
+    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s ∧ caller s →
+      GrownReturns64 (p.withExit ret) reloc s (fun s' => post s s')) :
+    EnsuresGrow64 p reloc entry args pre caller post :=
+  EnsuresGrow64.of_old_with (Pold := fun s => pre s ∧ caller s)
+    (fun s ret hret hp hc => ⟨hinv s ret hret hp hc, hc⟩) h
+
+/-! ## The return-address slot inside the goroutine stack: what installing the return address leaves unchanged
+
+The amd64 grown preconditions state facts about memory (the `g` struct, the pools, the runtime's view, the absence
+of stack pointers outside the stacks). The return address is written at `[RSP, RSP + 8)`, which lies inside the stack
+`[lo, hi)`, a pool range apart from the `g` struct and from the runtime's memory: none of those facts changes. -/
+
+/-- The return slot lies inside a pool when the stack `[lo, hi)` does and `RSP` is in it. -/
+theorem inRanges_slot {lo hi sp : Nat} {pool : List (Nat × Nat)} (hin : InRanges lo (hi - lo) pool)
+    (h1 : lo ≤ sp) (h2 : sp + 8 ≤ hi) : InRanges sp 8 pool :=
+  InRanges.sub hin h1 (by omega)
+
+/-- `GStack` survives installing the return address (the `g` struct is outside every pool; the slot is in one). -/
+theorem gStack_setRet {s : State} {ret g lo hi : Nat} {pool : List (Nat × Nat)}
+    (h : GStack s.mem g lo hi) (hgo : Outside g 24 pool) (hslot : InRanges (s.regs 4).toNat 8 pool) :
+    GStack (s.setRet ret).mem g lo hi := by
+  have hd := InRanges.disjoint hslot hgo
+  obtain ⟨h1, h2, h3, h4, h5⟩ := h
+  have e1 : (s.setRet ret).mem.readLE (g + gStackLo) 8 = s.mem.readLE (g + gStackLo) 8 :=
+    GoABI.readLE_setRet_of_disjoint (by simp only [gStackLo]; omega)
+  have e2 : (s.setRet ret).mem.readLE (g + gStackHi) 8 = s.mem.readLE (g + gStackHi) 8 :=
+    GoABI.readLE_setRet_of_disjoint (by simp only [gStackHi]; omega)
+  have e3 : (s.setRet ret).mem.readLE (g + gStackguard0) 8 = s.mem.readLE (g + gStackguard0) 8 :=
+    GoABI.readLE_setRet_of_disjoint (by simp only [gStackguard0]; omega)
+  exact ⟨h1, by simpa using h2, by rw [e1]; exact h3, by rw [e2]; exact h4, by rw [e3]; exact h5⟩
+
+/-- `NoStackPtr` survives installing the return address: the slot is in a pool, and the property quantifies over the
+words outside the pools and the runtime memory. -/
+theorem noStackPtr_setRet {s : State} {ret : Nat} {pool rt : List (Nat × Nat)}
+    (h : NoStackPtr s.mem pool rt) (hslot : InRanges (s.regs 4).toNat 8 pool) :
+    NoStackPtr (s.setRet ret).mem pool rt := by
+  intro a ha
+  have hd := InRanges.disjoint hslot (by rw [outside_append] at ha; exact ha.1)
+  have e : (s.setRet ret).mem.readLE a 8 = s.mem.readLE a 8 :=
+    GoABI.readLE_setRet_of_disjoint (by omega)
+  rw [e]; exact h a ha
+
+/-- What the runtime sees is unchanged by installing the return address (the slot is outside `rt`). -/
+theorem rtView_setRet {s : State} {ret : Nat} {rt : List (Nat × Nat)} (hout : Outside (s.regs 4).toNat 8 rt) :
+    rtView rt (s.setRet ret).mem = rtView rt s.mem :=
+  rtView_writeLE hout
 
 /-! ## amd64 frames keep their words above their stack pointer -/
 

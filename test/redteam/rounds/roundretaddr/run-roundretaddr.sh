@@ -34,9 +34,9 @@ run() { # PROOF ART THEOREM...
   for t in "$@"; do a+=(--theorem "$P.$t"); done
   "$J" verify --audit-only --janus-root "$root" --proof "$pf" "$art" "${a[@]}" 2>&1 | sed -E 's/^Audit-only: /Verified: /; s/^(=== .*): audit-only \(NOT verified\) ===\$/\1: verified ===/'
 }
-all_amd="$(run $R/attacks/RetAddrPin64.lean "$W/ErrWrap64" c1 c2 c3 c4 c5 c6 c7 c8 d0 d1 d2 d3 d4 d5 d6 d7 d8)"
+all_amd="$(run $R/attacks/RetAddrPin64.lean "$W/ErrWrap64" c1 c2 c3 c4 c5 c6 c7 c8 d0 d1 d2 d3 d4 d5 d6 d7 d8 d9)"
 printf '%s\n' "$all_amd" > "$W/RetAddrPin64.txt"
-all_arm="$(run $R/attacks/RetAddrPinA64.lean "$W/Add64" e1 e2 e3 e4 e5 e6 e7 e8 e9)"
+all_arm="$(run $R/attacks/RetAddrPinA64.lean "$W/Add64" e1 e2 e3 e4 e5 e6 e7 e8 e9 e10)"
 printf '%s\n' "$all_arm" > "$W/RetAddrPinA64.txt"
 row() { # ALL NAME : every row of this round is Verified (the pinned word is the caller's old word)
   local all=$1 name=$2 out verdict status=""
@@ -49,9 +49,18 @@ row() { # ALL NAME : every row of this round is Verified (the pinned word is the
   [ -n "$status" ] && broken+=("$name"); return 0
 }
 echo "== amd64: RetAddrPin64.lean (the RspBypass64 probes, bounds, the instruction-count forms)"
-for n in c1 c2 c3 c4 c5 c6 c7 c8 d0 d1 d2 d3 d4 d5 d6 d7 d8; do row "$all_amd" $n; done
+for n in c1 c2 c3 c4 c5 c6 c7 c8 d0 d1 d2 d3 d4 d5 d6 d7 d8 d9; do row "$all_amd" $n; done
 echo "== arm64: RetAddrPinA64.lean (the LrPin probes)"
-for n in e1 e2 e3 e4 e5 e6 e7 e8 e9; do row "$all_arm" $n; done
+for n in e1 e2 e3 e4 e5 e6 e7 e8 e9 e10; do row "$all_arm" $n; done
+# the stack-growth rows: the pin sits in the `caller` slot and the report shows it
+callerrow() { # ALL NAME PATTERN
+  local out; out="$(awk -v n="=== $P.$2:" 'index($0,n)==1{p=1;print;next} /^=== /{p=0} p' <<<"$1")"
+  if grep -F "Assumes of the caller" <<<"$out" | grep -qF -- "$3"; then printf '  %-6s %s\n' "$2" "report discloses the caller pin: $3"
+  else printf '  %-6s caller pin NOT disclosed in the report   <-- BROKEN\n' "$2"; broken+=("$2-caller"); fi
+}
+echo "== the caller slot is disclosed"
+callerrow "$all_arm" e10 "BitVec.toNat (s.regs 30) = 0"
+callerrow "$all_amd" d9 "= 0"
 echo
 if [ ${#broken[@]} -gt 0 ]; then echo "round retaddr: BROKEN rows: ${broken[*]}"; exit 1; fi
 echo "round retaddr: all rows as expected"

@@ -113,6 +113,16 @@ macro_rules
       (intro s k ret hret hp
        janus_pre_setRet_core s ret hret hp [$ds,*]))
 
+/-- `janus_pre_setRet_c`: as `janus_pre_setRet` for a precondition with a `caller` hypothesis (`EnsuresGrow`: the goal is
+`∀ s ret, RetAddr p ret → pre s → caller (s.setRet ret) → pre (s.setRet ret)`; `hc` is available to the proof). -/
+syntax "janus_pre_setRet_c" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
+
+macro_rules 
+  | `(tactic| janus_pre_setRet_c) => `(tactic| janus_pre_setRet_c [])
+  | `(tactic| janus_pre_setRet_c [$ds,*]) => `(tactic|
+      (intro s ret hret hp hc
+       janus_pre_setRet_core s ret hret hp [$ds,*]))
+
 /-- `janus_ensures_old [defs]`: reduce a goal `Ensures … pre post` (or `EnsuresWithin`, `EnsuresGo`,
 `EnsuresGoX`, `RunsAtLeastOnCall`, and the other main-theorem forms `Ensures0`, `CEnsures`, `CEnsuresA`,
 `EnsuresC`, `CEnsuresC`, `EnsuresK`, `EnsuresGrow`) to the pre-v0.4.0 statement `∀ ret, RetAddr … → ∀ s,
@@ -123,22 +133,24 @@ syntax "janus_ensures_old" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 
 /-- The bridge of each main-theorem form (arm64) and the pre-setRet tactic that proves its `hinv`. The names
 are resolved where `janus_ensures_old` is used (the form's module need not be imported here). -/
-def ensuresOldForms : List (Name × Bool) :=
-  [(`Janus.GoABI.Ensures.of_old, false), (`Janus.GoABI.EnsuresWithin.of_old, false),
-   (`Janus.GoABI.EnsuresGoX.of_old, false), (`Janus.GoABI.EnsuresGo.of_old, false),
-   (`Janus.GoABI.RunsAtLeastOnCall.of_old, false), (`Janus.GoABI0.Ensures0.of_old, false),
-   (`Janus.CABI.CEnsures.of_old, false), (`Janus.CABI.CEnsuresA.of_old, false),
-   (`Janus.FFI.EnsuresC.of_old, false), (`Janus.FFI.CEnsuresC.of_old, false),
-   (`Janus.Kernel.EnsuresK.of_old, true), (`Janus.Contracts.Stack.EnsuresGrow.of_old, false)]
+def ensuresOldForms : List (Name × Nat) :=
+  [(`Janus.GoABI.Ensures.of_old, 0), (`Janus.GoABI.EnsuresWithin.of_old, 0),
+   (`Janus.GoABI.EnsuresGoX.of_old, 0), (`Janus.GoABI.EnsuresGo.of_old, 0),
+   (`Janus.GoABI.RunsAtLeastOnCall.of_old, 0), (`Janus.GoABI0.Ensures0.of_old, 0),
+   (`Janus.CABI.CEnsures.of_old, 0), (`Janus.CABI.CEnsuresA.of_old, 0),
+   (`Janus.FFI.EnsuresC.of_old, 0), (`Janus.FFI.CEnsuresC.of_old, 0),
+   (`Janus.Kernel.EnsuresK.of_old, 1), (`Janus.Contracts.Stack.EnsuresGrow.of_old, 2)]
 
 open Lean Macro in
 macro_rules
   | `(tactic| janus_ensures_old) => `(tactic| janus_ensures_old [])
   | `(tactic| janus_ensures_old [$ds,*]) => do
     let mut acc ← `(Lean.Parser.Tactic.tacticSeq| fail "janus_ensures_old: the goal is not a main-theorem form with an `of_old` bridge")
-    for (n, isK) in ensuresOldForms.reverse do
-      let alt ← if isK then
+    for (n, kind) in ensuresOldForms.reverse do
+      let alt ← if kind == 1 then
           `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus_pre_setRet_k [$ds,*]) ?_)
+        else if kind == 2 then
+          `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus_pre_setRet_c [$ds,*]) ?_)
         else `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus_pre_setRet [$ds,*]) ?_)
       acc ← `(Lean.Parser.Tactic.tacticSeq| first | $alt | $acc)
     `(tactic| ($acc))

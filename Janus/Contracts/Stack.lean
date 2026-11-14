@@ -436,24 +436,43 @@ theorem grow_rec {p : Program} {reloc : State → State → Prop} {Cfg : State �
 
 /-! ## Grown `Ensures`
 
-`EnsuresGrow p entry args pre post`: for every admissible return address and every call state
-with these arguments satisfying `pre` (which no longer assumes room), the call returns satisfying
-`post`, after any number of stack growths handled by the `morestack` contract `reloc`. It is the
-grown counterpart of `GoABI.Ensures`. -/
+`EnsuresGrow p reloc entry args pre caller post`: for every call state with these arguments
+satisfying `pre` (which no longer assumes room, and is evaluated BEFORE the return address is
+installed: it cannot restrict it), and every admissible return address `ret` whose call state
+`s.setRet ret` satisfies `caller`, the call returns satisfying `post`, after any number of stack
+growths handled by the `morestack` contract `reloc`. It is the grown counterpart of `GoABI.Ensures`.
+
+`caller` is the one place where the theorem may say something about the return address: it is
+evaluated on the state WITH the return address installed (`s.setRet ret`), and it is meant to say
+that the caller is a real Go frame (the frame chain from `X30` is walkable: the stack copy of
+`morestack` needs that). It is an explicit argument of the form, so it is printed in the statement
+and disclosed in the verify report; it is never hidden in `pre`. -/
 
 /-- The grown contract of a Go function, under the `morestack` contract `reloc`. -/
 def EnsuresGrow (p : Program) (reloc : State → State → Prop) (entry : Nat) (args : List W64)
-    (pre : State → Prop) (post : State → State → Prop) : Prop :=
-  ∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret →
+    (pre : State → Prop) (caller : State → Prop) (post : State → State → Prop) : Prop :=
+  ∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret → caller (s.setRet ret) →
     GrownReturns (p.withExit ret) reloc (s.setRet ret) (fun s' => post (s.setRet ret) s')
 
-/-- Migration bridge (see `GoABI.Ensures.of_old`). -/
-theorem EnsuresGrow.of_old {p : Program} {reloc : State → State → Prop} {entry : Nat} {args : List W64}
-    {pre : State → Prop} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
-    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+/-- Migration bridge, general form: `Pold` is the pre-v0.4.0 precondition (the state with the return
+address installed); it follows from `pre s` and `caller (s.setRet ret)`. -/
+theorem EnsuresGrow.of_old_with {p : Program} {reloc : State → State → Prop} {entry : Nat}
+    {args : List W64} {pre caller Pold : State → Prop} {post : State → State → Prop}
+    (hinv : ∀ s ret, RetAddr p ret → pre s → caller (s.setRet ret) → Pold (s.setRet ret))
+    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → Pold s →
       GrownReturns (p.withExit ret) reloc s (fun s' => post s s')) :
-    EnsuresGrow p reloc entry args pre post :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet ret) (hinv s ret hret hp)
+    EnsuresGrow p reloc entry args pre caller post :=
+  fun s hs hp ret hret hc => h ret hret _ (hs.setRet ret) (hinv s ret hret hp hc)
+
+/-- Migration bridge: the pre-v0.4.0 precondition is `pre ∧ caller` (the chain conjuncts split off into
+`caller`). `hinv` needs `pre (s.setRet ret)` from `pre s` and `caller (s.setRet ret)`. -/
+theorem EnsuresGrow.of_old {p : Program} {reloc : State → State → Prop} {entry : Nat} {args : List W64}
+    {pre caller : State → Prop} {post : State → State → Prop}
+    (hinv : ∀ s ret, RetAddr p ret → pre s → caller (s.setRet ret) → pre (s.setRet ret))
+    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s ∧ caller s →
+      GrownReturns (p.withExit ret) reloc s (fun s' => post s s')) :
+    EnsuresGrow p reloc entry args pre caller post :=
+  EnsuresGrow.of_old_with (Pold := fun s => pre s ∧ caller s)
+    (fun s ret hret hp hc => ⟨hinv s ret hret hp hc, hc⟩) h
 
 end Janus.Contracts.Stack

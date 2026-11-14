@@ -97,6 +97,10 @@ structure Record where
   computed from the statement, not from the extraction. A main theorem has them as hypotheses; a
   witness claims them. Empty: the statement assumes nothing about the runtime. -/
   contractHyps : Array String := #[]
+  /-- v0.4.0: the `caller` argument of an `EnsuresGrow`/`EnsuresGrow64` main statement, printed: the one place a stack-growth
+  theorem may assume something about the return address (the caller's frame chain, evaluated with the return address
+  installed). Disclosed in the verify report so that it cannot hide. -/
+  callerAssumption : Array String := #[]
   /-- UP3c: the main theorem is a refutation (its statement, under its binders, is a negation `¬ …`): it claims no run, so no run-witness is required. -/
   refutation : Bool := false
   /-- UP3c: the main statement makes no claim about running the program (no `Returns`/`Panics`/`ReachesRet`/`Reaches`/`Summary`/`Program.run` reachable through its definitions): `Extracted.entry = Extracted.entry`; nothing to witness. -/
@@ -1767,6 +1771,19 @@ partial def strayImpl (ivs : Std.HashSet FVarId) (e : Expr) : Option FVarId :=
   | .letE _ t v b _ => strayImpl ivs t <|> strayImpl ivs v <|> strayImpl ivs b
   | .mdata _ b | .proj _ _ b => strayImpl ivs b
   | _ => none
+
+/-- v0.4.0: the `caller` argument (the 6th) of every `EnsuresGrow` / `EnsuresGrow64` that is the conclusion of the statement
+(or a conjunct of it), printed. `EnsuresGrow p reloc entry args pre caller post`. -/
+partial def callerSlots (ty : Expr) : MetaM (Array String) :=
+  Meta.forallTelescope ty fun _ body => go body
+where
+  go (e : Expr) : MetaM (Array String) := do
+    let e := e.consumeMData
+    if e.isAppOfArity ``And 2 then return (← go (e.getArg! 0)) ++ (← go (e.getArg! 1))
+    if e.getAppFn.constName?.any (fun n => n == `Janus.Contracts.Stack.EnsuresGrow || n == `Janus.Contracts.StackAmd64.EnsuresGrow64) && e.getAppNumArgs == 7 then
+      let c := e.getArg! 5
+      return #[(← try Meta.ppExpr c catch _ => pure (toString c)).pretty 10000]
+    return #[]
 
 /-- UP3c: CONSERVATIVE: does `e` possibly reach a run claim (`Returns`, `Panics`, `ReachesRet`, `Reaches`, `Summary`, `Program.run`, any machine
 `step`/`exec`/`run`) through the definitions it mentions? Anything the walk cannot unfold (axiom, opaque, `implemented_by`/extern bodies are opaque,
@@ -3576,13 +3593,15 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     let (statement, statementExplicit, defs, extOut, notes, contractHyps) ←
       cleanEnvAndPrint cx thmN ci.type localDefs stubs extDefs cleanState (pre? := pre?.map (·.2))
         (main := role == .main)
+    -- v0.4.0: the `caller` slot of a stack-growth statement is disclosed
+    let callerAssumption ← runCore envA (Meta.MetaM.run' (callerSlots ci.type))
     -- UP3c: `runFree` needs a hypothesis-free statement (data binders only): a false/circular hypothesis would make it vacuous
     let runFreeHyps := runFreeBinders ci.type
     return { name := thm, kind, module := modName.toString, axioms := axs.map (·.toString),
              statement, statementExplicit, definitions := defs,
              modules := modNames.map (·.toString),
              external := externalNames.filterMap external.get?, externalDefinitions := extOut,
-             notes, role := role.label, matchedMain, matchedMains, matchedModules, contractHyps,
+             notes, role := role.label, matchedMain, matchedMains, matchedModules, contractHyps, callerAssumption,
              -- UP3c: a refutation is EXACTLY `¬ P` with no hypotheses of its own (no binder before the `¬`), `P` a `∀` over data binders only whose
              -- final claim is not itself a negation / `False`, and `P` is a claim about the extracted program. `¬¬P`, `(h : ¬E) → False`, a
              -- false hypothesis, or a program that appears only in a hypothesis are NOT refutations (they are vacuous in the way the witness closes)

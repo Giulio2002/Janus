@@ -96,6 +96,9 @@ type verifiedReport struct {
 	// itself (round 14): "NewobjectContract@runtime.newobject". Empty: the statement assumes
 	// nothing about the runtime, whatever the extraction left out (Contracts).
 	ContractHyps []string `json:"contractHyps,omitempty"`
+	// CallerAssumption (v0.4.0): the `caller` argument of an EnsuresGrow/EnsuresGrow64 statement, printed. It is evaluated with the
+	// return address installed and is the only place such a theorem may assume something about the caller.
+	CallerAssumption []string `json:"callerAssumption,omitempty"`
 	// Refutation: the main theorem is a negation (UP3c); it claims no run, so no run-witness is required.
 	Refutation bool `json:"refutation,omitempty"`
 	// RunFree: the statement reaches no run claim (UP3c); nothing to witness.
@@ -147,6 +150,7 @@ type auditResult struct {
 	MatchedMains      []string   `json:"matchedMains"`        // every main theorem of the module the witness supports
 	MatchedModules    []string   `json:"matchedModules"`      // the module declaring each of them
 	ContractHyps      []string   `json:"contractHyps"`        // round 14: the contracts the STATEMENT applies ("Contract@runtime.fn")
+	CallerAssumption  []string   `json:"callerAssumption,omitempty"` // v0.4.0: the `caller` slot of a stack-growth statement
 	Refutation        bool       `json:"refutation"`          // UP3c: the main theorem is a negation (claims no run)
 	RunFree           bool       `json:"runFree"`             // UP3c: the statement claims nothing about running the program
 	Imports           [][]string `json:"imports"`             // [module, direct imports…] for every non-core module
@@ -1309,6 +1313,7 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			MatchedMains:      ar.MatchedMains,
 			MatchedModules:    ar.MatchedModules,
 			ContractHyps:      ar.ContractHyps,
+			CallerAssumption:  callerSlotsOr(ar.Statement, ar.CallerAssumption),
 			Refutation:        ar.Refutation,
 			RunFree:           ar.RunFree,
 			Notes:             ar.Notes,
@@ -1663,6 +1668,9 @@ func roleLines(r *verifiedReport) []string {
 		out = append(out, fmt.Sprintf("  Role: WITNESS, not a correctness claim: a concrete instance showing %s, for the main theorem %s (it uses a concrete runtime implementation; the main theorem must be verified separately)",
 			what, termSafe(r.MatchedMain)))
 	}
+	for _, c := range r.CallerAssumption {
+		out = append(out, fmt.Sprintf("  Assumes of the caller (return address / frame chain): %s (evaluated with the return address installed; the theorem holds only for callers satisfying it)", termSafe(c)))
+	}
 	if len(r.ContractHyps) > 0 {
 		out = append(out, fmt.Sprintf("  Runtime contracts assumed: %s (not extracted; the statement applies them as hypotheses)",
 			termSafe(strings.Join(r.ContractHyps, ", "))))
@@ -1694,6 +1702,62 @@ func roleLines(r *verifiedReport) []string {
 			termSafe(strings.Join(r.Contracts, ", "))))
 	}
 	return out
+}
+
+// callerSlots (v0.4.0) returns, for every `EnsuresGrow` / `EnsuresGrow64` application of the printed statement, its 6th argument:
+// the `caller` slot (`EnsuresGrow p reloc entry args pre caller post`), printed as the statement prints it. The slot is evaluated
+// with the return address installed and is the only place a stack-growth theorem may assume something about the caller.
+func callerSlots(stmt string) []string {
+	var out []string
+	for _, name := range []string{"Janus.Contracts.Stack.EnsuresGrow ", "Janus.Contracts.StackAmd64.EnsuresGrow64 "} {
+		for from := 0; ; {
+			i := strings.Index(stmt[from:], name)
+			if i < 0 {
+				break
+			}
+			pos := from + i + len(name)
+			from = pos
+			var args []string
+			rest := []rune(stmt[pos:])
+			for k := 0; k < len(rest) && len(args) < 6; {
+				for k < len(rest) && rest[k] == ' ' {
+					k++
+				}
+				if k >= len(rest) {
+					break
+				}
+				start, depth := k, 0
+				for k < len(rest) {
+					c := rest[k]
+					if c == '(' || c == '[' || c == '⟨' {
+						depth++
+					} else if c == ')' || c == ']' || c == '⟩' {
+						depth--
+						if depth < 0 {
+							break
+						}
+					} else if c == ' ' && depth == 0 {
+						break
+					}
+					k++
+				}
+				args = append(args, string(rest[start:k]))
+			}
+			if len(args) >= 6 {
+				out = append(out, args[5])
+			}
+		}
+	}
+	return out
+}
+
+// callerSlotsOr is callerSlots of the printed statement, or the audit's own print of the slot when the statement has no such application
+// in the printed form (a definition that unfolds to one).
+func callerSlotsOr(stmt string, fallback []string) []string {
+	if s := callerSlots(stmt); len(s) > 0 {
+		return s
+	}
+	return fallback
 }
 
 // checkWitnessSupport (round 14): a witness verified together with main theorems must support one of

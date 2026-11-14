@@ -1806,6 +1806,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			MatchedMains:          r.audit.MatchedMains,
 			MatchedModules:        r.audit.MatchedModules,
 			ContractHyps:          r.audit.ContractHyps,
+			CallerAssumption:      callerSlotsOr(r.audit.Statement, r.audit.CallerAssumption),
 			Refutation:            r.audit.Refutation,
 			RunFree:               r.audit.RunFree,
 			OleanProvenance:       provenance,

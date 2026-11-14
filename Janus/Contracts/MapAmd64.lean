@@ -78,12 +78,13 @@ theorem RTPre.of_parts {K V : Type} {M : MapModel K V} {s S : State} {frame abov
     (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg : S.regs 14 = s.regs 14)
     (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
     (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame + above) : RTPre M nargs S := by
-  obtain ⟨-, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, -, -⟩ := hc
+  obtain ⟨-, ⟨hg1, hg2, hg3, -⟩, hal, hd, hb, hst, hout, hdj, -⟩ := hc
   simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3
-  refine ⟨by rw [hg]; exact henv, ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, hx, hdf, hra, ?_⟩
+  refine ⟨by rw [hg]; exact henv, ⟨?_, ?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, hx, hdf, hra, ?_⟩
   · simp only [regG, stackguard0Offset, hg]; omega
   · simp only [regG, stackguard0Offset, hg, hacc]; exact hg2
   · simp only [stackguard0, regG, regSP, stackguard0Offset, hg, hguard, hsp]; omega
+  · simp only [regG, regSP, stackguard0Offset, Spec.Disjoint, hg, hsp] at hdj ⊢; omega
   · rw [hsp]; omega
   · rw [hsp]; omega
   · rw [hsp]; omega
