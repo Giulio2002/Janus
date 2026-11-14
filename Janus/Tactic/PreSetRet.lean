@@ -38,6 +38,8 @@ open Lean Elab Tactic Meta
 precondition doubles the disjunction case splits of each side condition). Unfolds at default transparency (`exact`). -/
 def Hide (p : Prop) : Prop := p
 
+theorem Hide.elim {p : Prop} (h : Hide p) : p := h
+
 /-- Destructure every hypothesis of the form `A ∧ B` or `∃ x, A` of the local context, repeatedly
 (except the one named by `keep`). With `deep`, a hypothesis whose type *unfolds* (default transparency) to a
 structure-like proposition (`∧`, `∃`, `StackGuardOK`, a consumer's `CallEnv`, …) is split too. -/

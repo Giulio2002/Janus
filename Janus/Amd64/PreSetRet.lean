@@ -97,7 +97,7 @@ macro_rules (kind := janus64PreSetRetCore)
          try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$v1:ident] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$v2:ident] at ⊢
-         all_goals first | exact hp0 | (and_intros <;> first | with_reducible assumption | omega | (trace_state; fail "janus_pre_setRet: this conjunct of the precondition is not invariant under setRet (see the goal above; pass the predicate definitions to the tactic, e.g. `janus64_ensures_old [Pre, CallEnv]`, and make a pointer read apart from the return slot)")))))
+         all_goals first | with_reducible exact Janus.Tactic.Hide.elim hp0 | (and_intros <;> first | with_reducible assumption | omega | (trace_state; fail "janus_pre_setRet: this conjunct of the precondition is not invariant under setRet (see the goal above; pass the predicate definitions to the tactic, e.g. `janus64_ensures_old [Pre, CallEnv]`, and make a pointer read apart from the return slot)")))))
 
 syntax (name := janus64PreSetRet) "janus64_pre_setRet" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 
