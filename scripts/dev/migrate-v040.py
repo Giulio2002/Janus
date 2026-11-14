@@ -201,7 +201,7 @@ def lambda_binders(s, i):
     j = s.find('=>', out[-1][2] if out else i + 3)
     return out, j
 
-def fix_mono(it, warn):
+def fix_mono(it, warn, ok_heads=None):
     """`Ensures.mono h hpre hpost` / `(h …).mono hpre hpost` with the v0.3 `hpost` (`fun s s' hp hq`): the first binder `_`
     (or unused) -> `mono_ret` with one more `_` (the new `hpost` also binds `ret`)."""
     out = []
@@ -212,6 +212,18 @@ def fix_mono(it, warn):
         if not m: break
         toks, stop = tokens(it, m.end())
         dot = m.group(1) is None
+        if dot and ok_heads is not None:
+            # `(h args).mono …`: only when the receiver is an Ensures-form theorem or hypothesis (`Summary.mono` has the same shape)
+            d = 0; q = m.start()
+            while q >= 0:
+                if it[q] == ')': d += 1
+                elif it[q] == '(':
+                    d -= 1
+                    if d == 0: break
+                q -= 1
+            hd = re.match(r"\(\s*([\w.']+)", it[q:]) if q >= 0 else None
+            if not hd or hd.group(1).split('.')[-1] not in ok_heads and hd.group(1) not in ok_heads:
+                out.append(it[pos:m.end()]); pos = m.end(); continue
         # locate the hpost lambda: the last argument, `(fun …)` or an unparenthesised `fun …`
         k = None
         for q, tk in enumerate(toks):
@@ -543,7 +555,14 @@ def migrate(t, amd0, reg, fname=''):
     for i, it in enumerate(items):
         m = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
         if not m: continue
-        it = fix_mono(it, warn)
+        ok_heads = {n.split('.')[-1] for n in reg.names} | {n.split('.')[-1] for n in ens}
+        sg_, _bs_ = split_sig(it)
+        if sg_ is not None:
+            for mm in re.finditer(r"\((\w+) : ((?:[^()]|\([^()]*\))*)\)", sg_):
+                ty = mm.group(2)
+                if ENSDEF.match(ty) or (re.match(r'\s*(?:\w+\.)*(\w+)', ty) and re.match(r'\s*(?:\w+\.)*(\w+)', ty).group(1) in reg.ensdefs):
+                    ok_heads.add(mm.group(1))
+        it = fix_mono(it, warn, ok_heads)
         cc = conclusion(it)
         if cc and reg.generic and not is_generic(cc[1], cc[2], cc[3]):
             # a row that calls a generic helper (`Ensures.full64 hap … ens`): its `hinv` default has no definition list, so the

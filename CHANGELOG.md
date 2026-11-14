@@ -183,6 +183,14 @@ whose conclusion is an `Ensures` form).
   literal of at most 16 elements, so a concrete callee needs nothing, and (an instance argument, not an explicit one) a summary is still
   applied to its state and precondition: `Ensures.toSummaryIn h hx hc s hpc ⟨…⟩` is unchanged. A generic wrapper with a *variable* `args`
   takes `[ArgsFit args]` (the script adds it).
+- **arm64: bounds on `X30` migrate unchanged.** `janus_pre_setRet` re-proves `(s.regs 30).toNat < 2^48`, `… % 4 = 0` (what `RetAddr` says of every
+  return address: `setRet_lr_toNat`), unfolds `Spec.StackOK` / `Spec.GuardOK`, and closes conjunct by conjunct (existentials included). A
+  pin (`X30 = 0`, `X30 < 2^20`) still fails, by design.
+- **Scale.** On a precondition with 30 conjuncts and dozens of `Outside`/`Apart` disjunctions the discharge of
+  `[a, a+n) ∩ [RSP, RSP+8) = ∅` takes one disjunction at a time (`janus_disj_omega`: split it, clear the others, `omega`), never the exponential
+  `omega` over all of them; the precondition's unfolded copy is hidden from `omega` (`Hide`); the whole precondition is tried before it is split.
+  `janus64_ensures_old [Pre, CallEnv, …]` unfolds each listed definition at once and one by one (an ambiguous name fails only its own `simp`);
+  the script passes the fully qualified names of the state-reading definitions reachable from the row's precondition.
 - **`janus64_pre_setRet` also discharges** (all tested in `JanusTests/RetAddr`): explicit reads `readLE (RSP + 8 / 16 / 24) 8`
   together with the old-word bound `readLE RSP 8 < 2^47` (re-proved from `RetAddr`: after `setRet` the word is `ret`),
   `Janus.Spec.Ptr` and `Buffer` (pure `accessible`: simp lemmas `ptr_setRet`, `buffer_setRet`), `StackGuardOK`, `TlsG`
