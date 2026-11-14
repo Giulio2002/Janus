@@ -228,6 +228,24 @@ theorem readLE_writeLE_self (a n v : Nat) : (m.writeLE a n v).readLE a n = v % 2
     rw [ih, BitVec.toNat_ofNat, Nat.sub_self, Nat.pow_zero, Nat.div_one]
     exact mod_mul_256 v n
 
+/-- Writing back what is already there changes nothing. -/
+theorem writeLE_readLE_self (a n : Nat) : m.writeLE a n (m.readLE a n) = m := by
+  obtain ⟨b, r⟩ := m
+  have key : ∀ x, a ≤ x → x < a + n →
+      BitVec.ofNat 8 (readLE ⟨b, r⟩ a n / 256 ^ (x - a)) = b x := by
+    intro x h1 h2
+    rw [readLE_div _ _ _ _ (by omega)]
+    obtain ⟨k, hk⟩ : ∃ k, n - (x - a) = k + 1 := ⟨n - (x - a) - 1, by omega⟩
+    rw [hk, readLE_succ, show a + (x - a) = x by omega]
+    simp only [BitVec.ofNat_add, BitVec.ofNat_mul]
+    simp [BitVec.ofNat_toNat]
+  simp only [writeLE]
+  congr 1
+  funext x
+  by_cases h : a ≤ x ∧ x < a + n
+  · simp only [h, and_self, if_true]; exact key x h.1 h.2
+  · simp only [h, if_false]
+
 theorem readLE_writeLE_of_disjoint {a n b k : Nat} (v : Nat) (h : b + k ≤ a ∨ a + n ≤ b) :
     (m.writeLE a n v).readLE b k = m.readLE b k :=
   readLE_congr (fun i hi => bytes_writeLE_outside _ (by omega))

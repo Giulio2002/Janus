@@ -10,6 +10,7 @@ import Janus.Tactic.Ring
 import Janus.Tactic.Carry
 import Janus.Tactic.RingTac
 import Janus.Tactic.Recursion
+import Janus.Tactic.PreSetRet
 
 /-!
 # Janus proof automation

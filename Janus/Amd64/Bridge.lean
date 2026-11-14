@@ -69,7 +69,7 @@ theorem Ensures.toSummary {p : Program} {entry : Nat} {args : List W64} {pre : S
       (fun s => ∃ ret, RetAddr p ret ∧ CallSetup (p.withExit ret) entry args s ∧ pre s)
       (fun s s' => ABIReturn s s' ∧ post s s') := by
   intro s _ ⟨ret, hret, hsu, hpre⟩
-  obtain ⟨n, s', hr, hp⟩ := h ret hret s hsu hpre
+  obtain ⟨n, s', hr, hp⟩ := h.toOld ret hret s hsu hpre
   have h2 := (show Reaches (p.withExit ret) s (IsReturn fun s' => ABIReturn s s' ∧ post s s') from ⟨n, _, hr, hp⟩).toReachesRet hret hx
   rw [retAddrOf_eq, hsu.ret]
   exact h2

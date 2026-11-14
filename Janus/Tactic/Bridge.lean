@@ -77,15 +77,16 @@ theorem Reaches.toReachesRet {p : Program} {ret : Nat} {s : State} {Q : State �
 
 /-- **An `Ensures` theorem is a callee summary.** The precondition carries the call-state facts
 (`CallSetup` of `p.withExit ret` for an admissible `ret`, hence `X30 = ret`); the postcondition is
-the ABI return rules and the `Ensures` post. -/
+the ABI return rules and the `Ensures` post. (A `Summary` speaks about the state with the return
+address installed: `Ensures.toOld`.) -/
 theorem Ensures.toSummary {p : Program} {entry : Nat} {args : List W64} {pre : State → Prop}
     {post : State → State → Prop} (h : Ensures p entry args pre post)
-    (hx : p.fetch p.exitAddr = none) :
+    (hx : p.fetch p.exitAddr = none) (hlen : args.length ≤ numIntRegs := by decide) :
     Summary p entry
       (fun s => ∃ ret, RetAddr p ret ∧ CallSetup (p.withExit ret) entry args s ∧ pre s)
       (fun s s' => ABIReturn s s' ∧ post s s') := by
   intro s _ ⟨ret, hret, hsu, hpre⟩
-  have h2 := (reaches_of_returns (h ret hret s hsu hpre)).toReachesRet hret hx
+  have h2 := (reaches_of_returns (h.toOld hlen ret hret s hsu hpre)).toReachesRet hret hx
   rw [hsu.lr]
   exact h2
 

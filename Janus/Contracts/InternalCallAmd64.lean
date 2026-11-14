@@ -179,7 +179,7 @@ theorem Ensures.toSummaryIn {p0 P : Program} {entry : Nat} {args : List W64} {pr
   intro s hpc ⟨hret, hzero, hargs, hdf, hpre⟩
   have hsu : CallSetup (p0.withExit (s.mem.readLE (s.regs regSP).toNat 8)) entry args s :=
     ⟨hpc, rfl, hzero, hlen, fun i hi => by simpa using hargs.index i hi, hdf⟩
-  obtain ⟨n, s1, hr, hp⟩ := h _ hret s hsu hpre
+  obtain ⟨n, s1, hr, hp⟩ := h.toOld _ hret s hsu hpre
   have h2 := (show Reaches (p0.withExit (s.mem.readLE (s.regs regSP).toNat 8)) s
     (IsReturn fun s' => ABIReturn s s' ∧ post s s') from ⟨n, _, hr, hp⟩).toReachesRet hret hx
   rw [retAddrOf_eq]

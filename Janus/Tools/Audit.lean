@@ -1764,103 +1764,6 @@ partial def strayImpl (ivs : Std.HashSet FVarId) (e : Expr) : Option FVarId :=
   | .mdata _ b | .proj _ _ b => strayImpl ivs b
   | _ => none
 
-/-- `x` is the entry stack pointer `State.regs s 4` (or `State.regs s regSP`). -/
-def isRspReg (x : Expr) : Bool :=
-  x.getAppFn.constName? == some `Janus.Amd64.State.regs && x.getAppNumArgs == 2 &&
-    ((x.getArg! 1).nat? == some 4 || (x.getArg! 1).constName?.any (·.getString! == "regSP"))
-
-/-- The byte offset `k` of an address of the exact form `(RSP).toNat` (`k = 0`) or `(RSP).toNat + k` with a numeral `k`;
-`none` for every other address (including any other arithmetic on `RSP`). -/
-def rspOffset? (a : Expr) : Option Nat :=
-  let a := a.consumeMData
-  let isRspNat (b : Expr) : Bool :=
-    let b := b.consumeMData
-    b.isAppOfArity ``BitVec.toNat 2 && isRspReg (b.getArg! 1).consumeMData
-  if isRspNat a then some 0
-  else if a.isAppOfArity ``HAdd.hAdd 6 && isRspNat (a.getArg! 4) then (a.getArg! 5).consumeMData.nat?
-  else none
-
-/-- `e` is a read that may overlap the memory word at the entry `RSP` (`[RSP, RSP + 8)`, the saved return address):
-`Memory.readLE m a n` whose address `a` mentions `RSP`, unless `a` is exactly `(RSP).toNat + k` with a numeral `k ≥ 8`
-— such a read starts above the return-address word and is a Go stack ARGUMENT (ABIInternal passes the words that do not
-fit in the integer argument registers at `RSP + 8, RSP + 16, …`), which a precondition may legitimately state. Every
-other address that mentions `RSP` (offset `< 8`, subtraction, a non-numeral offset, nested arithmetic) counts as a read of
-`[RSP]` (conservative). -/
-def isSpRead (e : Expr) : Bool :=
-  e.getAppFn.constName? == some `Janus.Arm64.Memory.readLE && e.getAppNumArgs ≥ 3 &&
-    let a := e.getArg! 1
-    (a.find? isRspReg).isSome && (match rspOffset? a with | some k => k < 8 | none => true)
-
-/-- The framework's standard ABI predicates are opaque to the analysis below (see `abiPredicates`).
-`StackWords s skip words` (stack-assigned argument words) reads only `[RSP + stackArgOffset + skip + 8 * i]` with
-`stackArgOffset = 8`, so every read starts at or above `RSP + 8`, never inside the return-address word `[RSP, RSP + 8)`:
-it is the framework's own spelling of Go stack arguments (v0.3.4). `stackWord s off` is NOT listed (`off = 0` is `[RSP]`). -/
-def abiNames : List Name :=
-  [`Janus.Contracts.CallOK64, `Janus.Contracts.StackRoom64,
-   `Janus.GoABI.CallSetup, `Janus.GoABI.RetAddr, `Janus.GoABI.StackWritable, `Janus.GoABI.StackGuardOK,
-   `Janus.GoABI.StackWords,
-   `Janus.Amd64.GoABI.CallSetup, `Janus.Amd64.GoABI.RetAddr, `Janus.Amd64.GoABI.StackWritable,
-   `Janus.Amd64.GoABI.StackGuardOK, `Janus.Amd64.GoABI.StackWords]
-
-/-- by EXACT full name (a name the framework already declares cannot be redeclared by a proof file), never by a
-prefix or a last component: a proof's own `def Janus.Sneak.CallSetup` is not an ABI predicate -/
-def isAbiName (n : Name) : Bool := abiNames.contains n
-
-/-- Does the definition `c` read the word at `[RSP]`, directly or through the definitions it uses (transitively)?
-Memoised per constant (`cache`), so the cost is one traversal of each definition, not of each use; the ABI predicates
-and the core library (`Init`/`Std`/`Lean`) are opaque. A definition under analysis counts as not reading (cycles). -/
-partial def constReadsSp (cache : IO.Ref (Std.HashMap Name Bool)) (c : Name) : MetaM Bool := do
-  if let some r := (← cache.get)[c]? then return r
-  if isAbiName c then return false
-  let env ← getEnv
-  if let some mi := env.getModuleIdxFor? c then
-    let m := env.header.moduleNames[mi.toNat]!
-    if m.getRoot == `Init || m.getRoot == `Std || m.getRoot == `Lean then
-      cache.modify (·.insert c false); return false
-  cache.modify (·.insert c false)
-  let some (.defnInfo d) := env.find? c | return false
-  let mut r := (d.value.find? isSpRead).isSome
-  if !r then
-    for u in d.value.getUsedConstants do
-      if ← constReadsSp cache u then r := true; break
-  cache.modify (·.insert c r)
-  return r
-
-/-- Does the conjunct `e` read the word at `[RSP]`: itself (any spelling, under binders, in arithmetic or an existential) or
-through a definition it mentions (alias, framework predicate that is not one of the ABI predicates)? Semantic, not
-syntactic. -/
-def mentionsSpWord (cache : IO.Ref (Std.HashMap Name Bool)) (e : Expr) : MetaM Bool := do
-  if (e.find? isSpRead).isSome then return true
-  for u in e.getUsedConstants do
-    if ← constReadsSp cache u then return true
-  return false
-
-/-- `c` is (an application of) one of the framework's standard ABI preconditions: they say `[RSP]` is the return address (a
-word below `2^47`), which every consumer legitimately assumes of its caller. A top-level precondition conjunct that is one
-of these is allowed without unfolding; every other conjunct must not read the word at `[RSP]`. -/
-def isAbiPredicate (c : Expr) : Bool :=
-  c.getAppFn.constName?.any isAbiName
-
-/-- the conjuncts of a precondition body (`A ∧ B ∧ …`), under the `fun s =>` binder -/
-partial def conjuncts (e : Expr) : List Expr :=
-  match e with
-  | .mdata _ b => conjuncts b
-  | _ => if e.isAppOfArity ``And 2 then conjuncts (e.getArg! 0) ++ conjuncts (e.getArg! 1) else [e]
-
-/-- The precondition argument of every `Ensures p entry args pre post` in `ty`. -/
-partial def ensuresPres (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
-  let acc := if (e.getAppFn.constName?.any fun n => n == `Janus.GoABI.Ensures || n == `Janus.Amd64.GoABI.Ensures) && e.getAppNumArgs == 5 then acc.push (e.getArg! 3) else acc
-  -- `EnsuresWithin bound p entry args pre post` and `RunsAtLeastOnCall lower p entry args pre` (instruction-count bounds): the
-  -- precondition is the next-to-last / last argument, and is checked like the one of an `Ensures` (the RSP-word rule)
-  let acc := if (e.getAppFn.constName?.any fun n => n == `Janus.GoABI.EnsuresWithin || n == `Janus.Amd64.GoABI.EnsuresWithin) && e.getAppNumArgs == 6 then acc.push (e.getArg! 4) else acc
-  let acc := if (e.getAppFn.constName?.any fun n => n == `Janus.GoABI.RunsAtLeastOnCall || n == `Janus.Amd64.GoABI.RunsAtLeastOnCall) && e.getAppNumArgs == 5 then acc.push (e.getArg! 4) else acc
-  match e with
-  | .app f a => ensuresPres a (ensuresPres f acc)
-  | .lam _ d b _ | .forallE _ d b _ => ensuresPres b (ensuresPres d acc)
-  | .letE _ ty v b _ => ensuresPres b (ensuresPres v (ensuresPres ty acc))
-  | .mdata _ b | .proj _ _ b => ensuresPres b acc
-  | _ => acc
-
 /-- UP3c: CONSERVATIVE: does `e` possibly reach a run claim (`Returns`, `Panics`, `ReachesRet`, `Reaches`, `Summary`, `Program.run`, any machine
 `step`/`exec`/`run`) through the definitions it mentions? Anything the walk cannot unfold (axiom, opaque, `implemented_by`/extern bodies are opaque,
 fuel exhausted) counts as reaching one; so does any constant whose name mentions `step`, `exec` or `run` (a user-defined iteration of the step
@@ -1948,23 +1851,9 @@ the runtime implementation must also be a variable of the statement (`concreteRu
 `impl` is a runtime variable even when no contract mentions it. -/
 def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) := do
   let env ← getEnv
-  -- a bound on the caller's return address: any top-level precondition that reads the memory word at the entry `RSP`
-  -- (`[RSP]`; `ErrorfAmd64.RetLow` is one) weakens the guarantee without the reader seeing it. A consumer proves such facts
-  -- inside its proof from the return address its own `call` pushes. Hypotheses (contract statements) are not scanned.
-  -- (the statement's binders and `fun s => …` become free variables: no loose bound variable reaches `whnf`)
-  let spCache ← IO.mkRef ({} : Std.HashMap Name Bool)
-  let spHit ← Meta.forallTelescope ty fun _ stmt => do
-    for pre in ensuresPres stmt do
-      let bad ← Meta.lambdaTelescope pre fun _ body => do
-        for c in conjuncts body do
-          unless isAbiPredicate c do
-            if ← mentionsSpWord spCache c then return true
-        return false
-      if bad then return true
-    return false
-  do
-    if spHit then
-       return some "the precondition constrains the memory word at the entry `RSP` (the saved return address `[RSP]`, e.g. `ErrorfAmd64.RetLow`, in any form: alias, arithmetic, existential): a theorem must not assume a bound on its caller's return address; a consumer discharges such a fact inside its proof from the return address its own `call` pushes (a code address of the extracted program)"
+  -- (v0.4.0: the former check that no precondition reads the memory word at the entry `RSP` is gone. `Ensures` evaluates its
+  -- precondition on the call state BEFORE the return address is installed (`State.setRet`), so no precondition can constrain the
+  -- caller's return address, whatever it says about `X30` or `[RSP]`.)
   Meta.forallTelescope ty fun xs body => do
     let bound : Std.HashSet FVarId := xs.foldl (fun s x => s.insert x.fvarId!) {}
     let mut rtVars : Std.HashSet FVarId := {}

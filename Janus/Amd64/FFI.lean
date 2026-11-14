@@ -206,7 +206,7 @@ theorem CEnsuresC.refine {p : Program} {C₁ C₂ : Contract} {entry : Nat} {arg
 theorem EnsuresC.of_ensures {p : Program} {C : Contract} {entry : Nat} {args : List W64}
     {pre : State → Prop} {post : State → State → Prop} (h : Ensures p entry args pre post) :
     EnsuresC p C entry args pre post :=
-  fun ret hret s hs hp => .of_returns (h ret hret s hs hp)
+  fun ret hret s hs hp => .of_returns (h.toOld ret hret s hs hp)
 
 theorem CEnsuresC.of_cEnsures {p : Program} {C : Contract} {entry : Nat} {args : List W64}
     {pre : State → Prop} {post : State → State → Prop} (h : CEnsures p entry args pre post) :

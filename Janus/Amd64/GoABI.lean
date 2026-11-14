@@ -105,6 +105,78 @@ structure CallSetup (p : Program) (entry : Nat) (args : List W64) (s : State) : 
 
 abbrev GoCall := CallSetup
 
+/-- `CallSetup` without the return address: the call state *before* `CALL` pushes the return
+address at `[RSP]`. `Ensures` evaluates its precondition on such a state (`State.setRet` writes
+the return address afterwards, for every admissible `ret`), so a precondition cannot restrict the
+return address. The word at `[RSP]` of this state is whatever the caller's stack holds. -/
+structure CallSetup0 (entry : Nat) (args : List W64) (s : State) : Prop where
+  rip : s.rip = BitVec.ofNat 64 entry
+  zero : s.xmm xmmZero = 0
+  len : args.length ≤ numIntRegs
+  args : ∀ i (h : i < args.length), s.regs (argReg i) = args[i]
+  df : s.df = false
+
+/-- Install the return address `ret`: the 8-byte little-endian word `ret` at `[RSP]` (what `CALL`
+pushes). Nothing else changes; in particular the regions (and so accessibility) are kept. -/
+def _root_.Janus.Amd64.State.setRet (s : State) (ret : Nat) : State :=
+  { s with mem := s.mem.writeLE (s.regs regSP).toNat 8 ret }
+
+section SetRet
+
+variable {s : State} {ret : Nat}
+
+@[simp] theorem setRet_regs : (s.setRet ret).regs = s.regs := rfl
+@[simp] theorem setRet_rip : (s.setRet ret).rip = s.rip := rfl
+@[simp] theorem setRet_flags : (s.setRet ret).flags = s.flags := rfl
+@[simp] theorem setRet_xmm : (s.setRet ret).xmm = s.xmm := rfl
+@[simp] theorem setRet_ymmHi : (s.setRet ret).ymmHi = s.ymmHi := rfl
+@[simp] theorem setRet_zmmHi : (s.setRet ret).zmmHi = s.zmmHi := rfl
+@[simp] theorem setRet_kreg : (s.setRet ret).kreg = s.kreg := rfl
+@[simp] theorem setRet_fsBase : (s.setRet ret).fsBase = s.fsBase := rfl
+@[simp] theorem setRet_df : (s.setRet ret).df = s.df := rfl
+@[simp] theorem setRet_mxcsr : (s.setRet ret).mxcsr = s.mxcsr := rfl
+@[simp] theorem setRet_x87 : (s.setRet ret).x87 = s.x87 := rfl
+@[simp] theorem setRet_fpucw : (s.setRet ret).fpucw = s.fpucw := rfl
+@[simp] theorem setRet_mem_regions : (s.setRet ret).mem.regions = s.mem.regions := rfl
+@[simp] theorem setRet_accessible (a n : Nat) (w : Bool) :
+    (s.setRet ret).mem.accessible a n w = s.mem.accessible a n w :=
+  Janus.Arm64.Memory.accessible_writeLE _ _ _ _ _ _ _
+@[simp] theorem setRet_setRet {ret' : Nat} : (s.setRet ret).setRet ret' =
+    { s with mem := (s.mem.writeLE (s.regs regSP).toNat 8 ret).writeLE (s.regs regSP).toNat 8 ret' } := rfl
+
+/-- (The stack pointer is written `s.regs 4` in these statements, so that `omega` sees one atom with
+the `s.regs 4` of the preconditions; `regSP` is an abbreviation for it.) Memory outside the 8 bytes `[RSP, RSP + 8)` is untouched: reads there (stack arguments at
+`RSP + k` with `k ≥ 8`, pointer reads from a region the caller owns apart from the return slot)
+are unchanged. -/
+theorem readLE_setRet_of_disjoint {a n : Nat}
+    (h : a + n ≤ (s.regs 4).toNat ∨ (s.regs 4).toNat + 8 ≤ a) :
+    (s.setRet ret).mem.readLE a n = s.mem.readLE a n :=
+  Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ h
+
+/-- The return slot holds `ret`. -/
+theorem readLE_setRet_sp (h : ret < 2 ^ 64) :
+    (s.setRet ret).mem.readLE (s.regs 4).toNat 8 = ret := by
+  show (s.mem.writeLE _ 8 ret).readLE _ 8 = ret
+  rw [Janus.Arm64.Memory.readLE_writeLE_self]
+  exact Nat.mod_eq_of_lt (by simpa using h)
+
+theorem bytes_setRet_of_outside {a : Nat}
+    (h : a < (s.regs 4).toNat ∨ (s.regs 4).toNat + 8 ≤ a) :
+    (s.setRet ret).mem.bytes a = s.mem.bytes a :=
+  Janus.Arm64.Memory.bytes_writeLE_outside _ h
+
+theorem CallSetup0.setRet {p : Program} {entry : Nat} {args : List W64}
+    (h : CallSetup0 entry args s) {ret : Nat} (hret : ret < 2 ^ 64) :
+    CallSetup (p.withExit ret) entry args (s.setRet ret) where
+  rip := h.rip
+  ret := readLE_setRet_sp hret
+  zero := h.zero
+  len := h.len
+  args := h.args
+  df := h.df
+
+end SetRet
+
 /-- `MXCSR` as Go's ABIInternal fixes it at every call (`abi-internal.md`, "amd64
 architecture"): the control bits 15:6 (`FTZ`, `RC`, the six exception masks, `DAZ`) are those
 of `0x1F80` (round to nearest even, every exception masked, no flushing) and the reserved bits
@@ -224,13 +296,17 @@ def NeverPanics (p : Program) (s : State) : Prop :=
 def GrowsStack (p : Program) (s : State) : Prop :=
   ∃ fuel name s', p.run fuel s = .ok (.stub name .morestack s')
 
-/-- Go function contract: for **every** admissible return address `ret` (`RetAddr`) and
-**every** call state with these arguments and `[RSP] = ret` satisfying `pre`, the call returns
-to `ret` (never faults or panics), obeys the ABI return rules, and satisfies `post s₀ s₁`. -/
+/-- Go function contract: for **every** call state `s` with these arguments (`CallSetup0`, the
+state before the return address is pushed) satisfying `pre`, and **every** admissible return
+address `ret` (`RetAddr`), the call from `s₀ = s.setRet ret` (`[RSP] = ret`) returns to `ret`
+(never faults or panics), obeys the ABI return rules, and satisfies `post s₀ s₁`.
+`pre` is evaluated on `s`, **before** `ret` is written, so it cannot restrict the return address
+(a condition on the word at `[RSP]` is a condition on what the stack held before the call,
+which the call overwrites). -/
 def Ensures (p : Program) (entry : Nat) (args : List W64) (pre : State → Prop)
     (post : State → State → Prop) : Prop :=
-  ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
-    Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')
+  ∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret →
+    Returns (p.withExit ret) (s.setRet ret) (fun s' => ABIReturn (s.setRet ret) s' ∧ post (s.setRet ret) s')
 
 def EnsuresResults (p : Program) (entry : Nat) (args : List W64) (nres : Nat)
     (pre : State → Prop) (post : List W64 → Prop) : Prop :=
@@ -404,18 +480,56 @@ theorem Faults.of_steps {k : Nat} (hs : Program.Steps p s k s') (h : Faults p s'
 
 theorem Ensures.returns {pre : State → Prop} {post : State → State → Prop} {ret : Nat}
     (h : Ensures p entry args pre post) (hret : RetAddr p ret)
-    (hs : CallSetup (p.withExit ret) entry args s) (hpre : pre s) :
-    Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s') := h ret hret s hs hpre
+    (hs : CallSetup0 entry args s) (hpre : pre s) :
+    Returns (p.withExit ret) (s.setRet ret)
+      (fun s' => ABIReturn (s.setRet ret) s' ∧ post (s.setRet ret) s') := h s hs hpre ret hret
 
 theorem Ensures.neverPanics {pre : State → Prop} {post : State → State → Prop} {ret : Nat}
     (h : Ensures p entry args pre post) (hret : RetAddr p ret)
-    (hs : CallSetup (p.withExit ret) entry args s) (hpre : pre s) :
-    NeverPanics (p.withExit ret) s := (h ret hret s hs hpre).neverPanics
+    (hs : CallSetup0 entry args s) (hpre : pre s) :
+    NeverPanics (p.withExit ret) (s.setRet ret) := (h s hs hpre ret hret).neverPanics
 
+/-- A call state that already holds `ret` at `[RSP]` is unchanged by writing it. -/
+theorem CallSetup.setRet_eq {p : Program} {entry : Nat} {args : List W64} {ret : Nat}
+    (h : CallSetup (p.withExit ret) entry args s) : s.setRet ret = s := by
+  have e := Janus.Arm64.Memory.writeLE_readLE_self s.mem (s.regs regSP).toNat 8
+  have hr : s.mem.readLE (s.regs regSP).toNat 8 = ret := h.ret
+  rw [hr] at e
+  show ({ s with mem := s.mem.writeLE (s.regs regSP).toNat 8 ret } : State) = s
+  rw [e]
+
+/-- **The old-shaped statement.** An `Ensures` theorem gives, for every call state that already
+holds `ret` at `[RSP]`, the run claim of the pre-v0.4.0 `Ensures`. (Used to feed `Summary`s and the
+contract bridges, which still speak about the state with the return address written.) -/
+theorem Ensures.toOld {pre : State → Prop} {post : State → State → Prop}
+    (h : Ensures p entry args pre post) :
+    ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+      Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s') := by
+  intro ret hret s hs hp
+  have := h s ⟨hs.rip, hs.zero, hs.len, hs.args, hs.df⟩ hp ret hret
+  rwa [hs.setRet_eq] at this
+
+/-- Weaken the precondition and the postcondition. The postcondition is compared on the state
+with the return address installed (`s.setRet ret`), for a precondition-satisfying `s`. -/
 theorem Ensures.mono {pre pre' : State → Prop} {post post' : State → State → Prop}
     (h : Ensures p entry args pre post) (hpre : ∀ s, pre' s → pre s)
-    (hpost : ∀ s s', pre' s → post s s' → post' s s') : Ensures p entry args pre' post' :=
-  fun ret hret s hs hp => (h ret hret s hs (hpre s hp)).mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ hp hq⟩
+    (hpost : ∀ s ret s', pre' s → post (s.setRet ret) s' → post' (s.setRet ret) s') :
+    Ensures p entry args pre' post' :=
+  fun s hs hp ret hret => (h s hs (hpre s hp) ret hret).mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ _ hp hq⟩
+
+/-! ### Migration from the old shape
+
+Before v0.4.0 `Ensures` was `∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s →
+pre s → …`: the precondition saw the state with `[RSP] = ret` written. `Ensures.of_old` proves the
+new statement from the old-shaped proof, given that `pre` survives writing a return address
+(`hinv`; `janus64_pre_setRet` proves it for the usual preconditions). -/
+
+theorem Ensures.of_old {pre : State → Prop} {post : State → State → Prop}
+    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+      Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')) :
+    Ensures p entry args pre post :=
+  fun s hs hp ret hret => h ret hret _ (hs.setRet (by have := hret.user; omega)) (hinv s ret hret hp)
 
 /-! ### Return addresses -/
 
@@ -523,11 +637,11 @@ value `v` that leaves its frame in state `s₁` (`pan s₀ v s₁`). The classif
 the call state. -/
 def EnsuresGo (p : Program) (entry : Nat) (args : List W64) (pre : State → Prop)
     (C : State → GoClass) (ret : State → State → Prop) (pan : State → Eface → State → Prop) : Prop :=
-  ∀ r, RetAddr p r → ∀ s, CallSetup (p.withExit r) entry args s → pre s →
-    GoReturns (p.withExit r) (C s) s fun o =>
+  ∀ s, CallSetup0 entry args s → pre s → ∀ r, RetAddr p r →
+    GoReturns (p.withExit r) (C (s.setRet r)) (s.setRet r) fun o =>
       match o with
-      | .returned s' => ABIReturn s s' ∧ ret s s'
-      | .panicked v s' => pan s v s'
+      | .returned s' => ABIReturn (s.setRet r) s' ∧ ret (s.setRet r) s'
+      | .panicked v s' => pan (s.setRet r) v s'
       | .goexited _ => False
 
 /-- `EnsuresGo` with the third outcome: a `runtime.Goexit` that leaves the call's frame in state
@@ -535,12 +649,12 @@ def EnsuresGo (p : Program) (entry : Nat) (args : List W64) (pre : State → Pro
 def EnsuresGoX (p : Program) (entry : Nat) (args : List W64) (pre : State → Prop)
     (C : State → GoClass) (ret : State → State → Prop) (pan : State → Eface → State → Prop)
     (gox : State → State → Prop) : Prop :=
-  ∀ r, RetAddr p r → ∀ s, CallSetup (p.withExit r) entry args s → pre s →
-    GoReturns (p.withExit r) (C s) s fun o =>
+  ∀ s, CallSetup0 entry args s → pre s → ∀ r, RetAddr p r →
+    GoReturns (p.withExit r) (C (s.setRet r)) (s.setRet r) fun o =>
       match o with
-      | .returned s' => ABIReturn s s' ∧ ret s s'
-      | .panicked v s' => pan s v s'
-      | .goexited s' => gox s s'
+      | .returned s' => ABIReturn (s.setRet r) s' ∧ ret (s.setRet r) s'
+      | .panicked v s' => pan (s.setRet r) v s'
+      | .goexited s' => gox (s.setRet r) s'
 
 section GoLemmas
 
@@ -646,19 +760,20 @@ panics, for any classification. -/
 theorem Ensures.toGo {entry : Nat} {args : List W64} {pre : State → Prop}
     {post : State → State → Prop} (h : Ensures p entry args pre post) (C : State → GoClass) :
     EnsuresGo p entry args pre C post (fun _ _ _ => False) :=
-  fun r hr s hs hp => GoReturns.of_returns (h r hr s hs hp) fun _ h => h
+  fun s hs hp r hr => GoReturns.of_returns (h s hs hp r hr) fun _ h => h
 
 /-- Weaken the outcomes of an `EnsuresGo`. -/
 theorem EnsuresGo.mono {entry : Nat} {args : List W64} {pre pre' : State → Prop}
     {Cl : State → GoClass} {ret ret' : State → State → Prop} {pan pan' : State → Eface → State → Prop}
     (h : EnsuresGo p entry args pre Cl ret pan) (hpre : ∀ s, pre' s → pre s)
-    (hret : ∀ s s', pre' s → ret s s' → ret' s s') (hpan : ∀ s v s', pre' s → pan s v s' → pan' s v s') :
+    (hret : ∀ s r s', pre' s → ret (s.setRet r) s' → ret' (s.setRet r) s')
+    (hpan : ∀ s r v s', pre' s → pan (s.setRet r) v s' → pan' (s.setRet r) v s') :
     EnsuresGo p entry args pre' Cl ret' pan' := by
-  intro r hr s hs hp
-  refine (h r hr s hs (hpre s hp)).mono fun o ho => ?_
+  intro s hs hp r hr
+  refine (h s hs (hpre s hp) r hr).mono fun o ho => ?_
   cases o with
-  | returned s' => exact ⟨ho.1, hret _ _ hp ho.2⟩
-  | panicked v s' => exact hpan _ _ _ hp ho
+  | returned s' => exact ⟨ho.1, hret _ _ _ hp ho.2⟩
+  | panicked v s' => exact hpan _ _ _ _ hp ho
   | goexited s' => exact ho
 
 /-- An `EnsuresGo` theorem is an `EnsuresGoX` theorem whose `Goexit` outcome is impossible. -/
@@ -666,8 +781,8 @@ theorem EnsuresGo.toX {entry : Nat} {args : List W64} {pre : State → Prop} {Cl
     {ret : State → State → Prop} {pan : State → Eface → State → Prop}
     (h : EnsuresGo p entry args pre Cl ret pan) :
     EnsuresGoX p entry args pre Cl ret pan (fun _ _ => False) := by
-  intro r hr s hs hp
-  refine (h r hr s hs hp).mono fun o ho => ?_
+  intro s hs hp r hr
+  refine (h s hs hp r hr).mono fun o ho => ?_
   cases o <;> exact ho
 
 /-- Every `Ensures` theorem is an `EnsuresGoX` theorem that neither panics nor exits. -/
@@ -681,15 +796,16 @@ theorem EnsuresGoX.mono {entry : Nat} {args : List W64} {pre pre' : State → Pr
     {Cl : State → GoClass} {ret ret' : State → State → Prop} {pan pan' : State → Eface → State → Prop}
     {gox gox' : State → State → Prop}
     (h : EnsuresGoX p entry args pre Cl ret pan gox) (hpre : ∀ s, pre' s → pre s)
-    (hret : ∀ s s', pre' s → ret s s' → ret' s s') (hpan : ∀ s v s', pre' s → pan s v s' → pan' s v s')
-    (hgox : ∀ s s', pre' s → gox s s' → gox' s s') :
+    (hret : ∀ s r s', pre' s → ret (s.setRet r) s' → ret' (s.setRet r) s')
+    (hpan : ∀ s r v s', pre' s → pan (s.setRet r) v s' → pan' (s.setRet r) v s')
+    (hgox : ∀ s r s', pre' s → gox (s.setRet r) s' → gox' (s.setRet r) s') :
     EnsuresGoX p entry args pre' Cl ret' pan' gox' := by
-  intro r hr s hs hp
-  refine (h r hr s hs (hpre s hp)).mono fun o ho => ?_
+  intro s hs hp r hr
+  refine (h s hs (hpre s hp) r hr).mono fun o ho => ?_
   cases o with
-  | returned s' => exact ⟨ho.1, hret _ _ hp ho.2⟩
-  | panicked v s' => exact hpan _ _ _ hp ho
-  | goexited s' => exact hgox _ _ hp ho
+  | returned s' => exact ⟨ho.1, hret _ _ _ hp ho.2⟩
+  | panicked v s' => exact hpan _ _ _ _ hp ho
+  | goexited s' => exact hgox _ _ _ hp ho
 
 end GoLemmas
 
@@ -724,16 +840,17 @@ length). For every admissible return address and call state meeting `pre`, the c
 the ABI, satisfies `post`, and executes at most `bound s` instructions. -/
 def EnsuresWithin (bound : State → Nat) (p : Program) (entry : Nat) (args : List W64)
     (pre : State → Prop) (post : State → State → Prop) : Prop :=
-  ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
-    ReturnsWithin (bound s) (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')
+  ∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret →
+    ReturnsWithin (bound (s.setRet ret)) (p.withExit ret) (s.setRet ret)
+      (fun s' => ABIReturn (s.setRet ret) s' ∧ post (s.setRet ret) s')
 
 /-- Lower-bound companion: every admissible call state meeting `pre` executes at least `lower s`
 instructions before any outcome. A universal run claim like `EnsuresWithin`: it is verified only
 together with a tied witness that exhibits a call state meeting `pre` and the returning run. -/
 def RunsAtLeastOnCall (lower : State → Nat) (p : Program) (entry : Nat) (args : List W64)
     (pre : State → Prop) : Prop :=
-  ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
-    RunsAtLeast (lower s) (p.withExit ret) s
+  ∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret →
+    RunsAtLeast (lower (s.setRet ret)) (p.withExit ret) (s.setRet ret)
 
 section WithinLemmas
 
@@ -828,40 +945,90 @@ theorem EnsuresWithin.of_ensures {bound : State → Nat} {entry : Nat} {args : L
     {pre : State → Prop} {post : State → State → Prop}
     (hw : EnsuresWithin bound p entry args pre (fun _ _ => True))
     (he : Ensures p entry args pre post) : EnsuresWithin bound p entry args pre post :=
-  fun ret hret s hs hp =>
-    ((hw ret hret s hs hp).and_returns (he ret hret s hs hp)).post_mono fun _ ⟨⟨ha, _⟩, _, hq⟩ => ⟨ha, hq⟩
+  fun s hs hp ret hret =>
+    ((hw s hs hp ret hret).and_returns (he s hs hp ret hret)).post_mono fun _ ⟨⟨ha, _⟩, _, hq⟩ => ⟨ha, hq⟩
 
 /-- The bound claim implies the plain `Ensures` claim. -/
 theorem EnsuresWithin.ensures {bound : State → Nat} {entry : Nat} {args : List W64}
     {pre : State → Prop} {post : State → State → Prop}
     (h : EnsuresWithin bound p entry args pre post) : Ensures p entry args pre post :=
-  fun ret hret s hs hp => (h ret hret s hs hp).returns
+  fun s hs hp ret hret => (h s hs hp ret hret).returns
 
 /-- A larger budget is still a valid budget. -/
 theorem EnsuresWithin.mono_bound {bound bound' : State → Nat} {entry : Nat} {args : List W64}
     {pre : State → Prop} {post : State → State → Prop}
-    (h : EnsuresWithin bound p entry args pre post) (hle : ∀ s, pre s → bound s ≤ bound' s) :
+    (h : EnsuresWithin bound p entry args pre post) (hle : ∀ s ret, pre s → bound (s.setRet ret) ≤ bound' (s.setRet ret)) :
     EnsuresWithin bound' p entry args pre post :=
-  fun ret hret s hs hp => (h ret hret s hs hp).mono (hle s hp)
+  fun s hs hp ret hret => (h s hs hp ret hret).mono (hle s ret hp)
 
 /-- Weaken the precondition and the postcondition (as `Ensures.mono`). -/
 theorem EnsuresWithin.mono {bound : State → Nat} {entry : Nat} {args : List W64}
     {pre pre' : State → Prop} {post post' : State → State → Prop}
     (h : EnsuresWithin bound p entry args pre post) (hpre : ∀ s, pre' s → pre s)
-    (hpost : ∀ s s', pre' s → post s s' → post' s s') :
+    (hpost : ∀ s ret s', pre' s → post (s.setRet ret) s' → post' (s.setRet ret) s') :
     EnsuresWithin bound p entry args pre' post' :=
-  fun ret hret s hs hp =>
-    (h ret hret s hs (hpre s hp)).post_mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ hp hq⟩
+  fun s hs hp ret hret =>
+    (h s hs (hpre s hp) ret hret).post_mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ _ hp hq⟩
 
 /-- A lower bound for `lower` is one for every pointwise smaller bound. -/
 theorem RunsAtLeastOnCall.mono {lower lower' : State → Nat} {entry : Nat} {args : List W64}
     {pre : State → Prop} (h : RunsAtLeastOnCall lower p entry args pre)
-    (hle : ∀ s, pre s → lower' s ≤ lower s) : RunsAtLeastOnCall lower' p entry args pre :=
-  fun ret hret s hs hp => (h ret hret s hs hp).mono (hle s hp)
+    (hle : ∀ s ret, pre s → lower' (s.setRet ret) ≤ lower (s.setRet ret)) :
+    RunsAtLeastOnCall lower' p entry args pre :=
+  fun s hs hp ret hret => (h s hs hp ret hret).mono (hle s ret hp)
 
 end WithinLemmas
 
 end Within
+
+/-! ### Migration bridges for the other forms
+
+Each takes the pre-v0.4.0 statement (the precondition seeing the state with the return address
+installed) and `hinv : pre` survives `setRet` (`janus_pre_setRet`). -/
+
+section OldShape
+
+variable {p : Program} {entry : Nat} {args : List W64} {pre : State → Prop}
+
+theorem EnsuresGo.of_old {C : State → GoClass} {ret : State → State → Prop}
+    {pan : State → Eface → State → Prop}
+    (hinv : ∀ s r, RetAddr p r → pre s → pre (s.setRet r))
+    (h : ∀ r, RetAddr p r → ∀ s, CallSetup (p.withExit r) entry args s → pre s →
+      GoReturns (p.withExit r) (C s) s fun o =>
+        match o with
+        | .returned s' => ABIReturn s s' ∧ ret s s'
+        | .panicked v s' => pan s v s'
+        | .goexited _ => False) :
+    EnsuresGo p entry args pre C ret pan :=
+  fun s hs hp r hr => h r hr _ (hs.setRet hr.lt64) (hinv s r hr hp)
+
+theorem EnsuresGoX.of_old {C : State → GoClass} {ret : State → State → Prop}
+    {pan : State → Eface → State → Prop} {gox : State → State → Prop}
+    (hinv : ∀ s r, RetAddr p r → pre s → pre (s.setRet r))
+    (h : ∀ r, RetAddr p r → ∀ s, CallSetup (p.withExit r) entry args s → pre s →
+      GoReturns (p.withExit r) (C s) s fun o =>
+        match o with
+        | .returned s' => ABIReturn s s' ∧ ret s s'
+        | .panicked v s' => pan s v s'
+        | .goexited s' => gox s s') :
+    EnsuresGoX p entry args pre C ret pan gox :=
+  fun s hs hp r hr => h r hr _ (hs.setRet hr.lt64) (hinv s r hr hp)
+
+theorem EnsuresWithin.of_old {bound : State → Nat} {post : State → State → Prop}
+    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+      ReturnsWithin (bound s) (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')) :
+    EnsuresWithin bound p entry args pre post :=
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
+
+theorem RunsAtLeastOnCall.of_old {lower : State → Nat}
+    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+      RunsAtLeast (lower s) (p.withExit ret) s) :
+    RunsAtLeastOnCall lower p entry args pre :=
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
+
+end OldShape
 
 end GoABI
 end Janus.Amd64
