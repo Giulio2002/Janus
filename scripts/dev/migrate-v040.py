@@ -666,6 +666,46 @@ def fix_stackguard(t):
     `⟨…, hg1, hg2, hg3, …⟩` of another state still need their own proof of `hg4` (reported)."""
     return re.sub(r'⟨hg1, hg2, hg3⟩', '⟨hg1, hg2, hg3, hg4⟩', t)
 
+SG_CLOSER = "first | omega | (simp only [stackguard0Offset, regG, regSP, *]; omega)"
+
+def fix_stackguard_construct(t):
+    """`refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, …⟩` (an environment transfer lemma: a `CallEnv` whose first component is a
+    `StackGuardOK`): a 4th hole for the guard word's apartness from `[RSP, RSP + 8)`, and a bullet after the third one."""
+    lines = t.split('\n')
+    out = []
+    i = 0
+    changed = 0
+    pat = re.compile(r'^(\s*)refine ⟨((?:⟨)?)⟨\?_, \?_, \?_⟩, (⟨\?_, \?_, \?_⟩|⟨by omega, by omega, by omega, \?_, hx15, hdf, hra⟩)')
+    while i < len(lines):
+        ln = lines[i]
+        m = pat.match(ln)
+        if not m:
+            out.append(ln); i += 1; continue
+        ind = m.group(1)
+        out.append(ln.replace('⟨?_, ?_, ?_⟩', '⟨?_, ?_, ?_, ?_⟩', 1))
+        i += 1
+        nb = 0
+        bullet = re.compile('^' + re.escape(ind) + '· ')
+        done = False
+        while i < len(lines):
+            l2 = lines[i]
+            if bullet.match(l2):
+                if nb == 3 and not done:
+                    out.append(ind + '· ' + SG_CLOSER)
+                    done = True
+                nb += 1
+            elif l2.strip() and not l2.startswith(ind + ' ') and not bullet.match(l2) and nb >= 3:
+                pass
+            out.append(l2); i += 1
+            if done and nb > 4: break
+            if nb > 3 and done: 
+                # keep copying the remaining lines normally
+                break
+        if not done and nb == 3:
+            out.append(ind + '· ' + SG_CLOSER)
+        changed += 1
+    return '\n'.join(out), changed
+
 def main(files):
     reg = Reg()
     texts = {}
@@ -689,6 +729,11 @@ def main(files):
             t3 = fix_stackguard(t2)
             if t3 != t2: warn.append('StackGuardOK patterns `hg1, hg2, hg3` extended by `hg4` (a construction of another state needs its own proof of the guard word apart from [RSP, RSP+8))')
             t2 = t3
+        if amd and 'refine ⟨' in t2:
+            t4, nchg = fix_stackguard_construct(t2)
+            if nchg:
+                warn.append('%d `refine ⟨⟨?_, ?_, ?_⟩, …⟩` StackGuardOK constructions got a 4th hole and a closing bullet' % nchg)
+                t2 = t4
         if t2 != t: open(f, 'w').write(t2)
         print(f, ('WARN: ' + '; '.join(warn)) if warn else 'ok')
 
