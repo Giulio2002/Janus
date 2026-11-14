@@ -264,8 +264,9 @@ func TestAuditUndefinedStreamPins(t *testing.T) {
 	proof := func(pre string) string {
 		return "import Extracted\nnamespace Proof\nopen Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic\n" +
 			"theorem correctness (x y : BitVec 64) :\n    EnsuresResults Extracted.program Extracted.entry [x, y] 1\n" +
-			"      (fun s => StackWritable s 0 8 ∧ " + pre + ") (fun r => r = [x + y]) := by\n" +
-			"  janus64_ensures_old\n  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
+			"      (fun s => StackWritable s 0 8 ∧ ((" + pre + ") ∨ True)) (fun r => r = [x + y]) := by\n" +
+			// the pin is wrapped in `∨ True`: the audit rules read the statement, and the precondition then holds at `s.setRet ret` too
+			"  refine Janus.Amd64.GoABI.Ensures.of_old (fun s ret hret hp => ⟨by simpa [Janus.Amd64.GoABI.StackWritable] using hp.1, Or.inr trivial⟩) ?_\n  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
 			"  simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw\n  janus64_run\nend Proof\n"
 	}
 	// proofW: the same main theorem together with its tied Witness.nonvacuous (a main theorem is verified only with one):
@@ -288,9 +289,9 @@ theorem hpre : StackWritable s0 0 8 := by
   repeat' apply And.intro
   all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup0 Extracted.entry [x, y] s ∧ (StackWritable s 0 8 ∧ ` + pre + `) ∧
+    CallSetup0 Extracted.entry [x, y] s ∧ (StackWritable s 0 8 ∧ ((` + pre + `) ∨ True)) ∧
     (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ (results 1 s') = [x + y]) :=
-  ⟨ret, s0, x, y, hret, setup, ⟨hpre, by first | rfl | exact fun _ _ => rfl⟩, correctness x y s0 setup ⟨hpre, by first | rfl | exact fun _ _ => rfl⟩ ret hret⟩
+  ⟨ret, s0, x, y, hret, setup, ⟨hpre, Or.inr trivial⟩, correctness x y s0 setup ⟨hpre, Or.inr trivial⟩ ret hret⟩
 end Witness
 end Proof
 `
@@ -368,7 +369,7 @@ func TestAuditWitnessNamedMainNotExempt(t *testing.T) {
 		return "import Extracted\nnamespace Proof\nopen Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic\n" + open +
 			"theorem " + name + " (x y : BitVec 64) :\n    EnsuresResults Extracted.program Extracted.entry [x, y] 1\n" +
 			"      (fun s => StackWritable s 0 8 ∧ " + pin + ") (fun r => r = [x + y]) := by\n" +
-			"  janus64_ensures_old\n  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
+			"  refine Janus.Amd64.GoABI.Ensures.of_old (fun s ret hret hp => hp) ?_\n  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
 			"  simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw\n  janus64_run\n" + close + "end Proof\n"
 	}
 	cases := map[string]string{
