@@ -281,6 +281,8 @@ class Reg:
     argthms = []        # (name, body) of theorems with a generic `{args : List …}` binder
     argsfit = set()     # those that (transitively) call `Ensures.toSummaryIn`: they take `[ArgsFit args]`
     ensdefs = {}        # defs whose body is `∀ …, Ensures …` (a spec: `Hyp2 impl R …`) -> (file, body)
+    setupnames = set()  # theorems `name : CallSetup (P.withExit R) …` (last component)
+    setupused = set()   # those passed as the setup of a `ret hret s SETUP` application anywhere in the consumer tree
     defs = {}           # last component of a def/abbrev name -> [(file, body text)] for the Prop-valued ones
 
 DEFRE = re.compile(r'(?m)^(?:@\[[^\]]*\]\s*)?(?:private |protected |noncomputable )*(?:def|abbrev) ([\w.\']+)')
@@ -389,6 +391,8 @@ def collect(t, reg):
     for it in items:
         m = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
         if not m: continue
+        ms = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)\s*:\s*CallSetup\s*\(', it)
+        if ms and '.withExit' in it.split(':=', 1)[0]: reg.setupnames.add(ms.group(1).split('.')[-1])
         sg0, bs0 = split_sig(it)
         if sg0 is not None and re.search(r'\{args\s*:\s*List', sg0):
             reg.argthms.append((m.group(1).split('.')[-1], it[bs0:]))
@@ -451,8 +455,8 @@ def migrate(t, amd0, reg, fname=''):
         isa.append(cur)
     inw, w = [], False
     for it in items:
-        if re.match(r'namespace Witness\b', it): w = True
-        if re.match(r'end Witness\b', it): w = False
+        if re.match(r'namespace (?:[\w.]+\.)?Witness\w*\b', it): w = True
+        if re.match(r'end (?:[\w.]+\.)?Witness\w*\b', it): w = False
         inw.append(w)
     ens = {}      # row theorem name -> is EnsuresK
     # ---- pass 1: row theorems and generic helpers
@@ -660,7 +664,14 @@ def migrate(t, amd0, reg, fname=''):
                             out.append((m, toks, k, isk))
                         break
         return out
-    used_setups = set()
+    used_setups = set(reg.setupused)
+    extra = {}
+    for i, it in enumerate(items):
+        mm0 = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
+        if mm0 and mm0.group(1) not in ens and '.toOld ret hret' in it:
+            it2, st2 = untoold(it, reg.setupnames)
+            if st2:
+                items[i] = it2; extra[i] = st2
     for it in items:
         for m, toks, k, isk in find_apps(it):
             sidx = k + (4 if isk else 3)
@@ -679,8 +690,8 @@ def migrate(t, amd0, reg, fname=''):
         apps = find_apps(it)
         sig0 = it.split(':=', 1)[0]
         exw = '∃' in sig0 and SETUP_RE.search(it) is not None
-        if (apps or (exw and inw[i] and (name in FORCE or (ens and not RAW)))) and (name not in ens or inw[i]) and not conclusion(it) is not None:
-            it = rewrite_witness(it, apps, amd, name, warn, plain, kern)
+        if (apps or extra.get(i) or (exw and inw[i] and (name in FORCE or (ens and not RAW)))) and (name not in ens or inw[i]) and not conclusion(it) is not None:
+            it = rewrite_witness(it, apps, amd, name, warn, plain, kern, extra.get(i, ()))
             items[i] = it
     return ''.join(items), warn
 
@@ -716,12 +727,30 @@ def fix_setup_body(it, amd, warn, name):
         parts = [parts[0], ' by decide'] + parts[2:]   # (pc, lr, args) -> (pc, len, args)
     return it[:bs] + body[:k + 1] + ','.join(parts) + body[j:]
 
-def rewrite_witness(it, apps, amd, name, warn, plain, kern):
+def untoold(it, setups):
+    """`(thm args).toOld ret hret S SETUP PRE` (the row-proof rewrite applied to a witness application) -> `(thm args) S SETUP PRE ret hret`
+    when SETUP is a known `CallSetup (P.withExit R)` lemma. Returns (text, states)."""
+    states = set()
+    pos = 0
+    while True:
+        m = re.compile(r'\)\.toOld\s+ret\s+hret\s+').search(it, pos)
+        if not m: break
+        toks, stop = tokens(it, m.end())
+        if len(toks) < 2 or toks[1][0].split('.')[-1] not in setups:
+            pos = m.end(); continue
+        last = 3 if len(toks) >= 3 else 2
+        states.add(toks[0][0])
+        new = ') ' + it[toks[0][1]:toks[last - 1][2]] + ' ret hret'
+        it = it[:m.start()] + new + it[toks[last - 1][2]:]
+        pos = m.start() + len(new)
+    return it, states
+
+def rewrite_witness(it, apps, amd, name, warn, plain, kern, extra=()):
     it = fix_setups(it)
     sig_end = split_sig(it)[1] if split_sig(it)[0] is not None else len(it)
     stmt = it[:sig_end]
     # states set up by the statement, and the return-address variable
-    states = {'s'}
+    states = {'s'} | set(extra)
     for mm in re.finditer(r"(?:CallSetup0|CallSetupF|CCallF|CCallAF)\b[^\n]*?\s(\w+'?)(?=\s*(?:∧|$|:=))", stmt, re.M):
         states.add(mm.group(1))
     for m, toks, k, isk in apps:
@@ -838,6 +867,9 @@ def main(files):
         reg.imports[f] = re.findall(r'(?m)^import\s+([\w.]+)', t)
         reg.modfile[modname(f)] = f
         reg.modfile[f.replace('/', '.')[:-5]] = f
+    for f in files:
+        for mm in re.finditer(r"\bret\s+hret\s+[\w'.]+\s+([\w.']+)", texts[f]):
+            if mm.group(1).split('.')[-1] in reg.setupnames: reg.setupused.add(mm.group(1).split('.')[-1])
     changed = True
     while changed:                    # theorems with a generic `args` that call `Ensures.toSummaryIn` or such a theorem
         changed = False
