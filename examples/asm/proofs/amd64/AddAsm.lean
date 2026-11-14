@@ -37,7 +37,7 @@ theorem add_summary :
 theorem correctness (x y : BitVec 64) :
     EnsuresResults0 Extracted.program Extracted.entry [x, y] 1 (fun _ => True)
       (fun r => r = [x + y]) := by
-  refine Ensures0.of_summary0 add_summary ?_ ?_
+  refine Ensures0.of_summary0_at add_summary ?_ ?_
   · intro ret s hret hs0 _
     have hs := hs0.setRet (p := Extracted.program) hret.lt64
     generalize s.setRet ret = s1 at hs ⊢

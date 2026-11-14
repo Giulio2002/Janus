@@ -655,6 +655,12 @@ def rewrite_witness(it, apps, amd, name, warn, plain, kern):
             pos = ret_t[1] + len(new)
     return it
 
+def fix_stackguard(t):
+    """amd64 `StackGuardOK` has a 4th field (`apart`: the guard word is not the return slot): the destructuring
+    the nested pattern `⟨hg1, hg2, hg3⟩` (the customary names of its three fields) becomes `⟨hg1, hg2, hg3, hg4⟩`. Constructions
+    `⟨…, hg1, hg2, hg3, …⟩` of another state still need their own proof of `hg4` (reported)."""
+    return re.sub(r'⟨hg1, hg2, hg3⟩', '⟨hg1, hg2, hg3, hg4⟩', t)
+
 def main(files):
     reg = Reg()
     texts = {}
@@ -670,6 +676,10 @@ def main(files):
         t = texts[f]
         amd = 'Janus.Amd64' in t
         t2, warn = migrate(t, amd, reg, f)
+        if amd and '⟨hg1, hg2, hg3⟩' in t2:
+            t3 = fix_stackguard(t2)
+            if t3 != t2: warn.append('StackGuardOK patterns `hg1, hg2, hg3` extended by `hg4` (a construction of another state needs its own proof of the guard word apart from [RSP, RSP+8))')
+            t2 = t3
         if t2 != t: open(f, 'w').write(t2)
         print(f, ('WARN: ' + '; '.join(warn)) if warn else 'ok')
 

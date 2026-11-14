@@ -266,7 +266,7 @@ func TestAuditUndefinedStreamPins(t *testing.T) {
 			"theorem correctness (x y : BitVec 64) :\n    EnsuresResults Extracted.program Extracted.entry [x, y] 1\n" +
 			"      (fun s => StackWritable s 0 8 ∧ ((" + pre + ") ∨ True)) (fun r => r = [x + y]) := by\n" +
 			// the pin is wrapped in `∨ True`: the audit rules read the statement, and the precondition then holds at `s.setRet ret` too
-			"  refine Janus.Amd64.GoABI.Ensures.of_old (fun s ret hret hp => ⟨by simpa [Janus.Amd64.GoABI.StackWritable] using hp.1, Or.inr trivial⟩) ?_\n  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
+			"  refine Janus.Amd64.GoABI.Ensures.of_old (fun s ret _ hret hp => ⟨by simpa [Janus.Amd64.GoABI.StackWritable] using hp.1, Or.inr trivial⟩) ?_\n  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
 			"  simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw\n  janus64_run\nend Proof\n"
 	}
 	// proofW: the same main theorem together with its tied Witness.nonvacuous (a main theorem is verified only with one):
@@ -369,7 +369,7 @@ func TestAuditWitnessNamedMainNotExempt(t *testing.T) {
 		return "import Extracted\nnamespace Proof\nopen Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic\n" + open +
 			"theorem " + name + " (x y : BitVec 64) :\n    EnsuresResults Extracted.program Extracted.entry [x, y] 1\n" +
 			"      (fun s => StackWritable s 0 8 ∧ " + pin + ") (fun r => r = [x + y]) := by\n" +
-			"  refine Janus.Amd64.GoABI.Ensures.of_old (fun s ret hret hp => hp) ?_\n  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
+			"  refine Janus.Amd64.GoABI.Ensures.of_old (fun s ret _ hret hp => hp) ?_\n  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
 			"  simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw\n  janus64_run\n" + close + "end Proof\n"
 	}
 	cases := map[string]string{

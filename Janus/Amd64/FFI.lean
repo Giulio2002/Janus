@@ -199,19 +199,19 @@ def CEnsuresC (p : Program) (C : Contract) (entry : Nat) (args : List W64) (pre 
 /-- Migration bridges (see `GoABI.Ensures.of_old`). -/
 theorem EnsuresC.of_old {p : Program} {C : Contract} {entry : Nat} {args : List W64}
     {pre : State → Prop} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (hinv : ∀ s ret, CallSetup0 entry args s → RetAddr p ret → pre s → pre (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
       ReturnsC (p.withExit ret) C (fun s' => ABIReturn s s' ∧ post s s') s) :
     EnsuresC p C entry args pre post :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hs hret hp)
 
 theorem CEnsuresC.of_old {p : Program} {C : Contract} {entry : Nat} {args : List W64}
     {pre : State → Prop} {post : State → State → Prop}
-    (hinv : ∀ s ret, RetAddr p ret → pre s → pre (s.setRet ret))
+    (hinv : ∀ s ret, CCallF entry args s → RetAddr p ret → pre s → pre (s.setRet ret))
     (h : ∀ ret, RetAddr p ret → ∀ s, CCall (p.withExit ret) entry args s → pre s →
       ReturnsC (p.withExit ret) C (fun s' => CReturn s s' ∧ post s s') s) :
     CEnsuresC p C entry args pre post :=
-  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hret hp)
+  fun s hs hp ret hret => h ret hret _ (hs.setRet hret.lt64) (hinv s ret hs hret hp)
 
 /-- The old-shaped statement (the state already holds `ret` at `[RSP]`): what a callee summary or a
 call-site composition (`CgoCall.refines`) uses. -/

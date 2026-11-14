@@ -70,6 +70,7 @@ macro_rules (kind := janus64PreSetRetCore)
     -- lemmas of modules that are imported after this one: identifiers built with `mkIdent` resolve where the tactic is used
     let v1 := mkIdent `Janus.Contracts.view_setRet
     let v2 := mkIdent `Janus.Contracts.StackAmd64.rtView_setRet
+    let c1 := mkIdent `Janus.Amd64.CABI.CStack
     `(tactic|
       (have hu := ($hret).user
        try simp only [Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.SPAligned,
@@ -78,6 +79,7 @@ macro_rules (kind := janus64PreSetRetCore)
          Janus.Amd64.GoABI.stackguard0, Janus.Amd64.GoABI.stackguard0Offset,
          Janus.Amd64.GoABI.ClosureCtx, Janus.Spec.Disjoint, Janus.Apart, Janus.outside_nil,
          Janus.outside_cons, $ds,*] at $hp:ident ⊢
+       try simp only [$c1:ident] at $hp:ident ⊢
        all_goals
         (have hp0 : Janus.Tactic.Hide _ := $hp
          janus_split_hyps keep hp0
