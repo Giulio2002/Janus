@@ -10,6 +10,7 @@ theorem correctness [inst : HMul (BitVec 64) (BitVec 64) (BitVec 64)]
     (x y : BitVec 64) (h : @HMul.hMul _ _ _ inst x y = x + y) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => s'.regs 0 = @HMul.hMul _ _ _ inst x y) := by
+  janus_ensures_old
   intro ret hret s hs _
   rw [h]
   janus_intro hs
