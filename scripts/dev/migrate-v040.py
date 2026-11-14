@@ -50,7 +50,10 @@ def migrate(t, amd0):
                 if re.search(r':= by\n[ \t]*janus6?4?_ensures_old', it):
                     it2, n = it, 1
                 else:
-                    it2, n = re.subn(r'(:= by\n)([ \t]*)(intro ret hret)', lambda mm: mm.group(1) + mm.group(2) + tac + '\n' + mm.group(2) + mm.group(3), it, count=1)
+                    def ins(mm):   # `intro h₁ h₂ ret hret …`: the leading names (the statement's hypotheses) are introduced first
+                        pre = mm.group(3).strip()
+                        return mm.group(1) + (mm.group(2) + 'intro ' + pre + '\n' if pre else '') + mm.group(2) + tac + '\n' + mm.group(2) + 'intro ret hret'
+                    it2, n = re.subn(r'(:= by\n)([ \t]*)intro ((?:[\w\'_]+ )*?)ret hret', ins, it, count=1)
                 if n == 0: warn.append('theorem %s: no `intro ret hret` right after `:= by`' % (m.group(1)))
                 items[i] = it2
     # pass 2: setups used with an Ensures-head theorem
@@ -65,7 +68,7 @@ def migrate(t, amd0):
         if not m: continue
         name = m.group(1)
         if name in used_setups and re.search(r'CallSetup \(', it):
-            it = re.sub(r'CallSetup \((?:[\w.]+)\.withExit ret\) ([\w.]+) (\[[^\]]*\]) (\w+)', r'CallSetup0 \1 \2 \3', it)
+            it = re.sub(r'CallSetup \((?:[^()]|\([^()]*\))*?\.withExit ret\) ([\w.]+) (\[[^\]]*\]) (\w+)', r'CallSetup0 \1 \2 \3', it)
             if amd: it = it.replace('⟨rfl, by decide, rfl, by decide,', '⟨rfl, rfl, by decide,')
             else: it = re.sub(r'⟨rfl, rfl, by', '⟨rfl, by decide, by', it)
             if 'CallSetup0' not in it: warn.append('setup %s not rewritten' % name)
@@ -73,11 +76,11 @@ def migrate(t, amd0):
             continue
         # witnesses applying an Ensures-head theorem
         if '∃' in it.split(':=', 1)[0] and appre and appre.search(it):
-            it = re.sub(r'CallSetup \((?:[\w.]+)\.withExit ret\) ([\w.]+) (\[[^\]]*\]) (\w+)', r'CallSetup0 \1 \2 \3', it)
+            it = re.sub(r'CallSetup \((?:[^()]|\([^()]*\))*?\.withExit ret\) ([\w.]+) (\[[^\]]*\]) (\w+)', r'CallSetup0 \1 \2 \3', it)
             lines = it.split('\n')
             k = 0
             while k < len(lines):
-                if re.search(r'(Returns|ReturnsWithin \d+|RunsAtLeast \d+) \((?:[\w.]+)\.withExit ret\) s(?![\w\'])', lines[k]):
+                if re.search(r'(Returns|ReturnsWithin \d+|RunsAtLeast \d+) \((?:[^()]|\([^()]*\))*?\.withExit ret\) s(?![\w\'])', lines[k]):
                     j = k
                     while True:
                         lines[j] = re.sub(r'(?<![\w.\'])s(?![\w\'])', '(s.setRet ret)', lines[j])
