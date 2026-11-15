@@ -769,19 +769,39 @@ def rewrite_witness(it, apps, amd, name, warn, plain, kern, extra=()):
         m, toks, k, isk = apps[0]
         retv = toks[k][0]
     if retv is None: retv = 'ret'
-    lines = it.split('\n')
-    k = 0
-    while k < len(lines):
-        if re.search(r'(Returns\w*|GrownReturns\w*|RunsAtLeast \d+|ReturnsWithin \d+) \((?:[^()]|\([^()]*\)|\((?:[^()]|\([^()]*\))*\))*?\.withExit \w+\)', lines[k]) and 'setRet' not in lines[k]:
-            j = k
-            while True:
-                for st in states:
-                    lines[j] = re.sub(r'(?<![\w.\'])' + re.escape(st) + r'(?![\w\'])', '(' + st + '.setRet ' + retv + ')', lines[j])
-                if ':=' in lines[j] or j + 1 >= len(lines) or not lines[j + 1].strip(): break
-                j += 1
-            k = j
-        k += 1
-    it = '\n'.join(lines)
+    # every run claim `Returns (P.withExit R) S …` (the conjunct only: up to the `∧` / closing paren that ends it, or the end of the
+    # statement when its `fun` is not parenthesised): the free states become `(S.setRet R)`
+    RUNRE = re.compile(r'(Returns\w*|Panics|GrownReturns\w*|RunsAtLeast \d+|ReturnsWithin \d+) \((?:[^()]|\([^()]*\)|\((?:[^()]|\([^()]*\))*\))*?\.withExit \w+\)')
+    def conj_end(t, i):
+        d = 0; bare_fun = False; n = len(t)
+        while i < n:
+            c = t[i]
+            if c == '-' and t[i:i + 2] == '--':
+                j = t.find('\n', i); i = n if j < 0 else j; continue
+            if c in OPEN: d += 1
+            elif c in CLOSE:
+                d -= 1
+                if d < 0: return i
+            elif d == 0:
+                if t.startswith(':=', i): return i
+                if t.startswith('fun ', i) or t.startswith('fun\n', i): bare_fun = True
+                if c == '∧' and not bare_fun: return i
+            i += 1
+        return n
+    pos = 0
+    while True:
+        m = RUNRE.search(it, pos)
+        if not m: break
+        end = conj_end(it, m.end())
+        seg = it[m.start():end]
+        if 'setRet' in m.group(0) or '.setRet' in seg.split('\n')[0]:
+            pos = end; continue
+        head = m.group(0)
+        tail = it[m.end():end]
+        for st in states:
+            tail = re.sub(r'(?<![\w.\'])' + re.escape(st) + r'(?![\w\'])', '(' + st + '.setRet ' + retv + ')', tail)
+        it = it[:m.end()] + tail + it[end:]
+        pos = m.end() + len(tail)
     # a lambda `(fun (S.setRet R) s' => body)` applied to the state: the binder stays `S`, the body reads the binder
     for st in states:
         key = '(fun (' + st + '.setRet ' + retv + ')'
