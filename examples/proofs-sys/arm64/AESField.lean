@@ -31,6 +31,7 @@ theorem correctness (E : KEnv) :
       (fun s k => GuardOK s 0 ∧ StackOK s 40 0 ∧ IdRegsEmulated k)
       (fun _ k s' k' => ∃ v, v < 2 ^ 64 ∧ k' = k.emit (.env "ID_AA64ISAR0_EL1" v) ∧
         s'.regs 0 = BitVec.ofNat 64 (v / 16 % 16)) := by
+  janus_ensures_old [Proof.Witness.k, Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Kernel.IdRegsEmulated]
   intro ret hret s k hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hid⟩
   apply ReturnsK.of_reaches
   janus_intro hs
@@ -69,8 +70,8 @@ def E0 : KEnv := ⟨[], 1024⟩
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h⟩
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h⟩
 
 theorem pre : GuardOK s0 0 ∧ StackOK s0 40 0 ∧ IdRegsEmulated k0 :=
   ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩, rfl⟩
@@ -80,17 +81,17 @@ def pin (_E : KEnv) (_k : Kern) : Prop := True
 
 /-- So the guarantee is reached in that state, for whatever value the kernel reports. -/
 theorem returns : ReturnsK ((Extracted.program).withExit ret) E0
-    (fun s' k' => FFI.ABIReturnC s0 s' ∧ ∃ v, v < 2 ^ 64 ∧ k' = k0.emit (.env "ID_AA64ISAR0_EL1" v) ∧
-      s'.regs 0 = BitVec.ofNat 64 (v / 16 % 16)) (fun _ _ => False) s0 k0 :=
-  correctness E0 ret hret s0 k0 setup pre
+    (fun s' k' => FFI.ABIReturnC (s0.setRet ret) s' ∧ ∃ v, v < 2 ^ 64 ∧ k' = k0.emit (.env "ID_AA64ISAR0_EL1" v) ∧
+      s'.regs 0 = BitVec.ofNat 64 (v / 16 % 16)) (fun _ _ => False) (s0.setRet ret) k0 :=
+  (correctness E0) s0 k0 setup pre ret hret
 
 /-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (E : KEnv) (ret : Nat) (s : State) (k : Kern), pin E k ∧ RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧
+    CallSetup0 Extracted.entry [] s ∧
     (GuardOK s 0 ∧ StackOK s 40 0 ∧ IdRegsEmulated k) ∧
     ReturnsK ((Extracted.program).withExit ret) E
-      (fun s' k' => FFI.ABIReturnC s s' ∧ ∃ v, v < 2 ^ 64 ∧ k' = k.emit (.env "ID_AA64ISAR0_EL1" v) ∧
-      s'.regs 0 = BitVec.ofNat 64 (v / 16 % 16)) (fun _ _ => False) s k :=
+      (fun s' k' => FFI.ABIReturnC (s.setRet ret) s' ∧ ∃ v, v < 2 ^ 64 ∧ k' = k.emit (.env "ID_AA64ISAR0_EL1" v) ∧
+      s'.regs 0 = BitVec.ofNat 64 (v / 16 % 16)) (fun _ _ => False) (s.setRet ret) k :=
   ⟨E0, ret, s0, k0, trivial, hret, setup, pre, returns⟩
 
 end Witness

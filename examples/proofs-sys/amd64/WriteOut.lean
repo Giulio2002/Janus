@@ -69,6 +69,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E : KE
         (∃ c, c ≤ len.toNat ∧ k' = k.emit (.write 1 (readBytes s.mem ptr.toNat c)) ∧
           s'.regs 0 = BitVec.ofNat 64 c ∧ s'.regs 3 = 0 ∧ s'.regs 1 = 0) ∨
         (k' = k ∧ s'.regs 0 = BitVec.ofNat 64 (2 ^ 64 - 1))) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Kernel.Buf, Proof.errVars, Proof.Witness.k, Janus.Kernel.readBytes, Janus.Amd64.GoABI.regSP]
   intro ret hret s k hs ⟨hg, ⟨hb, ha, hw⟩, hal, hout, hbuf, hlen, hbo, hbd, hgd, herr, hed⟩
   have hgl := hg.load
   have hgb := hg.below
@@ -108,9 +109,9 @@ theorem full_write (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E : KEn
         (errVars + 48 ≤ (s.regs 4).toNat - 1232 ∨ (s.regs 4).toNat + 16 ≤ errVars))
       (fun s k s' k' => s'.regs 0 = len →
         k'.output 1 = k.output 1 ++ readBytes s.mem ptr.toNat len.toNat) := by
-  intro ret hret s k hs hpre
+  intro s k hs hpre ret hret
   have hl := hpre.2.2.2.2.2.1
-  refine (correctness impl rt E hent hexit hconv ptr len cap ret hret s k hs hpre).mono ?_
+  refine ((correctness impl rt E hent hexit hconv ptr len cap) s k hs hpre ret hret).mono ?_
     (fun _ _ h => h)
   rintro s' k' ⟨habi, ⟨c, hc, rfl, h0, -, -⟩ | ⟨-, h0⟩⟩
   · refine ⟨habi, fun hn => ?_⟩
@@ -181,8 +182,8 @@ def E0 : KEnv := ⟨[], 1024⟩
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [BitVec.ofNat 64 p0, 0, 0] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [BitVec.ofNat 64 p0, 0, 0] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
 
@@ -198,8 +199,8 @@ theorem pre : StackGuardOK s0 48 ∧ StackWritable s0 1232 16 ∧ (s0.regs 4).to
     (errVars + 48 ≤ (s0.regs 4).toNat - 1232 ∨ (s0.regs 4).toNat + 16 ≤ errVars) := by
   have h : errVars = errA := by decide
   rw [h]
-  refine ⟨⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩,
-    ⟨by decide, by decide, by decide⟩, by decide, by simp only [outside_nil], Or.inl rfl, by decide,
+  refine ⟨(by first | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide, by decide⟩ | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩),
+    (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by simp only [outside_nil], Or.inl rfl, by decide,
     by simp only [outside_nil], Or.inr (by decide), by decide, by decide, by decide⟩
 
 /-- A state at the entry of the contract callee `a`: the witness call state with the program counter moved. -/
@@ -215,21 +216,21 @@ theorem wsOK1 (a : Nat) : wsOK a 1 := wsOK1_s0
 
 /-- The theorem fires: `WriteOut(p, 0, 0)` returns with a successful empty write or with `-1`. -/
 theorem returns : Amd64.Kernel.ReturnsK ((Extracted.program.link implAt).withExit ret) E0
-    (fun s' k' => ABIReturn s0 s' ∧
+    (fun s' k' => ABIReturn (s0.setRet ret) s' ∧
       ((∃ c, c ≤ (0 : BitVec 64).toNat ∧
-          k' = k0.emit (.write 1 (readBytes s0.mem (BitVec.ofNat 64 p0).toNat c)) ∧
+          k' = k0.emit (.write 1 (readBytes (s0.setRet ret).mem (BitVec.ofNat 64 p0).toNat c)) ∧
           s'.regs 0 = BitVec.ofNat 64 c ∧ s'.regs 3 = 0 ∧ s'.regs 1 = 0) ∨
         (k' = k0 ∧ s'.regs 0 = BitVec.ofNat 64 (2 ^ 64 - 1))))
-    (fun _ _ => False) s0 k0 :=
-  correctness implAt [] E0 hent hexit hconv (BitVec.ofNat 64 p0) 0 0 ret hret s0 k0 setup pre
+    (fun _ _ => False) (s0.setRet ret) k0 :=
+  (correctness implAt [] E0 hent hexit hconv (BitVec.ofNat 64 p0) 0 0) s0 k0 setup pre ret hret
 
 /-- `full_write` fires: with `len = 0`, `n = 0` and the output of fd 1 is unchanged. -/
 theorem returns_full : Amd64.Kernel.ReturnsK ((Extracted.program.link implAt).withExit ret) E0
-    (fun s' k' => ABIReturn s0 s' ∧
+    (fun s' k' => ABIReturn (s0.setRet ret) s' ∧
       (s'.regs 0 = (0 : BitVec 64) →
-        k'.output 1 = k0.output 1 ++ readBytes s0.mem (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat))
-    (fun _ _ => False) s0 k0 :=
-  Proof.full_write implAt [] E0 hent hexit hconv (BitVec.ofNat 64 p0) 0 0 ret hret s0 k0 setup pre
+        k'.output 1 = k0.output 1 ++ readBytes (s0.setRet ret).mem (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat))
+    (fun _ _ => False) (s0.setRet ret) k0 :=
+  (Proof.full_write implAt [] E0 hent hexit hconv (BitVec.ofNat 64 p0) 0 0) s0 k0 setup pre ret hret
 
 /-- The hypotheses are satisfiable: three runtime functions meeting their contracts and a call state of
 `WriteOut(p, 0, 0)` that satisfies the precondition. -/
@@ -243,7 +244,7 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E
     Amd64.Kernel.ConvT64Contract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.convT64") rt 1024 ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 p0, 0, 0] s ∧
+    CallSetup0 Extracted.entry [BitVec.ofNat 64 p0, 0, 0] s ∧
     (StackGuardOK s 48 ∧ StackWritable s 1232 16 ∧ (s.regs 4).toNat % 8 = 0 ∧
       Outside ((s.regs 4).toNat - 1232) 1248 rt ∧
       Buf s.mem (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat false ∧ (0 : BitVec 64).toNat ≤ 2 ^ 48 ∧
@@ -260,12 +261,12 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E
     (∃ s_c : Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.convT64") ∧
       CallOK64 s_c 1024 1) ∧
     Amd64.Kernel.ReturnsK ((Extracted.program.link impl).withExit ret) E
-      (fun s' k' => ABIReturn s s' ∧
+      (fun s' k' => ABIReturn (s.setRet ret) s' ∧
         ((∃ c, c ≤ (0 : BitVec 64).toNat ∧
-            k' = k.emit (.write 1 (readBytes s.mem (BitVec.ofNat 64 p0).toNat c)) ∧
+            k' = k.emit (.write 1 (readBytes (s.setRet ret).mem (BitVec.ofNat 64 p0).toNat c)) ∧
             s'.regs 0 = BitVec.ofNat 64 c ∧ s'.regs 3 = 0 ∧ s'.regs 1 = 0) ∨
           (k' = k ∧ s'.regs 0 = BitVec.ofNat 64 (2 ^ 64 - 1))))
-      (fun _ _ => False) s k :=
+      (fun _ _ => False) (s.setRet ret) k :=
   ⟨implAt, [], E0, ret, s0, k0, trivial, hent, hexit, hconv, hret, setup, pre,
     ⟨wsCall _, rfl, wsOK0 _⟩, ⟨wsCall _, rfl, wsOK0 _⟩, ⟨wsCall _, rfl, wsOK1 _⟩, returns⟩
 
@@ -282,7 +283,7 @@ theorem full_write : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E
     Amd64.Kernel.ConvT64Contract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.convT64") rt 1024 ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 p0, 0, 0] s ∧
+    CallSetup0 Extracted.entry [BitVec.ofNat 64 p0, 0, 0] s ∧
     (StackGuardOK s 48 ∧ StackWritable s 1232 16 ∧ (s.regs 4).toNat % 8 = 0 ∧
       Outside ((s.regs 4).toNat - 1232) 1248 rt ∧
       Buf s.mem (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat false ∧ (0 : BitVec 64).toNat ≤ 2 ^ 48 ∧
@@ -299,10 +300,10 @@ theorem full_write : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E
     (∃ s_c : Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.convT64") ∧
       CallOK64 s_c 1024 1) ∧
     Amd64.Kernel.ReturnsK ((Extracted.program.link impl).withExit ret) E
-      (fun s' k' => ABIReturn s s' ∧
+      (fun s' k' => ABIReturn (s.setRet ret) s' ∧
         (s'.regs 0 = (0 : BitVec 64) →
-          k'.output 1 = k.output 1 ++ readBytes s.mem (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat))
-      (fun _ _ => False) s k :=
+          k'.output 1 = k.output 1 ++ readBytes (s.setRet ret).mem (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat))
+      (fun _ _ => False) (s.setRet ret) k :=
   ⟨implAt, [], E0, ret, s0, k0, trivial, hent, hexit, hconv, hret, setup, pre,
     ⟨wsCall _, rfl, wsOK0 _⟩, ⟨wsCall _, rfl, wsOK0 _⟩, ⟨wsCall _, rfl, wsOK1 _⟩, returns_full⟩
 

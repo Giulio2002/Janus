@@ -154,6 +154,7 @@ theorem correctness (rt : List (Nat × Nat)) :
         k'.trace = k.trace ++ [.clock 0 sec nsec, .clock 1 msec mnsec] ∧
         k.mono ≤ msec * 10 ^ 9 + mnsec ∧ k'.mono = msec * 10 ^ 9 + mnsec ∧
         s'.regs 0 = BitVec.ofNat 64 (sec * 10 ^ 9 + nsec)) := by
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Proof.startNano, Proof.timeLocal, Proof.Witness.k]
   intro ret hret s k hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hout, hb1, hb2, hb3, hgd, hsn, hloc⟩
   janus_eval_nat hS : startNano
   janus_eval_nat hL : timeLocal
@@ -219,8 +220,8 @@ def E0 : KEnv := ⟨[], 1024⟩
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h⟩
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h⟩
 
 set_option maxRecDepth 100000 in
 theorem pre : GuardOK s0 48 ∧ StackOK s0 1128 0 ∧ Outside (s0.sp.toNat - 1128) 1128 [] ∧
@@ -233,27 +234,27 @@ theorem pre : GuardOK s0 48 ∧ StackOK s0 1128 0 ∧ Outside (s0.sp.toNat - 112
 
 /-- The theorem fires: `NowNano()` returns the wall-clock reading in nanoseconds. -/
 theorem returns : ReturnsK (Extracted.program.withExit ret) E0
-    (fun s' k' => FFI.ABIReturnC s0 s' ∧ ∃ sec nsec msec mnsec, nsec < 10 ^ 9 ∧
+    (fun s' k' => FFI.ABIReturnC (s0.setRet ret) s' ∧ ∃ sec nsec msec mnsec, nsec < 10 ^ 9 ∧
         k'.trace = k0.trace ++ [.clock 0 sec nsec, .clock 1 msec mnsec] ∧
         k0.mono ≤ msec * 10 ^ 9 + mnsec ∧ k'.mono = msec * 10 ^ 9 + mnsec ∧
         s'.regs 0 = BitVec.ofNat 64 (sec * 10 ^ 9 + nsec))
-    (fun _ _ => False) s0 k0 :=
-  correctness [] ret hret s0 k0 setup pre
+    (fun _ _ => False) (s0.setRet ret) k0 :=
+  (correctness []) s0 k0 setup pre ret hret
 
 /-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (ret : Nat) (s : State) (k : Kern), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧
+    CallSetup0 Extracted.entry [] s ∧
     (GuardOK s 48 ∧ StackOK s 1128 0 ∧ Outside (s.sp.toNat - 1128) 1128 rt ∧
       (s.regs 28).toNat + 400 ≤ 2 ^ 48 ∧ s.mem.accessible ((s.regs 28).toNat + 392) 8 false = true ∧
       s.mem.readLE ((s.regs 28).toNat + 392) 8 = 0 ∧
       ((s.regs 28).toNat + 400 ≤ s.sp.toNat - 1128 ∨ s.sp.toNat ≤ (s.regs 28).toNat + 16) ∧
       s.mem.accessible startNano 8 false = true ∧ s.mem.accessible timeLocal 8 false = true) ∧
     ReturnsK (Extracted.program.withExit ret) ⟨rt, 1024⟩
-      (fun s' k' => FFI.ABIReturnC s s' ∧ ∃ sec nsec msec mnsec, nsec < 10 ^ 9 ∧
+      (fun s' k' => FFI.ABIReturnC (s.setRet ret) s' ∧ ∃ sec nsec msec mnsec, nsec < 10 ^ 9 ∧
           k'.trace = k.trace ++ [.clock 0 sec nsec, .clock 1 msec mnsec] ∧
           k.mono ≤ msec * 10 ^ 9 + mnsec ∧ k'.mono = msec * 10 ^ 9 + mnsec ∧
           s'.regs 0 = BitVec.ofNat 64 (sec * 10 ^ 9 + nsec))
-      (fun _ _ => False) s k :=
+      (fun _ _ => False) (s.setRet ret) k :=
   ⟨[], ret, s0, k0, hret, setup, pre, returns⟩
 
 end Witness

@@ -49,12 +49,13 @@ theorem lsb63_of_neg (x : BitVec 64) (hx : x.toInt < 0) : x.getLsbD 63 = true :=
 theorem correctness (x : BitVec 64) (hx : 0 ≤ x.toInt) :
     Ensures Extracted.program Extracted.entry [x] (fun s => GuardOK s 0 ∧ StackOK s 24 16)
       (fun _ s' => s'.regs 0 = x) := by
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩⟩
   have h63 := lsb63_of_nonneg x hx
   janus_intro hs
   janus_run [h63]
 
-theorem traps (x : BitVec 64) (hx : x.toInt < 0) (ret : Nat)
+theorem traps_old (x : BitVec 64) (hx : x.toInt < 0) (ret : Nat)
     (hret : RetAddr Extracted.program ret) (s : State)
     (hs : CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s)
     (hg : GuardOK s 0) (hst : StackOK s 24 16) :
@@ -67,6 +68,17 @@ theorem traps (x : BitVec 64) (hx : x.toInt < 0) (ret : Nat)
   janus_run [h63]
   rw [trapAt_withExit]
   decide
+
+/-- v0.4.0 shape: the guard/stack precondition is read before the return address is installed; the run is from
+`s.setRet ret`. -/
+theorem traps (x : BitVec 64) (hx : x.toInt < 0) (s : State)
+    (hs : CallSetup0 Extracted.entry [x] s)
+    (hg : GuardOK s 0) (hst : StackOK s 24 16) (ret : Nat)
+    (hret : RetAddr Extracted.program ret) :
+    Traps (Extracted.program.withExit ret) (s.setRet ret) := by
+  refine traps_old x hx ret hret (s.setRet ret) (hs.setRet ret) ?_ ?_
+  · simpa [Janus.Spec.GuardOK] using hg
+  · simpa [Janus.Spec.StackOK] using hst
 
 namespace Witness
 
@@ -84,9 +96,10 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(5 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by intro i h; simp only [List.length_cons, List.length_nil] at h
-                rcases (by omega : i = 0) with rfl; rfl⟩
+theorem setup : CallSetup0 Extracted.entry [(5 : BitVec 64)] s0 :=
+  ⟨rfl, (by first | decide | simp | omega), by
+    intro i h; simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0) with rfl; rfl⟩
 
 theorem hpre : GuardOK s0 0 ∧ StackOK s0 24 16 := by
   simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, s0, wmem, sp0, g0]
@@ -94,10 +107,10 @@ theorem hpre : GuardOK s0 0 ∧ StackOK s0 24 16 := by
 
 /-- All the hypotheses of `correctness` hold together at a concrete call, and it returns `x`. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s ∧ 0 ≤ x.toInt ∧
+    CallSetup0 Extracted.entry [x] s ∧ 0 ≤ x.toInt ∧
     (GuardOK s 0 ∧ StackOK s 24 16) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => ABIReturn s s' ∧ s'.regs 0 = x) :=
-  ⟨ret, s0, 5, hret, setup, by decide, hpre, correctness 5 (by decide) ret hret s0 setup hpre⟩
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => ABIReturn (s.setRet ret) s' ∧ s'.regs 0 = x) :=
+  ⟨ret, s0, 5, hret, setup, by decide, hpre, (correctness 5 (by decide)) s0 setup hpre ret hret⟩
 
 def sT : State :=
   { regs := fun i => if i = 0 then 0xFFFFFFFFFFFFFFFF else if i = 28 then BitVec.ofNat 64 g0
@@ -106,9 +119,10 @@ def sT : State :=
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
 
-theorem setupT : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0xFFFFFFFFFFFFFFFF : BitVec 64)] sT :=
-  ⟨rfl, rfl, by intro i h; simp only [List.length_cons, List.length_nil] at h
-                rcases (by omega : i = 0) with rfl; rfl⟩
+theorem setupT : CallSetup0 Extracted.entry [(0xFFFFFFFFFFFFFFFF : BitVec 64)] sT :=
+  ⟨rfl, (by first | decide | simp | omega), by
+    intro i h; simp only [List.length_cons, List.length_nil] at h
+    rcases (by omega : i = 0) with rfl; rfl⟩
 
 theorem hpreT : GuardOK sT 0 ∧ StackOK sT 24 16 := by
   simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, sT, wmem, sp0, g0]
@@ -117,10 +131,10 @@ theorem hpreT : GuardOK sT 0 ∧ StackOK sT 24 16 := by
 
 /-- All the hypotheses of `traps` hold together at a concrete call with a negative `x`, and the call traps. -/
 theorem traps : ∃ (ret : Nat) (s : State) (x : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s ∧ x.toInt < 0 ∧
+    CallSetup0 Extracted.entry [x] s ∧ x.toInt < 0 ∧
     (GuardOK s 0 ∧ StackOK s 24 16) ∧
-    Traps (Extracted.program.withExit ret) s :=
-  ⟨ret, sT, 0xFFFFFFFFFFFFFFFF, hret, setupT, by decide, hpreT, Proof.traps 0xFFFFFFFFFFFFFFFF (by decide) ret hret sT setupT hpreT.1 hpreT.2⟩
+    Traps (Extracted.program.withExit ret) (s.setRet ret) :=
+  ⟨ret, sT, 0xFFFFFFFFFFFFFFFF, hret, setupT, by decide, hpreT, Proof.traps 0xFFFFFFFFFFFFFFFF (by decide) sT setupT hpreT.1 hpreT.2 ret hret⟩
 
 end Witness
 

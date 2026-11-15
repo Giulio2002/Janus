@@ -29,18 +29,19 @@ theorem msb_of_neg (x : BitVec 64) (hx : x.toInt < 0) : x.msb = true := by
 theorem correctness (x : BitVec 64) (hx : 0 ≤ x.toInt) :
     Ensures Extracted.program Extracted.entry [x] (fun s => StackGuardOK s 0 ∧ StackWritable s 16 16)
       (fun _ s' => s'.regs 0 = x) := by
-  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hb, ha, hw⟩⟩
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3, hg4⟩, ⟨hb, ha, hw⟩⟩
   have hm := msb_of_nonneg x hx
   janus64_intro hs
   simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3 hb ha hw
   janus64_run [hm]
 
-theorem traps (x : BitVec 64) (hx : x.toInt < 0) (ret : Nat)
+theorem traps_old (x : BitVec 64) (hx : x.toInt < 0) (ret : Nat)
     (hret : RetAddr Extracted.program ret) (s : State)
     (hs : CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s)
     (hg : StackGuardOK s 0) (hst : StackWritable s 16 16) :
     Janus.Amd64.Kernel.Traps (Extracted.program.withExit ret) s := by
-  obtain ⟨hg1, hg2, hg3⟩ := hg
+  obtain ⟨hg1, hg2, hg3, hg4⟩ := hg
   obtain ⟨hb, ha, hw⟩ := hst
   have hm := msb_of_neg x hx
   janus64_intro hs
@@ -49,6 +50,17 @@ theorem traps (x : BitVec 64) (hx : x.toInt < 0) (ret : Nat)
   janus64_run [hm]
   rw [Janus.Amd64.Kernel.trapAt_withExit]
   decide
+
+/-- v0.4.0 shape: the guard/stack precondition is read before the return address is installed; the run is from
+`s.setRet ret`. -/
+theorem traps (x : BitVec 64) (hx : x.toInt < 0) (s : State)
+    (hs : CallSetup0 Extracted.entry [x] s)
+    (hg : StackGuardOK s 0) (hst : StackWritable s 16 16) (ret : Nat)
+    (hret : RetAddr Extracted.program ret) :
+    Janus.Amd64.Kernel.Traps (Extracted.program.withExit ret) (s.setRet ret) := by
+  refine traps_old x hx ret hret (s.setRet ret) (hs.setRet hret.lt64) ?_ ?_
+  · simpa using hg
+  · simpa [Janus.Amd64.GoABI.StackWritable] using hst
 
 namespace Witness
 
@@ -65,19 +77,19 @@ def s0 : Amd64.State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(5 : BitVec 64)] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [(5 : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
 theorem hpre : StackGuardOK s0 0 ∧ StackWritable s0 16 16 :=
-  ⟨⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩,
-    ⟨by decide, by decide, by decide⟩⟩
+  ⟨(by first | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide, by decide⟩ | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩),
+    (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩)⟩
 
 /-- All the hypotheses of `correctness` hold together at a concrete call, and it returns `x`. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : Amd64.State) (x : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s ∧ 0 ≤ x.toInt ∧
+    CallSetup0 Extracted.entry [x] s ∧ 0 ≤ x.toInt ∧
     (StackGuardOK s 0 ∧ StackWritable s 16 16) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => ABIReturn s s' ∧ s'.regs 0 = x) :=
-  ⟨ret, s0, 5, hret, setup, by decide, hpre, correctness 5 (by decide) ret hret s0 setup hpre⟩
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => ABIReturn (s.setRet ret) s' ∧ s'.regs 0 = x) :=
+  ⟨ret, s0, 5, hret, setup, by decide, hpre, (correctness 5 (by decide)) s0 setup hpre ret hret⟩
 
 def sT : Amd64.State :=
   { regs := fun i => if i = 0 then 0xFFFFFFFFFFFFFFFF else if i = 4 then BitVec.ofNat 64 sp0 else if i = 14 then BitVec.ofNat 64 g0 else 0,
@@ -85,20 +97,20 @@ def sT : Amd64.State :=
     mem := ⟨bytes, [⟨sp0 - 0x100, 0x200, true⟩, ⟨g0, 0x100, false⟩]⟩ }
 
 
-theorem setupT : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0xFFFFFFFFFFFFFFFF : BitVec 64)] sT :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setupT : CallSetup0 Extracted.entry [(0xFFFFFFFFFFFFFFFF : BitVec 64)] sT :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
 theorem hpreT : StackGuardOK sT 0 ∧ StackWritable sT 16 16 :=
-  ⟨⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩,
-    ⟨by decide, by decide, by decide⟩⟩
+  ⟨(by first | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide, by decide⟩ | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩),
+    (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩)⟩
 
 
 /-- All the hypotheses of `traps` hold together at a concrete call with a negative `x`, and the call traps. -/
 theorem traps : ∃ (ret : Nat) (s : Amd64.State) (x : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s ∧ x.toInt < 0 ∧
+    CallSetup0 Extracted.entry [x] s ∧ x.toInt < 0 ∧
     (StackGuardOK s 0 ∧ StackWritable s 16 16) ∧
-    Janus.Amd64.Kernel.Traps (Extracted.program.withExit ret) s :=
-  ⟨ret, sT, 0xFFFFFFFFFFFFFFFF, hret, setupT, by decide, hpreT, Proof.traps 0xFFFFFFFFFFFFFFFF (by decide) ret hret sT setupT hpreT.1 hpreT.2⟩
+    Janus.Amd64.Kernel.Traps (Extracted.program.withExit ret) (s.setRet ret) :=
+  ⟨ret, sT, 0xFFFFFFFFFFFFFFFF, hret, setupT, by decide, hpreT, Proof.traps 0xFFFFFFFFFFFFFFFF (by decide) sT setupT hpreT.1 hpreT.2 ret hret⟩
 
 end Witness
 
