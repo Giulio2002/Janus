@@ -979,6 +979,29 @@ def _fix_stackguard_item(t):
 
 SG_CLOSER = "first | omega | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega)"
 
+SG_INLINE = "by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega)"
+
+def fix_stackguard_terms(t):
+    """Constructions of a StackGuardOK as an anonymous constructor with three components (the 4th field `apart` is new):
+    `⟨g1, g2, g3⟩` (hypotheses destructured earlier) gets a 4th component proved from the context; a triple of `by decide` /
+    `by decide +kernel` proofs is tried with a 4th `by decide` first and falls back to the 3-field structures it may also build (TlsG)."""
+    n = 0
+    out = []
+    pat_intro = re.compile(r'\b(?:rintro|obtain|rcases|intro|fun|match|cases)\b')
+    for ln in t.split('\n'):
+        if '⟨g1, g2, g3⟩' in ln and not pat_intro.search(ln):
+            ln = ln.replace('⟨g1, g2, g3⟩', '⟨g1, g2, g3, (%s)⟩' % SG_INLINE)
+            n += 1
+        out.append(ln)
+    t = '\n'.join(out)
+    comp = r"by decide(?: \+kernel)?|by unfold stackguard0 stackguard0Offset regG regSP; decide"
+    rx = re.compile(r'(?<![\w])⟨(' + comp + r'), (' + comp + r'), (' + comp + r')⟩')
+    def tri(m):
+        a, b, c = m.group(1), m.group(2), m.group(3)
+        return '(by first | exact ⟨%s, %s, %s, by decide⟩ | exact ⟨%s, %s, %s⟩)' % (a, b, c, a, b, c)
+    t2, k = rx.subn(tri, t)
+    return t2, n + k
+
 def fix_stackguard_construct(t):
     """`refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, …⟩` (an environment transfer lemma: a `CallEnv` whose first component is a
     `StackGuardOK`): a 4th hole for the guard word's apartness from `[RSP, RSP + 8)`, and a bullet after the third one."""
@@ -986,7 +1009,7 @@ def fix_stackguard_construct(t):
     out = []
     i = 0
     changed = 0
-    pat = re.compile(r'^(\s*)refine ⟨((?:⟨)?)⟨\?_, \?_, \?_⟩, (⟨\?_, \?_, \?_⟩|⟨by omega, by omega, by omega, \?_, hx15, hdf, hra⟩)')
+    pat = re.compile(r'^(\s*)refine ⟨((?:⟨)?)⟨\?_, \?_, \?_⟩, (⟨\?_, \?_, \?_⟩|⟨by omega, by omega, by omega, \?_, hx15, hdf, hra⟩|⟨\?_, \?_, \?_, \?_, hx\w*, hdf, hra⟩)')
     while i < len(lines):
         ln = lines[i]
         m = pat.match(ln)
@@ -1083,13 +1106,11 @@ def main(files):
             if nalt:
                 warn.append('%d `refine ⟨k, ?_, k⟩` alternatives got a 4-hole twin (StackGuardOK 4th field)' % nalt)
                 t2 = t5
-        if amd and '⟨by decide, by decide, by decide⟩' in t2:
-            # a constructor of three `by decide` (a StackGuardOK before the 4th field `apart`, or a 3-field TlsG): both shapes, the 4-field one first
-            t7, n7 = re.subn(r'(?<![\w])⟨by decide, by decide, by decide⟩',
-                             '(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩)', t2)
-            if n7:
-                warn.append('%d `⟨by decide, by decide, by decide⟩` constructors accept the 4-field StackGuardOK too' % n7)
-                t2 = t7
+        if amd:
+            t8, n8 = fix_stackguard_terms(t2)
+            if n8:
+                warn.append('%d StackGuardOK constructions (`⟨g1, g2, g3⟩`, `⟨by decide, …⟩` triples) got a 4th component proving the guard word apart from [RSP, RSP+8)' % n8)
+                t2 = t8
         if amd and '⟨?_, ?_, ?_⟩ <;>' in t2:
             # `first | decide | (refine ⟨?_, ?_, ?_⟩ <;> TAIL) | …` proving a precondition with a StackGuardOK (4 fields now): a 4-hole twin first
             t6, n6 = re.subn(r'(\| )\(refine ⟨\?_, \?_, \?_⟩ <;> ((?:[^()\n]|\((?:[^()\n]|\([^()\n]*\))*\))*)\)',
