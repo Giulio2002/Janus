@@ -291,6 +291,7 @@ class Reg:
     ensdefs = {}        # defs whose body is `∀ …, Ensures …` (a spec: `Hyp2 impl R …`) -> (file, body)
     setupnames = set()  # theorems `name : CallSetup (P.withExit R) …` (last component)
     setupused = set()   # those passed as the setup of a `ret hret s SETUP` application anywhere in the consumer tree
+    local_non = set()   # raw old-shaped theorems of the file being migrated
     opens = {}          # file -> namespaces it opens
     defs = {}           # last component of a def/abbrev name -> [(file, body text)] for the Prop-valued ones
 
@@ -484,6 +485,7 @@ def migrate(t, amd0, reg, fname=''):
         if ci0 >= 0 and (HEADRE.search(sg0[ci0 + 1:]) or any(w in reg.ensdefs for w in re.findall(r"[A-Za-z_][\w']*", sg0[ci0 + 1:]))): continue
         local_non.add(m0.group(1))
     reg.names = saved_names - local_non
+    reg.local_non = local_non
     try:
         return _migrate(t, amd0, reg, fname)
     finally:
@@ -729,6 +731,17 @@ def _migrate(t, amd0, reg, fname=''):
                         break
         return out
     used_setups = set(reg.setupused)
+    # a setup lemma applied only by the raw old-shaped theorems of this file (`local_non`) keeps its v0.3 form
+    if reg.local_non:
+        raw_used, row_used = set(), set()
+        for itx in items:
+            for nmx in reg.local_non:
+                for mx in re.finditer(r'(?<![\w.\'])' + re.escape(nmx) + r'(?![\w\'])', itx):
+                    tk, _ = tokens(itx, mx.end())
+                    for kx in range(len(tk) - 3):
+                        if tk[kx + 1][0].split('.')[-1] == 'hret' and kx + 3 < len(tk):
+                            raw_used.add(tk[kx + 3][0].split('.')[-1]); break
+        used_setups -= raw_used
     extra = {}
     for i, it in enumerate(items):
         mm0 = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
