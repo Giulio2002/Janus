@@ -798,6 +798,7 @@ def _migrate(t, amd0, reg, fname=''):
                 used_setups.add(toks[sidx][0])
                 if toks[sidx][0].split('.')[-1] in raw_setups: both_used.add(toks[sidx][0].split('.')[-1])
     both_used |= {n.split('.')[-1] for n in used_setups if n.split('.')[-1] in raw_setups}
+    restated = set()
     for i, it in enumerate(items):
         amd = isa[i]
         m = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
@@ -817,30 +818,34 @@ def _migrate(t, amd0, reg, fname=''):
             items[i] = it
             continue
         if inw[i] and name not in ens and not find_apps(it) and not conclusion(it):
-            it2 = fix_reexported_run(it)
-            if it2 != it: items[i] = it2; continue
+            it2 = fix_reexported_run(it, restated)
+            if it2 != it: items[i] = it2; restated.add(name.split('.')[-1]); continue
         apps = find_apps(it)
         sig0 = it.split(':=', 1)[0]
         exw = '∃' in sig0 and SETUP_RE.search(it) is not None
-        if (apps or extra.get(i) or (exw and inw[i] and (name in FORCE or (ens and not RAW)))) and (name not in ens or inw[i]) and not conclusion(it) is not None:
+        if exw and inw[i] and not apps and restated and any(re.search(r"(?<![\w.'])" + re.escape(r) + r"(?![\w'])", it[len(sig0):]) for r in restated): name_force = True
+        else: name_force = False
+        if (apps or extra.get(i) or (exw and inw[i] and (name in FORCE or name_force or (ens and not RAW)))) and (name not in ens or inw[i]) and not conclusion(it) is not None:
             it = rewrite_witness(it, apps, amd, name, warn, plain, kern, extra.get(i, ()))
             for bn in both_used:      # the rewritten witness applies the new-shaped twin of a setup lemma the raw theorems still apply
                 bsx = split_sig(it)[1]
                 if bsx is not None and not name == bn:
                     it = it[:bsx] + re.sub(r"(?<![\w.'])" + re.escape(bn) + r"(?![\w'])", bn + '_at0', it[bsx:])
             items[i] = it
+            if '.setRet' in it.split(':=', 1)[0]: restated.add(name.split('.')[-1])
     return ''.join(items), warn
 
-def fix_reexported_run(it):
+def fix_reexported_run(it, restated=()):
     """A claim file restates a witness run in its `Witness` namespace and proves it by the proof module's theorem of the same name:
     `theorem returns : Returns (P.withExit Wit.ret) Wit.s0 fun s' => ABIReturn Wit.s0 s' ∧ … := Wit.returns`. The proof module's
     theorem is now stated at `Wit.s0.setRet Wit.ret` (see `rewrite_witness`), so the restatement follows: every `Wit.s0` after the
     `withExit` becomes `(Wit.s0.setRet Wit.ret)`. Only a bare identifier body (a re-export) is rewritten."""
     sg, bs = split_sig(it)
     if sg is None: return it
-    if not re.fullmatch(r"\s*[\w.']+\s*", it[bs:]): return it
+    mb = re.match(r"\s*\(?([\w']+)(?:\.[\w.']+)?", it[bs:])      # a bare name, or `NAME.mono …` / `NAME.…` of a witness claim restated at the setRet state already
+    if not (re.fullmatch(r"\s*[\w.']+\s*", it[bs:]) or (mb and mb.group(1) in restated)): return it
     if SETUP_RE.search(sg): return it      # a statement with a call setup is rewritten as a whole by `rewrite_witness`
-    m = re.search(r'(?:Returns\w*|RunsAtLeast \d+|ReturnsWithin \d+) \([^()]*\.withExit ([\w.\']+)\) ([\w.\']+)(?=[\s])', sg)
+    m = re.search(r'(?:Returns\w*|RunsAtLeast \d+|ReturnsWithin \d+) \((?:[^()]|\([^()]*\))*\.withExit ([\w.\']+)\) ([\w.\']+)(?=[\s])', sg)
     if not m or 'setRet' in m.group(2) or m.group(2).startswith('(') : return it
     R, S = m.group(1), m.group(2)
     tail = re.sub(r"(?<![\w.'])" + re.escape(S) + r"(?![\w'])", '(' + S + '.setRet ' + R + ')', sg[m.end(2):])
@@ -887,10 +892,14 @@ def untoold(it, setups):
         m = re.compile(r'\)((?:\.(?:\d+|left|right))*)\.toOld\s+ret\s+hret\s+').search(it, pos)
         if not m: break
         toks, stop = tokens(it, m.end())
+        si = 1
         sname = re.match(r'\(?([\w.\']+)', toks[1][0]) if len(toks) >= 2 else None
+        if (sname is None or sname.group(1).split('.')[-1] not in setups) and len(toks) >= 3:
+            si = 2          # EnsuresK: `S K SETUP PRE`
+            sname = re.match(r'\(?([\w.\']+)', toks[2][0])
         if sname is None or sname.group(1).split('.')[-1] not in setups:
             pos = m.end(); continue
-        last = 3 if len(toks) >= 3 else 2
+        last = si + 2 if len(toks) >= si + 2 else si + 1
         states.add(toks[0][0]); states.add('__raw__')
         states.add('__setup__' + sname.group(1).split('.')[-1])
         new = ')' + m.group(1) + ' ' + it[toks[0][1]:toks[last - 1][2]] + ' ret hret'
