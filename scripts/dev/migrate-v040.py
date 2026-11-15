@@ -750,7 +750,7 @@ def _migrate(t, amd0, reg, fname=''):
         raw_used, row_used = set(), set()
         for itx in items:
             for nmx in reg.local_non:
-                for mx in re.finditer(r'(?<![\w.\'])' + re.escape(nmx) + r'(?![\w\'])', itx):
+                for mx in re.finditer(r'(?<![\w\'])(?:[\w]+\.)*' + re.escape(nmx) + r'(?![\w\'])', itx):
                     tk, _ = tokens(itx, mx.end())
                     for kx in range(len(tk) - 3):
                         if re.fullmatch(r"hret[\w']*", tk[kx + 1][0].split('.')[-1]) and kx + 3 < len(tk):
@@ -966,7 +966,11 @@ def fix_stackguard(t):
     `⟨…, hg1, hg2, hg3, …⟩` of another state still need their own proof of `hg4` (reported)."""
     t = re.sub(r'⟨hg1, hg2, hg3⟩', '⟨hg1, hg2, hg3, hg4⟩', t)
     # any other three binders followed by the region triple `⟨hb', …⟩` (the `CallEnv` shape: StackGuardOK, then the region)
-    return re.sub(r"⟨([\w'-]+), ([\w'-]+), ([\w'-]+)⟩(, ⟨hb)", lambda m: '⟨%s, %s, %s, %s⟩%s' % (m.group(1), m.group(2), m.group(3), '-' if m.group(3) == '-' else '_', m.group(4)), t)
+    def ext(m):
+        if m.group(2) == 'hnw' or m.group(3) == 'hacc':      # `⟨hle, hnw, hacc⟩`: a StackWritable (three fields), not a StackGuardOK
+            return m.group(0)
+        return '⟨%s, %s, %s, %s⟩%s' % (m.group(1), m.group(2), m.group(3), '-' if m.group(3) == '-' else '_', m.group(4))
+    return re.sub(r"⟨([\w'-]+), ([\w'-]+), ([\w'-]+)⟩(, ⟨hb)", ext, t)
 
 SG_CLOSER = "first | omega | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega)"
 
