@@ -32,6 +32,7 @@ theorem correctness (P : PanicRuntime) (ptr len cap i : BitVec 64) :
       (fun _ => goClass P)
       (fun s s' => (s'.regs 0).toNat = s.mem.readLE (ptr.toNat + 8 * i.toNat) 8)
       (fun _ v _ => v = P.boundsError) := by
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hcase⟩
   janus_intro hs
   refine GoReturns.of_reaches ?_
@@ -66,8 +67,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x300000 : BitVec 64), (4 : BitVec 64), (4 : BitVec 64), (1 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(0x300000 : BitVec 64), (4 : BitVec 64), (4 : BitVec 64), (1 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl⟩
@@ -79,13 +80,13 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (P : PanicRuntime) (ptr len cap i : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap, i] s ∧ (GuardOK s 0 ∧ StackOK s 24 16 ∧ (len.toNat ≤ i.toNat ∨ (i.toNat < len.toNat ∧ Ptr s.mem ptr (8 * len.toNat) false ∧ Disjoint ptr.toNat (8 * len.toNat) (s.sp.toNat - 24) 40))) ∧
-    GoReturns (Extracted.program.withExit ret) (goClass P) s fun o =>
+    CallSetup0 Extracted.entry [ptr, len, cap, i] s ∧ (GuardOK s 0 ∧ StackOK s 24 16 ∧ (len.toNat ≤ i.toNat ∨ (i.toNat < len.toNat ∧ Ptr s.mem ptr (8 * len.toNat) false ∧ Disjoint ptr.toNat (8 * len.toNat) (s.sp.toNat - 24) 40))) ∧
+    GoReturns (Extracted.program.withExit ret) (goClass P) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧ ((s'.regs 0).toNat = s.mem.readLE (ptr.toNat + 8 * i.toNat) 8)
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = (s.setRet ret).mem.readLE (ptr.toNat + 8 * i.toNat) 8)
     | .panicked v s' => v = P.boundsError
     | .goexited _ => False := by
-  refine ⟨ret, s0, PW, (0x300000), (4), (4), (1), hret, setup, ?pre, correctness PW (0x300000) (4) (4) (1) ret hret s0 setup ?pre⟩
+  refine ⟨ret, s0, PW, (0x300000), (4), (4), (1), hret, setup, ?pre, (correctness PW (0x300000) (4) (4) (1)) s0 setup ?pre ret hret⟩
   case pre =>
     try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Disjoint, s0, wmem, wbytes, sp0, g0, hp]
     all_goals decide

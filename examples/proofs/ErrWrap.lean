@@ -245,6 +245,7 @@ theorem correctness (impl : List Segment) (R : RtInv)
     (L : List (Nat × Nat)) (bud tp tl : Nat) :
     Ensures (Extracted.program.link impl) Extracted.entry [] (Pre R L bud tp tl)
       (Post R L bud tp tl) := by
+  janus_ensures_old [Proof.Pre, Janus.Spec.GuardOK, Janus.Spec.StackOK, Proof.ErrHolds, Proof.fmtAddr, Proof.ev, Proof.evData, Proof.evType]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb4, ha4, hw4⟩, hd, ⟨hv1, hv2, hv3, hv4, hv5, hv6, htl, htpb, htx⟩, hgo, hwrt, hwL, hok,
     hinv, hbud, hdataO, hevO, hevDO, hevW, hevDW, htW, htO⟩
   janus_intro hs
@@ -522,6 +523,11 @@ theorem setup : CallSetup ((Extracted.program.link implAt).withExit retA) Extrac
   ⟨rfl, rfl, by intro i h; simp at h⟩
 
 
+
+theorem setup_at0 : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h⟩
+
+
 set_option maxRecDepth 100000
 
 theorem dat_none (i : Nat) (h : 2000000 ≤ i) : dat i = none := by
@@ -648,20 +654,20 @@ theorem wsC_pre : erSite R0 [] 116 wsC :=
     (by decide) (by decide) (by decide) mC_rd0 mC_rd1 mC_rd2 mC_rd3 mC_rd4 mC_rd5
 
 /-- The guarantee fires: `ErrWrap()` from the witness state returns the wrapped error. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit retA) s0 fun s' =>
-    ABIReturn s0 s' ∧ Post R0 [] 116 textAddr 10 s0 s' :=
-  correctness implAt R0 hf0 [] 116 textAddr 10 retA hret0 s0 setup pre0
+theorem returns : Returns ((Extracted.program.link implAt).withExit retA) (s0.setRet retA) fun s' =>
+    ABIReturn (s0.setRet retA) s' ∧ Post R0 [] 116 textAddr 10 (s0.setRet retA) s' :=
+  correctness implAt R0 hf0 [] 116 textAddr 10 s0 setup_at0 pre0 retA hret0
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (L : List (Nat × Nat)) (bud tp tl : Nat) (ret : Nat) (s : State),
     ErrorfLive (Extracted.program.link impl) (Extracted.program.contractAddr "fmt.errorf") 4096 R tErr iErr tInt iWrap 26
       fmtNum 4294967296 ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧ Pre R L bud tp tl s ∧
+    CallSetup0 Extracted.entry [] s ∧ Pre R L bud tp tl s ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "fmt.errorf") ∧
       erSite R L bud s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ Post R L bud tp tl s s' :=
-  ⟨implAt, R0, [], 116, textAddr, 10, retA, s0, hf0, hret0, setup, pre0, ⟨wsC, rfl, wsC_pre⟩, returns⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ Post R L bud tp tl (s.setRet ret) s' :=
+  ⟨implAt, R0, [], 116, textAddr, 10, retA, s0, hf0, hret0, setup_at0, pre0, ⟨wsC, rfl, wsC_pre⟩, returns⟩
 
 end Witness
 

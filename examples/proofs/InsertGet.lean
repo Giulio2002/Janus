@@ -34,6 +34,7 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64))
       (fun s => CallerOK M s 48 32 ∧ M.Typ mapType ∧ m.toNat ≠ 0 ∧ M.Rep s.mem m.toNat f ∧
         H [mapType, m.toNat, k.toNat] (s.regs 28).toNat (s.sp.toNat - 48) (rtView M.priv s.mem))
       (fun _ s' => s'.regs 0 = v ∧ M.Rep s'.mem m.toNat (f.set k v)) := by
+  janus_ensures_old [Janus.Contracts.Map.CallerOK, Proof.mapType]
   intro ret hret s hs ⟨hc, hty, hm0, hmap, hH⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -133,8 +134,8 @@ def s0 : State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
@@ -191,9 +192,9 @@ theorem wsCallB_pre : Access1Site (MC ck64) AMap.empty wsCallB := by
   simp only [MC_priv, MC_depth, priv0, outside_cons, outside_nil, and_true]; decide
 
 /-- The theorem fires: `InsertGet(map, 5, 7)` returns what the theorem says. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
     (s'.regs 0 = 7 ∧ (MC ck64).Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7)) :=
-  correctness implAt (MC ck64) (MC_laws _) HAssign hcon hB (BitVec.ofNat 64 MP) 5 7 AMap.empty ret hret s0 setup pre
+  (correctness implAt (MC ck64) (MC_laws _) HAssign hcon hB (BitVec.ofNat 64 MP) 5 7 AMap.empty) s0 setup pre ret hret
 
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapassign_fast64`
 meeting `Assign` for it, and a call state of `InsertGet(map, 5, 7)` that satisfies the precondition. -/
@@ -204,14 +205,14 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
     Access1 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.mapaccess1_fast64") M ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s ∧
+    CallSetup0 Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s ∧
     (CallerOK M s 48 32 ∧ M.Typ mapType ∧ (BitVec.ofNat 64 MP).toNat ≠ 0 ∧ M.Rep s.mem (BitVec.ofNat 64 MP).toNat AMap.empty ∧
     H [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s.regs 28).toNat (s.sp.toNat - 48) (rtView M.priv s.mem)) ∧
     (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : State),
       s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapassign_fast64") ∧ AssignSite M H f s_c) ∧
     (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : State),
       s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess1_fast64") ∧ Access1Site M f s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
     (s'.regs 0 = 7 ∧ M.Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7)) :=
   ⟨implAt, (MC ck64), HAssign, ret, s0, (MC_laws _), hcon, hB, hret, setup, pre, ⟨AMap.empty, wsCallA, by simp only [wsCallA]; exact addr.symm ▸ rfl, wsCallA_pre⟩, ⟨AMap.empty, wsCallB, by simp only [wsCallB]; exact addrB.symm ▸ rfl, wsCallB_pre⟩, returns⟩
 

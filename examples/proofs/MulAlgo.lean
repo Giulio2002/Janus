@@ -32,6 +32,7 @@ theorem forAllValues (n : BitVec 64) (cut bias : Nat) :
         GlobalIs Extracted.program.globals s.mem "example.com/basic.mulBias" bias)
       (fun _ s' => s'.regs 0 = if n.slt (BitVec.ofNat 64 cut) then BitVec.ofNat 64 bias + 1
         else BitVec.ofNat 64 bias + 2) := by
+  janus_ensures_old [Janus.Spec.GlobalIs, Janus.Float.Fmt.bias]
   intro ret hret s hs ⟨hc, hb⟩
   janus_intro hs
   obtain ⟨hca, hcr⟩ := hc.elim rfl
@@ -54,10 +55,10 @@ theorem correctness (n : BitVec 64) :
       (fun s => GlobalsInit Extracted.program.globals s.mem
         ["example.com/basic.karatsubaCut", "example.com/basic.mulBias"])
       (fun _ s' => s'.regs 0 = if n.slt 40#64 then 1#64 else 2#64) :=
-  (forAllValues n 40 0).mono
+  (forAllValues n 40 0).mono_ret
     (fun _ h => ⟨h.globalIs (n := "example.com/basic.karatsubaCut") (by simp) rfl,
       h.globalIs (n := "example.com/basic.mulBias") (by simp) rfl⟩)
-    (fun _ _ _ h => by rw [h]; split <;> rfl)
+    (fun _ _ _ _ h => by rw [h]; split <;> rfl)
 
 namespace Witness
 
@@ -73,8 +74,8 @@ def s0 : State :=
   { regs := fun i => if i = 30 then BitVec.ofNat 64 ret else 0, sp := 0x10000,
     pc := BitVec.ofNat 64 Extracted.entry, flags := ⟨false, false, false, false⟩, mem := mem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩
+theorem setup : CallSetup0 Extracted.entry [0#64] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h; subst h; rfl⟩
 
 theorem hpre : GlobalsInit Extracted.program.globals s0.mem
     ["example.com/basic.karatsubaCut", "example.com/basic.mulBias"] :=
@@ -82,32 +83,32 @@ theorem hpre : GlobalsInit Extracted.program.globals s0.mem
 
 /-- All hypotheses of `correctness` hold together, in the link-time image. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧
+    CallSetup0 Extracted.entry [0#64] s ∧
     GlobalsInit Extracted.program.globals s.mem
       ["example.com/basic.karatsubaCut", "example.com/basic.mulBias"] ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ s'.regs 0 = if (0#64).slt 40#64 then 1#64 else 2#64) :=
-  ⟨ret, s0, hret, setup, hpre, correctness 0#64 ret hret s0 setup hpre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ s'.regs 0 = if (0#64).slt 40#64 then 1#64 else 2#64) :=
+  ⟨ret, s0, hret, setup, hpre, (correctness 0#64) s0 setup hpre ret hret⟩
 
 /-- So the guarantee is reached: `MulAlgo(0)` returns `1` (schoolbook, `0 < 40`). -/
-theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ s'.regs 0 = 1#64 := by
-  refine (correctness 0#64 ret hret s0 setup hpre).mono ?_
+theorem returns : Returns (Extracted.program.withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ s'.regs 0 = 1#64 := by
+  refine ((correctness 0#64) s0 setup hpre ret hret).mono ?_
   intro s' h
   exact ⟨h.1, by rw [h.2]; decide⟩
 
 /-- All hypotheses of `forAllValues` hold together (cut 40, bias 0, in the link-time image), and the call returns. -/
 theorem forAllValues : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧
+    CallSetup0 Extracted.entry [0#64] s ∧
     (GlobalIs Extracted.program.globals s.mem "example.com/basic.karatsubaCut" 40 ∧
         GlobalIs Extracted.program.globals s.mem "example.com/basic.mulBias" 0) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ s'.regs 0 = if (0#64).slt (BitVec.ofNat 64 40) then BitVec.ofNat 64 0 + 1
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ s'.regs 0 = if (0#64).slt (BitVec.ofNat 64 40) then BitVec.ofNat 64 0 + 1
         else BitVec.ofNat 64 0 + 2) :=
   ⟨ret, s0, hret, setup, ⟨hpre.globalIs (n := "example.com/basic.karatsubaCut") (by simp) rfl,
       hpre.globalIs (n := "example.com/basic.mulBias") (by simp) rfl⟩,
-    Proof.forAllValues 0#64 40 0 ret hret s0 setup ⟨hpre.globalIs (n := "example.com/basic.karatsubaCut") (by simp) rfl,
-      hpre.globalIs (n := "example.com/basic.mulBias") (by simp) rfl⟩⟩
+    (Proof.forAllValues 0#64 40 0) s0 setup ⟨hpre.globalIs (n := "example.com/basic.karatsubaCut") (by simp) rfl,
+      hpre.globalIs (n := "example.com/basic.mulBias") (by simp) rfl⟩ ret hret⟩
 
 end Witness
 

@@ -234,7 +234,9 @@ def CaseStmt (k : Nat) : Prop :=
 /-- One `DCZID_EL0` value: execute both functions symbolically, for an empty and for a filled
 cache; the small-block `DC ZVA` loop (cached `4 << bs`, `bs < 4`) goes through `zva_start`. -/
 macro "clear_case" : tactic => `(tactic| (
-  intro p len cap ret hret s hs ⟨hz, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hlen, ⟨hp, hp'⟩, hpal, hca,
+  intro p len cap
+  janus_ensures_old [Proof.blockSize]
+  intro ret hret s hs ⟨hz, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hlen, ⟨hp, hp'⟩, hpal, hca,
     hcache, hd1, hd2, hd3⟩
   janus_intro hs
   janus_eval_nat h_bs : blockSize
@@ -274,7 +276,9 @@ def CaseDZP : Prop :=
 
 set_option maxHeartbeats 0 in
 theorem case_dzp : CaseDZP := by
-  intro p len cap ret hret s hs ⟨hz, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hlen, ⟨hp, hp'⟩, hpal, hca,
+  intro p len cap
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Proof.blockSize]
+  intro ret hret s hs ⟨hz, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hlen, ⟨hp, hp'⟩, hpal, hca,
     hcache, hd1, hd2, hd3⟩
   janus_intro hs
   janus_eval_nat h_bs : blockSize
@@ -333,9 +337,10 @@ theorem correctness (p len cap : BitVec 64) :
         Disjoint blockSize 4 (s.sp.toNat - 40) 56)
       (fun s s' => ZeroOn s'.mem p.toNat (p.toNat + 128) ∧
         s'.mem.readLE blockSize 4 = zvaCache s.dczid ∧ Frame s s' p.toNat) := by
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Proof.blockSize]
   intro ret hret s hs hpre
   by_cases hdzp : s.dczid.getLsbD 4 = true
-  · exact case_dzp p len cap ret hret s hs ⟨hdzp, hpre⟩
+  · exact (case_dzp p len cap).toOld ret hret s hs ⟨hdzp, hpre⟩
   have hz : s.dczid = BitVec.ofNat 5 s.dczid.toNat := by simp
   have hk : s.dczid.toNat < 16 := by
     have key : ∀ k < 32, (BitVec.ofNat 5 k).getLsbD 4 = false → k < 16 := by decide
@@ -343,7 +348,7 @@ theorem correctness (p len cap : BitVec 64) :
   revert hz
   generalize s.dczid.toNat = k at hk
   intro hz
-  have run (h : CaseStmt k) := h p len cap ret hret s hs ⟨hz, hpre⟩
+  have run (h : CaseStmt k) := (h p len cap).toOld ret hret s hs ⟨hz, hpre⟩
   janus_cases hk
   · exact run case_0
   · exact run case_1
@@ -384,8 +389,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x300000 : BitVec 64), (16 : BitVec 64), (16 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(0x300000 : BitVec 64), (16 : BitVec 64), (16 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩
@@ -394,15 +399,15 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (p : BitVec 64) (len : BitVec 64) (cap : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [p, len, cap] s ∧ (GuardOK s 0 ∧ StackOK s 40 16 ∧ len.toNat = 16 ∧ Ptr s.mem p 128 true ∧
+    CallSetup0 Extracted.entry [p, len, cap] s ∧ (GuardOK s 0 ∧ StackOK s 40 16 ∧ len.toNat = 16 ∧ Ptr s.mem p 128 true ∧
         p.toNat % 128 = 0 ∧ s.mem.accessible blockSize 4 true = true ∧
         (s.mem.readLE blockSize 4 = 0 ∨ s.mem.readLE blockSize 4 = zvaCache s.dczid) ∧
         Disjoint p.toNat 128 (s.sp.toNat - 40) 56 ∧ Disjoint p.toNat 128 blockSize 4 ∧
         Disjoint blockSize 4 (s.sp.toNat - 40) 56) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (ZeroOn s'.mem p.toNat (p.toNat + 128) ∧
-        s'.mem.readLE blockSize 4 = zvaCache s.dczid ∧ Frame s s' p.toNat)) := by
-  refine ⟨ret, s0, (0x300000), (16), (16), hret, setup, ?pre, correctness (0x300000) (16) (16) ret hret s0 setup ?pre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (ZeroOn s'.mem p.toNat (p.toNat + 128) ∧
+        s'.mem.readLE blockSize 4 = zvaCache (s.setRet ret).dczid ∧ Frame (s.setRet ret) s' p.toNat)) := by
+  refine ⟨ret, s0, (0x300000), (16), (16), hret, setup, ?pre, (correctness (0x300000) (16) (16)) s0 setup ?pre ret hret⟩
   case pre =>
     simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, blockSize] <;> decide
 

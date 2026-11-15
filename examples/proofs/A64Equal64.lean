@@ -32,6 +32,7 @@ theorem correctness (a b : BitVec 64) :
       (fun s => GuardOK s 0 ∧ StackOK s 24 0 ∧ Ptr s.mem a 64 false ∧ Ptr s.mem b 64 false ∧
         Disjoint a.toNat 64 (s.sp.toNat - 24) 24 ∧ Disjoint b.toNat 64 (s.sp.toNat - 24) 24)
       (fun s s' => s'.regs 0 = if s.mem.readLE a.toNat 64 = s.mem.readLE b.toNat 64 then 1 else 0) := by
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, ⟨hA, hA'⟩, ⟨hB, hB'⟩, hda, hdb⟩
   janus_intro hs
   simp only [Disjoint] at hda hdb
@@ -64,8 +65,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x300000 : BitVec 64), (0x300100 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(0x300000 : BitVec 64), (0x300100 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
@@ -74,11 +75,11 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (a : BitVec 64) (b : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [a, b] s ∧ (GuardOK s 0 ∧ StackOK s 24 0 ∧ Ptr s.mem a 64 false ∧ Ptr s.mem b 64 false ∧
+    CallSetup0 Extracted.entry [a, b] s ∧ (GuardOK s 0 ∧ StackOK s 24 0 ∧ Ptr s.mem a 64 false ∧ Ptr s.mem b 64 false ∧
         Disjoint a.toNat 64 (s.sp.toNat - 24) 24 ∧ Disjoint b.toNat 64 (s.sp.toNat - 24) 24) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (s'.regs 0 = if s.mem.readLE a.toNat 64 = s.mem.readLE b.toNat 64 then 1 else 0)) := by
-  refine ⟨ret, s0, (0x300000), (0x300100), hret, setup, ?pre, correctness (0x300000) (0x300100) ret hret s0 setup ?pre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (s'.regs 0 = if (s.setRet ret).mem.readLE a.toNat 64 = (s.setRet ret).mem.readLE b.toNat 64 then 1 else 0)) := by
+  refine ⟨ret, s0, (0x300000), (0x300100), hret, setup, ?pre, (correctness (0x300000) (0x300100)) s0 setup ?pre ret hret⟩
   case pre =>
     simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp] <;> decide
 

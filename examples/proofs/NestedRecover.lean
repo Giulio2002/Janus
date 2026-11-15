@@ -193,6 +193,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       (goClassU P U)
       (fun _ s' => (s'.regs 0).toNat = 7)
       (fun _ _ _ => False) := by
+  janus_ensures_old [Janus.Contracts.Panic.PanicCallerOK, Janus.Contracts.Panic.gOf]
   intro ret hret s hs ⟨hc, hcalm, hne1, hne2, hroom, hds, hw⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -767,9 +768,9 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmW }
 
-theorem setup : CallSetup ((Extracted.program.link implW).withExit ret) Extracted.entry
+theorem setup : CallSetup0 Extracted.entry
     [1#64, 0#64, 2#64, 0#64] s0 := by
-  refine ⟨rfl, rfl, fun i h => ?_⟩
+  refine ⟨rfl, by first | decide | simp | omega, fun i h => ?_⟩
   simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl
 
 set_option maxRecDepth 100000 in
@@ -878,12 +879,12 @@ theorem wsRet_pre : DeferreturnPre PW wsRet := by
 
 /-- So the guarantee is reached: `NestedRecover` panics, the nested panic is recovered by the
 remaining deferred call, and the call returns `7`. -/
-theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U0 s0) s0 fun o =>
+theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U0 (s0.setRet ret)) (s0.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s0 s' ∧ (s'.regs 0).toNat = 7
+    | .returned s' => ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = 7
     | .panicked _ _ => False
     | .goexited _ => False :=
-  correctness implW PW (P0_laws T0 RPa) U0 hpan hrec hdr 1#64 0#64 2#64 0#64 ret hret s0 setup pre
+  (correctness implW PW (P0_laws T0 RPa) U0 hpan hrec hdr 1#64 0#64 2#64 0#64) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State → Nat → Nat → Prop) (ret : Nat)
@@ -893,7 +894,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State →
     GorecoverContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.gorecover") P ∧
     DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [1#64, 0#64, 2#64, 0#64] s ∧
+    CallSetup0 Extracted.entry [1#64, 0#64, 2#64, 0#64] s ∧
     (PanicCallerOK P s (P.depth + 144) 40 ∧ P.Calm s.mem (s.regs 28).toNat ∧ (1#64 : BitVec 64).toNat ≠ 0 ∧
       (2#64 : BitVec 64).toNat ≠ 0 ∧ 2 ≤ P.room s.mem (gOf s) ∧
       (∀ d ∈ P.defers s.mem (gOf s), s.sp.toNat ≤ d.sp) ∧
@@ -904,9 +905,9 @@ theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State →
       grSite P s_c) ∧
     (∃ s_r : State, s_r.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") ∧
       DeferreturnPre P s_r) ∧
-    GoReturns ((Extracted.program.link impl).withExit ret) (goClassU P U s) s fun o =>
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClassU P U (s.setRet ret)) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧ (s'.regs 0).toNat = 7
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧ (s'.regs 0).toNat = 7
     | .panicked _ _ => False
     | .goexited _ => False :=
   ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hpan, hrec, hdr, hret, setup, pre, ⟨wsG, wfi, rfl, wsG_find, wsG_pre⟩, ⟨wsGr, rfl, wsGr_pre⟩, ⟨wsRet, rfl, wsRet_pre⟩, returns⟩

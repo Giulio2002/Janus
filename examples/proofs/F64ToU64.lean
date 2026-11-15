@@ -24,6 +24,7 @@ theorem correctness (x : BitVec 64) (i : Int) (hi : truncInt binary64 x.toNat = 
     Ensures Extracted.program Extracted.entry []
       (fun s => s.getV 0 64 = x.toNat ∧ s.fpcr = 0)
       (fun _ s' => (s'.regs 0).toNat = i.toNat) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hx, hf⟩
   janus_intro hs
   simp only [State.getV] at hx
@@ -35,6 +36,7 @@ theorem exact (x : BitVec 64) :
     Ensures Extracted.program Extracted.entry []
       (fun s => s.getV 0 64 = x.toNat ∧ FP.trapEnables s.fpcr.toNat = 0)
       (fun s s' => s'.regs 0 = BitVec.ofNat 64 (FP.fpToFixed binary64 s.fpcr.toNat true .rz 64 x.toNat).1) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hx, ht⟩
   janus_intro hs
   simp only [State.getV] at hx
@@ -51,6 +53,7 @@ theorem saturation (x : BitVec 64) :
         (isNaN binary64 x.toNat = true → (s'.regs 0).toNat = 0) ∧
         (classify binary64 x.toNat = .inf →
           (s'.regs 0).toNat = if signOf binary64 x.toNat then 0 else 2 ^ 64 - 1)) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hx, hf⟩
   janus_intro hs
   simp only [State.getV] at hx
@@ -87,8 +90,8 @@ def s0 : State :=
     flags := ⟨false, false, false, false⟩, mem := wmem,
     vregs := fun i => if i = 0 then BitVec.ofNat 128 (c_x.toNat) else 0 }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     omega⟩
@@ -106,25 +109,25 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧
+    CallSetup0 Extracted.entry [] s ∧
     (truncInt binary64 c_x.toNat = some c_i ∧ 0 ≤ c_i ∧ c_i < 2 ^ 64) ∧
     (s.getV 0 64 = c_x.toNat ∧ s.fpcr = 0) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 0).toNat = c_i.toNat)) :=
-  ⟨ret, s0, hret, setup, ⟨c_hi, c_h0, c_h1⟩, hpre, correctness c_x c_i c_hi c_h0 c_h1 ret hret s0 setup hpre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = c_i.toNat)) :=
+  ⟨ret, s0, hret, setup, ⟨c_hi, c_h0, c_h1⟩, hpre, (correctness c_x c_i c_hi c_h0 c_h1) s0 setup hpre ret hret⟩
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `saturation` hold together at a concrete call, and the call returns. -/
 theorem saturation : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (s.getV 0 64 = c_x.toNat ∧ s.fpcr = 0) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((∀ i, truncInt binary64 c_x.toNat = some i → i < 0 → (s'.regs 0).toNat = 0) ∧
+    CallSetup0 Extracted.entry [] s ∧ (s.getV 0 64 = c_x.toNat ∧ s.fpcr = 0) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((∀ i, truncInt binary64 c_x.toNat = some i → i < 0 → (s'.regs 0).toNat = 0) ∧
         (∀ i, truncInt binary64 c_x.toNat = some i → 2 ^ 64 ≤ i → (s'.regs 0).toNat = 2 ^ 64 - 1) ∧
         (isNaN binary64 c_x.toNat = true → (s'.regs 0).toNat = 0) ∧
         (classify binary64 c_x.toNat = .inf →
           (s'.regs 0).toNat = if signOf binary64 c_x.toNat then 0 else 2 ^ 64 - 1))) := by
-  refine ⟨ret, s0, hret, setup, ?pre, Proof.saturation c_x ret hret s0 setup ?pre⟩
+  refine ⟨ret, s0, hret, setup, ?pre, (Proof.saturation c_x) s0 setup ?pre ret hret⟩
   case pre =>
     simp only [Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, c_x]
     decide
@@ -133,10 +136,10 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `exact` hold together at a concrete call, and the call returns. -/
 theorem exact : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (s.getV 0 64 = c_x.toNat ∧ FP.trapEnables s.fpcr.toNat = 0) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (s'.regs 0 = BitVec.ofNat 64 (FP.fpToFixed binary64 s.fpcr.toNat true .rz 64 c_x.toNat).1)) := by
-  refine ⟨ret, s0, hret, setup, ?pre, Proof.exact c_x ret hret s0 setup ?pre⟩
+    CallSetup0 Extracted.entry [] s ∧ (s.getV 0 64 = c_x.toNat ∧ FP.trapEnables s.fpcr.toNat = 0) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (s'.regs 0 = BitVec.ofNat 64 (FP.fpToFixed binary64 (s.setRet ret).fpcr.toNat true .rz 64 c_x.toNat).1)) := by
+  refine ⟨ret, s0, hret, setup, ?pre, (Proof.exact c_x) s0 setup ?pre ret hret⟩
   case pre =>
     simp only [Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, c_x]
     decide

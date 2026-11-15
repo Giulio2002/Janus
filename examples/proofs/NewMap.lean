@@ -27,6 +27,7 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64))
       (fun s => CallerOK M s 16 0 ∧ H [] (s.regs 28).toNat (s.sp.toNat - 16) (rtView M.priv s.mem))
       (fun s s' => (s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧
         M.Env s'.mem (s.regs 28)) := by
+  janus_ensures_old [Janus.Contracts.Map.CallerOK]
   intro ret hret s hs ⟨hc, hH⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -87,8 +88,8 @@ def s0 : State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h⟩
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
@@ -125,9 +126,9 @@ theorem wsCall_pre : MakeSmallSite (MC ck64) HMake wsCall := by
   simp only [MC_priv, MC_depth, priv0, outside_cons, outside_nil, and_true]; decide
 
 /-- The theorem fires: `NewMap()` returns what the theorem says. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    ((s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty ∧ (MC ck64).Env s'.mem (s0.regs 28)) :=
-  correctness implAt (MC ck64) (MC_laws _) HMake hcon ret hret s0 setup ⟨pre.1, pre.2.1⟩
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
+    ((s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty ∧ (MC ck64).Env s'.mem ((s0.setRet ret).regs 28)) :=
+  (correctness implAt (MC ck64) (MC_laws _) HMake hcon) s0 setup ⟨pre.1, pre.2.1⟩ ret hret
 
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.makemap_small`
 meeting `MakeSmall` for it, and a call state of `NewMap()` that satisfies the precondition. -/
@@ -136,11 +137,11 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
     MakeSmall (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.makemap_small") M H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
+    CallSetup0 Extracted.entry [] s ∧
     (CallerOK M s 16 0 ∧ H [] (s.regs 28).toNat (s.sp.toNat - 16) (rtView M.priv s.mem) ∧ IsMap M s.mem 0 emp) ∧
     (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makemap_small") ∧ MakeSmallSite M H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
-    ((s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧ M.Env s'.mem (s.regs 28)) :=
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
+    ((s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧ M.Env s'.mem ((s.setRet ret).regs 28)) :=
   ⟨implAt, (MC ck64), HMake, ret, s0, (MC_laws _), hcon, hret, setup, pre, ⟨wsCall, by simp only [wsCall]; exact addr.symm ▸ rfl, wsCall_pre⟩, returns⟩
 
 end Witness

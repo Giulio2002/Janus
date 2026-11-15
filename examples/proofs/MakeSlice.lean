@@ -43,6 +43,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
           s'.mem.accessible (s'.regs 0).toNat (8 * n.toNat) true = true ∧
           ∀ i, i < n.toNat → s'.mem.readLE ((s'.regs 0).toNat + 8 * i) 8 = 0) ∧
         MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 16)])) := by
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Proof.u64Type]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hout, hn, hH⟩
   janus_intro hs
   janus_eval_nat h_ut : u64Type
@@ -93,8 +94,8 @@ def s0 : State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [4] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [4] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
@@ -146,14 +147,14 @@ theorem wsCall_pre : mkSite rt H wsCall := by
 
 /-- The theorem fires: for this call and this `makeslice`, `MakeSlice(4)` returns a zeroed slice of
 length and capacity 4 inside `rt`. -/
-theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
     s'.regs 1 = 4 ∧ s'.regs 2 = 4 ∧
     (0 < (4 : BitVec 64).toNat → InRanges (s'.regs 0).toNat (8 * (4 : BitVec 64).toNat) rt ∧
       (s'.regs 0).toNat % 8 = 0 ∧
       s'.mem.accessible (s'.regs 0).toNat (8 * (4 : BitVec 64).toNat) true = true ∧
       ∀ i, i < (4 : BitVec 64).toNat → s'.mem.readLE ((s'.regs 0).toNat + 8 * i) 8 = 0) ∧
-    MemFrame s0.mem s'.mem (rt ++ [(s0.sp.toNat - 4144, s0.sp.toNat + 16)]) :=
-  correctness impl rt H 4 hmk ret hret s0 setup pre
+    MemFrame (s0.setRet ret).mem s'.mem (rt ++ [((s0.setRet ret).sp.toNat - 4144, (s0.setRet ret).sp.toNat + 16)]) :=
+  (correctness impl rt H 4 hmk) s0 setup pre ret hret
 
 /-- The hypotheses are satisfiable: a `makeslice` meeting the contract (`hmk`), runtime ranges, a
 readiness predicate, and a call state of `MakeSlice(4)` that satisfies the precondition. -/
@@ -162,20 +163,20 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtR
     MakesliceContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.makeslice") rt 4096 H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [4] s ∧
+    CallSetup0 Extracted.entry [4] s ∧
     (GuardOK s 0 ∧ StackOK s 4144 16 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside (s.sp.toNat - 4144) 4160 rt ∧ (4 : BitVec 64).toNat ≤ 2 ^ 45 ∧
       H [u64Type, (4 : BitVec 64).toNat, (4 : BitVec 64).toNat] (s.regs 28).toNat (s.sp.toNat - 48)
         (rtView rt s.mem)) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makeslice") ∧
       mkSite rt H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
     s'.regs 1 = 4 ∧ s'.regs 2 = 4 ∧
     (0 < (4 : BitVec 64).toNat → InRanges (s'.regs 0).toNat (8 * (4 : BitVec 64).toNat) rt ∧
       (s'.regs 0).toNat % 8 = 0 ∧
       s'.mem.accessible (s'.regs 0).toNat (8 * (4 : BitVec 64).toNat) true = true ∧
       ∀ i, i < (4 : BitVec 64).toNat → s'.mem.readLE ((s'.regs 0).toNat + 8 * i) 8 = 0) ∧
-    MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 16)]) :=
+    MemFrame (s.setRet ret).mem s'.mem (rt ++ [((s.setRet ret).sp.toNat - 4144, (s.setRet ret).sp.toNat + 16)]) :=
   ⟨impl, rt, H, ret, s0, hmk, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness

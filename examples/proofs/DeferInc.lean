@@ -31,6 +31,7 @@ theorem correctness (P : PanicRuntime) (p x : BitVec 64) :
         s'.mem.readLE p.toNat 8 = (s.mem.readLE p.toNat 8 + 1) % 2 ^ 64)
       (fun _ _ _ => False) := by
   apply Ensures.toGo
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, ⟨hp, hp'⟩, hd⟩
   simp only [Disjoint] at hd
   janus_intro hs
@@ -58,8 +59,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x300000 : BitVec 64), (5 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(0x300000 : BitVec 64), (5 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
@@ -71,13 +72,13 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (P : PanicRuntime) (p x : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [p, x] s ∧ (GuardOK s 0 ∧ StackOK s 72 0 ∧ Ptr s.mem p 8 true ∧ Disjoint p.toNat 8 (s.sp.toNat - 72) 72) ∧
-    GoReturns (Extracted.program.withExit ret) (goClass P) s fun o =>
+    CallSetup0 Extracted.entry [p, x] s ∧ (GuardOK s 0 ∧ StackOK s 72 0 ∧ Ptr s.mem p 8 true ∧ Disjoint p.toNat 8 (s.sp.toNat - 72) 72) ∧
+    GoReturns (Extracted.program.withExit ret) (goClass P) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧ ((s'.regs 0).toNat = x.toNat ∧ s'.mem.readLE p.toNat 8 = (s.mem.readLE p.toNat 8 + 1) % 2 ^ 64)
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = x.toNat ∧ s'.mem.readLE p.toNat 8 = ((s.setRet ret).mem.readLE p.toNat 8 + 1) % 2 ^ 64)
     | .panicked v s' => False
     | .goexited _ => False := by
-  refine ⟨ret, s0, PW, (0x300000), (5), hret, setup, ?pre, correctness PW (0x300000) (5) ret hret s0 setup ?pre⟩
+  refine ⟨ret, s0, PW, (0x300000), (5), hret, setup, ?pre, (correctness PW (0x300000) (5)) s0 setup ?pre ret hret⟩
   case pre =>
     try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Disjoint, s0, wmem, wbytes, sp0, g0, hp]
     all_goals decide

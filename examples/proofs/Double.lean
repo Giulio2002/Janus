@@ -24,6 +24,7 @@ theorem correctness (x : BitVec 64) (v : Nat) :
     Ensures Extracted.program Extracted.entry [x]
       (fun s => GlobalBytesIs Extracted.program.globals s.mem "example.com/basic.useFast" 0 1 v)
       (fun _ s' => s'.regs 0 = x + x) := by
+  janus_ensures_old [Janus.Spec.GlobalBytesIs, Proof.Witness.k]
   intro ret hret s hs h
   janus_intro hs
   have hacc := h.accessible rfl false
@@ -47,8 +48,8 @@ def s0 (m : Memory) : State :=
     sp := 0x10000, pc := BitVec.ofNat 64 Extracted.entry, flags := ⟨false, false, false, false⟩,
     mem := m }
 
-theorem setup (m : Memory) : CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] (s0 m) :=
-  ⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩
+theorem setup (m : Memory) : CallSetup0 Extracted.entry [21#64] (s0 m) :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h; subst h; rfl⟩
 
 /-- The flag clear: the link-time image (`GlobalsInit`, hence the byte `0`). -/
 theorem pre0 : GlobalBytesIs Extracted.program.globals (s0 mem0).mem "example.com/basic.useFast" 0 1 0 :=
@@ -62,22 +63,22 @@ theorem pre1 : GlobalBytesIs Extracted.program.globals (s0 mem1).mem "example.co
 
 /-- So the guarantee is reached on both paths: `Double(21)` returns `42`. -/
 theorem returns :
-    Returns (Extracted.program.withExit ret) (s0 mem0) (fun s' => ABIReturn (s0 mem0) s' ∧ s'.regs 0 = 42#64) ∧
-    Returns (Extracted.program.withExit ret) (s0 mem1) (fun s' => ABIReturn (s0 mem1) s' ∧ s'.regs 0 = 42#64) := by
-  refine ⟨(correctness 21#64 0 ret hret _ (setup _) pre0).mono ?_,
-    (correctness 21#64 1 ret hret _ (setup _) pre1).mono ?_⟩
+    Returns (Extracted.program.withExit ret) ((s0 mem0).setRet ret) (fun s' => ABIReturn ((s0 mem0).setRet ret) s' ∧ s'.regs 0 = 42#64) ∧
+    Returns (Extracted.program.withExit ret) ((s0 mem1).setRet ret) (fun s' => ABIReturn ((s0 mem1).setRet ret) s' ∧ s'.regs 0 = 42#64) := by
+  refine ⟨((correctness 21#64 0) _ (setup _) pre0 ret hret).mono ?_,
+    ((correctness 21#64 1) _ (setup _) pre1 ret hret).mono ?_⟩
   all_goals intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
 
 /-- The hypotheses of `correctness` hold together, for the flag clear and for the flag set, and both runs return. -/
 theorem nonvacuous : ∃ (ret : Nat) (s s' : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] s ∧
+    CallSetup0 Extracted.entry [21#64] s ∧
     GlobalBytesIs Extracted.program.globals s.mem "example.com/basic.useFast" 0 1 0 ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] s' ∧
+    CallSetup0 Extracted.entry [21#64] s' ∧
     GlobalBytesIs Extracted.program.globals s'.mem "example.com/basic.useFast" 0 1 1 ∧
-    Returns (Extracted.program.withExit ret) s (fun t => ABIReturn s t ∧ t.regs 0 = 21#64 + 21#64) ∧
-    Returns (Extracted.program.withExit ret) s' (fun t => ABIReturn s' t ∧ t.regs 0 = 21#64 + 21#64) :=
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun t => ABIReturn (s.setRet ret) t ∧ t.regs 0 = 21#64 + 21#64) ∧
+    Returns (Extracted.program.withExit ret) (s'.setRet ret) (fun t => ABIReturn (s'.setRet ret) t ∧ t.regs 0 = 21#64 + 21#64) :=
   ⟨ret, s0 mem0, s0 mem1, hret, setup _, pre0, setup _, pre1,
-    correctness 21#64 0 ret hret _ (setup _) pre0, correctness 21#64 1 ret hret _ (setup _) pre1⟩
+    (correctness 21#64 0) _ (setup _) pre0 ret hret, (correctness 21#64 1) _ (setup _) pre1 ret hret⟩
 
 end Witness
 

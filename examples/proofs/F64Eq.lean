@@ -22,6 +22,7 @@ theorem correctness (x y : BitVec 64) :
     Ensures Extracted.program Extracted.entry []
       (fun s => s.getV 0 64 = x.toNat ∧ s.getV 1 64 = y.toNat ∧ s.fpcr = 0)
       (fun _ s' => (s'.regs 0).toNat % 256 = (feq binary64 x.toNat y.toNat).toNat) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hx, hy, hf⟩
   janus_intro hs
   simp only [State.getV] at hx hy
@@ -55,25 +56,25 @@ def s0 : State :=
     mem := Janus.Contracts.EqHashModel.wmem,
     vregs := fun i => if i = 1 then BitVec.ofNat 128 0x8000000000000000 else 0 }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h⟩
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h⟩
 
 theorem hpre : s0.getV 0 64 = x.toNat ∧ s0.getV 1 64 = y.toNat ∧ s0.fpcr = 0 := by
   refine ⟨by decide, by decide, rfl⟩
 
 /-- So the guarantee is reached: `+0 == -0` returns `true`. -/
-theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat % 256 = 1 := by
-  refine (correctness x y ret hret s0 setup hpre).mono ?_
+theorem returns : Returns (Extracted.program.withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat % 256 = 1 := by
+  refine ((correctness x y) s0 setup hpre ret hret).mono ?_
   intro s' h
   exact ⟨h.1, by rw [h.2]; decide⟩
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧
+    CallSetup0 Extracted.entry [] s ∧
     (s.getV 0 64 = Witness.x.toNat ∧ s.getV 1 64 = Witness.y.toNat ∧ s.fpcr = 0) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ (s'.regs 0).toNat % 256 = 1) :=
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ (s'.regs 0).toNat % 256 = 1) :=
   ⟨ret, s0, hret, setup, hpre, returns⟩
 
 end Witness

@@ -317,6 +317,7 @@ theorem correctness (impl : List Segment) (R : IfaceModel) (hl : R.Laws) (H : Rt
       (fun s s' => Post R t x s s' ∧
         (StaticItabs R Extracted.program.data → taInter s.mem desc = hasherInter →
           t.toNat = mulHasherType → (s'.regs 0).toNat = mulHasherItab ∧ (s'.regs 2).toNat = 1)) := by
+  janus_ensures_old [Janus.Contracts.Iface.CallerOK, Janus.Spec.Type.TADescOK, Proof.desc, Janus.Spec.Type.taCanFail, Janus.Contracts.rtView, Janus.Spec.Type.taInter, Janus.Spec.Type.TACacheOK, Janus.Spec.Type.taCache, Proof.Witness.k, Janus.Spec.Type.taTyp, Janus.Spec.Type.taItab]
   intro ret hret s hs ⟨hc, hdesc, hcf, hdo, hty, hH⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -449,8 +450,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := mem1 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [td, val] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [td, val] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
 
@@ -494,13 +495,14 @@ theorem wsCall_pre : TypeAssertSite R0 Htrue wsCall := by
     | (simp only [R0_priv, outside_cons, outside_nil, and_true]; decide +kernel)
 
 /-- So the guarantee is reached: the assertion succeeds with the model's itab `TAB`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = TAB ∧ s'.regs 1 = val ∧ (s'.regs 2).toNat = 1 := by
-  refine (correctness implAt R0 R0_laws Htrue model td val ret hret s0 setup
-    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩).mono ?_
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = TAB ∧ s'.regs 1 = val ∧ (s'.regs 2).toNat = 1 := by
+  refine ((correctness implAt R0 R0_laws Htrue model td val) s0 setup
+    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩ ret hret).mono ?_
   intro s' h
   obtain ⟨habi, ⟨h0, h1, h2, -⟩, -⟩ := h
-  have hi : taInter s0.mem desc = ID := by decide +kernel
+  have hi : taInter (s0.setRet ret).mem desc = ID := by
+    rw [show (s0.setRet ret).mem = s0.mem from rfl]; decide +kernel
   rw [hi] at h0
   have h0' : (s'.regs 0).toNat = TAB := by rw [h0]; decide +kernel
   refine ⟨habi, h0', h1, ?_⟩
@@ -511,17 +513,17 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (H : RtReady) (r
     (t x : BitVec 64),
     R.Laws ∧ TypeAssert (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typeAssert") R H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [t, x] s ∧
+    CallSetup0 Extracted.entry [t, x] s ∧
     (CallerOK R s 48 24 ∧ TADescOK R s.mem desc ∧ taCanFail s.mem desc = true ∧
       Outside desc 24 [(s.sp.toNat - (R.depth + 48), s.sp.toNat + 24)] ∧
       (t.toNat ≠ 0 → R.IsType t.toNat) ∧
       H [desc, t.toNat] (s.regs 28).toNat (s.sp.toNat - 48) (rtView R.priv s.mem)) ∧
     (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.typeAssert") ∧ TypeAssertSite R H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (Post R t x s s' ∧
-        (StaticItabs R Extracted.program.data → taInter s.mem desc = hasherInter →
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ (Post R t x (s.setRet ret) s' ∧
+        (StaticItabs R Extracted.program.data → taInter (s.setRet ret).mem desc = hasherInter →
           t.toNat = mulHasherType → (s'.regs 0).toNat = mulHasherItab ∧ (s'.regs 2).toNat = 1)) :=
   ⟨implAt, R0, Htrue, ret, s0, td, val, R0_laws, model, hret, setup,
-    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt R0 R0_laws Htrue model td val ret hret s0 setup ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩⟩
+    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt R0 R0_laws Htrue model td val) s0 setup ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩ ret hret⟩
 
 end Witness
 

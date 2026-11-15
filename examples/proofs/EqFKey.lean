@@ -34,6 +34,7 @@ theorem correctness (impl : List Segment) (d : Nat)
     Ensures (Extracted.program.link impl) Extracted.entry [p, q]
       (fun s => CallerOK s d 16 0 ∧ s.fpcr = 0 ∧ KeyInput d s p.toNat ∧ KeyInput d s q.toNat)
       (fun s s' => (s'.regs 0).toNat % 256 = (keyEq s.mem p.toNat q.toNat).toNat) := by
+  janus_ensures_old [Janus.Contracts.Mem.CallerOK, Proof.KeyInput, Proof.window, Janus.Contracts.Mem.strPtr, Janus.Contracts.Mem.strLen, Janus.Contracts.Mem.callerWindow]
   intro ret hret s hs ⟨hc, hfp, ⟨hpb, hpa, hpo, hpsb, hpsa, hpso⟩, ⟨hqb, hqa, hqo, hqsb, hqsa, hqso⟩⟩
   have hc' := hc
   obtain ⟨⟨hg1, hg2, hg3⟩, hal, hd8, hdd, hb, hst, hog⟩ := hc'
@@ -146,8 +147,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := Janus.Contracts.EqHashModel.wmem }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [k, k] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [k, k] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
 
@@ -181,9 +182,9 @@ theorem wsCall_pre : MemequalSite 64 wsCall :=
   ⟨eqpre_pc _ (Janus.Contracts.MemSat.wstate_eqPre _ 0 (by decide)), input_pc _ (Janus.Contracts.MemSat.wstate_input _ 0 _ _ (by decide) (by decide)), input_pc _ (Janus.Contracts.MemSat.wstate_input _ 0 _ _ (by decide) (by decide))⟩
 
 /-- So the guarantee is reached: the key equals itself. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat % 256 = 1 := by
-  refine (correctness implAt 64 (model 64) k k ret hret s0 setup hpre).mono ?_
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat % 256 = 1 := by
+  refine ((correctness implAt 64 (model 64) k k) s0 setup hpre ret hret).mono ?_
   intro s' h
   exact ⟨h.1, by rw [h.2]; decide⟩
 
@@ -191,11 +192,11 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
 theorem nonvacuous : ∃ (impl : List Segment) (d ret : Nat) (s : State) (p q : BitVec 64),
     Memequal (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memequal") d ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, q] s ∧
+    CallSetup0 Extracted.entry [p, q] s ∧
     (CallerOK s d 16 0 ∧ s.fpcr = 0 ∧ KeyInput d s p.toNat ∧ KeyInput d s q.toNat) ∧
     (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memequal") ∧ MemequalSite d s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat % 256 = (keyEq s.mem p.toNat q.toNat).toNat) :=
-  ⟨implAt, 64, ret, s0, k, k, model 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt 64 (model 64) k k ret hret s0 setup hpre⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat % 256 = (keyEq (s.setRet ret).mem p.toNat q.toNat).toNat) :=
+  ⟨implAt, 64, ret, s0, k, k, model 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt 64 (model 64) k k) s0 setup hpre ret hret⟩
 
 end Witness
 

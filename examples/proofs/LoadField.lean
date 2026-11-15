@@ -26,6 +26,7 @@ theorem correctness (P : PanicRuntime) :
       (fun _ => goClass P)
       (fun _ _ => False)
       (fun _ v _ => v = P.err ErrKind.mem) := by
+  janus_ensures_old
   intro ret hret s hs hna
   have h0 : s.regs 0 = 0#64 := hs.args 0 (by decide)
   have hpc : s.pc = BitVec.ofNat 64 Extracted.entry := hs.pc
@@ -74,8 +75,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(0 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     have : i = 0 := by omega
@@ -88,13 +89,13 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (P : PanicRuntime), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧ (s.mem.accessible 0 8 false = false) ∧
-    GoReturns (Extracted.program.withExit ret) (goClass P) s fun o =>
+    CallSetup0 Extracted.entry [0#64] s ∧ (s.mem.accessible 0 8 false = false) ∧
+    GoReturns (Extracted.program.withExit ret) (goClass P) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧ (False)
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧ (False)
     | .panicked v s' => v = P.err ErrKind.mem
     | .goexited _ => False := by
-  refine ⟨ret, s0, PW, hret, setup, ?pre, correctness PW ret hret s0 setup ?pre⟩
+  refine ⟨ret, s0, PW, hret, setup, ?pre, (correctness PW) s0 setup ?pre ret hret⟩
   case pre =>
     try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Disjoint, s0, wmem, wbytes, sp0, g0, hp]
     all_goals decide

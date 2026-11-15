@@ -144,6 +144,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       (fun _ => goClass P)
       (fun s s' => s'.mem.readLE accA 8 = mix (s.mem.readLE accA 8))
       (fun _ _ _ => False) := by
+  janus_ensures_old [Janus.Contracts.Panic.PanicCallerOK, Janus.Contracts.Panic.gOf]
   intro ret hret s hs ⟨hc, hd, hacc, hao, hfo, hroom, hsave, hdss⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd', hb, hst, hout, hgd, hgo⟩ := hc'
@@ -977,8 +978,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wm }
 
-theorem setup : CallSetup ((Extracted.program.link implW).withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h⟩
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h⟩
 
 set_option maxRecDepth 100000 in
 theorem pre : PanicCallerOK PW s0 160 0 ∧ Extracted.program.DataLoaded s0.mem ∧
@@ -1073,12 +1074,12 @@ theorem wsRet_pre : DeferreturnPre PW wsRet := by
 
 /-- So the guarantee is reached: `RangeDefer` returns, having run its two deferred calls in LIFO
 order. -/
-theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) s0 fun o =>
+theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) (s0.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s0 s' ∧ s'.mem.readLE accA 8 = mix (s0.mem.readLE accA 8)
+    | .returned s' => ABIReturn (s0.setRet ret) s' ∧ s'.mem.readLE accA 8 = mix ((s0.setRet ret).mem.readLE accA 8)
     | .panicked _ _ => False
     | .goexited _ => False :=
-  correctness implW PW (P0_laws T0 RPa) U0 hrf hat hdr ret hret s0 setup pre
+  (correctness implW PW (P0_laws T0 RPa) U0 hrf hat hdr) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State → Nat → Nat → Prop) (ret : Nat)
@@ -1088,7 +1089,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State →
     DeferprocatContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferprocat") P ∧
     DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
+    CallSetup0 Extracted.entry [] s ∧
     (PanicCallerOK P s 160 0 ∧ Extracted.program.DataLoaded s.mem ∧ s.mem.accessible accA 8 true = true ∧
       Outside accA 8 (P.priv ++ [(s.sp.toNat - (P.depth + 160), s.sp.toNat)]) ∧
       Outside fvA 16 (P.priv ++ [(s.sp.toNat - (P.depth + 160), s.sp.toNat)]) ∧
@@ -1100,9 +1101,9 @@ theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State →
       paSite P s_c) ∧
     (∃ s_r : State, s_r.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") ∧
       DeferreturnPre P s_r) ∧
-    GoReturns ((Extracted.program.link impl).withExit ret) (goClass P) s fun o =>
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClass P) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧ s'.mem.readLE accA 8 = mix (s.mem.readLE accA 8)
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧ s'.mem.readLE accA 8 = mix ((s.setRet ret).mem.readLE accA 8)
     | .panicked _ _ => False
     | .goexited _ => False :=
   ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hrf, hat, hdr, hret, setup, pre, ⟨wsRf, rfl, wsRf_pre⟩, ⟨wsPa, rfl, wsPa_pre⟩, ⟨wsRet, rfl, wsRet_pre⟩, returns⟩

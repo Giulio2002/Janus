@@ -32,6 +32,7 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
     Ensures (Extracted.program.link impl) Extracted.entry [p, n, c] (pre M wb d p n)
       (fun s s' => Zeroed s'.mem p.toNat (8 * n.toNat) ∧
         MemFrame s.mem s'.mem (M.priv ++ window d s ++ [(p.toNat, p.toNat + 8 * n.toNat)])) := by
+  janus_ensures_old [Proof.pre, Janus.Contracts.Mem.CallerOK, Proof.window, Janus.Contracts.Mem.WriteBarrierOff, Janus.Spec.Ptr, Janus.Contracts.Mem.callerWindow]
   intro ret hret s hs ⟨hc, henv, hgp, hpriv, hwb1, hwb2, hwbo, hwb, hn, hal8, ⟨hP, hP'⟩, hpo, hpp⟩
   have hc' := hc
   obtain ⟨⟨hg1, hg2, hg3⟩, hal, hd8, hdd, hb, hst, hog⟩ := hc'
@@ -137,8 +138,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := Janus.Contracts.EqHashModel.wmem }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [p, n, n] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [p, n, n] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩
 
@@ -171,9 +172,9 @@ def wsCall : State := { MemSat.wstate tmR with pc := BitVec.ofNat 64 cAddr }
 theorem wsCall_pre : clSite M0 WB 64 wsCall := clSite_pc _ _ _ _ _ clSite_stock
 
 /-- So the guarantee is reached: the 64 bytes at `DST` are zero. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ Zeroed s'.mem DST 64 :=
-  (correctness implAt M0 M0_laws WB 64 (model WB 64) p n n ret hret s0 setup hpre).mono
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ Zeroed s'.mem DST 64 :=
+  ((correctness implAt M0 M0_laws WB 64 (model WB 64) p n n) s0 setup hpre ret hret).mono
     fun _ h => ⟨h.1, h.2.1⟩
 
 /-- All hypotheses of `correctness` hold together. -/
@@ -181,14 +182,14 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MemModel) (wb d ret : Nat) (
     M.Laws ∧ MemclrHasPointers (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.memclrHasPointers") M wb d ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, n, c] s ∧
+    CallSetup0 Extracted.entry [p, n, c] s ∧
     pre M wb d p n s ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memclrHasPointers") ∧
       clSite M wb d s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
       (Zeroed s'.mem p.toNat (8 * n.toNat) ∧
-        MemFrame s.mem s'.mem (M.priv ++ window d s ++ [(p.toNat, p.toNat + 8 * n.toNat)])) :=
-  ⟨implAt, M0, WB, 64, ret, s0, p, n, n, M0_laws, model WB 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt M0 M0_laws WB 64 (model WB 64) p n n ret hret s0 setup hpre⟩
+        MemFrame (s.setRet ret).mem s'.mem (M.priv ++ window d (s.setRet ret) ++ [(p.toNat, p.toNat + 8 * n.toNat)])) :=
+  ⟨implAt, M0, WB, 64, ret, s0, p, n, n, M0_laws, model WB 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt M0 M0_laws WB 64 (model WB 64) p n n) s0 setup hpre ret hret⟩
 
 end Witness
 

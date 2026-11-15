@@ -20,6 +20,7 @@ theorem correctness {V : Type} (M : MapModel (BitVec 64) V) (hl : M.Laws)
     Ensures Extracted.program Extracted.entry [m]
       (fun s => IsMap M s.mem m.toNat f)
       (fun _ s' => ∀ ks, Keys f ks → (s'.regs 0).toNat = ks.length) := by
+  janus_ensures_old [Janus.Spec.Map.IsMap]
   intro ret hret s hs hmap
   janus_intro hs
   by_cases h0 : m.toNat = 0
@@ -56,8 +57,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(0 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     have : i = 0 := by omega
@@ -69,12 +70,12 @@ theorem hpre : IsMap (ME (BitVec 64)) s0.mem (0 : BitVec 64).toNat emp := by
 
 /-- All hypotheses of `correctness` hold together at a concrete call: a nil map (the model `ME`, the empty map). -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (m : BitVec 64), (ME (BitVec 64)).Laws ∧ RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [m] s ∧
+    CallSetup0 Extracted.entry [m] s ∧
     (IsMap (ME (BitVec 64)) s.mem m.toNat emp) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (∀ ks, Keys emp ks → (s'.regs 0).toNat = ks.length)) :=
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (∀ ks, Keys emp ks → (s'.regs 0).toNat = ks.length)) :=
   ⟨ret, s0, 0, ME_laws _, hret, setup, hpre,
-    correctness (ME (BitVec 64)) (ME_laws _) 0 emp ret hret s0 setup hpre⟩
+    (correctness (ME (BitVec 64)) (ME_laws _) 0 emp) s0 setup hpre ret hret⟩
 
 end Witness
 

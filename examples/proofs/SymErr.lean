@@ -30,6 +30,7 @@ def ErrHolds (m : Janus.Arm64.Memory) : Prop :=
 theorem correctness :
     Ensures Extracted.program Extracted.entry [] (fun s => ErrHolds s.mem)
       (fun _ s' => (s'.regs 0).toNat = typeWord ∧ (s'.regs 1).toNat = dataWord) := by
+  janus_ensures_old [Proof.ErrHolds, Proof.v, Proof.typeWord, Proof.dataWord]
   intro ret hret s hs ht
   janus_intro hs
   simp only [ErrHolds, v, typeWord, dataWord, Extracted.dataAddr.«example.com/basic.errSym»,
@@ -61,8 +62,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     omega⟩
@@ -76,10 +77,10 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (ErrHolds s.mem) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 0).toNat = typeWord ∧ (s'.regs 1).toNat = dataWord)) :=
-  ⟨ret, s0, hret, setup, hpre, correctness ret hret s0 setup hpre⟩
+    CallSetup0 Extracted.entry [] s ∧ (ErrHolds s.mem) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = typeWord ∧ (s'.regs 1).toNat = dataWord)) :=
+  ⟨ret, s0, hret, setup, hpre, (correctness) s0 setup hpre ret hret⟩
 
 end Witness
 

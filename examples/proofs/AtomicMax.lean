@@ -42,6 +42,7 @@ theorem correctness (p v : BitVec 64) :
       (fun s s' => (s'.regs 0).toNat = s.mem.readLE p.toNat 8 ∧
         s'.mem = if v.toNat ≤ s.mem.readLE p.toNat 8 then s.mem
                  else s.mem.writeLE p.toNat 8 v.toNat) := by
+  janus_ensures_old [Proof.hasAtomics, Janus.Spec.Ptr]
   intro ret hret s hs ⟨hfa, hf, ⟨hp, hp'⟩, hal⟩
   janus_intro hs
   janus_eval_nat h_ha : hasAtomics
@@ -88,9 +89,10 @@ theorem anyCPU (p v : BitVec 64) :
       (fun s s' => (s'.regs 0).toNat = s.mem.readLE p.toNat 8 ∧
         s'.mem = if v.toNat ≤ s.mem.readLE p.toNat 8 then s.mem
                  else s.mem.writeLE p.toNat 8 v.toNat) := by
+  janus_ensures_old [Proof.hasAtomics, Janus.Spec.Ptr, Proof.Witness.k]
   intro ret hret s hs ⟨hfa, ⟨hp, hp'⟩, hal, hcpu⟩
   by_cases hf : s.mem.readLE hasAtomics 1 % 2 = 1
-  · exact correctness p v ret hret s hs ⟨hfa, hf, ⟨hp, hp'⟩, hal⟩
+  · exact (correctness p v).toOld ret hret s hs ⟨hfa, hf, ⟨hp, hp'⟩, hal⟩
   · obtain ⟨k, hk⟩ := hcpu.resolve_left hf
     janus_intro hs
     janus_eval_nat h_ha : hasAtomics
@@ -121,8 +123,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x300000 : BitVec 64), (5 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(0x300000 : BitVec 64), (5 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
@@ -131,13 +133,13 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (p : BitVec 64) (v : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [p, v] s ∧ (s.mem.accessible hasAtomics 1 false = true ∧ s.mem.readLE hasAtomics 1 % 2 = 1 ∧
+    CallSetup0 Extracted.entry [p, v] s ∧ (s.mem.accessible hasAtomics 1 false = true ∧ s.mem.readLE hasAtomics 1 % 2 = 1 ∧
         Ptr s.mem p 8 true ∧ p.toNat % 8 = 0) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 0).toNat = s.mem.readLE p.toNat 8 ∧
-        s'.mem = if v.toNat ≤ s.mem.readLE p.toNat 8 then s.mem
-                 else s.mem.writeLE p.toNat 8 v.toNat)) := by
-  refine ⟨ret, s0, (0x300000), (5), hret, setup, ?pre, correctness (0x300000) (5) ret hret s0 setup ?pre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = (s.setRet ret).mem.readLE p.toNat 8 ∧
+        s'.mem = if v.toNat ≤ (s.setRet ret).mem.readLE p.toNat 8 then (s.setRet ret).mem
+                 else (s.setRet ret).mem.writeLE p.toNat 8 v.toNat)) := by
+  refine ⟨ret, s0, (0x300000), (5), hret, setup, ?pre, (correctness (0x300000) (5)) s0 setup ?pre ret hret⟩
   case pre =>
     simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, hasAtomics] <;> decide
 
@@ -145,14 +147,14 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `anyCPU` hold together at a concrete call (the CPU has the atomics), and the call returns. -/
 theorem anyCPU : ∃ (ret : Nat) (s : State) (p : BitVec 64) (v : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [p, v] s ∧
+    CallSetup0 Extracted.entry [p, v] s ∧
     (s.mem.accessible hasAtomics 1 false = true ∧ Ptr s.mem p 8 true ∧ p.toNat % 8 = 0 ∧
         (s.mem.readLE hasAtomics 1 % 2 = 1 ∨ ∃ k, s.exclPass k = true)) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 0).toNat = s.mem.readLE p.toNat 8 ∧
-        s'.mem = if v.toNat ≤ s.mem.readLE p.toNat 8 then s.mem
-                 else s.mem.writeLE p.toNat 8 v.toNat)) := by
-  refine ⟨ret, s0, (0x300000), (5), hret, setup, ?pre, Proof.anyCPU (0x300000) (5) ret hret s0 setup ?pre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = (s.setRet ret).mem.readLE p.toNat 8 ∧
+        s'.mem = if v.toNat ≤ (s.setRet ret).mem.readLE p.toNat 8 then (s.setRet ret).mem
+                 else (s.setRet ret).mem.writeLE p.toNat 8 v.toNat)) := by
+  refine ⟨ret, s0, (0x300000), (5), hret, setup, ?pre, (Proof.anyCPU (0x300000) (5)) s0 setup ?pre ret hret⟩
   case pre =>
     refine ⟨?_, ?_, ?_, Or.inl ?_⟩ <;>
     (try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, hasAtomics]) <;> decide

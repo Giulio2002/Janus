@@ -45,6 +45,7 @@ theorem correctness (impl : List Segment) (H : HashModel) (hl : H.Laws) (d : Nat
     (p h : BitVec 64) :
     Ensures (Extracted.program.link impl) Extracted.entry [p, h] (pre H d p)
       (fun s s' => KeyHash H s.mem p.toNat h.toNat (s'.regs 0).toNat) := by
+  janus_ensures_old [Proof.pre, Janus.Contracts.Mem.CallerOK, Proof.window, Janus.Contracts.Mem.strPtr, Janus.Contracts.Mem.strLen, Janus.Contracts.Mem.callerWindow]
   intro ret hret s hs0 ⟨hc, henv, hpriv, hgp, hfp, hpb, hpa, hpo, hpp, hsb, hsa, hso, hsp'⟩
   have hc' := hc
   obtain ⟨⟨hg1, hg2, hg3⟩, hal, hd8, hdd, hb, hst, hog⟩ := hc'
@@ -215,8 +216,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := Janus.Contracts.EqHashModel.wmem }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [k, h0] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [k, h0] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
 
@@ -264,9 +265,9 @@ theorem wsCallS_pre : StrhashSite H0 64 wsCallS :=
   rw [h0]; exact Janus.Contracts.MemSat.wstate_strInput _ 2
 
 /-- So the guarantee is reached: the result is a possible hash of the key. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ KeyHash H0 s0.mem (STR - 8) 0 (s'.regs 0).toNat :=
-  (correctness implAt H0 H0_laws 64 (modelF 64) (modelS 64) k h0 ret hret s0 setup hpre).mono
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ KeyHash H0 (s0.setRet ret).mem (STR - 8) 0 (s'.regs 0).toNat :=
+  ((correctness implAt H0 H0_laws 64 (modelF 64) (modelS 64) k h0) s0 setup hpre ret hret).mono
     fun _ h => ⟨h.1, h.2⟩
 
 /-- All hypotheses of `correctness` hold together. -/
@@ -275,11 +276,11 @@ theorem nonvacuous : ∃ (impl : List Segment) (H : HashModel) (d ret : Nat) (s 
       binary64 8 ∧
     Strhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.strhash") H d ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, h] s ∧ pre H d p s ∧
+    CallSetup0 Extracted.entry [p, h] s ∧ pre H d p s ∧
     (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.f64hash") ∧ FhashSite H d s_c) ∧
     (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.strhash") ∧ StrhashSite H d s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (KeyHash H s.mem p.toNat h.toNat (s'.regs 0).toNat) :=
-  ⟨implAt, H0, 64, ret, s0, k, h0, H0_laws, modelF 64, modelS 64, hret, setup, hpre, ⟨wsCallF, rfl, wsCallF_pre⟩, ⟨wsCallS, rfl, wsCallS_pre⟩, correctness implAt H0 H0_laws 64 (modelF 64) (modelS 64) k h0 ret hret s0 setup hpre⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ (KeyHash H (s.setRet ret).mem p.toNat h.toNat (s'.regs 0).toNat) :=
+  ⟨implAt, H0, 64, ret, s0, k, h0, H0_laws, modelF 64, modelS 64, hret, setup, hpre, ⟨wsCallF, rfl, wsCallF_pre⟩, ⟨wsCallS, rfl, wsCallS_pre⟩, (correctness implAt H0 H0_laws 64 (modelF 64) (modelS 64) k h0) s0 setup hpre ret hret⟩
 
 end Witness
 

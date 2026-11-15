@@ -31,6 +31,7 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64))
     Ensures (Extracted.program.link impl) Extracted.entry [m, k]
       (fun s => CallerOK M s 48 0 ∧ M.Typ mapType ∧ IsMap M s.mem m.toNat f)
       (fun s s' => IsMap M s'.mem m.toNat (f.erase k) ∧ M.Env s'.mem (s.regs 28)) := by
+  janus_ensures_old [Janus.Contracts.Map.CallerOK, Proof.mapType, Janus.Spec.Map.IsMap]
   intro ret hret s hs ⟨hc, hty, hmap⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -91,8 +92,8 @@ def s0 : State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [BitVec.ofNat 64 MP, 5] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
@@ -129,9 +130,9 @@ theorem wsCall_pre : DeleteSite (ME (BitVec 64)) AMap.empty wsCall := by
   simp only [ME_priv, ME_depth, priv0, outside_cons, outside_nil, and_true]; decide
 
 /-- The theorem fires: `Delete(map, 5)` returns what the theorem says. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (IsMap (ME (BitVec 64)) s'.mem (BitVec.ofNat 64 MP).toNat (emp.erase 5) ∧ (ME (BitVec 64)).Env s'.mem (s0.regs 28)) :=
-  correctness implAt (ME (BitVec 64)) (ME_laws _) hcon (BitVec.ofNat 64 MP) 5 emp ret hret s0 setup pre
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
+    (IsMap (ME (BitVec 64)) s'.mem (BitVec.ofNat 64 MP).toNat (emp.erase 5) ∧ (ME (BitVec 64)).Env s'.mem ((s0.setRet ret).regs 28)) :=
+  (correctness implAt (ME (BitVec 64)) (ME_laws _) hcon (BitVec.ofNat 64 MP) 5 emp) s0 setup pre ret hret
 
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapdelete_fast64`
 meeting `Contracts.Map.Delete` for it, and a call state of `Delete(map, 5)` that satisfies the precondition. -/
@@ -140,12 +141,12 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
     Contracts.Map.Delete (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.mapdelete_fast64") M ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5] s ∧
+    CallSetup0 Extracted.entry [BitVec.ofNat 64 MP, 5] s ∧
     (CallerOK M s 48 0 ∧ M.Typ mapType ∧ IsMap M s.mem (BitVec.ofNat 64 MP).toNat AMap.empty) ∧
     (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : State),
       s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapdelete_fast64") ∧ DeleteSite M f s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
-    (IsMap M s'.mem (BitVec.ofNat 64 MP).toNat (emp.erase 5) ∧ M.Env s'.mem (s.regs 28)) :=
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
+    (IsMap M s'.mem (BitVec.ofNat 64 MP).toNat (emp.erase 5) ∧ M.Env s'.mem ((s.setRet ret).regs 28)) :=
   ⟨implAt, (ME (BitVec 64)), ret, s0, (ME_laws _), hcon, hret, setup, pre, ⟨AMap.empty, wsCall, by simp only [wsCall]; exact addr.symm ▸ rfl, wsCall_pre⟩, returns⟩
 
 end Witness

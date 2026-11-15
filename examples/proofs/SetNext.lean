@@ -82,6 +82,7 @@ theorem correctness (n q : BitVec 64) :
           s'.mem.readLE (pOf s + offNext) 8 = nextOf s + 16 ∧
           MemFrame s.mem s'.mem [(n.toNat, n.toNat + 8), (nextOf s, nextOf s + 16),
             (pOf s + offNext, pOf s + offNext + 8), (s.sp.toNat - 248, s.sp.toNat)])) := by
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Proof.wbFlag, Proof.BarrierOK, Proof.offM, Proof.mOf, Proof.offP, Proof.pOf, Proof.offNext, Proof.nextOf, Proof.endOf, Proof.offEnd]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, ⟨hn, hn'⟩, hfa, hsep, hbar⟩
   janus_intro hs
   janus_eval_nat h_wf : wbFlag
@@ -122,8 +123,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x300000 : BitVec 64), (0x300100 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(0x300000 : BitVec 64), (0x300100 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
@@ -132,21 +133,21 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (n : BitVec 64) (q : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [n, q] s ∧ (GuardOK s 0 ∧ StackOK s 248 0 ∧ Ptr s.mem n 8 true ∧
+    CallSetup0 Extracted.entry [n, q] s ∧ (GuardOK s 0 ∧ StackOK s 248 0 ∧ Ptr s.mem n 8 true ∧
         s.mem.accessible wbFlag 4 false = true ∧
         Separated [(n.toNat, 8), (s.sp.toNat - 248, 248), (wbFlag, 4)] ∧
         (s.mem.readLE wbFlag 4 ≠ 0 → BarrierOK s n.toNat)) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (s'.mem.readLE n.toNat 8 = q.toNat ∧
-        (s.mem.readLE wbFlag 4 = 0 →
-          MemFrame s.mem s'.mem [(n.toNat, n.toNat + 8), (s.sp.toNat - 248, s.sp.toNat)]) ∧
-        (s.mem.readLE wbFlag 4 ≠ 0 →
-          s'.mem.readLE (nextOf s) 8 = q.toNat ∧
-          s'.mem.readLE (nextOf s + 8) 8 = s.mem.readLE n.toNat 8 ∧
-          s'.mem.readLE (pOf s + offNext) 8 = nextOf s + 16 ∧
-          MemFrame s.mem s'.mem [(n.toNat, n.toNat + 8), (nextOf s, nextOf s + 16),
-            (pOf s + offNext, pOf s + offNext + 8), (s.sp.toNat - 248, s.sp.toNat)]))) := by
-  refine ⟨ret, s0, (0x300000), (0x300100), hret, setup, ?pre, correctness (0x300000) (0x300100) ret hret s0 setup ?pre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (s'.mem.readLE n.toNat 8 = q.toNat ∧
+        ((s.setRet ret).mem.readLE wbFlag 4 = 0 →
+          MemFrame (s.setRet ret).mem s'.mem [(n.toNat, n.toNat + 8), ((s.setRet ret).sp.toNat - 248, (s.setRet ret).sp.toNat)]) ∧
+        ((s.setRet ret).mem.readLE wbFlag 4 ≠ 0 →
+          s'.mem.readLE (nextOf (s.setRet ret)) 8 = q.toNat ∧
+          s'.mem.readLE (nextOf (s.setRet ret) + 8) 8 = (s.setRet ret).mem.readLE n.toNat 8 ∧
+          s'.mem.readLE (pOf (s.setRet ret) + offNext) 8 = nextOf (s.setRet ret) + 16 ∧
+          MemFrame (s.setRet ret).mem s'.mem [(n.toNat, n.toNat + 8), (nextOf (s.setRet ret), nextOf (s.setRet ret) + 16),
+            (pOf (s.setRet ret) + offNext, pOf (s.setRet ret) + offNext + 8), ((s.setRet ret).sp.toNat - 248, (s.setRet ret).sp.toNat)]))) := by
+  refine ⟨ret, s0, (0x300000), (0x300100), hret, setup, ?pre, (correctness (0x300000) (0x300100)) s0 setup ?pre ret hret⟩
   case pre =>
     refine ⟨?_, ?_, ?_, ?_, ?_, fun hh => absurd hh (by decide)⟩
     all_goals try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, Separated, wbFlag]

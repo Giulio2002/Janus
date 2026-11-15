@@ -304,6 +304,7 @@ theorem correctness (impl : List Segment) (R : IfaceModel) (hl : R.Laws) (H : Rt
       (fun s s' => Post R c t s s' ∧
         (StaticItabs R Extracted.program.data → c = hasherInter → t.toNat = mulHasherType →
           (s'.regs 0).toNat = 3)) := by
+  janus_ensures_old [Janus.Contracts.Iface.CallerOK, Janus.Spec.Type.ISDescOK, Proof.desc, Proof.window, Janus.Spec.Type.ISCacheOK, Proof.Witness.k, Janus.Spec.Type.isTyp, Janus.Spec.Type.isCase, Janus.Spec.Type.isItab]
   intro ret hret s hs ⟨hc, hdl, hdesc, hdo, hty, hH⟩
   suffices hmain : Reaches ((Extracted.program.link impl).withExit ret) s
       (IsReturn fun s' => ABIReturn s s' ∧ Post R c t s s') by
@@ -471,8 +472,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := mem2 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [td, val] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [td, val] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
 
@@ -513,10 +514,10 @@ theorem wsCall_pre : InterfaceSwitchSite R0 Htrue [ID] wsCall := by
     | exact Or.inl rfl
 
 /-- So the guarantee is reached: a box of `TD` takes the interface case `ID` (`3`). -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = 3 := by
-  refine (correctness implAt R0 R0_laws Htrue model ID td val ret hret s0 setup
-    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩).mono ?_
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = 3 := by
+  refine ((correctness implAt R0 R0_laws Htrue model ID td val) s0 setup
+    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩ ret hret).mono ?_
   intro s' h
   refine ⟨h.1, ?_⟩
   rw [h.2.1.1]
@@ -530,16 +531,16 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (H : RtReady) (c
     (s : State) (t x : BitVec 64), R.Laws ∧
     InterfaceSwitch (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.interfaceSwitch") R H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [t, x] s ∧
+    CallSetup0 Extracted.entry [t, x] s ∧
     (CallerOK R s 64 24 ∧ Extracted.program.DataLoaded s.mem ∧
       ISDescOK R s.mem desc [c] ∧ Outside desc 24 (window R s) ∧ (t.toNat ≠ 0 → R.IsType t.toNat) ∧
       H [desc, t.toNat] (s.regs 28).toNat (s.sp.toNat - 64) (rtView R.priv s.mem)) ∧
     (∃ (cs : List Nat) (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.interfaceSwitch") ∧ InterfaceSwitchSite R H cs s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (Post R c t s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ (Post R c t (s.setRet ret) s' ∧
         (StaticItabs R Extracted.program.data → c = hasherInter → t.toNat = mulHasherType →
           (s'.regs 0).toNat = 3)) :=
   ⟨implAt, R0, Htrue, ID, ret, s0, td, val, R0_laws, model, hret, setup,
-    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩, ⟨[ID], wsCall, rfl, wsCall_pre⟩, correctness implAt R0 R0_laws Htrue model ID td val ret hret s0 setup ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩⟩
+    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩, ⟨[ID], wsCall, rfl, wsCall_pre⟩, (correctness implAt R0 R0_laws Htrue model ID td val) s0 setup ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩ ret hret⟩
 
 end Witness
 

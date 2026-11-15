@@ -20,6 +20,7 @@ theorem correctness (x : BitVec 64) :
     Ensures Extracted.program Extracted.entry []
       (fun s => s.getV 0 64 = x.toNat)
       (fun _ s' => s'.getV 0 64 = abs binary64 x.toNat) := by
+  janus_ensures_old
   intro ret hret s hs hx
   janus_intro hs
   simp only [State.getV] at hx
@@ -53,8 +54,8 @@ def s0 : State :=
     flags := ⟨false, false, false, false⟩, mem := wmem,
     vregs := fun i => if i = 0 then BitVec.ofNat 128 (c_x.toNat) else 0 }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     omega⟩
@@ -63,10 +64,10 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) , RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (s.getV 0 64 = c_x.toNat) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (s'.getV 0 64 = abs binary64 c_x.toNat)) := by
-  refine ⟨ret, s0, hret, setup, ?pre, correctness c_x ret hret s0 setup ?pre⟩
+    CallSetup0 Extracted.entry [] s ∧ (s.getV 0 64 = c_x.toNat) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (s'.getV 0 64 = abs binary64 c_x.toNat)) := by
+  refine ⟨ret, s0, hret, setup, ?pre, (correctness c_x) s0 setup ?pre ret hret⟩
   case pre =>
     simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp] <;> decide
 

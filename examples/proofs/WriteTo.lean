@@ -35,7 +35,9 @@ theorem correctness (impl : List Segment) (fn stack : Nat) (rt : List (Nat × Na
         tab.toNat + 32 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 8 false = true ∧ s.mem.readLE (tab.toNat + 24) 8 = fn ∧
         Outside (s.sp.toNat - 56) 56 rt)
       (fun _ s' => ∃ n e1 e2, R w ptr len cap n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 1 = e1 ∧ s'.regs 2 = e2) := by
-  intro hc ret hret s hs ⟨h8, ⟨hfn4, hfn⟩, hd, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, htb, ht, hF, hrt⟩
+  intro hc
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK]
+  intro ret hret s hs ⟨h8, ⟨hfn4, hfn⟩, hd, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, htb, ht, hF, hrt⟩
   janus_intro hs
   simp only [Disjoint] at hd
   have hrt' : Outside (s.sp.toNat - 48 - 8) (48 + 8) rt := hrt.of_sub (by omega) (by omega)
@@ -91,9 +93,9 @@ theorem wsCall_pre : ICallPre 4 16 48 rt0 (fun sc => sc.regs 0 = 0x600000 ∧ sc
 
 theorem hret : RetAddr (Extracted.program.link impl) ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry
+theorem setup : CallSetup0 Extracted.entry
     [BitVec.ofNat 64 tabA, 0x600000, 0x500000, 3, 3] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | _ | _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | _ | _ | _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
 /-- The hypotheses are satisfiable together: a writer meeting the contract, and a call state of `WriteTo` (with a concrete itab)
 that satisfies the precondition. -/
@@ -102,30 +104,30 @@ theorem nonvacuous : ∃ (impl : List Segment) (fn stack : Nat) (rt : List (Nat 
     ICallContract (Extracted.program.link impl) fn 4 stack 48 rt (fun _ => []) R
       (fun sc => sc.regs 0 = w ∧ sc.regs 1 = ptr ∧ sc.regs 2 = len ∧ sc.regs 3 = cap) ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [tab, w, ptr, len, cap] s ∧
+    CallSetup0 Extracted.entry [tab, w, ptr, len, cap] s ∧
     (8 ≤ stack ∧ CodePtrOK fn ∧ Disjoint (tab.toNat + 24) 8 (s.sp.toNat - 56) 88 ∧
       GuardOK s 0 ∧ StackOK s (48 + stack) 40 ∧
       tab.toNat + 32 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 8 false = true ∧ s.mem.readLE (tab.toNat + 24) 8 = fn ∧
       Outside (s.sp.toNat - 56) 56 rt) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 fn ∧
       ICallPre 4 stack 48 rt (fun sc => sc.regs 0 = w ∧ sc.regs 1 = ptr ∧ sc.regs 2 = len ∧ sc.regs 3 = cap) s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
       ∃ n e1 e2, R w ptr len cap n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 1 = e1 ∧ s'.regs 2 = e2 :=
   ⟨impl, A0, 16, rt0, R0, ret, s0, BitVec.ofNat 64 tabA, 0x600000, 0x500000, 3, 3, hc, hret, setup,
     ⟨by decide, ⟨by decide, by decide⟩, (by unfold Janus.Spec.Disjoint; decide), ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
     by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩,
     ⟨wsCall, rfl, wsCall_pre⟩,
-    correctness impl A0 16 rt0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc ret hret s0 setup
+    (correctness impl A0 16 rt0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc) s0 setup
     ⟨by decide, ⟨by decide, by decide⟩, (by unfold Janus.Spec.Disjoint; decide), ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
-    by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩⟩
+    by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩ ret hret⟩
 
 /-- The theorem fires: the concrete call of `WriteTo` (the concrete writer serves the itab) returns, and its results are the ones
 `correctness` describes. -/
-theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
     ∃ n e1 e2, R0 0x600000 0x500000 3 3 n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 1 = e1 ∧ s'.regs 2 = e2 :=
-  correctness impl A0 16 rt0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc ret hret s0 setup
+  (correctness impl A0 16 rt0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc) s0 setup
     ⟨by decide, ⟨by decide, by decide⟩, (by unfold Janus.Spec.Disjoint; decide), ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
-    by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩
+    by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩ ret hret
 
 end Witness
 

@@ -48,6 +48,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       (fun _ _ => False)
       (fun _ _ _ => False)
       (fun s s' => s'.mem.readLE p.toNat 8 = (s.mem.readLE p.toNat 8 + 1) % 2 ^ 64) := by
+  janus_ensures_old [Janus.Contracts.Panic.PanicCallerOK, Janus.Spec.Ptr, Janus.Contracts.Panic.gOf]
   intro ret hret s hs ⟨hc, ⟨hp, hp'⟩, hdj, hpo, hroom, hds⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -385,9 +386,9 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmW }
 
-theorem setup : CallSetup ((Extracted.program.link implW).withExit ret) Extracted.entry
+theorem setup : CallSetup0 Extracted.entry
     [BitVec.ofNat 64 pA] s0 := by
-  refine ⟨rfl, rfl, fun i h => ?_⟩
+  refine ⟨rfl, by first | decide | simp | omega, fun i h => ?_⟩
   simp at h; subst h; rfl
 
 theorem pre : PanicCallerOK PW s0 (PW.depth + 80) 16 ∧ Ptr s0.mem (BitVec.ofNat 64 pA) 8 true ∧
@@ -481,13 +482,13 @@ theorem wsGr_pre : grSite PW wsGr :=
 
 /-- So the guarantee is reached: `GoexitDefer` runs its deferred call (which adds 1 to `*p`) and
 terminates the goroutine. -/
-theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U0 s0) s0 fun o =>
+theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U0 (s0.setRet ret)) (s0.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s0 s' ∧ False
+    | .returned s' => ABIReturn (s0.setRet ret) s' ∧ False
     | .panicked _ _ => False
     | .goexited s' => s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 =
-        (s0.mem.readLE (BitVec.ofNat 64 pA).toNat 8 + 1) % 2 ^ 64 :=
-  correctness implW PW (P0_laws T0 RPa) U0 hge hrec (BitVec.ofNat 64 pA) ret hret s0 setup pre
+        ((s0.setRet ret).mem.readLE (BitVec.ofNat 64 pA).toNat 8 + 1) % 2 ^ 64 :=
+  (correctness implW PW (P0_laws T0 RPa) U0 hge hrec (BitVec.ofNat 64 pA)) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State → Nat → Nat → Prop) (ret : Nat)
@@ -496,7 +497,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State →
       Extracted.funcs ∧
     GorecoverContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.gorecover") P ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 pA] s ∧
+    CallSetup0 Extracted.entry [BitVec.ofNat 64 pA] s ∧
     (PanicCallerOK P s (P.depth + 80) 16 ∧ Ptr s.mem (BitVec.ofNat 64 pA) 8 true ∧
       Spec.Disjoint (BitVec.ofNat 64 pA).toNat 8 (s.sp.toNat - (P.depth + (P.depth + 80)))
         (P.depth + (P.depth + 80) + 16) ∧
@@ -506,12 +507,12 @@ theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State →
       FuncInfo.find Extracted.funcs (s_c.regs 30).toNat = some fi ∧ GoexitPre P fi s_c) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gorecover") ∧
       grSite P s_c) ∧
-    GoReturns ((Extracted.program.link impl).withExit ret) (goClassU P U s) s fun o =>
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClassU P U (s.setRet ret)) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧ False
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧ False
     | .panicked _ _ => False
     | .goexited s' => s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 =
-        (s.mem.readLE (BitVec.ofNat 64 pA).toNat 8 + 1) % 2 ^ 64 :=
+        ((s.setRet ret).mem.readLE (BitVec.ofNat 64 pA).toNat 8 + 1) % 2 ^ 64 :=
   ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hge, hrec, hret, setup, pre, ⟨wsG, wfi, rfl, wsG_find, wsG_pre⟩, ⟨wsGr, rfl, wsGr_pre⟩, returns⟩
 
 end Witness

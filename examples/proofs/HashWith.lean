@@ -75,6 +75,7 @@ theorem correctness (tab h x : BitVec 64) :
       (fun s => ItabIs Extracted.program.data s.mem tab rotItab ∧ Ptr s.mem h 8 false ∧
         Disjoint h.toNat 8 (s.sp.toNat - 40) 64 ∧ GuardOK s 0 ∧ StackOK s 40 24)
       (fun s s' => s'.regs 0 = x.rotateLeft 13 + BitVec.ofNat 64 (s.mem.readLE h.toNat 8)) := by
+  suffices h : _ ∧ _ from ⟨Ensures.of_old (by janus_pre_setRet [Janus.Spec.ItabIs, Janus.Spec.Ptr, Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.SegLoaded]) h.1, Ensures.of_old (by janus_pre_setRet [Janus.Spec.ItabIs, Janus.Spec.Ptr, Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.SegLoaded]) h.2⟩
   constructor
   all_goals
     intro ret hret s hs ⟨hi, ⟨hh, hhb⟩, hd, ⟨hg1, hg2, hg3⟩, hal, hb, ha, hw⟩
@@ -115,15 +116,15 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(tab1 : BitVec 64), (hp : BitVec 64), (7 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(tab1 : BitVec 64), (hp : BitVec 64), (7 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩
 def s1 : State := { s0 with regs := fun i => if i = 0 then tab2 else s0.regs i }
 
-theorem setup1 : CallSetup (Extracted.program.withExit ret) Extracted.entry [(tab2 : BitVec 64), (hp : BitVec 64), (7 : BitVec 64)] s1 :=
-  ⟨rfl, rfl, by
+theorem setup1 : CallSetup0 Extracted.entry [(tab2 : BitVec 64), (hp : BitVec 64), (7 : BitVec 64)] s1 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩
@@ -157,20 +158,20 @@ theorem rest1 : Ptr s1.mem (hp : BitVec 64) 8 false ∧ Disjoint (hp : BitVec 64
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 theorem nonvacuous : ∃ (ret : Nat) (s s' : State) (tab h x tab2 h2 x2 : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [tab, h, x] s ∧
+    CallSetup0 Extracted.entry [tab, h, x] s ∧
     (ItabIs Extracted.program.data s.mem tab mulItab ∧ Ptr s.mem h 8 false ∧
         Disjoint h.toNat 8 (s.sp.toNat - 40) 64 ∧ GuardOK s 0 ∧ StackOK s 40 24) ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [tab2, h2, x2] s' ∧
+    CallSetup0 Extracted.entry [tab2, h2, x2] s' ∧
     (ItabIs Extracted.program.data s'.mem tab2 rotItab ∧ Ptr s'.mem h2 8 false ∧
         Disjoint h2.toNat 8 (s'.sp.toNat - 40) 64 ∧ GuardOK s' 0 ∧ StackOK s' 40 24) ∧
-    (Returns (Extracted.program.withExit ret) s fun t =>
-      ABIReturn s t ∧ (t.regs 0 = x * BitVec.ofNat 64 (s.mem.readLE h.toNat 8))) ∧
-    (Returns (Extracted.program.withExit ret) s' fun t =>
-      ABIReturn s' t ∧ (t.regs 0 = x2.rotateLeft 13 + BitVec.ofNat 64 (s'.mem.readLE h2.toNat 8))) :=
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun t =>
+      ABIReturn (s.setRet ret) t ∧ (t.regs 0 = x * BitVec.ofNat 64 ((s.setRet ret).mem.readLE h.toNat 8))) ∧
+    (Returns (Extracted.program.withExit ret) (s'.setRet ret) fun t =>
+      ABIReturn (s'.setRet ret) t ∧ (t.regs 0 = x2.rotateLeft 13 + BitVec.ofNat 64 ((s'.setRet ret).mem.readLE h2.toNat 8))) :=
   ⟨ret, s0, s1, tab1, hp, 7, tab2, hp, 7, hret, setup, ⟨itab0, rest0.1, rest0.2.1, rest0.2.2.1, rest0.2.2.2⟩,
     setup1, ⟨itab1, rest1.1, rest1.2.1, rest1.2.2.1, rest1.2.2.2⟩,
-    (correctness tab1 hp 7).1 ret hret s0 setup ⟨itab0, rest0.1, rest0.2.1, rest0.2.2.1, rest0.2.2.2⟩,
-    (correctness tab2 hp 7).2 ret hret s1 setup1 ⟨itab1, rest1.1, rest1.2.1, rest1.2.2.1, rest1.2.2.2⟩⟩
+    (correctness tab1 hp 7).1 s0 setup ⟨itab0, rest0.1, rest0.2.1, rest0.2.2.1, rest0.2.2.2⟩ ret hret,
+    (correctness tab2 hp 7).2 s1 setup1 ⟨itab1, rest1.1, rest1.2.1, rest1.2.2.1, rest1.2.2.2⟩ ret hret⟩
 
 end Witness
 

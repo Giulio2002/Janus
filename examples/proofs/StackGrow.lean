@@ -1321,6 +1321,7 @@ theorem correctness (impl : List Segment) (R : RtInv) (S : PoolShape) (B : Nat) 
         (∀ c, c ≤ B → c < n.toNat → 24 + 8 * growCap8 n.toNat c ≤ bud) ∧
         (∀ c, c ≤ B → c < n.toNat → growCap8 n.toNat c ≤ B)))
       (fun s s' => Post R B n L bud s s') := by
+  janus_ensures_old [Proof.wbFlag, Janus.Spec.GuardOK, Janus.Spec.StackOK, Proof.poolAddr, Proof.stkType, Proof.u64Type, Janus.Spec.Pool.newOffset]
   intro ret hret s hs ⟨⟨hS, hfl⟩, ⟨hg1, hg2, hg3⟩, ⟨hal, hb4, ha4, hw4⟩, hd, hgo, hwrt, hwL, hrt0, hpin, hsin, hu64,
     hfacc, hokG, hokP, hokN, hokGr, hokClr, hokWb, hnew0, hinv, hn40, hb24, hbud, hcapB⟩
   subst hS
@@ -1728,8 +1729,8 @@ def s0 : State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [1] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [1] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
 set_option maxHeartbeats 16000000 in
 set_option maxRecDepth 100000 in
@@ -2082,11 +2083,11 @@ theorem wsU_pre : putSite R 1 [(HEAP, HEAP + 24)] 0x400 [(HEAP, HEAP + 24)] wsU 
     rw [if_neg (by simp only [BUMP, HEAP]; omega)]
 
 /-- The main post at the witness's values, from `correctness`. -/
-theorem returnsPost : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ Post R 1 1 [] 0x400 s0 s' :=
-  correctness implAt R (SliceObj 1) 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
+theorem returnsPost : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ Post R 1 1 [] 0x400 (s0.setRet ret) s' :=
+  (correctness implAt R (SliceObj 1) 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
     (by rw [aN]; exact hnew) (by rw [aGr]; exact hgrow) (by rw [aM]; exact hclr) (by rw [aW]; exact hwb)
-    1 [] 0x400 ret hret s0 setup ⟨⟨rfl, hfl'⟩, pre⟩
+    1 [] 0x400) s0 setup ⟨⟨rfl, hfl'⟩, pre⟩ ret hret
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (B : Nat) (ret : Nat) (s : State)
@@ -2105,7 +2106,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (B : Nat) (ret : Nat)
     WbLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.gcWriteBarrier2")
       4096 R 2) ∧
     (RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [n] s) ∧
+    CallSetup0 Extracted.entry [n] s) ∧
     (((SliceObj B = SliceObj B ∧ (∀ b L g v, R.inv b L g v → Outside wbFlag 4 L)) ∧ GuardOK s 4288 ∧ StackOK s 4288 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside ((s.regs 28).toNat + 16) 8 ((s.sp.toNat - 4288, s.sp.toNat + 24) :: R.rt) ∧
       LiveSep [(s.sp.toNat - 4288, s.sp.toNat + 24)] R.rt ∧
@@ -2138,7 +2139,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (B : Nat) (ret : Nat)
       wbSite R L b s_c) ∧
     (∃ (L : List (Nat × Nat)) (b : Nat) (rs : List (Nat × Nat)) (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "sync.(*Pool).Put") ∧
       putSite R B L b rs s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ Post R B n L bud s s' := by
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ Post R B n L bud (s.setRet ret) s' := by
   obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22,
     a23⟩ := pre
   refine ⟨implAt, R, 1, ret, s0, [], 0x400, 1, by decide, ⟨?_, ?_, ?_, ?_, ?_, ?_⟩, ⟨hret, setup⟩,
@@ -2160,14 +2161,14 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (B : Nat) (ret : Nat)
 
 /-- So the guarantee is reached: `StackGrow(1)` returns `1`, the capacity of the grown stack, with the
 runtime's invariant again for the live set extended by `ex` (the abandoned array). -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = 1 ∧
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = 1 ∧
       ∃ xs b', FreshFrom xs [] ∧ b' ≤ 0x400 ∧
-        MemFrame s0.mem s'.mem (R.rt ++ [(s0.sp.toNat - 4288, s0.sp.toNat + 24)]) ∧
-        LiveFrame s0.mem s'.mem [] [] ∧ R.inv b' ([] ++ xs) (s0.regs 28).toNat (view R.rt ([] ++ xs) s'.mem) := by
-  have h := correctness implAt R (SliceObj 1) 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
+        MemFrame (s0.setRet ret).mem s'.mem (R.rt ++ [((s0.setRet ret).sp.toNat - 4288, (s0.setRet ret).sp.toNat + 24)]) ∧
+        LiveFrame (s0.setRet ret).mem s'.mem [] [] ∧ R.inv b' ([] ++ xs) ((s0.setRet ret).regs 28).toNat (view R.rt ([] ++ xs) s'.mem) := by
+  have h := (correctness implAt R (SliceObj 1) 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
     (by rw [aN]; exact hnew) (by rw [aGr]; exact hgrow) (by rw [aM]; exact hclr) (by rw [aW]; exact hwb)
-    1 [] 0x400 ret hret s0 setup ⟨⟨rfl, hfl'⟩, pre⟩
+    1 [] 0x400) s0 setup ⟨⟨rfl, hfl'⟩, pre⟩ ret hret
   refine Returns.mono h fun s' ⟨hab, cap0, hc, hres, xs, b', hfr, hb, hF, hLF, hinv⟩ => ⟨hab, ?_, xs, b', hfr, hb, hF, hLF, hinv⟩
   have : cap0 = 0 ∨ cap0 = 1 := by omega
   rcases this with rfl | rfl

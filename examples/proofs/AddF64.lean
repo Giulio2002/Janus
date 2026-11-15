@@ -25,6 +25,7 @@ theorem correctness (a b : BitVec 64) :
     Ensures Extracted.program Extracted.entry []
       (fun s => s.getV 0 64 = a.toNat ∧ s.getV 1 64 = b.toNat ∧ s.fpcr = 0)
       (fun _ s' => ResultIs binary64 (add binary64 .rne a.toNat b.toNat) (s'.getV 0 64)) := by
+  janus_ensures_old
   intro ret hret s hs ⟨ha, hb, hf⟩
   janus_intro hs
   simp only [State.getV] at ha hb
@@ -46,6 +47,7 @@ theorem exact (a b : BitVec 64) :
       (fun s s' => s'.getV 0 64 = (FP.fpAdd binary64 s.fpcr.toNat a.toNat b.toNat).1 % 2 ^ 64 ∧
         s'.fpsr = s.fpsr ||| BitVec.ofNat 32 ((FP.fpAdd binary64 s.fpcr.toNat a.toNat b.toNat).2.proc |||
           (FP.fpAdd binary64 s.fpcr.toNat a.toNat b.toNat).2.direct)) := by
+  janus_ensures_old
   intro ret hret s hs ⟨ha, hb, ht⟩
   janus_intro hs
   simp only [State.getV] at ha hb
@@ -81,8 +83,8 @@ def s0 : State :=
     flags := ⟨false, false, false, false⟩, mem := wmem,
     vregs := fun i => if i = 0 then BitVec.ofNat 128 (c_a.toNat) else if i = 1 then BitVec.ofNat 128 (c_b.toNat) else 0 }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     omega⟩
@@ -91,10 +93,10 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) , RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (s.getV 0 64 = c_a.toNat ∧ s.getV 1 64 = c_b.toNat ∧ s.fpcr = 0) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (ResultIs binary64 (add binary64 .rne c_a.toNat c_b.toNat) (s'.getV 0 64))) := by
-  refine ⟨ret, s0, hret, setup, ?pre, correctness c_a c_b ret hret s0 setup ?pre⟩
+    CallSetup0 Extracted.entry [] s ∧ (s.getV 0 64 = c_a.toNat ∧ s.getV 1 64 = c_b.toNat ∧ s.fpcr = 0) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (ResultIs binary64 (add binary64 .rne c_a.toNat c_b.toNat) (s'.getV 0 64))) := by
+  refine ⟨ret, s0, hret, setup, ?pre, (correctness c_a c_b) s0 setup ?pre ret hret⟩
   case pre =>
     simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp] <;> decide
 
@@ -102,13 +104,13 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `exact` hold together at a concrete call, and the call returns. -/
 theorem exact : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧
+    CallSetup0 Extracted.entry [] s ∧
     (s.getV 0 64 = c_a.toNat ∧ s.getV 1 64 = c_b.toNat ∧ FP.trapEnables s.fpcr.toNat = 0) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (s'.getV 0 64 = (FP.fpAdd binary64 s.fpcr.toNat c_a.toNat c_b.toNat).1 % 2 ^ 64 ∧
-        s'.fpsr = s.fpsr ||| BitVec.ofNat 32 ((FP.fpAdd binary64 s.fpcr.toNat c_a.toNat c_b.toNat).2.proc |||
-          (FP.fpAdd binary64 s.fpcr.toNat c_a.toNat c_b.toNat).2.direct))) := by
-  refine ⟨ret, s0, hret, setup, ?pre, Proof.exact c_a c_b ret hret s0 setup ?pre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (s'.getV 0 64 = (FP.fpAdd binary64 (s.setRet ret).fpcr.toNat c_a.toNat c_b.toNat).1 % 2 ^ 64 ∧
+        s'.fpsr = (s.setRet ret).fpsr ||| BitVec.ofNat 32 ((FP.fpAdd binary64 (s.setRet ret).fpcr.toNat c_a.toNat c_b.toNat).2.proc |||
+          (FP.fpAdd binary64 (s.setRet ret).fpcr.toNat c_a.toNat c_b.toNat).2.direct))) := by
+  refine ⟨ret, s0, hret, setup, ?pre, (Proof.exact c_a c_b) s0 setup ?pre ret hret⟩
   case pre =>
     try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp]
     all_goals decide

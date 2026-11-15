@@ -40,6 +40,7 @@ theorem correctness (impl : List Segment) (R : IfaceModel) (hl : R.Laws) (H : Rt
       (fun s s' => (s'.regs 0).toNat = uint64Type ∧ BoxHolds R s'.mem (s'.regs 1).toNat 8 x.toNat ∧
         MemFrame s.mem s'.mem (R.priv ++ [(s.sp.toNat - (R.depth + 32), s.sp.toNat)]) ∧
         R.Env s'.mem (s.regs 28)) := by
+  janus_ensures_old [Janus.Contracts.Iface.CallerOK]
   intro ret hret s hs ⟨hc, hH⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -117,8 +118,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [42#64] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩
+theorem setup : CallSetup0 Extracted.entry [42#64] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h; subst h; rfl⟩
 
 theorem pre : CallerOK R0 s0 32 0 := by
   refine ⟨wmem_env (s0.regs 28), ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide,
@@ -143,24 +144,24 @@ theorem wsCall_pre : ConvT64Site R0 Htrue wsCall :=
   ⟨rtpre_pc _ (wstate_rtpre _ 1 (by decide)), trivial⟩
 
 /-- So the guarantee is reached: `Box(42)` returns a box holding `42`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = uint64Type ∧ BoxHolds R0 s'.mem (s'.regs 1).toNat 8 42 ∧
-      MemFrame s0.mem s'.mem (R0.priv ++ [(s0.sp.toNat - (R0.depth + 32), s0.sp.toNat)]) ∧
-      R0.Env s'.mem (s0.regs 28) :=
-  correctness implAt R0 R0_laws Htrue model 42#64 ret hret s0 setup ⟨pre, trivial⟩
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = uint64Type ∧ BoxHolds R0 s'.mem (s'.regs 1).toNat 8 42 ∧
+      MemFrame (s0.setRet ret).mem s'.mem (R0.priv ++ [((s0.setRet ret).sp.toNat - (R0.depth + 32), (s0.setRet ret).sp.toNat)]) ∧
+      R0.Env s'.mem ((s0.setRet ret).regs 28) :=
+  (correctness implAt R0 R0_laws Htrue model 42#64) s0 setup ⟨pre, trivial⟩ ret hret
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (H : RtReady) (ret : Nat) (s : State),
     R.Laws ∧
     ConvT64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.convT64") R H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [42#64] s ∧
+    CallSetup0 Extracted.entry [42#64] s ∧
     CallerOK R s 32 0 ∧ H [42] (s.regs 28).toNat (s.sp.toNat - 32) (rtView R.priv s.mem) ∧
     (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.convT64") ∧ ConvT64Site R H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat = uint64Type ∧ BoxHolds R s'.mem (s'.regs 1).toNat 8 (42#64).toNat ∧
-        MemFrame s.mem s'.mem (R.priv ++ [(s.sp.toNat - (R.depth + 32), s.sp.toNat)]) ∧
-        R.Env s'.mem (s.regs 28)) :=
-  ⟨implAt, R0, Htrue, ret, s0, R0_laws, model, hret, setup, pre, trivial, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt R0 R0_laws Htrue model 42#64 ret hret s0 setup ⟨pre, trivial⟩⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = uint64Type ∧ BoxHolds R s'.mem (s'.regs 1).toNat 8 (42#64).toNat ∧
+        MemFrame (s.setRet ret).mem s'.mem (R.priv ++ [((s.setRet ret).sp.toNat - (R.depth + 32), (s.setRet ret).sp.toNat)]) ∧
+        R.Env s'.mem ((s.setRet ret).regs 28)) :=
+  ⟨implAt, R0, Htrue, ret, s0, R0_laws, model, hret, setup, pre, trivial, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt R0 R0_laws Htrue model 42#64) s0 setup ⟨pre, trivial⟩ ret hret⟩
 
 end Witness
 

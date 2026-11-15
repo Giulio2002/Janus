@@ -72,6 +72,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
           ZeroBytes s'.mem ((s'.regs 0).toNat + 24 * (len.toNat + 1))
             (growCap 24 true (len.toNat + 1) cap.toNat * 24 - 24 * (len.toNat + 1)) ∧
           MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4208, s.sp.toNat + 56)]))) := by
+  janus_ensures_old [Proof.Pre, Janus.Spec.GuardOK, Janus.Spec.StackOK, Proof.ptType]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hout, hlc, hc, hpb, hdj, hdt, hwr, hrd, hHf⟩
   janus_intro hs
   janus_eval_nat h_ut : ptType
@@ -189,8 +190,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmemD }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [0, 0, 0, 0, 0, 0] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h; rcases i with _ | _ | _ | _ | _ | _ | i <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [0, 0, 0, 0, 0, 0] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h; rcases i with _ | _ | _ | _ | _ | _ | i <;> simp [s0] at h ⊢ <;> omega⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded wmemD := by
@@ -237,38 +238,38 @@ theorem wsCall_pre : rpSite rtA HA wsCall := by
 
 /-- The witness call returns: the result has length 1 (the full theorem's conclusion holds;
 this states its first part). -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 1).toNat = 1 :=
-  (correctness implAt rtA HA 0 0 0 0 0 0 model ret hret s0 setup pre).mono fun _ h => ⟨h.1, by simpa using h.2.1⟩
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 1).toNat = 1 :=
+  ((correctness implAt rtA HA 0 0 0 0 0 0 model) s0 setup pre ret hret).mono fun _ h => ⟨h.1, by simpa using h.2.1⟩
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
     RtContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.growslice")
       rt 4096 H growsliceSpec ∧ RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0, 0, 0] s ∧
+    CallSetup0 Extracted.entry [0, 0, 0, 0, 0, 0] s ∧
     Pre rt H 0 0 0 s ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.growslice") ∧
       rpSite rt H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
       ((s'.regs 1).toNat = (0 : BitVec 64).toNat + 1 ∧
         ((0 : BitVec 64).toNat < (0 : BitVec 64).toNat → s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 2 = (0 : BitVec 64) ∧
           s'.mem.readLE ((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat) 8 = (0 : BitVec 64).toNat ∧
           s'.mem.readLE ((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat + 8) 8 = (0 : BitVec 64).toNat ∧
           s'.mem.readLE ((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat + 16) 8 = (0 : BitVec 64).toNat ∧
-          MemFrame s.mem s'.mem [((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat, (0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat + 24),
-            (s.sp.toNat - 4208, s.sp.toNat + 56)]) ∧
+          MemFrame (s.setRet ret).mem s'.mem [((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat, (0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat + 24),
+            ((s.setRet ret).sp.toNat - 4208, (s.setRet ret).sp.toNat + 56)]) ∧
         ((0 : BitVec 64).toNat ≤ (0 : BitVec 64).toNat →
           (s'.regs 2).toNat = growCap 24 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat ∧
           InRanges (s'.regs 0).toNat (growCap 24 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat * 24) rt ∧
           s'.mem.accessible (s'.regs 0).toNat (growCap 24 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat * 24) true = true ∧
-          (∀ i, i < 24 * (0 : BitVec 64).toNat → s'.mem.bytes ((s'.regs 0).toNat + i) = s.mem.bytes ((0 : BitVec 64).toNat + i)) ∧
+          (∀ i, i < 24 * (0 : BitVec 64).toNat → s'.mem.bytes ((s'.regs 0).toNat + i) = (s.setRet ret).mem.bytes ((0 : BitVec 64).toNat + i)) ∧
           s'.mem.readLE ((s'.regs 0).toNat + 24 * (0 : BitVec 64).toNat) 8 = (0 : BitVec 64).toNat ∧
           s'.mem.readLE ((s'.regs 0).toNat + 24 * (0 : BitVec 64).toNat + 8) 8 = (0 : BitVec 64).toNat ∧
           s'.mem.readLE ((s'.regs 0).toNat + 24 * (0 : BitVec 64).toNat + 16) 8 = (0 : BitVec 64).toNat ∧
           ZeroBytes s'.mem ((s'.regs 0).toNat + 24 * ((0 : BitVec 64).toNat + 1))
             (growCap 24 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat * 24 - 24 * ((0 : BitVec 64).toNat + 1)) ∧
-          MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4208, s.sp.toNat + 56)]))) :=
-  ⟨implAt, rtA, HA, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt rtA HA 0 0 0 0 0 0 model ret hret s0 setup pre⟩
+          MemFrame (s.setRet ret).mem s'.mem (rt ++ [((s.setRet ret).sp.toNat - 4208, (s.setRet ret).sp.toNat + 56)]))) :=
+  ⟨implAt, rtA, HA, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt rtA HA 0 0 0 0 0 0 model) s0 setup pre ret hret⟩
 
 end Witness
 

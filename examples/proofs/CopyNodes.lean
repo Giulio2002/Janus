@@ -50,6 +50,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
         (∀ i, i < 8 * min dl.toNat sl.toNat → s'.mem.bytes (dp.toNat + i) = s.mem.bytes (sp.toNat + i)) ∧
         MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4160, s.sp.toNat + 56),
           (dp.toNat, dp.toNat + 8 * min dl.toNat sl.toNat)])) := by
+  janus_ensures_old [Proof.Pre, Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Contracts.Readable, Proof.nodeType]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hout, hdl, hsl, hdb, hdw, ⟨hs1, hs2⟩, hdt, hdd, hds, hH⟩
   janus_intro hs
   janus_eval_nat h_ut : nodeType
@@ -112,8 +113,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmemD }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [0, 0, 0, 0, 0, 0] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h; rcases i with _ | _ | _ | _ | _ | _ | i <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [0, 0, 0, 0, 0, 0] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h; rcases i with _ | _ | _ | _ | _ | _ | i <;> simp [s0] at h ⊢ <;> omega⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded wmemD := by
@@ -159,24 +160,24 @@ theorem wsCall_pre : rpSite rtW HA wsCall := by
 
 /-- The witness call returns: nothing is copied (the full theorem's conclusion holds; this
 states its first part). -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = 0 :=
-  (correctness implAt rtW HA 0 0 0 0 0 0 model ret hret s0 setup pre).mono fun _ h => ⟨h.1, by simpa using h.2.1⟩
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = 0 :=
+  ((correctness implAt rtW HA 0 0 0 0 0 0 model) s0 setup pre ret hret).mono fun _ h => ⟨h.1, by simpa using h.2.1⟩
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
     RtContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typedslicecopy")
       rt 4096 H typedslicecopySpec ∧ RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0, 0, 0] s ∧
+    CallSetup0 Extracted.entry [0, 0, 0, 0, 0, 0] s ∧
     Pre rt H 0 0 0 0 s ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.typedslicecopy") ∧
       rpSite rt H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
       ((s'.regs 0).toNat = min (0 : BitVec 64).toNat (0 : BitVec 64).toNat ∧
-        (∀ i, i < 8 * min (0 : BitVec 64).toNat (0 : BitVec 64).toNat → s'.mem.bytes ((0 : BitVec 64).toNat + i) = s.mem.bytes ((0 : BitVec 64).toNat + i)) ∧
-        MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4160, s.sp.toNat + 56),
+        (∀ i, i < 8 * min (0 : BitVec 64).toNat (0 : BitVec 64).toNat → s'.mem.bytes ((0 : BitVec 64).toNat + i) = (s.setRet ret).mem.bytes ((0 : BitVec 64).toNat + i)) ∧
+        MemFrame (s.setRet ret).mem s'.mem (rt ++ [((s.setRet ret).sp.toNat - 4160, (s.setRet ret).sp.toNat + 56),
           ((0 : BitVec 64).toNat, (0 : BitVec 64).toNat + 8 * min (0 : BitVec 64).toNat (0 : BitVec 64).toNat)])) :=
-  ⟨implAt, rtW, HA, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt rtW HA 0 0 0 0 0 0 model ret hret s0 setup pre⟩
+  ⟨implAt, rtW, HA, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt rtW HA 0 0 0 0 0 0 model) s0 setup pre ret hret⟩
 
 end Witness
 

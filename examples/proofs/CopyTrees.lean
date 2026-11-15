@@ -45,6 +45,7 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
     Ensures (Extracted.program.link impl) Extracted.entry [dst, src] (pre M wb d dst src)
       (fun s s' => Mem.Copied s.mem s'.mem dst.toNat src.toNat 128 ∧
         MemFrame s.mem s'.mem (M.priv ++ window d s ++ [(dst.toNat, dst.toNat + 128)])) := by
+  janus_ensures_old [Proof.pre, Janus.Contracts.Mem.CallerOK, Proof.treesType, Proof.window, Janus.Contracts.Mem.WriteBarrierOff, Janus.Spec.Ptr, Janus.Contracts.Mem.callerWindow]
   intro ret hret s hs ⟨hc, henv, hgp, hpriv, hd, hto, hwb1, hwb2, hwbo, hwb, ⟨hS, hS'⟩, hso, ⟨hD, hD'⟩, hdo, hdp⟩
   have hc' := hc
   obtain ⟨⟨hg1, hg2, hg3⟩, hal, hd8, hdd, hb, hst, hog⟩ := hc'
@@ -157,8 +158,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := mem0 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [dst, src] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [dst, src] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
 
@@ -202,23 +203,23 @@ def wsCall : State := { MemSat.wstate tmR with pc := BitVec.ofNat 64 cAddr }
 theorem wsCall_pre : tmSite M0 WB 64 wsCall := tmSite_pc _ _ _ _ _ tmSite_stock
 
 /-- So the guarantee is reached: `DST + 128` receives the 128 bytes of `DST`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ Mem.Copied s0.mem s'.mem (DST + 128) DST 128 :=
-  (correctness implAt M0 M0_laws WB 64 (model WB 64) dst src ret hret s0 setup hpre).mono
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ Mem.Copied (s0.setRet ret).mem s'.mem (DST + 128) DST 128 :=
+  ((correctness implAt M0 M0_laws WB 64 (model WB 64) dst src) s0 setup hpre ret hret).mono
     fun _ h => ⟨h.1, h.2.1⟩
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (M : MemModel) (wb d ret : Nat) (s : State) (dst src : BitVec 64),
     M.Laws ∧ TypedMemmove (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typedmemmove") M wb d ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [dst, src] s ∧
+    CallSetup0 Extracted.entry [dst, src] s ∧
     pre M wb d dst src s ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.typedmemmove") ∧
       tmSite M wb d s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
-      (Mem.Copied s.mem s'.mem dst.toNat src.toNat 128 ∧
-        MemFrame s.mem s'.mem (M.priv ++ window d s ++ [(dst.toNat, dst.toNat + 128)])) :=
-  ⟨implAt, M0, WB, 64, ret, s0, dst, src, M0_laws, model WB 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt M0 M0_laws WB 64 (model WB 64) dst src ret hret s0 setup hpre⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
+      (Mem.Copied (s.setRet ret).mem s'.mem dst.toNat src.toNat 128 ∧
+        MemFrame (s.setRet ret).mem s'.mem (M.priv ++ window d (s.setRet ret) ++ [(dst.toNat, dst.toNat + 128)])) :=
+  ⟨implAt, M0, WB, 64, ret, s0, dst, src, M0_laws, model WB 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt M0 M0_laws WB 64 (model WB 64) dst src) s0 setup hpre ret hret⟩
 
 end Witness
 

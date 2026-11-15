@@ -159,6 +159,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
         s'.mem.readLE accA 8 = mix (s.mem.readLE accA 8))
       (fun s v s' => 10 < x.toNat ∧ v = ⟨etyp.toNat, edata.toNat⟩ ∧
         s'.mem.readLE accA 8 = mix (s.mem.readLE accA 8)) := by
+  janus_ensures_old [Janus.Contracts.Panic.PanicCallerOK, Janus.Contracts.Panic.gOf]
   intro ret hret s hs ⟨hc, hd, hacc, hao, hfo, hne, hroom, hsave, hdss⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd', hb, hst, hout, hgd, hgo⟩ := hc'
@@ -858,9 +859,9 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wm }
 
-theorem setup : CallSetup ((Extracted.program.link implW).withExit ret) Extracted.entry
+theorem setup : CallSetup0 Extracted.entry
     [11#64, 1#64, 0#64] s0 := by
-  refine ⟨rfl, rfl, fun i h => ?_⟩
+  refine ⟨rfl, by first | decide | simp | omega, fun i h => ?_⟩
   simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl
 
 set_option maxRecDepth 100000 in
@@ -973,14 +974,14 @@ theorem wsRet_pre : DeferreturnPre PW wsRet := by
 
 /-- So the guarantee is reached: with `x = 11` `DeferMix` panics with `e`, after the deferred
 calls ran in LIFO order. -/
-theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U0 s0) s0 fun o =>
+theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U0 (s0.setRet ret)) (s0.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s0 s' ∧ ((11#64 : BitVec 64).toNat ≤ 10 ∧ (s'.regs 0).toNat = (11#64 : BitVec 64).toNat ∧
-        s'.mem.readLE accA 8 = mix (s0.mem.readLE accA 8))
+    | .returned s' => ABIReturn (s0.setRet ret) s' ∧ ((11#64 : BitVec 64).toNat ≤ 10 ∧ (s'.regs 0).toNat = (11#64 : BitVec 64).toNat ∧
+        s'.mem.readLE accA 8 = mix ((s0.setRet ret).mem.readLE accA 8))
     | .panicked v s' => 10 < (11#64 : BitVec 64).toNat ∧ v = ⟨(1#64 : BitVec 64).toNat, (0#64 : BitVec 64).toNat⟩ ∧
-        s'.mem.readLE accA 8 = mix (s0.mem.readLE accA 8)
+        s'.mem.readLE accA 8 = mix ((s0.setRet ret).mem.readLE accA 8)
     | .goexited _ => False :=
-  correctness implW PW (P0_laws T0 RPa) U0 hds hdp hpan hdr 11#64 1#64 0#64 ret hret s0 setup pre
+  (correctness implW PW (P0_laws T0 RPa) U0 hds hdp hpan hdr 11#64 1#64 0#64) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State → Nat → Nat → Prop) (ret : Nat)
@@ -992,7 +993,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State →
       Extracted.funcs ∧
     DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [11#64, 1#64, 0#64] s ∧
+    CallSetup0 Extracted.entry [11#64, 1#64, 0#64] s ∧
     (PanicCallerOK P s 96 32 ∧ Extracted.program.DataLoaded s.mem ∧ s.mem.accessible accA 8 true = true ∧
       Outside accA 8 (P.priv ++ [(s.sp.toNat - (P.depth + 96), s.sp.toNat + 32)]) ∧
       Outside fvA 16 (P.priv ++ [(s.sp.toNat - (P.depth + 96), s.sp.toNat + 32)]) ∧
@@ -1006,12 +1007,12 @@ theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State →
       FuncInfo.find Extracted.funcs (s_c.regs 30).toNat = some fi ∧ GopanicPre P fi s_c) ∧
     (∃ s_r : State, s_r.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") ∧
       DeferreturnPre P s_r) ∧
-    GoReturns ((Extracted.program.link impl).withExit ret) (goClassU P U s) s fun o =>
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClassU P U (s.setRet ret)) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧ ((11#64 : BitVec 64).toNat ≤ 10 ∧ (s'.regs 0).toNat = (11#64 : BitVec 64).toNat ∧
-        s'.mem.readLE accA 8 = mix (s.mem.readLE accA 8))
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧ ((11#64 : BitVec 64).toNat ≤ 10 ∧ (s'.regs 0).toNat = (11#64 : BitVec 64).toNat ∧
+        s'.mem.readLE accA 8 = mix ((s.setRet ret).mem.readLE accA 8))
     | .panicked v s' => 10 < (11#64 : BitVec 64).toNat ∧ v = ⟨(1#64 : BitVec 64).toNat, (0#64 : BitVec 64).toNat⟩ ∧
-        s'.mem.readLE accA 8 = mix (s.mem.readLE accA 8)
+        s'.mem.readLE accA 8 = mix ((s.setRet ret).mem.readLE accA 8)
     | .goexited _ => False :=
   ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hds, hdp, hpan, hdr, hret, setup, pre, ⟨wsDs, rfl, wsDs_pre⟩, ⟨wsCall, rfl, wsCall_pre⟩, ⟨wsG, wfi, rfl, wsG_find, wsG_pre⟩, ⟨wsRet, rfl, wsRet_pre⟩, returns⟩
 

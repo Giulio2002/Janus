@@ -31,6 +31,7 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64))
     Ensures (Extracted.program.link impl) Extracted.entry [m, k]
       (fun s => CallerOK M s 48 0 ∧ M.Typ mapType ∧ IsMap M s.mem m.toNat f)
       (fun _ s' => s'.regs 0 = (f k).getD 0 ∧ (s'.regs 1).toNat % 256 = (f k).isSome.toNat) := by
+  janus_ensures_old [Janus.Contracts.Map.CallerOK, Proof.mapType, Janus.Spec.Map.IsMap]
   intro ret hret s hs ⟨hc, hty, hmap⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -92,8 +93,8 @@ def s0 : State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [BitVec.ofNat 64 MP, 5] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
@@ -139,22 +140,22 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
     Access2 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.mapaccess2_fast64") M ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5] s ∧
+    CallSetup0 Extracted.entry [BitVec.ofNat 64 MP, 5] s ∧
     (CallerOK M s 48 0 ∧ M.Typ mapType ∧ IsMap M s.mem (BitVec.ofNat 64 MP).toNat AMap.empty) ∧
     (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : State),
       s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess2_fast64") ∧ Access2Site M f s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
       (s'.regs 0 = (emp 5).getD 0 ∧
         (s'.regs 1).toNat % 256 = (emp 5).isSome.toNat) :=
   ⟨implAt, ME _, ret, s0, ME_laws _, hacc, hret, setup, pre,
     ⟨AMap.empty, wsCall, by simp only [wsCall]; exact addr.symm ▸ rfl, wsCall_pre⟩,
-    correctness implAt (ME _) (ME_laws _) hacc (BitVec.ofNat 64 MP) 5 AMap.empty ret hret s0 setup pre⟩
+    (correctness implAt (ME _) (ME_laws _) hacc (BitVec.ofNat 64 MP) 5 AMap.empty) s0 setup pre ret hret⟩
 
 /-- The theorem fires: `Lookup(map, 5)` on the empty map returns `0` and `false`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
     (s'.regs 0 = (emp 5).getD 0 ∧
       (s'.regs 1).toNat % 256 = (emp 5).isSome.toNat) :=
-  correctness implAt (ME _) (ME_laws _) hacc (BitVec.ofNat 64 MP) 5 emp ret hret s0 setup pre
+  (correctness implAt (ME _) (ME_laws _) hacc (BitVec.ofNat 64 MP) 5 emp) s0 setup pre ret hret
 
 end Witness
 

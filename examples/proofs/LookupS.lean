@@ -36,6 +36,7 @@ theorem correctness (impl : List Segment) (M : MapModel (Nat × Nat) (BitVec 64)
     (m kp kl : BitVec 64) (f : AMap (Nat × Nat) (BitVec 64)) :
     Ensures (Extracted.program.link impl) Extracted.entry [m, kp, kl] (pre M m kp kl f)
       (fun s s' => s'.regs 0 = (f (strKey s.mem kp.toNat kl.toNat)).getD 0) := by
+  janus_ensures_old [Proof.pre, Janus.Contracts.Map.CallerOK, Proof.mapType, Janus.Spec.Map.IsMap, Proof.window]
   intro ret hret s hs ⟨hc, hty, hmap, hkb, hka, hko⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -125,8 +126,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := mmem }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [mv, kp, kl] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [mv, kp, kl] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩
 
@@ -157,9 +158,9 @@ theorem wsCall_pre : Access1StrSite (ME (Nat × Nat)) AMap.empty wsCall := by
     (isMap_of_ne (by decide)).2 (mmem_rep _), ⟨a, b, c⟩⟩
 
 /-- So the guarantee is reached: the lookup in the empty map gives `0`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ s'.regs 0 = 0 := by
-  refine (correctness implAt (ME _) (ME_laws _) model mv kp kl AMap.empty ret hret s0 setup pre0).mono ?_
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ s'.regs 0 = 0 := by
+  refine ((correctness implAt (ME _) (ME_laws _) model mv kp kl AMap.empty) s0 setup pre0 ret hret).mono ?_
   intro s' h
   exact ⟨h.1, by simpa [AMap.empty] using h.2⟩
 
@@ -169,12 +170,12 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (Nat × Nat) (BitVe
     M.Laws ∧ Access1Str (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.mapaccess1_faststr") 8 M ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, kp, kl] s ∧
+    CallSetup0 Extracted.entry [m, kp, kl] s ∧
     m.toNat ≠ 0 ∧ pre M m kp kl f s ∧
     (∃ (f : AMap (Nat × Nat) (BitVec (8 * 8))) (s_c : State),
       s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess1_faststr") ∧ Access1StrSite M f s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (s'.regs 0 = (f (strKey s.mem kp.toNat kl.toNat)).getD 0) :=
-  ⟨implAt, ME _, ret, s0, mv, kp, kl, AMap.empty, ME_laws _, model, hret, setup, by decide, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, correctness implAt (ME _) (ME_laws _) model mv kp kl AMap.empty ret hret s0 setup pre0⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ (s'.regs 0 = (f (strKey (s.setRet ret).mem kp.toNat kl.toNat)).getD 0) :=
+  ⟨implAt, ME _, ret, s0, mv, kp, kl, AMap.empty, ME_laws _, model, hret, setup, by decide, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, (correctness implAt (ME _) (ME_laws _) model mv kp kl AMap.empty) s0 setup pre0 ret hret⟩
 
 end Witness
 

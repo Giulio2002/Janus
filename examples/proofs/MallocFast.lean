@@ -284,6 +284,7 @@ theorem fast_path (sz typ nz : BitVec 64) :
       (fun s => GuardOK s 144 ∧ StackOK s 152 32 ∧ 16 ≤ sz.toNat ∧ sz.toNat ≤ 1016 ∧
         typ.toNat = 0 ∧ MCacheOK s sz.toNat)
       (fun s s' => FastRun s s' sz.toNat) := by
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Proof.MCacheOK, Proof.Obj, Proof.gOf, Proof.mOf, Proof.pOf, Proof.cOf, Proof.spanOf, Proof.globLo, Proof.globHi, Proof.slotOf, Proof.csOf, Proof.debugMalloc, Proof.gcBlackenEnabled, Proof.sizeToClass8, Proof.classToSize, Proof.writeBarrier, Proof.memProfileRate, Proof.scOf, Proof.cacheOf, Proof.resOf, Proof.nelemsOf, Proof.rd, Janus.Contracts.ZeroBytes, Proof.eszOf, Proof.baseOf, Proof.nBase, Proof.fidxOf]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hs1, hs2, ht, hok⟩
   janus_intro hs
   janus_eval_nat h_dm : debugMalloc
@@ -419,8 +420,9 @@ theorem correctness (sz typ nz : BitVec 64) (rt : List (Nat × Nat)) :
         InRanges (slotOf s sz.toNat) (csOf s sz.toNat) rt)
       (fun s s' => FastPost s s' sz.toNat ∧
         Fresh rt s'.mem (s'.regs 0).toNat sz.toNat (blockSize sz.toNat true) true) := by
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Proof.MCacheOK, Proof.TablesOK, Proof.baseOf, Proof.slotOf, Proof.csOf, Proof.Obj, Proof.gOf, Proof.mOf, Proof.pOf, Proof.cOf, Proof.spanOf, Proof.globLo, Proof.globHi, Proof.debugMalloc, Proof.gcBlackenEnabled, Proof.sizeToClass8, Proof.classToSize, Proof.writeBarrier, Proof.memProfileRate, Proof.scOf, Proof.cacheOf, Proof.resOf, Proof.nelemsOf, Proof.rd, Janus.Contracts.ZeroBytes, Proof.eszOf, Proof.nBase, Proof.fidxOf]
   intro ret hret s hs ⟨hg, hst, h1, h2, ht, hok, htab, hb, hin⟩
-  exact (fast_path sz typ nz ret hret s hs ⟨hg, hst, h1, h2, ht, hok⟩).mono
+  exact ((fast_path sz typ nz).toOld ret hret s hs ⟨hg, hst, h1, h2, ht, hok⟩).mono
     fun s' ⟨habi, hr⟩ => ⟨habi, ⟨hr, zero_of_run hok hr⟩,
       fresh_of_fastPost hok htab h1 h2 hb hin ⟨hr, zero_of_run hok hr⟩⟩
 
@@ -467,8 +469,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(16 : BitVec 64), (0 : BitVec 64), (0 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(16 : BitVec 64), (0 : BitVec 64), (0 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩
@@ -477,13 +479,13 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (sz : BitVec 64) (typ : BitVec 64) (nz : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [sz, typ, nz] s ∧ (GuardOK s 144 ∧ StackOK s 152 32 ∧ 16 ≤ sz.toNat ∧ sz.toNat ≤ 1016 ∧
+    CallSetup0 Extracted.entry [sz, typ, nz] s ∧ (GuardOK s 144 ∧ StackOK s 152 32 ∧ 16 ≤ sz.toNat ∧ sz.toNat ≤ 1016 ∧
         typ.toNat = 0 ∧ MCacheOK s sz.toNat ∧ TablesOK s ∧ baseOf s sz.toNat % 8192 = 0 ∧
         InRanges (slotOf s sz.toNat) (csOf s sz.toNat) c_rt) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (FastPost s s' sz.toNat ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (FastPost (s.setRet ret) s' sz.toNat ∧
         Fresh c_rt s'.mem (s'.regs 0).toNat sz.toNat (blockSize sz.toNat true) true)) := by
-  refine ⟨ret, s0, (16), (0), (0), hret, setup, ?pre, correctness (16) (0) (0) c_rt ret hret s0 setup ?pre⟩
+  refine ⟨ret, s0, (16), (0), (0), hret, setup, ?pre, (correctness (16) (0) (0) c_rt) s0 setup ?pre ret hret⟩
   case pre =>
     refine ⟨?_, ?_, by decide, by decide, by decide, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_, ?_⟩
     all_goals try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp, MCacheOK, Obj, TablesOK, spread_cons, spread_nil, Apart, InRanges, ZeroBytes, le, mM, pP, cC, sS, bB]

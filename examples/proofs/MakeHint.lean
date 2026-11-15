@@ -30,6 +30,7 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64))
     Ensures (Extracted.program.link impl) Extracted.entry [n] (pre M H n)
       (fun s s' => (s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧
         (∀ mp f, M.Rep s.mem mp f → mp ≠ (s'.regs 0).toNat) ∧ M.Env s'.mem (s.regs 28)) := by
+  janus_ensures_old [Proof.pre, Janus.Contracts.Map.CallerOK, Proof.mapType]
   intro ret hret s hs ⟨hc, hty, hH⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -104,8 +105,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := mmemDead }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [n] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [n] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h; simp at h
     rcases (by omega : i = 0) with rfl; rfl⟩
 
@@ -134,9 +135,9 @@ theorem wsCall_pre : MakeMapSite (MC ck64) HMake wsCall :=
     hMake_dead _ _ _⟩
 
 /-- So the guarantee is reached: a new, empty map. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty :=
-  correctness implAt (MC _) (MC_laws _) HMake model n ret hret s0 setup pre0
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty :=
+  (correctness implAt (MC _) (MC_laws _) HMake model n) s0 setup pre0 ret hret
     |>.mono fun _ h => ⟨h.1, h.2.1, h.2.2.1⟩
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
@@ -144,11 +145,11 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec
     (ret : Nat) (s : State) (n : BitVec 64),
     M.Laws ∧ MakeMap (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.makemap") M H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [n] s ∧ pre M H n s ∧
+    CallSetup0 Extracted.entry [n] s ∧ pre M H n s ∧
     (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makemap") ∧ MakeMapSite M H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧
-        (∀ mp f, M.Rep s.mem mp f → mp ≠ (s'.regs 0).toNat) ∧ M.Env s'.mem (s.regs 28)) :=
-  ⟨implAt, MC _, HMake, ret, s0, n, MC_laws _, model, hret, setup, pre0, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt (MC _) (MC_laws _) HMake model n ret hret s0 setup pre0⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧
+        (∀ mp f, M.Rep (s.setRet ret).mem mp f → mp ≠ (s'.regs 0).toNat) ∧ M.Env s'.mem ((s.setRet ret).regs 28)) :=
+  ⟨implAt, MC _, HMake, ret, s0, n, MC_laws _, model, hret, setup, pre0, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt (MC _) (MC_laws _) HMake model n) s0 setup pre0 ret hret⟩
 
 end Witness
 

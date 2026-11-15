@@ -36,6 +36,7 @@ theorem correctness (impl : List Segment) (a la b lb : BitVec 64)
         Disjoint ((s.regs 28).toNat + 16) 8 (s.sp.toNat - 144) 184)
       (fun s s' => if strCmp s.mem b.toNat a.toNat lb.toNat la.toNat < 0
         then s'.regs 0 = b ∧ s'.regs 1 = lb else s'.regs 0 = a ∧ s'.regs 1 = la) := by
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Contracts.Cmpstring.StrOK]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hsa, hsb, hda, hdb, hgd⟩
   janus_intro hs
   simp only [Disjoint] at hgd hda hdb
@@ -72,8 +73,8 @@ def s0 : State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [0, 0, 0, 0] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [0, 0, 0, 0] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | _ | _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
 theorem pre : GuardOK s0 80 ∧ StackOK s0 144 40 ∧ StrOK s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat ∧
     StrOK s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat ∧
@@ -95,11 +96,11 @@ theorem wsCall_pre : Janus.Contracts.Cmpstring.CmpstringPre 16 wsCall :=
   ⟨⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩, Or.inl rfl, Or.inl rfl⟩
 
 /-- The theorem fires: `MinStr("", "")` returns the first string. -/
-theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (if strCmp s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat < 0
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
+    (if strCmp (s0.setRet ret).mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat < 0
       then s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64)
       else s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64)) :=
-  correctness impl 0 0 0 0 hcmp ret hret s0 setup pre
+  (correctness impl 0 0 0 0 hcmp) s0 setup pre ret hret
 
 /-- The hypotheses are satisfiable: a `runtime.cmpstring` meeting the contract (`hcmp`) and a call
 state of `MinStr("", "")` that satisfies the precondition. -/
@@ -107,7 +108,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (ret : Nat) (s : State),
     CmpstringContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.cmpstring") 16 ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0] s ∧
+    CallSetup0 Extracted.entry [0, 0, 0, 0] s ∧
     (GuardOK s 80 ∧ StackOK s 144 40 ∧ StrOK s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat ∧
       StrOK s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat ∧
       ((0 : BitVec 64).toNat = 0 ∨ Disjoint (0 : BitVec 64).toNat (0 : BitVec 64).toNat (s.sp.toNat - 144) 184) ∧
@@ -115,8 +116,8 @@ theorem nonvacuous : ∃ (impl : List Segment) (ret : Nat) (s : State),
       Disjoint ((s.regs 28).toNat + 16) 8 (s.sp.toNat - 144) 184) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.cmpstring") ∧
       Janus.Contracts.Cmpstring.CmpstringPre 16 s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
-    (if strCmp s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat < 0
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
+    (if strCmp (s.setRet ret).mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat < 0
       then s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64)
       else s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64)) :=
   ⟨impl, ret, s0, hcmp, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩

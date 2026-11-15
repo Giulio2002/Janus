@@ -32,6 +32,7 @@ theorem pow10_lt : ∀ m, m < 8 → 10 ^ m < 18446744073709551616 := by decide
 theorem correctness (i : BitVec 64) :
     Ensures Extracted.program Extracted.entry [i] (fun s => TableHolds s.mem)
       (fun _ s' => (s'.regs 0).toNat = 10 ^ (i.toNat % 8)) := by
+  janus_ensures_old [Proof.TableHolds, Proof.tbl, Proof.Witness.k]
   intro ret hret s hs ht
   janus_intro hs
   simp only [TableHolds, tbl, Extracted.dataAddr.«example.com/basic.symPows»,
@@ -64,8 +65,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(3 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(3 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     have : i = 0 := by omega
@@ -80,10 +81,10 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (i : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [i] s ∧ (TableHolds s.mem) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 0).toNat = 10 ^ (i.toNat % 8))) :=
-  ⟨ret, s0, (3), hret, setup, hpre, correctness (3) ret hret s0 setup hpre⟩
+    CallSetup0 Extracted.entry [i] s ∧ (TableHolds s.mem) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = 10 ^ (i.toNat % 8))) :=
+  ⟨ret, s0, (3), hret, setup, hpre, (correctness (3)) s0 setup hpre ret hret⟩
 
 end Witness
 

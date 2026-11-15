@@ -311,6 +311,7 @@ theorem correctness (crc p n cap : BitVec 64) :
       (fun s => GuardOK s 0 ∧ StackOK s 120 24 ∧ n.toNat < 2 ^ 63 ∧ Ptr s.mem p n.toNat false ∧
         Disjoint p.toNat n.toNat (s.sp.toNat - 120) 144)
       (fun s s' => (s'.regs 0).toNat % 2 ^ 32 = crc32IEEE s.mem (crc.toNat % 2 ^ 32) p.toNat n.toNat) := by
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hlen, ⟨hp, hp'⟩, hd⟩
   janus_intro hs
   simp only [Disjoint] at hd
@@ -341,8 +342,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0 : BitVec 64), (0x300000 : BitVec 64), (16 : BitVec 64), (16 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(0 : BitVec 64), (0x300000 : BitVec 64), (16 : BitVec 64), (16 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl⟩
@@ -351,11 +352,11 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (crc : BitVec 64) (p : BitVec 64) (n : BitVec 64) (cap : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [crc, p, n, cap] s ∧ (GuardOK s 0 ∧ StackOK s 120 24 ∧ n.toNat < 2 ^ 63 ∧ Ptr s.mem p n.toNat false ∧
+    CallSetup0 Extracted.entry [crc, p, n, cap] s ∧ (GuardOK s 0 ∧ StackOK s 120 24 ∧ n.toNat < 2 ^ 63 ∧ Ptr s.mem p n.toNat false ∧
         Disjoint p.toNat n.toNat (s.sp.toNat - 120) 144) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 0).toNat % 2 ^ 32 = crc32IEEE s.mem (crc.toNat % 2 ^ 32) p.toNat n.toNat)) := by
-  refine ⟨ret, s0, (0), (0x300000), (16), (16), hret, setup, ?pre, correctness (0) (0x300000) (16) (16) ret hret s0 setup ?pre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat % 2 ^ 32 = crc32IEEE (s.setRet ret).mem (crc.toNat % 2 ^ 32) p.toNat n.toNat)) := by
+  refine ⟨ret, s0, (0), (0x300000), (16), (16), hret, setup, ?pre, (correctness (0) (0x300000) (16) (16)) s0 setup ?pre ret hret⟩
   case pre =>
     simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.GoABI.FPConvention, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, wmem, wbytes, sp0, g0, hp] <;> decide
 

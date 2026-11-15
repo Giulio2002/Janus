@@ -47,6 +47,7 @@ theorem correctness (impl : List Segment) (R : IfaceModel) (hl : R.Laws)
           s.mem.accessible pb.toNat (tySize s.mem ta.toNat) false = true →
           (s'.regs 0).toNat % 256 = (s.mem.readLE pa.toNat (tySize s.mem ta.toNat) ==
             s.mem.readLE pb.toNat (tySize s.mem ta.toNat)).toNat)) := by
+  janus_ensures_old [Janus.Contracts.Iface.CallerOK, Janus.Contracts.Iface.EqOK, Janus.Spec.Type.EqFrame, Proof.window, Janus.Spec.Type.isDirectIface, Janus.Spec.Type.tyTFlag]
   intro ret hret s hs ⟨hc, hok⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -133,9 +134,9 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry
+theorem setup : CallSetup0 Extracted.entry
     [td, val, td, val] s0 :=
-  ⟨rfl, rfl, by
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl⟩
 
@@ -174,12 +175,12 @@ theorem wsCall_pre : EfaceeqSite R0 wsCall :=
   ⟨rtpre_pc _ (wstate_rtpre _ 3 (by decide)), fun _ => ⟨Or.inl rfl, rfl, by decide, by decide⟩⟩
 
 /-- So the guarantee is reached: comparing the box with itself gives `true`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat % 256 = 1 := by
-  refine (correctness implAt R0 R0_laws model td val td val ret hret s0 setup pre).mono ?_
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat % 256 = 1 := by
+  refine ((correctness implAt R0 R0_laws model td val td val) s0 setup pre ret hret).mono ?_
   intro s' h
   refine ⟨h.1, ?_⟩
-  rw [h.2.1, show td.toNat = TD from rfl, show s0.mem = wmem from rfl,
+  rw [h.2.1, show td.toNat = TD from rfl, show (s0.setRet ret).mem = wmem from rfl,
     efaceEqual_R0 (g := s0.regs 28) (wmem_env _)]
   decide
 
@@ -187,19 +188,19 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
 theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (ret : Nat) (s : State) (ta pa tb pb : BitVec 64),
     R.Laws ∧ Efaceeq (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.efaceeq") R ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [ta, pa, tb, pb] s ∧
+    CallSetup0 Extracted.entry [ta, pa, tb, pb] s ∧
     (CallerOK R s 48 40 ∧ (ta = tb →
       EqOK R s.mem ta.toNat pa.toNat pb.toNat ∧ EqFrame R ta.toNat s.mem pa.toNat pb.toNat (window R s))) ∧
     (∃ (s_c : State), s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.efaceeq") ∧ EfaceeqSite R s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat % 256 =
-          (ta == tb && efaceEqual R s.mem ta.toNat pa.toNat pb.toNat).toNat ∧
-        (ta = tb → ta ≠ 0 → isRegularMemory s.mem ta.toNat = true →
-          isDirectIface s.mem ta.toNat = false →
-          s.mem.accessible pa.toNat (tySize s.mem ta.toNat) false = true →
-          s.mem.accessible pb.toNat (tySize s.mem ta.toNat) false = true →
-          (s'.regs 0).toNat % 256 = (s.mem.readLE pa.toNat (tySize s.mem ta.toNat) ==
-            s.mem.readLE pb.toNat (tySize s.mem ta.toNat)).toNat)) :=
-  ⟨implAt, R0, ret, s0, td, val, td, val, R0_laws, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt R0 R0_laws model td val td val ret hret s0 setup pre⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat % 256 =
+          (ta == tb && efaceEqual R (s.setRet ret).mem ta.toNat pa.toNat pb.toNat).toNat ∧
+        (ta = tb → ta ≠ 0 → isRegularMemory (s.setRet ret).mem ta.toNat = true →
+          isDirectIface (s.setRet ret).mem ta.toNat = false →
+          (s.setRet ret).mem.accessible pa.toNat (tySize (s.setRet ret).mem ta.toNat) false = true →
+          (s.setRet ret).mem.accessible pb.toNat (tySize (s.setRet ret).mem ta.toNat) false = true →
+          (s'.regs 0).toNat % 256 = ((s.setRet ret).mem.readLE pa.toNat (tySize (s.setRet ret).mem ta.toNat) ==
+            (s.setRet ret).mem.readLE pb.toNat (tySize (s.setRet ret).mem ta.toNat)).toNat)) :=
+  ⟨implAt, R0, ret, s0, td, val, td, val, R0_laws, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt R0 R0_laws model td val td val) s0 setup pre ret hret⟩
 
 end Witness
 

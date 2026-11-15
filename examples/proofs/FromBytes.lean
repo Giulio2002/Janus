@@ -31,6 +31,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
       rt 4096 H (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s»)) :
     Ensures (Extracted.program.link impl) Extracted.entry [p, n, c] (Pre rt H p n)
       (fun s s' => StrOut s'.mem (s'.regs 0).toNat (s'.regs 1).toNat (strBytes s.mem p.toNat n.toNat)) := by
+  janus_ensures_old [Proof.Pre, Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Contracts.StrIn]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hout, ⟨hp1, hp2⟩, hpo, hH⟩
   janus_intro hs
   simp only [outside_cons, outside_nil, and_true] at hpo
@@ -64,8 +65,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [0, 0, 0] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h; rcases i with _ | _ | _ | i <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [0, 0, 0] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h; rcases i with _ | _ | _ | i <;> simp [s0] at h ⊢ <;> omega⟩
 
 theorem pre : Pre rtW H0 0 0 s0 := by
   refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, ?_⟩,
@@ -97,21 +98,21 @@ theorem wsCall_pre : rpSite rtW H0 wsCall := by
     simp [outside_zero]
 
 /-- The witness call returns, with the conclusion of `correctness`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ StrOut s'.mem (s'.regs 0).toNat (s'.regs 1).toNat
-      (strBytes s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
-  correctness implAt rtW H0 0 0 0 model ret hret s0 setup pre
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ StrOut s'.mem (s'.regs 0).toNat (s'.regs 1).toNat
+      (strBytes (s0.setRet ret).mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
+  (correctness implAt rtW H0 0 0 0 model) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
     RtContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.slicebytetostring")
       rt 4096 H (slicebytetostringSpec Extracted.dataAddr.«runtime.staticuint64s») ∧ RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0] s ∧ Pre rt H 0 0 s ∧
+    CallSetup0 Extracted.entry [0, 0, 0] s ∧ Pre rt H 0 0 s ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.slicebytetostring") ∧
       rpSite rt H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
-    ABIReturn s s' ∧ StrOut s'.mem (s'.regs 0).toNat (s'.regs 1).toNat
-      (strBytes s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ StrOut s'.mem (s'.regs 0).toNat (s'.regs 1).toNat
+      (strBytes (s.setRet ret).mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
   ⟨implAt, rtW, H0, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness

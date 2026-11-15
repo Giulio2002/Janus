@@ -26,12 +26,16 @@ theorem correctness :
   let s := setup (Extracted.program.withExit 0x1000) Extracted.entry [0#64, 1#64] default
   have hs : CallSetup (Extracted.program.withExit 0x1000) Extracted.entry [0#64, 1#64] s :=
     setup_callSetup _ (by decide)
+  -- the call state before the return address is installed, and the state the run starts from
+  have hs0 : CallSetup0 Extracted.entry [0#64, 1#64] s := ⟨hs.pc, by decide, hs.args⟩
+  have hs1 : CallSetup (Extracted.program.withExit 0x1000) Extracted.entry [0#64, 1#64] (s.setRet 0x1000) :=
+    hs0.setRet 0x1000
   -- what the spec claims
-  have hspec := (h 0#64 1#64).returns hret hs trivial
+  have hspec := (h 0#64 1#64).returns hret hs0 trivial
   -- what the code does
-  have hcode : Returns (Extracted.program.withExit 0x1000) s
+  have hcode : Returns (Extracted.program.withExit 0x1000) (s.setRet 0x1000)
       (fun s' => (s'.regs 0).toNat = 2 ^ 64 - 1) := by
-    janus_intro hs
+    janus_intro hs1
     janus_run
   obtain ⟨_, _, _, ⟨_, hbad⟩, hgood⟩ := hspec.unique hcode
   rw [hgood] at hbad
