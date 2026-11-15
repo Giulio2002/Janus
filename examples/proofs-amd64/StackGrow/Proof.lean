@@ -317,10 +317,11 @@ theorem call_pre64 (R : RtInv) (L : List (Nat × Nat)) (b cost : Nat) (addr : Na
 `MemAmd64.EqPre` and `LiveMemAt64`. -/
 theorem memPre64_of {R : RtInv} {S : State} {stack nargs : Nat} {addr : Nat} {args : List Nat}
     {L : List (Nat × Nat)} {b : Nat} (hx15 : S.xmm 15 = 0) (hdf : S.df = false)
+    (hap : (S.regs 14).toNat + 16 + 8 ≤ (S.regs 4).toNat ∨ (S.regs 4).toNat + 8 ≤ (S.regs 14).toNat + 16)
     (h : CallOK64 S stack nargs ∧ StackRoom64 S stack nargs ∧
       LiveAt R addr args L b 0 (S.regs 14).toNat S.mem (liveWin64 S stack nargs)) :
     MemAmd64.EqPre stack nargs S ∧ LiveMemAt64 R addr args L b S (liveWin64 S stack nargs) :=
-  ⟨⟨⟨h.2.1.1.1, h.2.1.1.2.1, h.2.1.1.2.2⟩, ⟨h.1.2.1, h.1.2.2.1, h.1.2.2.2.1, h.1.2.2.2.2, hx15, hdf, h.1.1⟩,
+  ⟨⟨⟨h.2.1.1.1, h.2.1.1.2.1, h.2.1.1.2.2, by simp only [stackguard0Offset, regG, regSP]; exact hap⟩, ⟨h.1.2.1, h.1.2.2.1, h.1.2.2.2.1, h.1.2.2.2.2, hx15, hdf, h.1.1⟩,
     h.2.1.2⟩,
     h.2.2.1, h.2.2.2.1, h.2.2.2.2.2.1, h.2.2.2.2.2.2⟩
 
@@ -835,7 +836,9 @@ theorem afterGrow {impl : List Amd64.Segment} {R : RtInv} {B : Nat} {n : BitVec 
       hsp2 (by omega) hra2 (by omega) (by omega) (by omega) ha4
       (by rw [show (s.regs 4).toNat + 16 - ((s.regs 4).toNat - 4280) = 4280 + 16 by omega]; exact hw4) hwrt hL2'W
       (by rw [h0, h1]; exact hokClr newp cap0 hcap0 hcn') (by rw [hg2']; exact hinvW S2 hm) (Nat.zero_le _)
-    refine ⟨(memPre64_of hx152 hdf2 h).1, (memPre64_of hx152 hdf2 h).2, ?_, ?_, ?_, Or.inl ?_, ?_⟩
+    have hap : (S2.regs 14).toNat + 16 + 8 ≤ (S2.regs 4).toNat ∨ (S2.regs 4).toNat + 8 ≤ (S2.regs 14).toNat + 16 := by
+      rw [hg2']; simp only [outside_cons, outside_nil, and_true] at hgo; omega
+    refine ⟨(memPre64_of hx152 hdf2 hap h).1, (memPre64_of hx152 hdf2 hap h).2, ?_, ?_, ?_, Or.inl ?_, ?_⟩
     · rw [h0, h1]; omega
     · rw [hm.accessible, h0, h1]
       exact Arm64.Memory.accessible_mono _ hnacc (by omega) (by omega)
@@ -1445,6 +1448,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (S : PoolShape) (B :
         (∀ c, c ≤ B → c < n.toNat → 24 + 8 * growCap8 n.toNat c ≤ bud) ∧
         (∀ c, c ≤ B → c < n.toNat → growCap8 n.toNat c ≤ B)))
       (fun s s' => Post R B n L bud s s') := by
+  janus64_ensures_old [Proof.wbFlag, Janus.Amd64.GoABI.StackWritable, Proof.poolAddr, Proof.stkType, Proof.u64Type, Janus.Spec.Pool.newOffset, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨⟨hS, hfl⟩, hg, ⟨hb4, ha4, hw4⟩, hal, hd, hgo, hwrt, hwL, hrt0, hpin, hsin, hu64,
     hfacc, hokG, hokP, hokN, hokGr, hokClr, hokWb, hnew0, hinv, hn40, hb24, hbud, hcapB⟩
   subst hS
@@ -1903,8 +1907,8 @@ def s0 : State :=
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
 set_option maxRecDepth 100000 in
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [1] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [1] s0 :=
+  ⟨rfl, rfl, by decide, by
       intro i h
       rcases i with _ | i
       · rfl
@@ -1946,16 +1950,17 @@ theorem hw' : wF = (wbN) := by unfold wF; decide
 
 set_option maxRecDepth 100000 in
 theorem guard0 : StackGuardOK s0 4280 := by
-  refine ⟨?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_⟩
   · simp only [regG, stackguard0Offset, s0_g]; simp [g0]
   · simp only [regG, stackguard0Offset, s0_g]; decide
   · simp only [stackguard0, regG, regSP, stackguard0Offset, s0_g, s0_sp]; decide
+  · simp only [regG, regSP, stackguard0Offset, s0_g, s0_sp]; decide
 
 set_option maxRecDepth 100000 in
 theorem stack0 : StackWritable s0 4280 16 := by
   unfold StackWritable
   simp only [regSP, s0_sp]
-  exact ⟨by decide, by decide, by decide⟩
+  exact (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩)
 
 set_option maxRecDepth 100000 in
 theorem pre : StackGuardOK s0 4280 ∧ StackWritable s0 4280 16 ∧ (s0.regs 4).toNat % 8 = 0 ∧
@@ -2229,7 +2234,9 @@ theorem wsM_pre : memSite R [] 0x400 wsM := by
     (by rw [h0, h1]; have := hokClr 1044296 0 (by omega) (by decide); simpa using this) -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
     (by rw [hg']; exact RtInv.inv_frame hf hwrt hinv) (Nat.zero_le _)
   have hrt : R.rt = [(HEAP, HEND), (BUMP, BUMP + 8), (WBUF, WBUF + 64)] := rfl
-  refine ⟨(memPre64_of hx15 hdf h).1, (memPre64_of hx15 hdf h).2, ?_, ?_, ?_, Or.inr ?_, ?_⟩
+  have hap : (wsM.regs 14).toNat + 16 + 8 ≤ (wsM.regs 4).toNat ∨ (wsM.regs 4).toNat + 8 ≤ (wsM.regs 14).toNat + 16 := by
+    rw [hg']; simp only [outside_cons, outside_nil, and_true] at hgo; omega
+  refine ⟨(memPre64_of hx15 hdf hap h).1, (memPre64_of hx15 hdf hap h).2, ?_, ?_, ?_, Or.inr ?_, ?_⟩
   · rw [h0, h1]; omega
   · rw [h0, h1]; exact Arm64.Memory.accessible_mono _ (by rw [hf.accessible]; exact hw4) (by omega) (by omega)
   · rw [h0, h1]
@@ -2318,11 +2325,11 @@ theorem wsU_pre : putSite R 1 [(HEAP, HEAP + 24)] 0x400 [(HEAP, HEAP + 24)] wsU 
     rw [if_neg (by simp only [BUMP, HEAP]; omega), if_neg (by simp only [sp0, HEAP]; omega)]
 
 /-- The main post at the witness's values, from `correctness`. -/
-theorem returnsPost : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ Post R 1 1 [] 0x400 s0 s' :=
-  correctness implAt R (SliceObj 1) 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
+theorem returnsPost : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ Post R 1 1 [] 0x400 (s0.setRet ret) s' :=
+  (correctness implAt R (SliceObj 1) 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
     (by rw [aN]; exact hnew) (by rw [aGr]; exact hgrow) (by rw [aM]; exact hclr) (by rw [aW]; exact hwb)
-    1 [] 0x400 ret hret s0 setup ⟨⟨rfl, hfl'⟩, pre⟩
+    1 [] 0x400) s0 setup ⟨⟨rfl, hfl'⟩, pre⟩ ret hret
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (B : Nat) (ret : Nat) (s : State)
@@ -2341,7 +2348,7 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (B : Nat) (ret 
     WbLiveContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.gcWriteBarrier2")
       4096 R 2) ∧
     (RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [n] s) ∧
+    CallSetup0 Extracted.entry [n] s) ∧
     (((SliceObj B = SliceObj B ∧ (∀ b L g v, R.inv b L g v → Outside wbFlag 4 L)) ∧ StackGuardOK s 4280 ∧ StackWritable s 4280 16 ∧ (s.regs 4).toNat % 8 = 0 ∧
       Extracted.program.DataLoaded s.mem ∧
       Outside ((s.regs 14).toNat + 16) 8 (((s.regs 4).toNat - 4280, (s.regs 4).toNat + 16) :: R.rt) ∧
@@ -2374,7 +2381,7 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (B : Nat) (ret 
       wbSite R L b s_c) ∧
     (∃ (L : List (Nat × Nat)) (b : Nat) (rs : List (Nat × Nat)) (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "sync.(*Pool).Put") ∧
       putSite R B L b rs s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ Post R B n L bud s s' := by
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ Post R B n L bud (s.setRet ret) s' := by
   obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22,
     a23, a24⟩ := pre
   refine ⟨implAt, R, 1, ret, s0, [], 0x400, 1, by decide, ⟨?_, ?_, ?_, ?_, ?_, ?_⟩, ⟨hret, setup⟩,
@@ -2396,15 +2403,15 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (B : Nat) (ret 
 
 /-- So the guarantee is reached: `StackGrow(1)` returns `1`, the capacity of the grown stack, with the
 runtime's invariant again for the live set extended by `xs` (the abandoned array). -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = 1 ∧
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = 1 ∧
       ∃ xs b', FreshFrom xs [] ∧ b' ≤ 0x400 ∧
-        MemFrame s0.mem s'.mem (R.rt ++ [((s0.regs 4).toNat - 4280, (s0.regs 4).toNat + 16)]) ∧
-        LiveFrame s0.mem s'.mem [] [] ∧
-        R.inv b' ([] ++ xs) (s0.regs 14).toNat (view R.rt ([] ++ xs) s'.mem) := by
-  have h := correctness implAt R (SliceObj 1) 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
+        MemFrame (s0.setRet ret).mem s'.mem (R.rt ++ [(((s0.setRet ret).regs 4).toNat - 4280, ((s0.setRet ret).regs 4).toNat + 16)]) ∧
+        LiveFrame (s0.setRet ret).mem s'.mem [] [] ∧
+        R.inv b' ([] ++ xs) ((s0.setRet ret).regs 14).toNat (view R.rt ([] ++ xs) s'.mem) := by
+  have h := (correctness implAt R (SliceObj 1) 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
     (by rw [aN]; exact hnew) (by rw [aGr]; exact hgrow) (by rw [aM]; exact hclr) (by rw [aW]; exact hwb)
-    1 [] 0x400 ret hret s0 setup ⟨⟨rfl, hfl'⟩, pre⟩
+    1 [] 0x400) s0 setup ⟨⟨rfl, hfl'⟩, pre⟩ ret hret
   refine Returns.mono h fun s' ⟨hab, cap0, hc, hres, xs, b', hfr, hb, hF, hLF, hinv⟩ =>
     ⟨hab, ?_, xs, b', hfr, hb, hF, hLF, hinv⟩
   have : cap0 = 0 ∨ cap0 = 1 := by omega

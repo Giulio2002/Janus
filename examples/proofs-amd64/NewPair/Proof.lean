@@ -39,6 +39,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : Rt
         s'.mem.accessible ptr 16 true = true ∧
         s'.mem.readLE ptr 8 = a.toNat ∧ s'.mem.readLE (ptr + 8) 8 = b.toNat ∧
         MemFrame s.mem s'.mem (rt ++ [((s.regs 4).toNat - 4128, (s.regs 4).toNat + 24)])) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Proof.pairType, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hg, ⟨hb, ha, hw⟩, hd, hout, hal, hH⟩
   janus64_intro hs
   janus_eval_nat h_pt : pairType
@@ -94,8 +95,8 @@ def s0 : Janus.Amd64.State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [3, 5] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [3, 5] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
@@ -126,8 +127,8 @@ set_option maxRecDepth 100000 in
 theorem pre : StackGuardOK s0 0 ∧ StackWritable s0 4128 24 ∧ Extracted.program.DataLoaded s0.mem ∧
     Outside ((s0.regs 4).toNat - 4128) 4152 rt ∧ (s0.regs 4).toNat % 8 = 0 ∧
     H [pairType] (s0.regs 14).toNat ((s0.regs 4).toNat - 32) (rtView rt s0.mem) :=
-  ⟨⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩,
-    ⟨by decide, by decide, by decide⟩, dataLoaded,
+  ⟨(by first | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide, by decide⟩ | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩),
+    (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), dataLoaded,
     by simp only [rt, AllocW.rt, Janus.Contracts.AllocWitness.allocRt, AllocW.tys, outside_cons, outside_nil, List.map]; decide,
     by decide, hH⟩
 
@@ -154,12 +155,12 @@ theorem wsCall_pre : nwSite rt H wsCall := by
 
 /-- The theorem fires: for this call and this allocator, `NewPair(3, 5)` returns a fresh object in
 `rt` holding 3 and 5. -/
-theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
     ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
       s'.mem.accessible ptr 16 true = true ∧
       s'.mem.readLE ptr 8 = (3 : BitVec 64).toNat ∧ s'.mem.readLE (ptr + 8) 8 = (5 : BitVec 64).toNat ∧
-      MemFrame s0.mem s'.mem (rt ++ [((s0.regs 4).toNat - 4128, (s0.regs 4).toNat + 24)]) :=
-  correctness impl rt H 3 5 hnew ret hret s0 setup pre
+      MemFrame (s0.setRet ret).mem s'.mem (rt ++ [(((s0.setRet ret).regs 4).toNat - 4128, ((s0.setRet ret).regs 4).toNat + 24)]) :=
+  (correctness impl rt H 3 5 hnew) s0 setup pre ret hret
 
 /-- The hypotheses are satisfiable: an allocator meeting the contract (`hnew`), runtime ranges, a
 readiness predicate, and a call state of `NewPair(3, 5)` that satisfies the precondition. -/
@@ -168,17 +169,17 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (rt : List (Nat × Na
     NewobjectContract64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
+    CallSetup0 Extracted.entry [3, 5] s ∧
     (StackGuardOK s 0 ∧ StackWritable s 4128 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside ((s.regs 4).toNat - 4128) 4152 rt ∧ (s.regs 4).toNat % 8 = 0 ∧
       H [pairType] (s.regs 14).toNat ((s.regs 4).toNat - 32) (rtView rt s.mem)) ∧
     (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
       nwSite rt H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
     ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
       s'.mem.accessible ptr 16 true = true ∧
       s'.mem.readLE ptr 8 = (3 : BitVec 64).toNat ∧ s'.mem.readLE (ptr + 8) 8 = (5 : BitVec 64).toNat ∧
-      MemFrame s.mem s'.mem (rt ++ [((s.regs 4).toNat - 4128, (s.regs 4).toNat + 24)]) :=
+      MemFrame (s.setRet ret).mem s'.mem (rt ++ [(((s.setRet ret).regs 4).toNat - 4128, ((s.setRet ret).regs 4).toNat + 24)]) :=
   ⟨impl, rt, H, ret, s0, hnew, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness

@@ -63,6 +63,61 @@ def BarrierOK (s : State) (n : Nat) : Prop :=
   (s.regs 14).toNat + offM + 8 ≤ 2 ^ 48 ∧ mOf s + offP + 8 ≤ 2 ^ 48 ∧ pOf s + offNext + 16 ≤ 2 ^ 48 ∧
   nextOf s + 16 ≤ 2 ^ 48
 
+/-- `BarrierOK` survives writing the return slot: every runtime object it reads through is `Apart` from the stack window
+`[RSP - 136, RSP + 8)`, which contains the slot. -/
+theorem barrierOK_setRet {s : State} {ret n : Nat} (h : BarrierOK s n) : BarrierOK (s.setRet ret) n := by
+  janus_eval_nat h_o4 : offM
+  janus_eval_nat h_o5 : offP
+  janus_eval_nat h_o6 : offNext
+  janus_eval_nat h_o7 : offEnd
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, n1, n2, n3, n4⟩ := h
+  have b11 := a11
+  have b12 := a12
+  have b13 := a13
+  simp only [Apart, h_o4, h_o5, h_o6] at b11 b12 b13
+  have e1 : mOf (s.setRet ret) = mOf s := by
+    unfold mOf
+    simp only [setRet_regs, h_o4]
+    exact readLE_setRet_of_disjoint (by omega)
+  have e2 : pOf (s.setRet ret) = pOf s := by
+    unfold pOf
+    rw [e1, h_o5]
+    exact readLE_setRet_of_disjoint (by omega)
+  have e3 : nextOf (s.setRet ret) = nextOf s := by
+    unfold nextOf
+    rw [e2, h_o6]
+    exact readLE_setRet_of_disjoint (by omega)
+  have e4 : endOf (s.setRet ret) = endOf s := by
+    unfold endOf
+    rw [e2, h_o7]
+    exact readLE_setRet_of_disjoint (by omega)
+  unfold BarrierOK
+  simp only [setRet_regs, setRet_accessible, e1, e2, e3, e4]
+  exact ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, n1, n2, n3, n4⟩
+
+/-- The whole precondition of `correctness` survives writing the return slot. -/
+theorem pre_setRet (n : BitVec 64) (s : State) (ret : Nat)
+    (hp : StackGuardOK s 0 ∧ StackWritable s 136 8 ∧ Buffer s n 8 true ∧
+        s.mem.accessible wbFlag 4 false = true ∧
+        Separated [(n.toNat, 8), ((s.regs 4).toNat - 136, 144), (wbFlag, 4)] ∧
+        (s.mem.readLE wbFlag 4 ≠ 0 → BarrierOK s n.toNat)) :
+    StackGuardOK (s.setRet ret) 0 ∧ StackWritable (s.setRet ret) 136 8 ∧ Buffer (s.setRet ret) n 8 true ∧
+        (s.setRet ret).mem.accessible wbFlag 4 false = true ∧
+        Separated [(n.toNat, 8), (((s.setRet ret).regs 4).toNat - 136, 144), (wbFlag, 4)] ∧
+        ((s.setRet ret).mem.readLE wbFlag 4 ≠ 0 → BarrierOK (s.setRet ret) n.toNat) := by
+  obtain ⟨hg, hsw, hb, hfa, hsep, hbar⟩ := hp
+  have hsep2 := hsep
+  simp only [separated_cons, separated_nil, List.mem_cons, List.not_mem_nil, or_false, forall_eq_or_imp,
+    forall_eq, and_true] at hsep2
+  obtain ⟨⟨_, _⟩, hC⟩ := hsep2
+  have hfl : (s.setRet ret).mem.readLE wbFlag 4 = s.mem.readLE wbFlag 4 :=
+    readLE_setRet_of_disjoint (by omega)
+  refine ⟨by simpa using hg, by simpa [StackWritable] using hsw, by simpa using hb, by simpa using hfa,
+    by simpa using hsep, ?_⟩
+  rw [hfl]
+  intro h
+  exact barrierOK_setRet (hbar h)
+
 theorem correctness (n q : BitVec 64) :
     Ensures Extracted.program Extracted.entry [n, q]
       (fun s => StackGuardOK s 0 ∧ StackWritable s 136 8 ∧ Buffer s n 8 true ∧
@@ -78,6 +133,7 @@ theorem correctness (n q : BitVec 64) :
           s'.mem.readLE (pOf s + offNext) 8 = nextOf s + 16 ∧
           MemFrame s.mem s'.mem [(n.toNat, n.toNat + 8), (nextOf s, nextOf s + 16),
             (pOf s + offNext, pOf s + offNext + 8), ((s.regs 4).toNat - 136, (s.regs 4).toNat)])) := by
+  refine Ensures.of_old (fun s ret _ _ hp => pre_setRet n s ret hp) ?_
   intro ret hret s hs ⟨hsg, ⟨hb, ha, hw⟩, ⟨hn', hn⟩, hfa, hsep, hbar⟩
   janus64_intro hs
   have hgl := hsg.load
@@ -114,35 +170,35 @@ def s0 : State :=
   { regs := fun r_ => if r_ = 0 then n else if r_ = 3 then q else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := ⟨wmem64.bytes, wmem64.regions ++ [⟨wbFlag, 4, false⟩]⟩ }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [n, q] s0 :=
-  ⟨rfl, by decide +kernel, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [n, q] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 set_option maxRecDepth 100000 in
 theorem hpre : (fun s => StackGuardOK s 0 ∧ StackWritable s 136 8 ∧ Buffer s n 8 true ∧
         s.mem.accessible wbFlag 4 false = true ∧
         Separated [(n.toNat, 8), ((s.regs 4).toNat - 136, 144), (wbFlag, 4)] ∧
         (s.mem.readLE wbFlag 4 ≠ 0 → BarrierOK s n.toNat)) s0 := by
   dsimp only
-  refine ⟨⟨by decide +kernel, by decide +kernel, by decide +kernel⟩, ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩, ⟨by decide +kernel, by decide +kernel⟩, by decide +kernel, ?_, ?_⟩
+  refine ⟨(by first | exact ⟨by decide +kernel, by decide +kernel, by decide +kernel, by decide⟩ | exact ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩), (by first | exact ⟨by decide +kernel, by decide +kernel, by decide +kernel, by decide⟩ | exact ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩), ⟨by decide +kernel, by decide +kernel⟩, by decide +kernel, ?_, ?_⟩
   · simp only [Separated]; decide +kernel
   · intro h; exact absurd (by decide +kernel) h
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (n : BitVec 64) (q : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [n, q] s ∧ (StackGuardOK s 0 ∧ StackWritable s 136 8 ∧ Buffer s n 8 true ∧
+    CallSetup0 Extracted.entry [n, q] s ∧ (StackGuardOK s 0 ∧ StackWritable s 136 8 ∧ Buffer s n 8 true ∧
         s.mem.accessible wbFlag 4 false = true ∧
         Separated [(n.toNat, 8), ((s.regs 4).toNat - 136, 144), (wbFlag, 4)] ∧
         (s.mem.readLE wbFlag 4 ≠ 0 → BarrierOK s n.toNat)) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ s'.mem.readLE n.toNat 8 = q.toNat ∧
-        (s.mem.readLE wbFlag 4 = 0 → MemFrame s.mem s'.mem
-          [(n.toNat, n.toNat + 8), ((s.regs 4).toNat - 136, (s.regs 4).toNat)]) ∧
-        (s.mem.readLE wbFlag 4 ≠ 0 →
-          s'.mem.readLE (nextOf s) 8 = q.toNat ∧
-          s'.mem.readLE (nextOf s + 8) 8 = s.mem.readLE n.toNat 8 ∧
-          s'.mem.readLE (pOf s + offNext) 8 = nextOf s + 16 ∧
-          MemFrame s.mem s'.mem [(n.toNat, n.toNat + 8), (nextOf s, nextOf s + 16),
-            (pOf s + offNext, pOf s + offNext + 8), ((s.regs 4).toNat - 136, (s.regs 4).toNat)])) :=
-  ⟨ret, s0, n, q, hret, setup, hpre, correctness n q ret hret s0 setup hpre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ s'.mem.readLE n.toNat 8 = q.toNat ∧
+        ((s.setRet ret).mem.readLE wbFlag 4 = 0 → MemFrame (s.setRet ret).mem s'.mem
+          [(n.toNat, n.toNat + 8), (((s.setRet ret).regs 4).toNat - 136, ((s.setRet ret).regs 4).toNat)]) ∧
+        ((s.setRet ret).mem.readLE wbFlag 4 ≠ 0 →
+          s'.mem.readLE (nextOf (s.setRet ret)) 8 = q.toNat ∧
+          s'.mem.readLE (nextOf (s.setRet ret) + 8) 8 = (s.setRet ret).mem.readLE n.toNat 8 ∧
+          s'.mem.readLE (pOf (s.setRet ret) + offNext) 8 = nextOf (s.setRet ret) + 16 ∧
+          MemFrame (s.setRet ret).mem s'.mem [(n.toNat, n.toNat + 8), (nextOf (s.setRet ret), nextOf (s.setRet ret) + 16),
+            (pOf (s.setRet ret) + offNext, pOf (s.setRet ret) + offNext + 8), (((s.setRet ret).regs 4).toNat - 136, ((s.setRet ret).regs 4).toNat)])) :=
+  ⟨ret, s0, n, q, hret, setup, hpre, (correctness n q) s0 setup hpre ret hret⟩
 
 end Witness
 

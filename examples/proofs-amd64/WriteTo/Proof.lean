@@ -23,7 +23,9 @@ theorem correctness (impl : List Janus.Amd64.Segment) (fn stack : Nat) (rt : Lis
         tab.toNat + 32 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 8 false = true ∧
         s.mem.readLE (tab.toNat + 24) 8 = fn ∧ Outside ((s.regs 4).toNat - 48) 56 rt)
       (fun _ s' => ∃ n e1 e2, R w ptr len cap n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 3 = e1 ∧ s'.regs 1 = e2) := by
-  intro hc ret hret s hs ⟨h8, hfn, hd, hg, ⟨hle, hnw, hacc⟩, hal, htb, ht, hF, hrt⟩
+  intro hc
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.SPAligned, Janus.Amd64.GoABI.regSP]
+  intro ret hret s hs ⟨h8, hfn, hd, hg, ⟨hle, hnw, hacc⟩, hal, htb, ht, hF, hrt⟩
   janus64_intro hs
   have hgl := hg.load
   have hgb := hg.below
@@ -84,9 +86,9 @@ theorem wsCall_pre : Janus.Contracts.ICall.ICallPre64 4 16 56 rt0 (fun sc => sc.
 
 theorem hret : RetAddr (Extracted.program.link impl) ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry
+theorem setup : CallSetup0 Extracted.entry
     [BitVec.ofNat 64 tabA, 0x600000, 0x500000, 3, 3] s0 :=
-  ⟨rfl, by decide, rfl, by decide, (fun i h => by
+  ⟨rfl, rfl, by decide, (fun i h => by
       have h5 : i < 5 := by simpa using h
       match i, h5 with
       | 0, _ => rfl
@@ -100,7 +102,7 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (fn stack : Nat) (rt 
     ICallContract64 (Extracted.program.link impl) fn 4 stack 56 rt (fun _ => []) R
       (fun sc => sc.regs 0 = w ∧ sc.regs 3 = ptr ∧ sc.regs 1 = len ∧ sc.regs 7 = cap) ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [tab, w, ptr, len, cap] s ∧
+    CallSetup0 Extracted.entry [tab, w, ptr, len, cap] s ∧
     (8 ≤ stack ∧ CodePtrOK64 fn ∧
       (tab.toNat + 32 ≤ (s.regs 4).toNat - 48 ∨ (s.regs 4).toNat + 32 ≤ tab.toNat + 24) ∧
       StackGuardOK s 0 ∧ StackWritable s (48 + stack) 32 ∧ SPAligned s ∧
@@ -108,26 +110,26 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (fn stack : Nat) (rt 
       s.mem.readLE (tab.toNat + 24) 8 = fn ∧ Outside ((s.regs 4).toNat - 48) 56 rt) ∧
     (∃ s_c : State, s_c.rip = BitVec.ofNat 64 fn ∧
       Janus.Contracts.ICall.ICallPre64 4 stack 56 rt (fun sc => sc.regs 0 = w ∧ sc.regs 3 = ptr ∧ sc.regs 1 = len ∧ sc.regs 7 = cap) s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
       ∃ n e1 e2, R w ptr len cap n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 3 = e1 ∧ s'.regs 1 = e2 :=
   have pre : (8 ≤ 16 ∧ CodePtrOK64 A0 ∧
       ((BitVec.ofNat 64 tabA).toNat + 32 ≤ (s0.regs 4).toNat - 48 ∨ (s0.regs 4).toNat + 32 ≤ (BitVec.ofNat 64 tabA).toNat + 24) ∧
       StackGuardOK s0 0 ∧ StackWritable s0 (48 + 16) 32 ∧ SPAligned s0 ∧
       (BitVec.ofNat 64 tabA).toNat + 32 ≤ 2 ^ 48 ∧ s0.mem.accessible ((BitVec.ofNat 64 tabA).toNat + 24) 8 false = true ∧
       s0.mem.readLE ((BitVec.ofNat 64 tabA).toNat + 24) 8 = A0 ∧ Outside ((s0.regs 4).toNat - 48) 56 rt0) :=
-    ⟨by decide, (by unfold CodePtrOK64; decide), by decide, ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
+    ⟨by decide, (by unfold CodePtrOK64; decide), by decide, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩),
       (by unfold SPAligned; decide), by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩
   ⟨impl, A0, 16, rt0, R0, ret, s0, BitVec.ofNat 64 tabA, 0x600000, 0x500000, 3, 3, hc, hret, setup, pre,
     ⟨wsCall, rfl, wsCall_pre⟩,
-    correctness impl A0 16 rt0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc ret hret s0 setup pre⟩
+    (correctness impl A0 16 rt0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc) s0 setup pre ret hret⟩
 
 /-- The theorem fires: the concrete call of `WriteTo` (the concrete writer serves the itab) returns, and its results are the ones
 `correctness` describes. -/
-theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
     ∃ n e1 e2, R0 0x600000 0x500000 3 3 n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 3 = e1 ∧ s'.regs 1 = e2 :=
-  correctness impl A0 16 rt0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc ret hret s0 setup
-    ⟨by decide, (by unfold CodePtrOK64; decide), by decide, ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
-    (by unfold SPAligned; decide), by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩
+  (correctness impl A0 16 rt0 R0 (BitVec.ofNat 64 tabA) 0x600000 0x500000 3 3 hc) s0 setup
+    ⟨by decide, (by unfold CodePtrOK64; decide), by decide, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩),
+    (by unfold SPAligned; decide), by decide, by decide, by decide, by simp [s0, sp0, rt0]⟩ ret hret
 
 end Witness
 

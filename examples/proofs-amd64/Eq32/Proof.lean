@@ -36,6 +36,7 @@ theorem correctness (a b : BitVec 64) :
     Ensures Extracted.program Extracted.entry [a, b] (pre a b)
       (fun s s' => (s'.regs 0).toNat % 256 =
         (s.mem.readLE a.toNat 32 == s.mem.readLE b.toNat 32).toNat) := by
+  janus64_ensures_old [Proof.pre, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨hg, ⟨hle, hnw, hacc⟩, ⟨ha48, ha⟩, ⟨hb48, hb⟩, hda, hdb⟩ := hpre
@@ -90,19 +91,19 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [a, b] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [a, b] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 
 theorem hpre : pre a b s0 := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
+  refine ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩),
     ⟨by decide, by decide⟩, ⟨by decide, by decide⟩, by decide, by decide⟩
 
 /-- So the guarantee is reached: the two zero arrays compare equal. -/
-theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat % 256 = 1 := by
-  refine (correctness a b ret hret s0 setup hpre).mono ?_
+theorem returns : Returns (Extracted.program.withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat % 256 = 1 := by
+  refine ((correctness a b) s0 setup hpre ret hret).mono ?_
   intro s' h
   refine ⟨h.1, ?_⟩
   rw [h.2]
@@ -110,10 +111,10 @@ theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (a b : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [a, b] s ∧ pre a b s ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ (s'.regs 0).toNat % 256 = (s.mem.readLE a.toNat 32 == s.mem.readLE b.toNat 32).toNat) :=
-  ⟨ret, s0, a, b, hret, setup, hpre, correctness a b ret hret s0 setup hpre⟩
+    CallSetup0 Extracted.entry [a, b] s ∧ pre a b s ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ (s'.regs 0).toNat % 256 = ((s.setRet ret).mem.readLE a.toNat 32 == (s.setRet ret).mem.readLE b.toNat 32).toNat) :=
+  ⟨ret, s0, a, b, hret, setup, hpre, (correctness a b) s0 setup hpre ret hret⟩
 
 end Witness
 

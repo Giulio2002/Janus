@@ -49,6 +49,29 @@ theorem rot_summary :
   janus64_run
   exact ⟨_, _, rfl⟩
 
+/-- The itab's static bytes lie in read-only memory, apart from any writable range, so `[RSP, RSP + 8)` (inside the
+writable stack window) is not part of them: `ItabIs` survives writing the return slot. -/
+theorem itabIs_setRet {ds : List Janus.DataSegment} {s : State} {ret : Nat} {tab : BitVec 64} {name : String}
+    (h : ItabIs ds s.mem tab name) (hw : StackWritable s 32 24) : ItabIs ds (s.setRet ret).mem tab name := by
+  obtain ⟨d, hd, ht, hreg, hb⟩ := h
+  obtain ⟨hle, _, hacc⟩ := hw
+  have hw8 : s.mem.accessible (s.regs 4).toNat 8 true = true :=
+    Janus.Arm64.Memory.accessible_sub _ hacc (Or.inr rfl) (by simp only [regSP] at hle ⊢; omega) (by simp only [regSP] at hle ⊢; omega)
+  have hdj := Janus.Spec.SegLoaded.disjoint_of_writable ⟨hreg, hb⟩ hw8
+  refine ⟨d, hd, ht, hreg, fun i hi => ?_⟩
+  rw [bytes_setRet_of_outside (by omega)]
+  exact hb i hi
+
+theorem pre_setRet (tab h : BitVec 64) (name : String) (s : State) (ret : Nat)
+    (hp : ItabIs Extracted.program.data s.mem tab name ∧ Buffer s h 8 false ∧
+        StackGuardOK s 0 ∧ StackWritable s 32 24 ∧
+        ((s.regs 4).toNat + 24 ≤ h.toNat ∨ h.toNat + 8 ≤ (s.regs 4).toNat - 32)) :
+    ItabIs Extracted.program.data (s.setRet ret).mem tab name ∧ Buffer (s.setRet ret) h 8 false ∧
+        StackGuardOK (s.setRet ret) 0 ∧ StackWritable (s.setRet ret) 32 24 ∧
+        (((s.setRet ret).regs 4).toNat + 24 ≤ h.toNat ∨ h.toNat + 8 ≤ ((s.setRet ret).regs 4).toNat - 32) := by
+  obtain ⟨hi, hb, hg, hsw, hd⟩ := hp
+  exact ⟨itabIs_setRet hi hsw, by simpa using hb, by simpa using hg, by simpa [StackWritable] using hsw, hd⟩
+
 theorem correctness (tab h x : BitVec 64) :
     Ensures Extracted.program Extracted.entry [tab, h, x]
       (fun s => ItabIs Extracted.program.data s.mem tab mulItab ∧ Buffer s h 8 false ∧
@@ -60,6 +83,7 @@ theorem correctness (tab h x : BitVec 64) :
         StackGuardOK s 0 ∧ StackWritable s 32 24 ∧
         ((s.regs 4).toNat + 24 ≤ h.toNat ∨ h.toNat + 8 ≤ (s.regs 4).toNat - 32))
       (fun s s' => s'.regs 0 = x.rotateLeft 13 + BitVec.ofNat 64 (s.mem.readLE h.toNat 8)) := by
+  suffices hh : _ ∧ _ from ⟨Ensures.of_old (fun s ret _ _ hp => pre_setRet tab h _ s ret hp) hh.1, Ensures.of_old (fun s ret _ _ hp => pre_setRet tab h _ s ret hp) hh.2⟩
   constructor
   all_goals
     intro ret hret s hs ⟨hi, ⟨hhb, hh⟩, hg, ⟨hle, hnw, hacc⟩, hd⟩
@@ -97,8 +121,8 @@ def s0M : State :=
 def s0R : State := { s0M with regs := fun r_ => if r_ = 0 then tabR else s0M.regs r_ }
 
 theorem setups0M :
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [tabM, h, x] s0M :=
-  ⟨rfl, by decide, rfl, by decide, by
+    CallSetup0 Extracted.entry [tabM, h, x] s0M :=
+  ⟨rfl, rfl, by decide, by
     intro i hi; simp at hi
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
 
@@ -112,12 +136,12 @@ set_option maxRecDepth 100000 in
 theorem rests0M : Buffer s0M h 8 false ∧
     StackGuardOK s0M 0 ∧ StackWritable s0M 32 24 ∧
     ((s0M.regs 4).toNat + 24 ≤ h.toNat ∨ h.toNat + 8 ≤ (s0M.regs 4).toNat - 32) := by
-  refine ⟨⟨by decide +kernel, by decide +kernel⟩, ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩,
-    ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩, by decide +kernel⟩
+  refine ⟨⟨by decide +kernel, by decide +kernel⟩, (by first | exact ⟨by decide +kernel, by decide +kernel, by decide +kernel, by decide⟩ | exact ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩),
+    (by first | exact ⟨by decide +kernel, by decide +kernel, by decide +kernel, by decide⟩ | exact ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩), by decide +kernel⟩
 
 theorem setups0R :
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [tabR, h, x] s0R :=
-  ⟨rfl, by decide, rfl, by decide, by
+    CallSetup0 Extracted.entry [tabR, h, x] s0R :=
+  ⟨rfl, rfl, by decide, by
     intro i hi; simp at hi
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
 
@@ -131,26 +155,26 @@ set_option maxRecDepth 100000 in
 theorem rests0R : Buffer s0R h 8 false ∧
     StackGuardOK s0R 0 ∧ StackWritable s0R 32 24 ∧
     ((s0R.regs 4).toNat + 24 ≤ h.toNat ∨ h.toNat + 8 ≤ (s0R.regs 4).toNat - 32) := by
-  refine ⟨⟨by decide +kernel, by decide +kernel⟩, ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩,
-    ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩, by decide +kernel⟩
+  refine ⟨⟨by decide +kernel, by decide +kernel⟩, (by first | exact ⟨by decide +kernel, by decide +kernel, by decide +kernel, by decide⟩ | exact ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩),
+    (by first | exact ⟨by decide +kernel, by decide +kernel, by decide +kernel, by decide⟩ | exact ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩), by decide +kernel⟩
 
 theorem nonvacuous : ∃ (ret : Nat) (s s' : State) (tab h x tab' h' x' : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [tab, h, x] s ∧
+    CallSetup0 Extracted.entry [tab, h, x] s ∧
     (ItabIs Extracted.program.data s.mem tab mulItab ∧ Buffer s h 8 false ∧
         StackGuardOK s 0 ∧ StackWritable s 32 24 ∧
         ((s.regs 4).toNat + 24 ≤ h.toNat ∨ h.toNat + 8 ≤ (s.regs 4).toNat - 32)) ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [tab', h', x'] s' ∧
+    CallSetup0 Extracted.entry [tab', h', x'] s' ∧
     (ItabIs Extracted.program.data s'.mem tab' rotItab ∧ Buffer s' h' 8 false ∧
         StackGuardOK s' 0 ∧ StackWritable s' 32 24 ∧
         ((s'.regs 4).toNat + 24 ≤ h'.toNat ∨ h'.toNat + 8 ≤ (s'.regs 4).toNat - 32)) ∧
-    (Returns (Extracted.program.withExit ret) s fun t =>
-      ABIReturn s t ∧ t.regs 0 = x * BitVec.ofNat 64 (s.mem.readLE h.toNat 8)) ∧
-    (Returns (Extracted.program.withExit ret) s' fun t =>
-      ABIReturn s' t ∧ t.regs 0 = x'.rotateLeft 13 + BitVec.ofNat 64 (s'.mem.readLE h'.toNat 8)) :=
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun t =>
+      ABIReturn (s.setRet ret) t ∧ t.regs 0 = x * BitVec.ofNat 64 ((s.setRet ret).mem.readLE h.toNat 8)) ∧
+    (Returns (Extracted.program.withExit ret) (s'.setRet ret) fun t =>
+      ABIReturn (s'.setRet ret) t ∧ t.regs 0 = x'.rotateLeft 13 + BitVec.ofNat 64 ((s'.setRet ret).mem.readLE h'.toNat 8)) :=
   ⟨ret, s0M, s0R, tabM, h, x, tabR, h, x, hret, setups0M, ⟨itabs0M, rests0M⟩, setups0R,
     ⟨itabs0R, rests0R⟩,
-    (correctness tabM h x).1 ret hret s0M setups0M ⟨itabs0M, rests0M⟩,
-    (correctness tabR h x).2 ret hret s0R setups0R ⟨itabs0R, rests0R⟩⟩
+    (correctness tabM h x).1 s0M setups0M ⟨itabs0M, rests0M⟩ ret hret,
+    (correctness tabR h x).2 s0R setups0R ⟨itabs0R, rests0R⟩ ret hret⟩
 
 end Witness
 

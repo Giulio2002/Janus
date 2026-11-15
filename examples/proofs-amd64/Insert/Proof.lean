@@ -33,9 +33,10 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
       (fun s => CallerOK M s 40 32 ∧ M.Typ mapType ∧ m.toNat ≠ 0 ∧ M.Rep s.mem m.toNat f ∧
         H [mapType, m.toNat, k.toNat] (s.regs 14).toNat ((s.regs 4).toNat - 40) (Contracts.rtView M.priv s.mem))
       (fun s s' => M.Rep s'.mem m.toNat (f.set k v) ∧ M.Env s'.mem (s.regs 14)) := by
+  janus64_ensures_old [Janus.Contracts.MapAmd64.CallerOK, Proof.mapType]
   intro ret hret s hs ⟨hc, hty, hm0, hmap, hH⟩
   have hc' := hc
-  obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
+  obtain ⟨henv, ⟨hg1, hg2, hg3, hg4⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
   janus_eval_nat hT : mapType
   rw [hT] at hty hH
@@ -103,8 +104,8 @@ def s0 : Janus.Amd64.State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
@@ -114,7 +115,7 @@ theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
 set_option maxRecDepth 100000 in
 theorem callerOK : CallerOK (MC ck64) s0 40 32 := by
   refine ⟨⟨by decide, by decide⟩,
-    ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩,
+    (by first | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide, by decide⟩ | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩),
     by decide, by decide, by decide, by decide, ?_, ?_, ?_⟩
   · simp only [MC_priv, MC_depth, priv0, outside_cons, outside_nil, and_true]; decide
   · simp only [Janus.Spec.Disjoint, MC_depth]; decide
@@ -128,7 +129,7 @@ theorem pre : CallerOK (MC ck64) s0 40 32 ∧ (MC ck64).Typ mapType ∧ (BitVec.
 theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
     RTPre M n { s with rip := a } := by
   obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
-  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+  exact ⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
 
 /-- The precondition of `Assign`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
 @[reducible] def AssignSite (M : MapModel (BitVec 64) (BitVec 64)) (H : Contracts.RtReady) (f : AMap (BitVec 64) (BitVec 64)) (s_c : Janus.Amd64.State) : Prop :=
@@ -142,9 +143,9 @@ theorem wsCall_pre : AssignSite (MC ck64) HAssign AMap.empty wsCall :=
   ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64 rfl _ 3 (by decide) mmem64_zenv mmem64_guard mmem64_ret), trivial, by decide, mmem64_repC _, hAssign_mmem64 _ _ _⟩
 
 /-- The theorem fires: `Insert(map, 5, 7)` returns what the theorem says. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    ((MC ck64).Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7) ∧ (MC ck64).Env s'.mem (s0.regs 14)) :=
-  correctness implAt (MC ck64) (MC_laws _) HAssign hcon (BitVec.ofNat 64 MP) 5 7 AMap.empty ret hret s0 setup pre
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
+    ((MC ck64).Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7) ∧ (MC ck64).Env s'.mem ((s0.setRet ret).regs 14)) :=
+  (correctness implAt (MC ck64) (MC_laws _) HAssign hcon (BitVec.ofNat 64 MP) 5 7 AMap.empty) s0 setup pre ret hret
 
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapassign_fast64`
 meeting `Assign` for it, and a call state of `Insert(map, 5, 7)` that satisfies the precondition. -/
@@ -153,13 +154,13 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec
     Assign (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.mapassign_fast64") M H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s ∧
+    CallSetup0 Extracted.entry [BitVec.ofNat 64 MP, 5, 7] s ∧
     (CallerOK M s 40 32 ∧ M.Typ mapType ∧ (BitVec.ofNat 64 MP).toNat ≠ 0 ∧ M.Rep s.mem (BitVec.ofNat 64 MP).toNat AMap.empty ∧
     H [mapType, (BitVec.ofNat 64 MP).toNat, (5 : BitVec 64).toNat] (s.regs 14).toNat ((s.regs 4).toNat - 40) (Contracts.rtView M.priv s.mem)) ∧
     (∃ (f : AMap (BitVec 64) (BitVec 64)) (s_c : Janus.Amd64.State),
       s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapassign_fast64") ∧ AssignSite M H f s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
-    (M.Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7) ∧ M.Env s'.mem (s.regs 14)) :=
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
+    (M.Rep s'.mem (BitVec.ofNat 64 MP).toNat (emp.set 5 7) ∧ M.Env s'.mem ((s.setRet ret).regs 14)) :=
   ⟨implAt, (MC ck64), HAssign, ret, s0, (MC_laws _), hcon, hret, setup, pre, ⟨AMap.empty, wsCall, by show BitVec.ofNat 64 cA = _; rw [addr], wsCall_pre⟩, returns⟩
 
 end Witness

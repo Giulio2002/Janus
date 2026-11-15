@@ -25,7 +25,7 @@ open Janus.Contracts.Mem (BoolRes)
 namespace Proof
 
 theorem correctness (d : Nat) : MemequalN Extracted.program Extracted.entry d 8 := by
-  intro s hpc ⟨⟨hg, ⟨hal, hd, hsp, hacc, hx, hdf, hra⟩, hgo⟩, ⟨ha1, ha2, ha3⟩, ⟨hb1, hb2, hb3⟩⟩
+  intro s hpc ⟨⟨hg, ⟨hal, hd, hsp, hacc, hx, hdf, hra⟩, hgo⟩, ⟨ha1, ha2, ha3, _⟩, ⟨hb1, hb2, hb3⟩⟩
   janus64_run
   refine EqRet.intro ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ (MemFrame.refl _ _) ?_
   all_goals try (simp_all [setRegF, retAddrOf]; done)
@@ -55,7 +55,7 @@ def s0 : State :=
 
 /-- The precondition holds at `s0` (stack bound 64). -/
 theorem pre : EqPre 64 2 s0 ∧ Input s0 64 2 (s0.regs 0).toNat 8 ∧ Input s0 64 2 (s0.regs 3).toNat 8 := by
-  refine ⟨⟨⟨by decide, by decide, by decide⟩, ?_, ?_⟩, ?_, ?_⟩ <;>
+  refine ⟨⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_⟩, ?_, ?_⟩ <;>
     simp only [CallOK, Input, calleeStack, Janus.Contracts.MapAmd64.calleeStack, outside_cons,
       outside_nil] <;> decide
 

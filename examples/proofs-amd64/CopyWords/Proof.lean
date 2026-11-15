@@ -89,6 +89,7 @@ theorem correctness (dst dlen dcap src slen scap : BitVec 64)
       (fun s s' => results 1 s' = [BitVec.ofNat 64 (min dlen.toNat slen.toNat)] ∧
         ∀ j, j < min dlen.toNat slen.toNat →
           s'.mem.readLE (dst.toNat + 8 * j) 8 = s.mem.readLE (src.toNat + 8 * j) 8) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨⟨-, hnw, hacc⟩, ⟨hdw, hd⟩, ⟨hsw, hsa⟩, hds, hdsp, hssp⟩ := hpre
@@ -150,25 +151,25 @@ def s0 : State :=
   { regs := fun i => if i = 0 then dst else if i = 3 then dlen else if i = 1 then dcap else if i = 7 then src else if i = 6 then slen else if i = 8 then scap else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [dst, dlen, dcap, src, slen, scap] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3 ∨ i = 4 ∨ i = 5) with rfl | rfl | rfl | rfl | rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [dst, dlen, dcap, src, slen, scap] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3 ∨ i = 4 ∨ i = 5) with rfl | rfl | rfl | rfl | rfl | rfl <;> rfl, rfl⟩
 theorem hpre : (fun s => StackWritable s 0 40 ∧ Buffer s dst (8 * dlen.toNat) true ∧
         Buffer s src (8 * slen.toNat) false ∧ Disjoint dst (8 * dlen.toNat) src (8 * slen.toNat) ∧
         Disjoint dst (8 * dlen.toNat) (s.regs regSP) 40 ∧ Disjoint src (8 * slen.toNat) (s.regs regSP) 40) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (dst : BitVec 64) (dlen : BitVec 64) (dcap : BitVec 64) (src : BitVec 64) (slen : BitVec 64) (scap : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [dst, dlen, dcap, src, slen, scap] s ∧ (dlen.toNat < 2 ^ 63) ∧ (slen.toNat < 2 ^ 63) ∧ (StackWritable s 0 40 ∧ Buffer s dst (8 * dlen.toNat) true ∧
+    CallSetup0 Extracted.entry [dst, dlen, dcap, src, slen, scap] s ∧ (dlen.toNat < 2 ^ 63) ∧ (slen.toNat < 2 ^ 63) ∧ (StackWritable s 0 40 ∧ Buffer s dst (8 * dlen.toNat) true ∧
         Buffer s src (8 * slen.toNat) false ∧ Disjoint dst (8 * dlen.toNat) src (8 * slen.toNat) ∧
         Disjoint dst (8 * dlen.toNat) (s.regs regSP) 40 ∧ Disjoint src (8 * slen.toNat) (s.regs regSP) 40) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ results 1 s' = [BitVec.ofNat 64 (min dlen.toNat slen.toNat)] ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ results 1 s' = [BitVec.ofNat 64 (min dlen.toNat slen.toNat)] ∧
         ∀ j, j < min dlen.toNat slen.toNat →
-          s'.mem.readLE (dst.toNat + 8 * j) 8 = s.mem.readLE (src.toNat + 8 * j) 8) :=
-  ⟨ret, s0, dst, dlen, dcap, src, slen, scap, hret, setup, hdl, hsl, hpre, correctness dst dlen dcap src slen scap hdl hsl ret hret s0 setup hpre⟩
+          s'.mem.readLE (dst.toNat + 8 * j) 8 = (s.setRet ret).mem.readLE (src.toNat + 8 * j) 8) :=
+  ⟨ret, s0, dst, dlen, dcap, src, slen, scap, hret, setup, hdl, hsl, hpre, (correctness dst dlen dcap src slen scap hdl hsl) s0 setup hpre ret hret⟩
 
 end Witness
 

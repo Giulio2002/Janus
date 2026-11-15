@@ -31,6 +31,7 @@ theorem correctness (p v : BitVec 64) :
         Disjoint p 8 (s.regs regSP) 8)
       (fun s s' => s'.regs 0 = BitVec.ofNat 64 (s.mem.readLE p.toNat 8) ∧
         s'.mem.readLE p.toNat 8 = max (s.mem.readLE p.toNat 8) v.toNat) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨⟨-, hnw, hacc⟩, ⟨hpw, hp⟩, hal, hd⟩ := hpre
@@ -51,22 +52,22 @@ def s0 : State :=
   { regs := fun i => if i = 0 then p else if i = 3 then v else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [p, v] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [p, v] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 theorem hpre : (fun s => StackWritable s 0 8 ∧ Buffer s p 8 true ∧ p.toNat % 8 = 0 ∧
         Disjoint p 8 (s.regs regSP) 8) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (p : BitVec 64) (v : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [p, v] s ∧ (StackWritable s 0 8 ∧ Buffer s p 8 true ∧ p.toNat % 8 = 0 ∧
+    CallSetup0 Extracted.entry [p, v] s ∧ (StackWritable s 0 8 ∧ Buffer s p 8 true ∧ p.toNat % 8 = 0 ∧
         Disjoint p 8 (s.regs regSP) 8) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ s'.regs 0 = BitVec.ofNat 64 (s.mem.readLE p.toNat 8) ∧
-        s'.mem.readLE p.toNat 8 = max (s.mem.readLE p.toNat 8) v.toNat) :=
-  ⟨ret, s0, p, v, hret, setup, hpre, correctness p v ret hret s0 setup hpre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ s'.regs 0 = BitVec.ofNat 64 ((s.setRet ret).mem.readLE p.toNat 8) ∧
+        s'.mem.readLE p.toNat 8 = max ((s.setRet ret).mem.readLE p.toNat 8) v.toNat) :=
+  ⟨ret, s0, p, v, hret, setup, hpre, (correctness p v) s0 setup hpre ret hret⟩
 
 end Witness
 

@@ -170,6 +170,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
         s'.mem.readLE p.toNat 8 = order (s.mem.readLE p.toNat 8))
       (fun s v s' => 10 < x.toNat ∧ v = ⟨etyp.toNat, edata.toNat⟩ ∧
         s'.mem.readLE p.toNat 8 = order (s.mem.readLE p.toNat 8)) := by
+  janus64_ensures_old [Janus.Contracts.PanicAmd64.PanicCallerOK, Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.regSP, Janus.Contracts.PanicAmd64.gOf]
   intro ret hret s hs ⟨hc, ⟨hpb, hps⟩, hdj, hpo, hne, hroom, hds⟩
   have hc' := hc
   obtain ⟨henv, hg, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -534,7 +535,7 @@ theorem env_w : Env0 T0 wmW := by
   refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
   · omega
   · unfold TableOK
-    exact ⟨by decide, by decide, by decide⟩
+    exact (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩)
 
 theorem hret : RetAddr (Extracted.program.link implW) ret := RetAddr.of_check (by decide)
 
@@ -544,16 +545,16 @@ def s0 : Janus.Amd64.State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmW }
 
-theorem setup : CallSetup ((Extracted.program.link implW).withExit ret) Extracted.entry
+theorem setup : CallSetup0 Extracted.entry
     [BitVec.ofNat 64 pA, 11#64, 1#64, 0#64] s0 := by
-  refine ⟨rfl, by decide, rfl, by decide, fun i h => ?_, rfl⟩
+  refine ⟨rfl, rfl, by decide, fun i h => ?_, rfl⟩
   simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl
 
 theorem pre : PanicCallerOK PW s0 120 40 ∧ Buffer s0 (BitVec.ofNat 64 pA) 8 true ∧
     Spec.Disjoint (BitVec.ofNat 64 pA).toNat 8 ((s0.regs regSP).toNat - (PW.depth + 120)) (PW.depth + 120 + 40) ∧
     Outside (BitVec.ofNat 64 pA).toNat 8 PW.priv ∧ (1#64 : BitVec 64).toNat ≠ 0 ∧
     0 < PW.room s0.mem (gOf s0) ∧ ∀ d ∈ PW.defers s0.mem (gOf s0), (s0.regs regSP).toNat ≤ d.sp := by
-  refine ⟨⟨env_w, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, ?_, ?_, ?_⟩,
+  refine ⟨⟨env_w, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide, by decide, ?_, ?_, ?_⟩,
     ⟨by decide, by decide⟩, ?_, ?_, by decide, ?_, ?_⟩
   · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
   · unfold Spec.Disjoint; decide
@@ -587,7 +588,7 @@ theorem env_G : Env0 T0 wmG := by
   refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
   · omega
   · unfold TableOK
-    exact ⟨by decide, by decide, by decide⟩
+    exact (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩)
 
 theorem wsG_find : Spec.FuncInfo.find T0 (wsG.mem.readLE (wsG.regs 4).toNat 8) = some fi := by decide
 
@@ -596,7 +597,7 @@ theorem defers_G : defers0 wmG = [] := by
   rw [defers0_eq, hnd]; rfl
 
 theorem wsG_pre : GopanicPre PW fi wsG := by
-  refine ⟨⟨env_G, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, rfl, rfl, by decide, ?_⟩,
+  refine ⟨⟨env_G, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide, by decide, rfl, rfl, by decide, ?_⟩,
     by decide, ?_, ?_, ?_⟩
   · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
   · show 0 < room0 wmG
@@ -637,14 +638,14 @@ theorem wsG_pre : GopanicPre PW fi wsG := by
 
 /-- So the guarantee is reached: with `x = 11` `DeferOrder` panics with `e`, after the three deferred
 calls ran in LIFO order. -/
-theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U1 s0) s0 fun o =>
+theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U1 (s0.setRet ret)) (s0.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s0 s' ∧ ((11#64 : BitVec 64).toNat ≤ 10 ∧ (s'.regs 0).toNat = (11#64 : BitVec 64).toNat ∧
-        s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 = order (s0.mem.readLE (BitVec.ofNat 64 pA).toNat 8))
+    | .returned s' => ABIReturn (s0.setRet ret) s' ∧ ((11#64 : BitVec 64).toNat ≤ 10 ∧ (s'.regs 0).toNat = (11#64 : BitVec 64).toNat ∧
+        s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 = order ((s0.setRet ret).mem.readLE (BitVec.ofNat 64 pA).toNat 8))
     | .panicked v s' => 10 < (11#64 : BitVec 64).toNat ∧ v = ⟨(1#64 : BitVec 64).toNat, (0#64 : BitVec 64).toNat⟩ ∧
-        s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 = order (s0.mem.readLE (BitVec.ofNat 64 pA).toNat 8)
+        s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 = order ((s0.setRet ret).mem.readLE (BitVec.ofNat 64 pA).toNat 8)
     | .goexited _ => False :=
-  correctness implW PW (P0_laws T0 RPa) U1 hpan (BitVec.ofNat 64 pA) 11#64 1#64 0#64 ret hret s0 setup pre
+  (correctness implW PW (P0_laws T0 RPa) U1 hpan (BitVec.ofNat 64 pA) 11#64 1#64 0#64) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime)
@@ -652,7 +653,7 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntim
     GopanicContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.gopanic") P U Extracted.funcs ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry
+    CallSetup0 Extracted.entry
       [BitVec.ofNat 64 pA, 11#64, 1#64, 0#64] s ∧
     (PanicCallerOK P s 120 40 ∧ Buffer s (BitVec.ofNat 64 pA) 8 true ∧
       Spec.Disjoint (BitVec.ofNat 64 pA).toNat 8 ((s.regs regSP).toNat - (P.depth + 120)) (P.depth + 120 + 40) ∧
@@ -660,12 +661,12 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntim
       0 < P.room s.mem (gOf s) ∧ ∀ d ∈ P.defers s.mem (gOf s), (s.regs regSP).toNat ≤ d.sp) ∧
     (∃ (s_c : Janus.Amd64.State) (fi : Spec.FuncInfo), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic") ∧
       Spec.FuncInfo.find Extracted.funcs (s_c.mem.readLE (s_c.regs 4).toNat 8) = some fi ∧ GopanicPre P fi s_c) ∧
-    GoReturns ((Extracted.program.link impl).withExit ret) (goClassU P U s) s fun o =>
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClassU P U (s.setRet ret)) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧ ((11#64 : BitVec 64).toNat ≤ 10 ∧ (s'.regs 0).toNat = (11#64 : BitVec 64).toNat ∧
-        s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 = order (s.mem.readLE (BitVec.ofNat 64 pA).toNat 8))
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧ ((11#64 : BitVec 64).toNat ≤ 10 ∧ (s'.regs 0).toNat = (11#64 : BitVec 64).toNat ∧
+        s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 = order ((s.setRet ret).mem.readLE (BitVec.ofNat 64 pA).toNat 8))
     | .panicked v s' => 10 < (11#64 : BitVec 64).toNat ∧ v = ⟨(1#64 : BitVec 64).toNat, (0#64 : BitVec 64).toNat⟩ ∧
-        s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 = order (s.mem.readLE (BitVec.ofNat 64 pA).toNat 8)
+        s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 = order ((s.setRet ret).mem.readLE (BitVec.ofNat 64 pA).toNat 8)
     | .goexited _ => False :=
   ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hpan, hret, setup, pre, ⟨wsG, fi, rfl, wsG_find, wsG_pre⟩, returns⟩
 

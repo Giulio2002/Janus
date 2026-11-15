@@ -30,6 +30,7 @@ theorem correctness (impl : List Segment) (d : Nat)
     Ensures (Extracted.program.link impl) Extracted.entry [p1, l1, p2, l2] (pre d p1 l1 p2 l2)
       (fun s s' => (s'.regs 0).toNat % 256 =
         (l1 == l2 && s.mem.readLE p1.toNat l1.toNat == s.mem.readLE p2.toNat l2.toNat).toNat) := by
+  janus64_ensures_old [Proof.pre, Janus.Contracts.MemAmd64.CallerOK, Janus.Amd64.GoABI.Buffer, Janus.Contracts.MemAmd64.callerWindow]
   intro ret hret s hs ⟨hc, ⟨hP1', hP1⟩, ⟨hP2', hP2⟩, ho1, ho2⟩
   janus64_intro hs
   have hc' := hc
@@ -104,7 +105,7 @@ theorem model (d : Nat) : MemAmd64.Memequal (Extracted.program.link implAt) cAdd
   subst hpc
   janus64_run until [A0]
   obtain ⟨⟨⟨g1, g2, g3⟩, hcall, hgo⟩, i1, i2⟩ := hpre
-  exact hA _ rfl ⟨⟨⟨g1, g2, g3⟩, hcall, hgo⟩, i1, i2⟩
+  exact hA _ rfl ⟨⟨⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hcall, hgo⟩, i1, i2⟩
 
 def ret : Nat := wret
 
@@ -119,20 +120,20 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [p, l, p, l] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [p, l, p, l] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl, rfl⟩
 
 theorem hpre : pre 64 p l p l s0 := by
-  refine ⟨⟨⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, ?_⟩,
+  refine ⟨⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide, by decide, ?_⟩,
     ⟨by decide, by decide⟩, ⟨by decide, by decide⟩, ?_, ?_⟩ <;>
     simp only [MemAmd64.callerWindow, outside_cons, outside_nil, and_true] <;> decide
 
 theorem eqpre_rip {d n : Nat} {s : Janus.Amd64.State} (x : BitVec 64) (h : MemAmd64.EqPre d n s) :
     MemAmd64.EqPre d n { s with rip := x } := by
   obtain ⟨⟨g1, g2, g3⟩, hc, ho⟩ := h
-  exact ⟨⟨g1, g2, g3⟩, hc, ho⟩
+  exact ⟨⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hc, ho⟩
 
 def wsCall : Janus.Amd64.State :=
   { Janus.Contracts.MemSatAmd64.wstate (Janus.Contracts.MemSatAmd64.args IfaceModel.VAL IfaceModel.VAL 8 0) with rip := BitVec.ofNat 64 cAddr }
@@ -146,9 +147,9 @@ theorem wsCall_pre : meSite 64 wsCall :=
     (by simp only [MemAmd64.Input, Janus.Contracts.MapAmd64.calleeStack, Janus.outside_cons, Janus.outside_nil, wsCall]; decide)⟩
 
 /-- So the guarantee is reached: a string equals itself. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat % 256 = 1 := by
-  refine (correctness implAt 64 (model 64) p l p l ret hret s0 setup hpre).mono ?_
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat % 256 = 1 := by
+  refine ((correctness implAt 64 (model 64) p l p l) s0 setup hpre ret hret).mono ?_
   intro s' h
   exact ⟨h.1, by rw [h.2]; simp⟩
 
@@ -156,14 +157,14 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (d ret : Nat) (s : State) (p1 l1 p2 l2 : BitVec 64),
     MemAmd64.Memequal (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memequal") d ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p1, l1, p2, l2] s ∧
+    CallSetup0 Extracted.entry [p1, l1, p2, l2] s ∧
     pre d p1 l1 p2 l2 s ∧
     (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memequal") ∧
       meSite d s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
       ((s'.regs 0).toNat % 256 =
-        (l1 == l2 && s.mem.readLE p1.toNat l1.toNat == s.mem.readLE p2.toNat l2.toNat).toNat) :=
-  ⟨implAt, 64, ret, s0, p, l, p, l, model 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt 64 (model 64) p l p l ret hret s0 setup hpre⟩
+        (l1 == l2 && (s.setRet ret).mem.readLE p1.toNat l1.toNat == (s.setRet ret).mem.readLE p2.toNat l2.toNat).toNat) :=
+  ⟨implAt, 64, ret, s0, p, l, p, l, model 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt 64 (model 64) p l p l) s0 setup hpre ret hret⟩
 
 end Witness
 

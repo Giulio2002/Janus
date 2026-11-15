@@ -58,6 +58,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : Rt
           ZeroBytes s'.mem ((s'.regs 0).toNat + 24 * (len.toNat + 1))
             (growCap 24 true (len.toNat + 1) cap.toNat * 24 - 24 * (len.toNat + 1)) ∧
           MemFrame s.mem s'.mem (rt ++ [((s.regs 4).toNat - 4200, (s.regs 4).toNat + 56)]))) := by
+  janus64_ensures_old [Proof.Pre, Janus.Amd64.GoABI.StackWritable, Proof.ptType, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hsg, ⟨hb, ha, hw⟩, hd, hout, hal, hlc, hc, hpb, hdj, hdt, hwr, hrd, hHf⟩
   janus64_intro hs
   janus_eval_nat h_ut : ptType
@@ -162,8 +163,8 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mem0 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [0, 0, 0, 0, 0, 0] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [0, 0, 0, 0, 0, 0] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h; rcases i with _ | _ | _ | _ | _ | _ | i <;> simp [s0, argReg, intArgRegs] at h ⊢ <;> omega, rfl⟩
 
 set_option maxRecDepth 100000 in
@@ -172,7 +173,7 @@ theorem dataLoaded : Extracted.program.DataLoaded mem0 := by
   decide
 
 theorem pre : Pre rtA HA 0 0 0 s0 := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, ?_⟩, dataLoaded,
+  refine ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ⟨by decide, by decide, ?_⟩, dataLoaded,
     by simp only [rtA, rtW, List.cons_append, List.nil_append, outside_cons, outside_nil]; decide, by decide,
     by decide, by decide, by decide, by unfold Spec.Disjoint; decide, by unfold Spec.Disjoint; decide,
     fun h => absurd h (by decide), fun h => absurd h (by decide), fun _ => ?_⟩
@@ -211,38 +212,38 @@ theorem wsCall_pre : rpSite rtA HA wsCall := by
   · exact ready_intro rfl ⟨ha, by decide, by decide, by decide⟩
 
 /-- The witness call returns: the result has length 1. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 3).toNat = 1 :=
-  (correctness implAt rtA HA 0 0 0 0 0 0 model ret hret s0 setup pre).mono fun _ h => ⟨h.1, by simpa using h.2.1⟩
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 3).toNat = 1 :=
+  ((correctness implAt rtA HA 0 0 0 0 0 0 model) s0 setup pre ret hret).mono fun _ h => ⟨h.1, by simpa using h.2.1⟩
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
     RtContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.growslice")
       rt 4096 H growsliceSpec ∧ RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0, 0, 0] s ∧
+    CallSetup0 Extracted.entry [0, 0, 0, 0, 0, 0] s ∧
     Pre rt H 0 0 0 s ∧
     (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.growslice") ∧
       rpSite rt H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
       ((s'.regs 3).toNat = (0 : BitVec 64).toNat + 1 ∧
         ((0 : BitVec 64).toNat < (0 : BitVec 64).toNat → s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64) ∧
           s'.mem.readLE ((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat) 8 = (0 : BitVec 64).toNat ∧
           s'.mem.readLE ((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat + 8) 8 = (0 : BitVec 64).toNat ∧
           s'.mem.readLE ((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat + 16) 8 = (0 : BitVec 64).toNat ∧
-          MemFrame s.mem s'.mem [((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat, (0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat + 24),
-            ((s.regs 4).toNat - 4200, (s.regs 4).toNat + 56)]) ∧
+          MemFrame (s.setRet ret).mem s'.mem [((0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat, (0 : BitVec 64).toNat + 24 * (0 : BitVec 64).toNat + 24),
+            (((s.setRet ret).regs 4).toNat - 4200, ((s.setRet ret).regs 4).toNat + 56)]) ∧
         ((0 : BitVec 64).toNat ≤ (0 : BitVec 64).toNat →
           (s'.regs 1).toNat = growCap 24 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat ∧
           InRanges (s'.regs 0).toNat (growCap 24 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat * 24) rt ∧
           s'.mem.accessible (s'.regs 0).toNat (growCap 24 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat * 24) true = true ∧
-          (∀ i, i < 24 * (0 : BitVec 64).toNat → s'.mem.bytes ((s'.regs 0).toNat + i) = s.mem.bytes ((0 : BitVec 64).toNat + i)) ∧
+          (∀ i, i < 24 * (0 : BitVec 64).toNat → s'.mem.bytes ((s'.regs 0).toNat + i) = (s.setRet ret).mem.bytes ((0 : BitVec 64).toNat + i)) ∧
           s'.mem.readLE ((s'.regs 0).toNat + 24 * (0 : BitVec 64).toNat) 8 = (0 : BitVec 64).toNat ∧
           s'.mem.readLE ((s'.regs 0).toNat + 24 * (0 : BitVec 64).toNat + 8) 8 = (0 : BitVec 64).toNat ∧
           s'.mem.readLE ((s'.regs 0).toNat + 24 * (0 : BitVec 64).toNat + 16) 8 = (0 : BitVec 64).toNat ∧
           ZeroBytes s'.mem ((s'.regs 0).toNat + 24 * ((0 : BitVec 64).toNat + 1))
             (growCap 24 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat * 24 - 24 * ((0 : BitVec 64).toNat + 1)) ∧
-          MemFrame s.mem s'.mem (rt ++ [((s.regs 4).toNat - 4200, (s.regs 4).toNat + 56)]))) :=
-  ⟨implAt, rtA, HA, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt rtA HA 0 0 0 0 0 0 model ret hret s0 setup pre⟩
+          MemFrame (s.setRet ret).mem s'.mem (rt ++ [(((s.setRet ret).regs 4).toNat - 4200, ((s.setRet ret).regs 4).toNat + 56)]))) :=
+  ⟨implAt, rtA, HA, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt rtA HA 0 0 0 0 0 0 model) s0 setup pre ret hret⟩
 
 end Witness
 

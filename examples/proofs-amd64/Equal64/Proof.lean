@@ -67,6 +67,7 @@ theorem correctness (a b : BitVec 64) :
         s.mem.accessible hasAVX2 1 false = true ∧
         (hasAVX2 + 1 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ hasAVX2))
       (fun s s' => (s'.regs 0).setWidth 8 = if valueAt s a 64 = valueAt s b 64 then 1 else 0) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.regSP, Proof.hasAVX2]
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨hg, ⟨hle, hnw, hacc⟩, ⟨ha48, ha⟩, ⟨hb48, hb⟩, hda, hdb, hav, hdav⟩ := hpre
@@ -143,8 +144,8 @@ def s0 : State :=
   { regs := fun r_ => if r_ = 0 then a else if r_ = 3 then b else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := ⟨fun a => wmem64.bytes a, wmem64.regions ++ [⟨hasAVX2, 1, false⟩]⟩ }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [a, b] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [a, b] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 set_option maxRecDepth 100000 in
 theorem hpre : (fun s => StackGuardOK s 0 ∧ StackWritable s 40 8 ∧ Buffer s a 64 false ∧
         Buffer s b 64 false ∧
@@ -154,19 +155,19 @@ theorem hpre : (fun s => StackGuardOK s 0 ∧ StackWritable s 40 8 ∧ Buffer s 
         (hasAVX2 + 1 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ hasAVX2)) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (a : BitVec 64) (b : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [a, b] s ∧ (StackGuardOK s 0 ∧ StackWritable s 40 8 ∧ Buffer s a 64 false ∧
+    CallSetup0 Extracted.entry [a, b] s ∧ (StackGuardOK s 0 ∧ StackWritable s 40 8 ∧ Buffer s a 64 false ∧
         Buffer s b 64 false ∧
         (a.toNat + 64 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ a.toNat) ∧
         (b.toNat + 64 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ b.toNat) ∧
         s.mem.accessible hasAVX2 1 false = true ∧
         (hasAVX2 + 1 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ hasAVX2)) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ (s'.regs 0).setWidth 8 = if valueAt s a 64 = valueAt s b 64 then 1 else 0) :=
-  ⟨ret, s0, a, b, hret, setup, hpre, correctness a b ret hret s0 setup hpre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ (s'.regs 0).setWidth 8 = if valueAt (s.setRet ret) a 64 = valueAt (s.setRet ret) b 64 then 1 else 0) :=
+  ⟨ret, s0, a, b, hret, setup, hpre, (correctness a b) s0 setup hpre ret hret⟩
 
 end Witness
 

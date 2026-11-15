@@ -31,9 +31,10 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
     Ensures (Extracted.program.link impl) Extracted.entry [n] (pre M H n)
       (fun s s' => (s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧
         (∀ mp f, M.Rep s.mem mp f → mp ≠ (s'.regs 0).toNat) ∧ M.Env s'.mem (s.regs 14)) := by
+  janus64_ensures_old [Proof.pre, Janus.Contracts.MapAmd64.CallerOK, Proof.mapType]
   intro ret hret s hs ⟨hc, hty, hH⟩
   have hc' := hc
-  obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
+  obtain ⟨henv, ⟨hg1, hg2, hg3, hg4⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
   janus_eval_nat hT : mapType
   rw [hT] at hty hH
@@ -93,7 +94,7 @@ theorem model : MakeMap (Extracted.program.link implAt) cAddr (MC ck64) HMake :=
   subst hpc
   janus64_run until [A0]
   obtain ⟨⟨he, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
-  exact hA _ rfl ⟨⟨he, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+  exact hA _ rfl ⟨⟨he, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hrest⟩, hrest'⟩
 
 def ret : Nat := wret
 
@@ -108,13 +109,13 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mmem64Dead }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [n] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [n] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h
     rcases (by omega : i = 0) with rfl; rfl, rfl⟩
 
 theorem pre0 : pre (MC ck64) HMake n s0 := by
-  refine ⟨⟨show ZEnv mmem64Dead from mmem64_zenv.writeLE _ (by decide), ⟨by decide, by decide, by decide⟩,
+  refine ⟨⟨show ZEnv mmem64Dead from mmem64_zenv.writeLE _ (by decide), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩),
     by decide, by decide, by decide, by decide, ?_, ?_, ?_⟩, trivial, hMake_dead64 _ _ _⟩
   · simp only [MC_priv, MC_depth, priv0, outside_cons, outside_nil, and_true]; decide
   · unfold Janus.Spec.Disjoint; decide
@@ -123,7 +124,7 @@ theorem pre0 : pre (MC ck64) HMake n s0 := by
 theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
     RTPre M n { s with rip := a } := by
   obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
-  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+  exact ⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
 
 /-- The precondition of `MakeMap`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
 @[reducible] def MakeMapSite (M : MapModel (BitVec 64) (BitVec 64)) (H : Contracts.RtReady) (s_c : Janus.Amd64.State) : Prop :=
@@ -138,9 +139,9 @@ theorem wsCall_pre : MakeMapSite (MC ck64) HMake wsCall :=
     trivial, by decide, hMake_dead64 _ _ _⟩
 
 /-- So the guarantee is reached: a new, empty map. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty :=
-  correctness implAt (MC _) (MC_laws _) HMake model n ret hret s0 setup pre0
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat ≠ 0 ∧ (MC ck64).Rep s'.mem (s'.regs 0).toNat AMap.empty :=
+  (correctness implAt (MC _) (MC_laws _) HMake model n) s0 setup pre0 ret hret
     |>.mono fun _ h => ⟨h.1, h.2.1, h.2.2.1⟩
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
@@ -148,11 +149,11 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec
     (H : Contracts.RtReady) (ret : Nat) (s : State) (n : BitVec 64),
     M.Laws ∧ MakeMap (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.makemap") M H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [n] s ∧ pre M H n s ∧
+    CallSetup0 Extracted.entry [n] s ∧ pre M H n s ∧
     (∃ (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.makemap") ∧ MakeMapSite M H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧
-        (∀ mp f, M.Rep s.mem mp f → mp ≠ (s'.regs 0).toNat) ∧ M.Env s'.mem (s.regs 14)) :=
-  ⟨implAt, MC _, HMake, ret, s0, n, MC_laws _, model, hret, setup, pre0, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt (MC _) (MC_laws _) HMake model n ret hret s0 setup pre0⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧
+        (∀ mp f, M.Rep (s.setRet ret).mem mp f → mp ≠ (s'.regs 0).toNat) ∧ M.Env s'.mem ((s.setRet ret).regs 14)) :=
+  ⟨implAt, MC _, HMake, ret, s0, n, MC_laws _, model, hret, setup, pre0, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt (MC _) (MC_laws _) HMake model n) s0 setup pre0 ret hret⟩
 
 end Witness
 

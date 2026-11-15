@@ -33,9 +33,10 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 32) 
     (m k : BitVec 64) (f : AMap (BitVec 32) (BitVec (8 * 1))) :
     Ensures (Extracted.program.link impl) Extracted.entry [m, k] (pre M H m k f)
       (fun s s' => M.Rep s'.mem m.toNat (f.set (k.setWidth 32) 1#8) ∧ M.Env s'.mem (s.regs 14)) := by
+  janus64_ensures_old [Proof.pre, Proof.Witness.k, Janus.Contracts.MapAmd64.CallerOK, Proof.mapType]
   intro ret hret s hs ⟨hc, hty, hm0, hmap, hH⟩
   have hc' := hc
-  obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
+  obtain ⟨henv, ⟨hg1, hg2, hg3, hg4⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
   janus_eval_nat hT : mapType
   rw [hT] at hty hH
@@ -229,7 +230,7 @@ theorem model : AssignF32 (Extracted.program.link implAt) cAddr 1 (MCW ck32) HAs
   subst hpc
   janus64_run until [A0]
   obtain ⟨⟨he, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
-  exact hA f _ rfl ⟨⟨he, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+  exact hA f _ rfl ⟨⟨he, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hrest⟩, hrest'⟩
 
 def ret : Nat := wret
 
@@ -245,13 +246,13 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mmem64 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [mv, kv] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [mv, kv] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 
 theorem pre0 : pre (MCW ck32) HAssign mv kv AMap.empty s0 := by
-  refine ⟨⟨mmem64_zenv, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide,
+  refine ⟨⟨mmem64_zenv, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide,
     by decide, ?_, ?_, ?_⟩, trivial, by decide,
     ⟨rfl, by decide, by decide, Or.inl ⟨by decide, rfl⟩⟩, ?_⟩
   · simp only [MCW, privW, priv0, List.append_nil, outside_cons, outside_nil, and_true]; decide
@@ -263,7 +264,7 @@ theorem pre0 : pre (MCW ck32) HAssign mv kv AMap.empty s0 := by
 theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
     RTPre M n { s with rip := a } := by
   obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
-  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+  exact ⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
 
 /-- The precondition of `AssignF32`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
 @[reducible] def AssignF32Site (M : MapModel (BitVec 32) (BitVec (8 * 1))) (H : Contracts.RtReady) (f : AMap (BitVec 32) (BitVec (8 * 1))) (s_c : Janus.Amd64.State) : Prop :=
@@ -279,9 +280,9 @@ theorem wsCall_pre : AssignF32Site (MCW ck32) HAssign AMap.empty wsCall :=
        rw [readLE_rtView (inPrivW (by decide) (by decide))]; decide⟩
 
 /-- So the guarantee is reached: the map now holds `7 ↦ true`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (MCW ck32).Rep s'.mem MP (AMap.empty.set 7#32 1#8) :=
-  correctness implAt (MCW _) (MCW_laws _) HAssign model mv kv AMap.empty ret hret s0 setup pre0
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (MCW ck32).Rep s'.mem MP (AMap.empty.set 7#32 1#8) :=
+  (correctness implAt (MCW _) (MCW_laws _) HAssign model mv kv AMap.empty) s0 setup pre0 ret hret
     |>.mono fun _ h => ⟨h.1, h.2.1⟩
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
@@ -290,12 +291,12 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec
     M.Laws ∧ AssignF32 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.mapassign_fast32") 1 M H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, k] s ∧
+    CallSetup0 Extracted.entry [m, k] s ∧
     m.toNat ≠ 0 ∧ pre M H m k f s ∧
     (∃ (f : AMap (BitVec 32) (BitVec (8 * 1))) (s_c : Janus.Amd64.State),
       s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapassign_fast32") ∧ AssignF32Site M H f s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (M.Rep s'.mem m.toNat (f.set (k.setWidth 32) 1#8) ∧ M.Env s'.mem (s.regs 14)) :=
-  ⟨implAt, MCW _, HAssign, ret, s0, mv, kv, AMap.empty, MCW_laws _, model, hret, setup, by decide, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, correctness implAt (MCW _) (MCW_laws _) HAssign model mv kv AMap.empty ret hret s0 setup pre0⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ (M.Rep s'.mem m.toNat (f.set (k.setWidth 32) 1#8) ∧ M.Env s'.mem ((s.setRet ret).regs 14)) :=
+  ⟨implAt, MCW _, HAssign, ret, s0, mv, kv, AMap.empty, MCW_laws _, model, hret, setup, by decide, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, (correctness implAt (MCW _) (MCW_laws _) HAssign model mv kv AMap.empty) s0 setup pre0 ret hret⟩
 
 end Witness
 

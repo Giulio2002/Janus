@@ -461,6 +461,7 @@ theorem correctness_of_contract (rt : List (Nat × Nat)) (H : RtReady) (p n : Bi
     (hc : RtContract64 Extracted.program crAddr rt 4144 H countrunesSpec) :
     Ensures Extracted.program Extracted.entry [p, n] (Pre p n)
       (fun s s' => (s'.regs 0).toNat = countRunes (strBytes s.mem p.toNat n.toNat)) := by
+  janus64_ensures_old [Proof.Pre, Janus.Amd64.GoABI.StackWritable, Janus.Contracts.StrIn, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hsg, ⟨hb, ha, hw⟩, hal, hgs, ⟨hp1, hp2⟩, hps⟩
   janus64_intro hs
   have hgl := hsg.load
@@ -495,26 +496,26 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mem0 }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [0, 0] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [0, 0] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h; rcases i with _ | _ | i <;> simp [s0, argReg, intArgRegs] at h ⊢ <;> omega, rfl⟩
 
 theorem pre : Pre 0 0 s0 := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, ?_⟩, by decide, by decide,
+  refine ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ⟨by decide, by decide, ?_⟩, by decide, by decide,
     ⟨by decide, by simp⟩, by decide⟩
   have hw : mem0.accessible (wsp - 0x2000) 0x2100 true = true := by decide
   exact Arm64.Memory.accessible_mono _ hw (by decide) (by decide)
 
 /-- The witness call returns, with the conclusion of `correctness`. -/
-theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = countRunes (strBytes s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
-  correctness 0 0 ret hret s0 setup pre
+theorem returns : Returns (Extracted.program.withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = countRunes (strBytes (s0.setRet ret).mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
+  (correctness 0 0) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0, 0] s ∧ Pre 0 0 s ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ (s'.regs 0).toNat = countRunes (strBytes s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat)) :=
+    CallSetup0 Extracted.entry [0, 0] s ∧ Pre 0 0 s ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ (s'.regs 0).toNat = countRunes (strBytes (s.setRet ret).mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat)) :=
   ⟨ret, s0, hret, setup, pre, returns⟩
 
 end Witness

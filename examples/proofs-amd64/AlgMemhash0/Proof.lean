@@ -50,7 +50,7 @@ def s0 : State :=
 
 /-- The precondition holds at `s0` (model `H0`, stack bound 64). -/
 theorem pre : HPre H0 64 2 s0 := by
-  refine ⟨wmem64_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_⟩ <;>
+  refine ⟨wmem64_henv _, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_, ?_⟩ <;>
     simp only [CallOK, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack, outside_cons,
       outside_nil] <;> decide
 

@@ -187,6 +187,7 @@ def PreC (n : BitVec 64) (s : State) : Prop :=
 
 theorem returnsA (n k j : BitVec 64) :
     Ensures Extracted.program (entryOf .a) [n] (PreA n) (fun _ s' => s'.regs 0 = cA n.toNat) := by
+  janus64_ensures_old [Proof.PreA, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hg, hst, hd⟩
   simp only [entryOf] at hs
   janus64_intro hs
@@ -201,6 +202,7 @@ theorem returnsA (n k j : BitVec 64) :
 
 theorem returnsB (n k j : BitVec 64) :
     Ensures Extracted.program (entryOf .b) [n] (PreB n) (fun _ s' => s'.regs 0 = cB n (cA (n.toNat - 1))) := by
+  janus64_ensures_old [Proof.PreB, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hnz, hg, hst, hd⟩
   simp only [entryOf] at hs
   janus64_intro hs
@@ -215,6 +217,7 @@ theorem returnsB (n k j : BitVec 64) :
 
 theorem returnsC (n k j : BitVec 64) :
     Ensures Extracted.program (entryOf .c) [n, k, j] (PreC n) (fun _ s' => s'.regs 0 = cC n k j (cA (n.toNat - 1))) := by
+  janus64_ensures_old [Proof.PreC, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hnz, hg, hst, hd⟩
   simp only [entryOf] at hs
   janus64_intro hs
@@ -253,67 +256,67 @@ def s0 (pc : Nat) : State :=
     rip := BitVec.ofNat 64 pc, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup1 (pc : Nat) : CallSetup (Extracted.program.withExit ret) pc [2#64] (s0 pc) :=
-  ⟨rfl, wmem64_ret, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup1 (pc : Nat) : CallSetup0 pc [2#64] (s0 pc) :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
-theorem setup3 (pc : Nat) : CallSetup (Extracted.program.withExit ret) pc [2#64, 5#64, 7#64] (s0 pc) :=
-  ⟨rfl, wmem64_ret, rfl, by decide, by
+theorem setup3 (pc : Nat) : CallSetup0 pc [2#64, 5#64, 7#64] (s0 pc) :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
 
 theorem hpreA (pc : Nat) : PreA 2#64 (s0 pc) := by
   unfold PreA s0
-  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, ?_⟩ <;>
+  refine ⟨⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, ?_⟩ <;>
     simp only [regSP, regG, stackguard0, stackguard0Offset] <;> decide
 
 theorem hpreB (pc : Nat) : PreB 2#64 (s0 pc) := by
   unfold PreB s0
-  refine ⟨by decide, ⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, ?_⟩ <;>
+  refine ⟨by decide, ⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, ?_⟩ <;>
     simp only [regSP, regG, stackguard0, stackguard0Offset] <;> decide
 
 theorem hpreC (pc : Nat) : PreC 2#64 (s0 pc) := by
   unfold PreC s0
-  refine ⟨by decide, ⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, ?_⟩ <;>
+  refine ⟨by decide, ⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, ?_⟩ <;>
     simp only [regSP, regG, stackguard0, stackguard0Offset] <;> decide
 
 /-- So the guarantee is reached: `CycA(2) = 16260`, `CycB(2) = 16259`, `CycC(2, 5, 7) = 8462`. -/
 theorem returns :
-    Returns (Extracted.program.withExit ret) (s0 Extracted.entry) (fun s' =>
-      ABIReturn (s0 Extracted.entry) s' ∧ s'.regs 0 = 16260#64) ∧
-    Returns (Extracted.program.withExit ret) (s0 (segAddr Extracted.program "example.com/basic.CycB"))
-      (fun s' => ABIReturn (s0 (segAddr Extracted.program "example.com/basic.CycB")) s' ∧
+    Returns (Extracted.program.withExit ret) ((s0 Extracted.entry).setRet ret) (fun s' =>
+      ABIReturn ((s0 Extracted.entry).setRet ret) s' ∧ s'.regs 0 = 16260#64) ∧
+    Returns (Extracted.program.withExit ret) ((s0 (segAddr Extracted.program "example.com/basic.CycB")).setRet ret)
+      (fun s' => ABIReturn ((s0 (segAddr Extracted.program "example.com/basic.CycB")).setRet ret) s' ∧
         s'.regs 0 = 16259#64) ∧
-    Returns (Extracted.program.withExit ret) (s0 (segAddr Extracted.program "example.com/basic.CycC"))
-      (fun s' => ABIReturn (s0 (segAddr Extracted.program "example.com/basic.CycC")) s' ∧
+    Returns (Extracted.program.withExit ret) ((s0 (segAddr Extracted.program "example.com/basic.CycC")).setRet ret)
+      (fun s' => ABIReturn ((s0 (segAddr Extracted.program "example.com/basic.CycC")).setRet ret) s' ∧
         s'.regs 0 = 8462#64) := by
   obtain ⟨ha, hb, hc⟩ := correctness 2#64 5#64 7#64
-  refine ⟨(ha ret hret _ (setup1 _) (hpreA _)).mono ?_, (hb ret hret _ (setup1 _) (hpreB _)).mono ?_,
-    (hc ret hret _ (setup3 _) (hpreC _)).mono ?_⟩
+  refine ⟨(ha _ (setup1 _) (hpreA _) ret hret).mono ?_, (hb _ (setup1 _) (hpreB _) ret hret).mono ?_,
+    (hc _ (setup3 _) (hpreC _) ret hret).mono ?_⟩
   all_goals intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
 
 /-- The three runs, with the posts exactly as `correctness` states them at `n = 2, k = 5, j = 7`. -/
 theorem returnsGen :
-    Returns (Extracted.program.withExit ret) (s0 Extracted.entry) (fun s' =>
-      ABIReturn (s0 Extracted.entry) s' ∧ s'.regs 0 = cA (2#64).toNat) ∧
-    Returns (Extracted.program.withExit ret) (s0 (segAddr Extracted.program "example.com/basic.CycB"))
-      (fun s' => ABIReturn (s0 (segAddr Extracted.program "example.com/basic.CycB")) s' ∧
+    Returns (Extracted.program.withExit ret) ((s0 Extracted.entry).setRet ret) (fun s' =>
+      ABIReturn ((s0 Extracted.entry).setRet ret) s' ∧ s'.regs 0 = cA (2#64).toNat) ∧
+    Returns (Extracted.program.withExit ret) ((s0 (segAddr Extracted.program "example.com/basic.CycB")).setRet ret)
+      (fun s' => ABIReturn ((s0 (segAddr Extracted.program "example.com/basic.CycB")).setRet ret) s' ∧
         s'.regs 0 = cB 2#64 (cA ((2#64).toNat - 1))) ∧
-    Returns (Extracted.program.withExit ret) (s0 (segAddr Extracted.program "example.com/basic.CycC"))
-      (fun s' => ABIReturn (s0 (segAddr Extracted.program "example.com/basic.CycC")) s' ∧
+    Returns (Extracted.program.withExit ret) ((s0 (segAddr Extracted.program "example.com/basic.CycC")).setRet ret)
+      (fun s' => ABIReturn ((s0 (segAddr Extracted.program "example.com/basic.CycC")).setRet ret) s' ∧
         s'.regs 0 = cC 2#64 5#64 7#64 (cA ((2#64).toNat - 1))) := by
   obtain ⟨ha, hb, hc⟩ := correctness 2#64 5#64 7#64
-  exact ⟨ha ret hret _ (setup1 _) (hpreA _), hb ret hret _ (setup1 _) (hpreB _),
-    hc ret hret _ (setup3 _) (hpreC _)⟩
+  exact ⟨ha _ (setup1 _) (hpreA _) ret hret, hb _ (setup1 _) (hpreB _) ret hret,
+    hc _ (setup3 _) (hpreC _) ret hret⟩
 
 /-- All hypotheses of `correctness` hold together, for the three members, and the three runs return. -/
 theorem nonvacuous : ∃ (ret : Nat) (sa sb sc : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [2#64] sa ∧ PreA 2#64 sa ∧
-    CallSetup (Extracted.program.withExit ret) (segAddr Extracted.program "example.com/basic.CycB")
+    CallSetup0 Extracted.entry [2#64] sa ∧ PreA 2#64 sa ∧
+    CallSetup0 (segAddr Extracted.program "example.com/basic.CycB")
       [2#64] sb ∧ PreB 2#64 sb ∧
-    CallSetup (Extracted.program.withExit ret) (segAddr Extracted.program "example.com/basic.CycC")
+    CallSetup0 (segAddr Extracted.program "example.com/basic.CycC")
       [2#64, 5#64, 7#64] sc ∧ PreC 2#64 sc ∧
-    Returns (Extracted.program.withExit ret) sa (fun t => ABIReturn sa t ∧ t.regs 0 = cA (2#64).toNat) ∧
-    Returns (Extracted.program.withExit ret) sb (fun t => ABIReturn sb t ∧ t.regs 0 = cB 2#64 (cA ((2#64).toNat - 1))) ∧
-    Returns (Extracted.program.withExit ret) sc (fun t => ABIReturn sc t ∧ t.regs 0 = cC 2#64 5#64 7#64 (cA ((2#64).toNat - 1))) :=
+    Returns (Extracted.program.withExit ret) (sa.setRet ret) (fun t => ABIReturn (sa.setRet ret) t ∧ t.regs 0 = cA (2#64).toNat) ∧
+    Returns (Extracted.program.withExit ret) (sb.setRet ret) (fun t => ABIReturn (sb.setRet ret) t ∧ t.regs 0 = cB 2#64 (cA ((2#64).toNat - 1))) ∧
+    Returns (Extracted.program.withExit ret) (sc.setRet ret) (fun t => ABIReturn (sc.setRet ret) t ∧ t.regs 0 = cC 2#64 5#64 7#64 (cA ((2#64).toNat - 1))) :=
   ⟨ret, s0 _, s0 _, s0 _, hret, setup1 _, hpreA _, setup1 _, hpreB _, setup3 _, hpreC _,
     returnsGen.1, returnsGen.2.1, returnsGen.2.2⟩
 

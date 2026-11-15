@@ -109,6 +109,7 @@ def CallPre (n : BitVec 64) (s : State) : Prop :=
 theorem returns_even (n : BitVec 64) :
     Ensures Extracted.program (entryOf .even) [n] (CallPre n)
       (fun _ s' => (s'.regs 0).toNat = res .even n.toNat) := by
+  janus64_ensures_old [Proof.CallPre, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hg, hst, hd⟩
   simp only [entryOf] at hs
   janus64_intro hs
@@ -125,6 +126,7 @@ theorem returns_even (n : BitVec 64) :
 theorem returns_odd (n : BitVec 64) :
     Ensures Extracted.program (entryOf .odd) [n] (CallPre n)
       (fun _ s' => (s'.regs 0).toNat = res .odd n.toNat) := by
+  janus64_ensures_old [Proof.CallPre, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hg, hst, hd⟩
   simp only [entryOf] at hs
   janus64_intro hs
@@ -165,32 +167,32 @@ def s0 (pc : Nat) : State :=
     rip := BitVec.ofNat 64 pc, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup (pc : Nat) : CallSetup (Extracted.program.withExit ret) pc [n] (s0 pc) :=
-  ⟨rfl, wmem64_ret, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup (pc : Nat) : CallSetup0 pc [n] (s0 pc) :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
 theorem hpre (pc : Nat) : CallPre n (s0 pc) := by
   unfold CallPre s0
-  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, ?_⟩ <;>
+  refine ⟨⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, ?_⟩ <;>
     simp only [regSP, regG, stackguard0, stackguard0Offset] <;> decide
 
 /-- So the guarantee is reached: `IsEven(3)` returns `0` and `IsOdd(3)` returns `1`. -/
 theorem returns :
-    Returns (Extracted.program.withExit ret) (s0 Extracted.entry) (fun s' =>
-      ABIReturn (s0 Extracted.entry) s' ∧ (s'.regs 0).toNat = 0) ∧
-    Returns (Extracted.program.withExit ret) (s0 (segAddr Extracted.program "example.com/basic.IsOdd"))
-      (fun s' => ABIReturn (s0 (segAddr Extracted.program "example.com/basic.IsOdd")) s' ∧
+    Returns (Extracted.program.withExit ret) ((s0 Extracted.entry).setRet ret) (fun s' =>
+      ABIReturn ((s0 Extracted.entry).setRet ret) s' ∧ (s'.regs 0).toNat = 0) ∧
+    Returns (Extracted.program.withExit ret) ((s0 (segAddr Extracted.program "example.com/basic.IsOdd")).setRet ret)
+      (fun s' => ABIReturn ((s0 (segAddr Extracted.program "example.com/basic.IsOdd")).setRet ret) s' ∧
         (s'.regs 0).toNat = 1) := by
-  refine ⟨((correctness n).1 ret hret _ (setup _) (hpre _)).mono ?_,
-    ((correctness n).2 ret hret _ (setup _) (hpre _)).mono ?_⟩
+  refine ⟨((correctness n).1 _ (setup _) (hpre _) ret hret).mono ?_,
+    ((correctness n).2 _ (setup _) (hpre _) ret hret).mono ?_⟩
   all_goals intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
 
 /-- All hypotheses of `correctness` hold together, for both members, and both runs return. -/
 theorem nonvacuous : ∃ (ret : Nat) (s s' : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [n] s ∧ CallPre n s ∧
-    CallSetup (Extracted.program.withExit ret) (segAddr Extracted.program "example.com/basic.IsOdd")
+    CallSetup0 Extracted.entry [n] s ∧ CallPre n s ∧
+    CallSetup0 (segAddr Extracted.program "example.com/basic.IsOdd")
       [n] s' ∧ CallPre n s' ∧
-    Returns (Extracted.program.withExit ret) s (fun t => ABIReturn s t ∧ (t.regs 0).toNat = 0) ∧
-    Returns (Extracted.program.withExit ret) s' (fun t => ABIReturn s' t ∧ (t.regs 0).toNat = 1) :=
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun t => ABIReturn (s.setRet ret) t ∧ (t.regs 0).toNat = 0) ∧
+    Returns (Extracted.program.withExit ret) (s'.setRet ret) (fun t => ABIReturn (s'.setRet ret) t ∧ (t.regs 0).toNat = 1) :=
   ⟨ret, s0 _, s0 _, hret, setup _, hpre _, setup _, hpre _, returns.1, returns.2⟩
 
 end Witness

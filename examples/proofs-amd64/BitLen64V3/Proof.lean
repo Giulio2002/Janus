@@ -61,6 +61,7 @@ theorem correctness (x : BitVec 64) :
     EnsuresResults Extracted.program Extracted.entry [x] 1
       (fun s => StackWritable s 0 8)
       (fun r => r = [BitVec.ofNat 64 (bitLen x.toNat)]) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre
@@ -89,30 +90,30 @@ def s0 (x : BitVec 64) : Janus.Amd64.State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup0 : CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] (s0 0) :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup0 : CallSetup0 Extracted.entry [0#64] (s0 0) :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
-theorem setup1 : CallSetup (Extracted.program.withExit ret) Extracted.entry [0x40#64] (s0 0x40) :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup1 : CallSetup0 Extracted.entry [0x40#64] (s0 0x40) :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
-theorem pre0 : StackWritable (s0 0) 0 8 := ⟨by decide, by decide, by decide⟩
-theorem pre1 : StackWritable (s0 0x40) 0 8 := ⟨by decide, by decide, by decide⟩
+theorem pre0 : StackWritable (s0 0) 0 8 := (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩)
+theorem pre1 : StackWritable (s0 0x40) 0 8 := (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩)
 
 /-- So the guarantee is reached: `BitLen64(0)` returns `0` and `BitLen64(0x40)` returns `7`. -/
 theorem returns :
-    Returns (Extracted.program.withExit ret) (s0 0) (fun s' => ABIReturn (s0 0) s' ∧ results 1 s' = [0#64]) ∧
-    Returns (Extracted.program.withExit ret) (s0 0x40) (fun s' => ABIReturn (s0 0x40) s' ∧ results 1 s' = [7#64]) := by
-  refine ⟨(correctness 0 ret hret _ setup0 pre0).mono ?_, (correctness 0x40 ret hret _ setup1 pre1).mono ?_⟩
+    Returns (Extracted.program.withExit ret) ((s0 0).setRet ret) (fun s' => ABIReturn ((s0 0).setRet ret) s' ∧ results 1 s' = [0#64]) ∧
+    Returns (Extracted.program.withExit ret) ((s0 0x40).setRet ret) (fun s' => ABIReturn ((s0 0x40).setRet ret) s' ∧ results 1 s' = [7#64]) := by
+  refine ⟨((correctness 0) _ setup0 pre0 ret hret).mono ?_, ((correctness 0x40) _ setup1 pre1 ret hret).mono ?_⟩
   · intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
   · intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
 
 /-- The hypotheses of `correctness` hold, for the zero source (where `BSR` leaves its destination
 undefined) and for a non-zero one. -/
 theorem nonvacuous : ∃ (ret : Nat) (s s' : Janus.Amd64.State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧ StackWritable s 0 8 ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0x40#64] s' ∧ StackWritable s' 0 8 ∧
-    Returns (Extracted.program.withExit ret) s (fun t => ABIReturn s t ∧ results 1 t = [0#64]) ∧
-    Returns (Extracted.program.withExit ret) s' (fun t => ABIReturn s' t ∧ results 1 t = [7#64]) :=
+    CallSetup0 Extracted.entry [0#64] s ∧ StackWritable s 0 8 ∧
+    CallSetup0 Extracted.entry [0x40#64] s' ∧ StackWritable s' 0 8 ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun t => ABIReturn (s.setRet ret) t ∧ results 1 t = [0#64]) ∧
+    Returns (Extracted.program.withExit ret) (s'.setRet ret) (fun t => ABIReturn (s'.setRet ret) t ∧ results 1 t = [7#64]) :=
   ⟨ret, s0 0, s0 0x40, hret, setup0, pre0, setup1, pre1, returns.1, returns.2⟩
 
 end Witness

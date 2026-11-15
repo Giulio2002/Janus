@@ -137,7 +137,7 @@ theorem model (d : Nat) : Memequal (Extracted.program.link implAt) cAddr d := by
   subst hpc
   janus64_run until [A0]
   obtain ⟨⟨⟨g1, g2, g3⟩, hcall, hgo⟩, i1, i2⟩ := hpre
-  exact hA _ rfl ⟨⟨⟨g1, g2, g3⟩, hcall, hgo⟩, i1, i2⟩
+  exact hA _ rfl ⟨⟨⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hcall, hgo⟩, i1, i2⟩
 
 /-- The witness call state: `strequal(STR, STR)` on `EqHashModel.wmem64` (`STR` is the string
 header `(VAL, 8)`; return address `wret` at `[wsp]`), goroutine `wg`, `RSP = wsp`. -/
@@ -150,7 +150,7 @@ def s0 : State :=
 /-- The precondition holds at `s0` (`memequal`'s bound 64, `strequal`'s 104). -/
 theorem pre : EqPre (64 + 40) 2 s0 ∧ StrInput s0 (64 + 40) 2 (s0.regs 0).toNat ∧
     StrInput s0 (64 + 40) 2 (s0.regs 3).toNat := by
-  refine ⟨⟨⟨by decide, by decide, by decide⟩, ?_, ?_⟩, ⟨?_, ?_⟩, ⟨?_, ?_⟩⟩ <;>
+  refine ⟨⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_⟩, ⟨?_, ?_⟩, ⟨?_, ?_⟩⟩ <;>
     simp only [CallOK, StrInput, Input, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
       outside_cons, outside_nil] <;> decide
 
@@ -160,7 +160,7 @@ def wsCall : State := { s0 with rip := BitVec.ofNat 64 cAddr }
 
 theorem wsCall_pre : EqPre 64 0 wsCall ∧ Input wsCall 64 0 (wsCall.regs 0).toNat (wsCall.regs 1).toNat ∧
     Input wsCall 64 0 (wsCall.regs 3).toNat (wsCall.regs 1).toNat := by
-  refine ⟨⟨⟨by decide, by decide, by decide⟩, ?_, ?_⟩, ?_, ?_⟩ <;>
+  refine ⟨⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_⟩, ?_, ?_⟩ <;>
     simp only [wsCall, s0, CallOK, Input, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
       outside_cons, outside_nil] <;> decide
 

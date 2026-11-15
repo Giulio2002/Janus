@@ -41,7 +41,7 @@ def s0 : State :=
 
 /-- The precondition holds at `s0` (stack bound 64). -/
 theorem pre : EqPre 64 2 s0 ∧ Input s0 64 2 (s0.regs 0).toNat 0 ∧ Input s0 64 2 (s0.regs 3).toNat 0 := by
-  refine ⟨⟨⟨by decide, by decide, by decide⟩, ?_, ?_⟩, ?_, ?_⟩ <;>
+  refine ⟨⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_⟩, ?_, ?_⟩ <;>
     simp only [CallOK, Input, calleeStack, Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil] <;> decide
 
 /-- `correctness` at `s0`: the call returns `true`. -/

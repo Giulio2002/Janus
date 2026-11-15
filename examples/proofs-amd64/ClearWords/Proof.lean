@@ -182,11 +182,13 @@ theorem correctness (b len cap : BitVec 64) :
         s.mem.accessible hasAVX2 1 false = true ∧ s.mem.readLE hasAVX2 1 ≠ 1 ∧
         s.mem.accessible hasERMS 1 false = true ∧
         (b.toNat + 8 * len.toNat ≤ hasAVX2 ∨ hasERMS + 1 ≤ b.toNat) ∧
-        (hasERMS + 1 ≤ (s.regs regSP).toNat - 32 ∨ (s.regs regSP).toNat + 16 ≤ hasAVX2))
+        ((hasAVX2 + 1 ≤ (s.regs regSP).toNat - 32 ∨ (s.regs regSP).toNat + 16 ≤ hasAVX2) ∧
+          (hasERMS + 1 ≤ (s.regs regSP).toNat - 32 ∨ (s.regs regSP).toNat + 16 ≤ hasERMS)))
       (fun s s' => (∀ j, j < len.toNat → s'.mem.readLE (b.toNat + 8 * j) 8 = 0) ∧
         ∀ x, (x < b.toNat ∨ b.toNat + 8 * len.toNat ≤ x) →
           (x < (s.regs regSP).toNat - 32 ∨ (s.regs regSP).toNat + 16 ≤ x) →
           s'.mem.bytes x = s.mem.bytes x) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.regSP, Proof.hasAVX2, Proof.hasERMS, Proof.mc]
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨hg, ⟨hle, hnw, hacc⟩, ⟨hbw, hb⟩, hbd, hav, hav1, her, hfd, hfs⟩ := hpre
@@ -250,8 +252,8 @@ def s0 : State :=
   { regs := fun r_ => if r_ = 0 then b else if r_ = 3 then len else if r_ = 1 then cap else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := ⟨fun a => wmem64.bytes a, wmem64.regions ++ [⟨hasAVX2, 1, false⟩, ⟨hasERMS, 1, false⟩]⟩ }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [b, len, cap] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [b, len, cap] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
 set_option maxRecDepth 100000 in
 theorem hpre : (fun s => StackGuardOK s 0 ∧ StackWritable s 32 16 ∧ Buffer s b (8 * len.toNat) true ∧
         (b.toNat + 8 * len.toNat ≤ (s.regs regSP).toNat - 32 ∨
@@ -259,26 +261,28 @@ theorem hpre : (fun s => StackGuardOK s 0 ∧ StackWritable s 32 16 ∧ Buffer s
         s.mem.accessible hasAVX2 1 false = true ∧ s.mem.readLE hasAVX2 1 ≠ 1 ∧
         s.mem.accessible hasERMS 1 false = true ∧
         (b.toNat + 8 * len.toNat ≤ hasAVX2 ∨ hasERMS + 1 ≤ b.toNat) ∧
-        (hasERMS + 1 ≤ (s.regs regSP).toNat - 32 ∨ (s.regs regSP).toNat + 16 ≤ hasAVX2)) s0 := by
+        ((hasAVX2 + 1 ≤ (s.regs regSP).toNat - 32 ∨ (s.regs regSP).toNat + 16 ≤ hasAVX2) ∧
+          (hasERMS + 1 ≤ (s.regs regSP).toNat - 32 ∨ (s.regs regSP).toNat + 16 ≤ hasERMS))) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (b : BitVec 64) (len : BitVec 64) (cap : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [b, len, cap] s ∧ (StackGuardOK s 0 ∧ StackWritable s 32 16 ∧ Buffer s b (8 * len.toNat) true ∧
+    CallSetup0 Extracted.entry [b, len, cap] s ∧ (StackGuardOK s 0 ∧ StackWritable s 32 16 ∧ Buffer s b (8 * len.toNat) true ∧
         (b.toNat + 8 * len.toNat ≤ (s.regs regSP).toNat - 32 ∨
           (s.regs regSP).toNat + 16 ≤ b.toNat) ∧
         s.mem.accessible hasAVX2 1 false = true ∧ s.mem.readLE hasAVX2 1 ≠ 1 ∧
         s.mem.accessible hasERMS 1 false = true ∧
         (b.toNat + 8 * len.toNat ≤ hasAVX2 ∨ hasERMS + 1 ≤ b.toNat) ∧
-        (hasERMS + 1 ≤ (s.regs regSP).toNat - 32 ∨ (s.regs regSP).toNat + 16 ≤ hasAVX2)) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ (∀ j, j < len.toNat → s'.mem.readLE (b.toNat + 8 * j) 8 = 0) ∧
+        ((hasAVX2 + 1 ≤ (s.regs regSP).toNat - 32 ∨ (s.regs regSP).toNat + 16 ≤ hasAVX2) ∧
+          (hasERMS + 1 ≤ (s.regs regSP).toNat - 32 ∨ (s.regs regSP).toNat + 16 ≤ hasERMS))) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ (∀ j, j < len.toNat → s'.mem.readLE (b.toNat + 8 * j) 8 = 0) ∧
         ∀ x, (x < b.toNat ∨ b.toNat + 8 * len.toNat ≤ x) →
-          (x < (s.regs regSP).toNat - 32 ∨ (s.regs regSP).toNat + 16 ≤ x) →
-          s'.mem.bytes x = s.mem.bytes x) :=
-  ⟨ret, s0, b, len, cap, hret, setup, hpre, correctness b len cap ret hret s0 setup hpre⟩
+          (x < ((s.setRet ret).regs regSP).toNat - 32 ∨ ((s.setRet ret).regs regSP).toNat + 16 ≤ x) →
+          s'.mem.bytes x = (s.setRet ret).mem.bytes x) :=
+  ⟨ret, s0, b, len, cap, hret, setup, hpre, (correctness b len cap) s0 setup hpre ret hret⟩
 
 end Witness
 

@@ -13,6 +13,7 @@ theorem correctness (P : PanicRuntime) (x etyp edata : BitVec 64) :
       (fun _ => goClass P)
       (fun _ s' => x.toNat ≤ 10 → s'.regs 0 = x + 1)
       (fun _ v _ => 10 < x.toNat → v = ⟨etyp.toNat, edata.toNat⟩) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hg, hle, hnw, hacc⟩
   janus64_intro hs
   have hgl := hg.load
@@ -51,26 +52,26 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [x, etyp, edata] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [x, etyp, edata] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
 
 set_option maxRecDepth 100000 in
 theorem hpre : (fun s : State => StackGuardOK s 0 ∧ StackWritable s 40 40) s0 := by
   dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 theorem hyps : True := by decide
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (P : Janus.Spec.PanicRuntime) (x : BitVec 64) (etyp : BitVec 64) (edata : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, etyp, edata] s ∧ (StackGuardOK s 0 ∧ StackWritable s 40 40) ∧
-    GoReturns (Extracted.program.withExit ret) (goClass P) s fun o =>
+    CallSetup0 Extracted.entry [x, etyp, edata] s ∧ (StackGuardOK s 0 ∧ StackWritable s 40 40) ∧
+    GoReturns (Extracted.program.withExit ret) (goClass P) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧ (x.toNat ≤ 10 → s'.regs 0 = x + 1)
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧ (x.toNat ≤ 10 → s'.regs 0 = x + 1)
     | .panicked v s' => 10 < x.toNat → v = ⟨etyp.toNat, edata.toNat⟩
     | .goexited _ => False :=
-  ⟨ret, s0, PW, x, etyp, edata, hret, setup, hpre, correctness PW x etyp edata ret hret s0 setup hpre⟩
+  ⟨ret, s0, PW, x, etyp, edata, hret, setup, hpre, (correctness PW x etyp edata) s0 setup hpre ret hret⟩
 
 end Witness
 

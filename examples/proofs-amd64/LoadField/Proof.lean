@@ -14,6 +14,7 @@ theorem correctness (P : Spec.PanicRuntime) :
       (fun _ => goClass P)
       (fun _ _ => True)
       (fun _ v _ => v = P.err Spec.ErrKind.mem) := by
+  janus64_ensures_old
   intro ret hret s hs hna
   have h0 : s.regs 0 = 0#64 := hs.args 0 (by decide)
   have hrip : s.rip = BitVec.ofNat 64 Extracted.entry := hs.rip
@@ -50,26 +51,26 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [0#64] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
 set_option maxRecDepth 100000 in
 theorem hpre : (fun s : State => s.mem.accessible 0 8 false = false) s0 := by
   dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 theorem hyps : True := by decide
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (P : Janus.Spec.PanicRuntime) , RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧ (s.mem.accessible 0 8 false = false) ∧
-    GoReturns (Extracted.program.withExit ret) (goClass P) s fun o =>
+    CallSetup0 Extracted.entry [0#64] s ∧ (s.mem.accessible 0 8 false = false) ∧
+    GoReturns (Extracted.program.withExit ret) (goClass P) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧ (True)
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧ (True)
     | .panicked v s' => v = P.err Spec.ErrKind.mem
     | .goexited _ => False :=
-  ⟨ret, s0, PW, hret, setup, hpre, correctness PW ret hret s0 setup hpre⟩
+  ⟨ret, s0, PW, hret, setup, hpre, (correctness PW) s0 setup hpre ret hret⟩
 
 end Witness
 

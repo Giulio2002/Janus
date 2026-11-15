@@ -33,9 +33,10 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 128)
       (fun s s' =>
         let key := BitVec.ofNat 128 (s.mem.readLE kp.toNat 16)
         s'.regs 0 = (f key).getD 0 ∧ (s'.regs 3).toNat % 256 = (f key).isSome.toNat) := by
+  janus64_ensures_old [Janus.Contracts.MapAmd64.CallerOK, Proof.mapType, Janus.Spec.Map.IsMap, Janus.Amd64.GoABI.Buffer]
   intro ret hret s hs ⟨hc, hty, hmap, ⟨hk1, hk2⟩, hkd⟩
   have hc' := hc
-  obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
+  obtain ⟨henv, ⟨hg1, hg2, hg3, hg4⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
   janus_eval_nat hT : mapType
   rw [hT] at hty
@@ -102,8 +103,8 @@ def s0 : Janus.Amd64.State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [BitVec.ofNat 64 MP, BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [BitVec.ofNat 64 MP, BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
@@ -113,7 +114,7 @@ theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
 set_option maxRecDepth 100000 in
 theorem callerOK : CallerOK (ME (BitVec 128)) s0 40 8 := by
   refine ⟨⟨by decide, by decide⟩,
-    ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩,
+    (by first | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide, by decide⟩ | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩),
     by decide, by decide, by decide, by decide, ?_, ?_, ?_⟩
   · simp only [ME_priv, ME_depth, priv0, outside_cons, outside_nil, and_true]; decide
   · simp only [Janus.Spec.Disjoint, ME_depth]; decide
@@ -128,7 +129,7 @@ theorem pre : CallerOK (ME (BitVec 128)) s0 40 8 ∧ (ME (BitVec 128)).Typ mapTy
 theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
     RTPre M n { s with rip := a } := by
   obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
-  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+  exact ⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
 
 /-- The precondition of `Access2Ptr`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
 @[reducible] def Access2PtrSite (M : MapModel (BitVec 128) (BitVec 64)) (f : AMap (BitVec 128) (BitVec 64)) (s_c : Janus.Amd64.State) : Prop :=
@@ -144,10 +145,10 @@ theorem wsCall_pre : Access2PtrSite (ME (BitVec 128)) AMap.empty wsCall :=
     by simp only [Janus.Contracts.MapAmd64.calleeStack, ME_depth, outside_cons, outside_nil, and_true]; decide⟩
 
 /-- The theorem fires: `LookupKey16(map, key)` returns what the theorem says. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (let key := BitVec.ofNat 128 (s0.mem.readLE (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL).toNat 16)
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
+    (let key := BitVec.ofNat 128 ((s0.setRet ret).mem.readLE (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL).toNat 16)
     s'.regs 0 = (emp128 key).getD 0 ∧ (s'.regs 3).toNat % 256 = (emp128 key).isSome.toNat) :=
-  correctness implAt (ME (BitVec 128)) (ME_laws _) hcon (BitVec.ofNat 64 MP) (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL) AMap.empty ret hret s0 setup pre
+  (correctness implAt (ME (BitVec 128)) (ME_laws _) hcon (BitVec.ofNat 64 MP) (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL) AMap.empty) s0 setup pre ret hret
 
 /-- The hypotheses are satisfiable: a model, an implementation of `runtime.mapaccess2`
 meeting `Access2Ptr` for it, and a call state of `LookupKey16(map, key)` that satisfies the precondition. -/
@@ -156,13 +157,13 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec
     Access2Ptr (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.mapaccess2") M ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 MP, BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL] s ∧
+    CallSetup0 Extracted.entry [BitVec.ofNat 64 MP, BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL] s ∧
     (CallerOK M s 40 8 ∧ M.Typ mapType ∧ IsMap M s.mem (BitVec.ofNat 64 MP).toNat AMap.empty ∧
     Buffer s (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL) 16 false ∧ Janus.Spec.Disjoint (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL).toNat 16 ((s.regs 4).toNat - (M.depth + 40)) (M.depth + 40 + 8)) ∧
     (∃ (f : AMap (BitVec 128) (BitVec 64)) (s_c : Janus.Amd64.State),
       s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess2") ∧ Access2PtrSite M f s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
-    (let key := BitVec.ofNat 128 (s.mem.readLE (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL).toNat 16)
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
+    (let key := BitVec.ofNat 128 ((s.setRet ret).mem.readLE (BitVec.ofNat 64 Janus.Contracts.IfaceModel.VAL).toNat 16)
     s'.regs 0 = (emp128 key).getD 0 ∧ (s'.regs 3).toNat % 256 = (emp128 key).isSome.toNat) :=
   ⟨implAt, (ME (BitVec 128)), ret, s0, (ME_laws _), hcon, hret, setup, pre, ⟨AMap.empty, wsCall, by show BitVec.ofNat 64 cA = _; rw [addr], wsCall_pre⟩, returns⟩
 

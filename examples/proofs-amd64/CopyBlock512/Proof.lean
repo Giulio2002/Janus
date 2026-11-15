@@ -102,9 +102,10 @@ theorem correctness (dst src : BitVec 64) :
         (dst.toNat + 512 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat + 8 ≤ dst.toNat) ∧
         (src.toNat + 512 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ src.toNat) ∧
         s.mem.accessible memmoveBits 1 false = true ∧ s.mem.readLE memmoveBits 1 % 2 = 1 ∧
-        (memmoveBits + 1 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ memmoveBits) ∧
+        (memmoveBits + 1 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat + 8 ≤ memmoveBits) ∧
         (dst.toNat + 512 ≤ memmoveBits ∨ memmoveBits + 1 ≤ dst.toNat))
       (fun s s' => valueAt s' dst 512 = valueAt s src 512) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.regSP, Proof.memmoveBits]
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨hg, ⟨hle, hnw, hacc⟩, ⟨hdw, hd⟩, ⟨hsw, hsa⟩, hds, hdd, hsd, hmb, hmb1, hmbd, hmbd'⟩ := hpre
@@ -165,32 +166,32 @@ def s0 : State :=
   { regs := fun r_ => if r_ = 0 then dst else if r_ = 3 then src else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := ⟨fun a => if a = memmoveBits then 1#8 else wmem64.bytes a, wmem64.regions ++ [⟨memmoveBits, 1, false⟩]⟩ }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [dst, src] s0 :=
-  ⟨rfl, by decide +kernel, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [dst, src] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 set_option maxRecDepth 100000 in
 theorem hpre : (fun s => StackGuardOK s 0 ∧ StackWritable s 40 8 ∧ Buffer s dst 512 true ∧
         Buffer s src 512 false ∧ Disjoint dst 512 src 512 ∧
         (dst.toNat + 512 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat + 8 ≤ dst.toNat) ∧
         (src.toNat + 512 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ src.toNat) ∧
         s.mem.accessible memmoveBits 1 false = true ∧ s.mem.readLE memmoveBits 1 % 2 = 1 ∧
-        (memmoveBits + 1 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ memmoveBits) ∧
+        (memmoveBits + 1 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat + 8 ≤ memmoveBits) ∧
         (dst.toNat + 512 ≤ memmoveBits ∨ memmoveBits + 1 ≤ dst.toNat)) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (dst : BitVec 64) (src : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [dst, src] s ∧ (StackGuardOK s 0 ∧ StackWritable s 40 8 ∧ Buffer s dst 512 true ∧
+    CallSetup0 Extracted.entry [dst, src] s ∧ (StackGuardOK s 0 ∧ StackWritable s 40 8 ∧ Buffer s dst 512 true ∧
         Buffer s src 512 false ∧ Disjoint dst 512 src 512 ∧
         (dst.toNat + 512 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat + 8 ≤ dst.toNat) ∧
         (src.toNat + 512 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ src.toNat) ∧
         s.mem.accessible memmoveBits 1 false = true ∧ s.mem.readLE memmoveBits 1 % 2 = 1 ∧
-        (memmoveBits + 1 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat ≤ memmoveBits) ∧
+        (memmoveBits + 1 ≤ (s.regs regSP).toNat - 40 ∨ (s.regs regSP).toNat + 8 ≤ memmoveBits) ∧
         (dst.toNat + 512 ≤ memmoveBits ∨ memmoveBits + 1 ≤ dst.toNat)) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ valueAt s' dst 512 = valueAt s src 512) :=
-  ⟨ret, s0, dst, src, hret, setup, hpre, correctness dst src ret hret s0 setup hpre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ valueAt s' dst 512 = valueAt (s.setRet ret) src 512) :=
+  ⟨ret, s0, dst, src, hret, setup, hpre, (correctness dst src) s0 setup hpre ret hret⟩
 
 end Witness
 

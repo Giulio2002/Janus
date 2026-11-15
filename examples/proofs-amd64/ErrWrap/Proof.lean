@@ -291,6 +291,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv)
     (L : List (Nat × Nat)) (bud tp tl : Nat) :
     Ensures (Extracted.program.link impl) Extracted.entry [] (Pre R L bud tp tl)
       (Post R L bud tp tl) := by
+  janus64_ensures_old [Proof.Pre, Janus.Amd64.GoABI.StackWritable, Proof.ErrHolds, Proof.fmtAddr, Proof.ev, Proof.evData, Janus.Amd64.GoABI.regSP, Proof.evType]
   intro ret hret s hs ⟨hg, ⟨hb4, ha4, hw4⟩, hal, hd, ⟨hv1, hv2, hv3, hv4, hv5, hv6, htl, htpb, htx⟩, hgo, hwrt, hwL, hok,
     hinv, hbud, hdataO, hevO, hevDO, hevW, hevDW, htW, htO⟩
   janus64_intro hs
@@ -570,6 +571,10 @@ theorem hret0 : RetAddr (Extracted.program.link implAt) retA := RetAddr.of_check
 theorem setup : CallSetup ((Extracted.program.link implAt).withExit retA) Extracted.entry [] s0 :=
   ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h, rfl⟩
 
+
+theorem setup_at0 : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h, rfl⟩
+
 theorem dat_none (i : Nat) (h : 6000000 ≤ i) : dat i = none := by
   unfold dat
   rw [List.findSome?_eq_none_iff]
@@ -615,15 +620,16 @@ theorem s0_sp : (s0.regs 4).toNat = sp0 := by simp [s0, sp0]
 theorem s0_g : (s0.regs 14).toNat = g0 := by simp [s0, g0]
 
 theorem guard0 : StackGuardOK s0 4200 := by
-  refine ⟨?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_⟩
   · simp only [regG, stackguard0Offset, s0_g]; simp [g0]
   · simp only [regG, stackguard0Offset, s0_g]; decide
   · simp only [stackguard0, regG, regSP, stackguard0Offset, s0_g, s0_sp]; decide
+  · simp only [regG, regSP, stackguard0Offset, s0_g, s0_sp]; decide
 
 theorem stack0 : StackWritable s0 4200 8 := by
   unfold StackWritable
   simp only [regSP, s0_sp]
-  exact ⟨by decide, by decide, by decide⟩
+  exact (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩)
 
 theorem pre0 : Pre R0 [] 116 textAddr 10 s0 := by
   have hrt : R0.rt = [(HEAP, HEND), (BUMP, BUMP + 8), (WBUF, WBUF + 64), (CELL, CELL + 16)] := rfl
@@ -720,20 +726,20 @@ theorem wsC_pre : erSite R0 [] 116 wsC :=
     (by decide) mC_ra mC_rd0 mC_rd1 mC_rd2 mC_rd3 mC_rd4 mC_rd5
 
 /-- The guarantee fires: `ErrWrap()` from the witness state returns the wrapped error. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit retA) s0 fun s' =>
-    ABIReturn s0 s' ∧ Post R0 [] 116 textAddr 10 s0 s' :=
-  correctness implAt R0 hf0 [] 116 textAddr 10 retA hret0 s0 setup pre0
+theorem returns : Returns ((Extracted.program.link implAt).withExit retA) (s0.setRet retA) fun s' =>
+    ABIReturn (s0.setRet retA) s' ∧ Post R0 [] 116 textAddr 10 (s0.setRet retA) s' :=
+  correctness implAt R0 hf0 [] 116 textAddr 10 s0 setup_at0 pre0 retA hret0
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (L : List (Nat × Nat)) (bud tp tl : Nat) (ret : Nat) (s : State),
     ErrorfLive (Extracted.program.link impl) (Extracted.program.contractAddr "fmt.errorf") 4096 R tErr iErr tInt iWrap 26
       fmtNum 4294967296 ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧ Pre R L bud tp tl s ∧
+    CallSetup0 Extracted.entry [] s ∧ Pre R L bud tp tl s ∧
     (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "fmt.errorf") ∧
       erSite R L bud s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ Post R L bud tp tl s s' :=
-  ⟨implAt, R0, [], 116, textAddr, 10, retA, s0, hf0, hret0, setup, pre0, ⟨wsC, rfl, wsC_pre⟩, returns⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ Post R L bud tp tl (s.setRet ret) s' :=
+  ⟨implAt, R0, [], 116, textAddr, 10, retA, s0, hf0, hret0, setup_at0, pre0, ⟨wsC, rfl, wsC_pre⟩, returns⟩
 
 end Witness
 

@@ -170,7 +170,7 @@ theorem run (t : Nat) (heap : Nat × Nat) (f : AMap (BitVec 64) (BitVec 64)) (s 
         ∃ j, j < 8 ∧ p = slotVal (group s.mem (s.regs 3).toNat) j ∧
           f (s.regs 1) = some (BitVec.ofNat 64 (s.mem.readLE p 8)))) := by
   obtain ⟨lo, hi⟩ := heap
-  obtain ⟨⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd1, hb, hst, hx, hdf, hra, hout⟩, hty, hmap⟩ := hpre
+  obtain ⟨⟨henv, ⟨hg1, hg2, hg3, hg4⟩, hal, hd1, hb, hst, hx, hdf, hra, hout⟩, hty, hmap⟩ := hpre
   janus_eval_nat hzv : zeroVal
   simp only [smallModel_env, smallModel_typ, smallModel_depth, smallModel_priv, SmallEnv, regG, regSP,
     stackguard0Offset, stackguard0] at henv hty hout hg1 hg2 hg3 hd1 hst
@@ -305,7 +305,7 @@ set_option maxHeartbeats 8000000 in
 theorem hpre : RTPre (smallModel 0x600000 zeroVal (0x500000, 0x1000)) 3 s0 ∧
     (smallModel 0x600000 zeroVal (0x500000, 0x1000)).Typ (s0.regs 0).toNat ∧
     IsMap (smallModel 0x600000 zeroVal (0x500000, 0x1000)) s0.mem (s0.regs 3).toNat emp := by
-  refine ⟨⟨?_, ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
+  refine ⟨⟨?_, ⟨?_, ?_, ?_, by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega)⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
   all_goals (try simp only [smallModel_env, smallModel_typ, smallModel_priv, smallModel_depth, SmallEnv,
     outside_cons, outside_nil, and_true])
   all_goals first | decide +kernel | (simp [IsMap, emp, s0])

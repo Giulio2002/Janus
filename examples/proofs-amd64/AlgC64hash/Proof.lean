@@ -75,16 +75,17 @@ theorem eqPre_at {s S : State} {d frame nargs : Nat} (hg : StackGuardOK s (d + f
     (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg' : S.regs 14 = s.regs 14)
     (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
     (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame) : EqPre d nargs S := by
-  obtain ⟨hg1, hg2, hg3⟩ := hg
+  obtain ⟨hg1, hg2, hg3, hg4⟩ := hg
   simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3
   have hgo' := hgo
   simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil,
     and_true] at hgo'
-  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_⟩
+  refine ⟨⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_⟩
   · simp only [regG, stackguard0Offset, hg']; omega
   · simp only [regG, stackguard0Offset, hg', hf.accessible]; exact hg2
   · simp only [stackguard0, regG, regSP, stackguard0Offset, hg', hsp]
     rw [hf.readLE _ _ hgo]; omega
+  · first | omega | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega)
   · rw [hsp]; omega
   · rw [hsp]; omega
   · rw [hsp]; omega
@@ -156,14 +157,14 @@ theorem hPre_at' {H : Janus.Contracts.Hash.HashModel} {s S : State} {d frame nar
     (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg' : S.regs 14 = s.regs 14)
     (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
     (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame) : HPre H d nargs S := by
-  obtain ⟨-, ⟨hg1, hg2, hg3⟩, ⟨hal, hd, hb, hacc, -, -, -⟩, hout, hgo, hgp⟩ := hp
+  obtain ⟨-, ⟨hg1, hg2, hg3, hg4⟩, ⟨hal, hd, hb, hacc, -, -, -⟩, hout, hgo, hgp⟩ := hp
   simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3
   have hgo' := hgo
   simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil,
     and_true] at hgo'
   have hgw : Outside ((s.regs 14).toNat + 16) 8 (H.priv ++ calleeStack s (d + frame) 2) := by
     rw [outside_append]; exact ⟨hgp, hgo⟩
-  refine ⟨by rw [hg']; exact he, ⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_, ?_, by rw [hg']; exact hgp⟩
+  refine ⟨by rw [hg']; exact he, ⟨?_, ?_, ?_, by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega)⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_, ?_, by rw [hg']; exact hgp⟩
   · simp only [regG, stackguard0Offset, hg']; omega
   · simp only [regG, stackguard0Offset, hg', hf.accessible]; exact hg2
   · simp only [stackguard0, regG, regSP, stackguard0Offset, hg', hsp]
@@ -325,7 +326,7 @@ theorem model (d : Nat) : Fhash (Extracted.program.link implAt) cAddr H0 d binar
   subst hpc
   janus64_run until [A0]
   obtain ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
-  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hrest⟩, hrest'⟩
 
 /-- The witness call state: `c64hash(VAL, 7)` on `EqHashModel.wmem64` (model `H0`), goroutine
 `wg`, `RSP = wsp`, the default `MXCSR`. -/
@@ -338,7 +339,7 @@ def s0 : State :=
 /-- The precondition holds at `s0` (the callee's bound 64). -/
 theorem pre : HPre H0 (64 + 32) 2 s0 ∧ GoMXCSR s0 ∧ Input s0 (64 + 32) 2 (s0.regs 0).toNat (2 * 4) ∧
     Outside (s0.regs 0).toNat (2 * 4) H0.priv := by
-  refine ⟨⟨wmem64_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, by unfold GoMXCSR; decide,
+  refine ⟨⟨wmem64_henv _, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_, ?_, ?_⟩, by unfold GoMXCSR; decide,
     ?_, ?_⟩ <;>
     simp only [CallOK, Input, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
       outside_cons, outside_nil] <;> decide
@@ -348,7 +349,7 @@ contract's address, with its precondition for the stack bound `d = 64`. -/
 def wsCall : State := { s0 with rip := BitVec.ofNat 64 cAddr }
 
 theorem wsCall_pre : HPre H0 64 2 wsCall ∧ GoMXCSR wsCall ∧ Input wsCall 64 2 (wsCall.regs 0).toNat 4 := by
-  refine ⟨⟨wmem64_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, by unfold GoMXCSR; decide, ?_⟩ <;>
+  refine ⟨⟨wmem64_henv _, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_, ?_, ?_⟩, by unfold GoMXCSR; decide, ?_⟩ <;>
     simp only [wsCall, s0, CallOK, Input, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
       outside_cons, outside_nil] <;> decide
 

@@ -36,6 +36,7 @@ theorem correctness (impl : List Segment) (d : Nat)
     Ensures (Extracted.program.link impl) Extracted.entry [p, q]
       (fun s => MemAmd64.CallerOK s d 40 8 ∧ GoMXCSR s ∧ KeyInput d s p.toNat ∧ KeyInput d s q.toNat)
       (fun s s' => (s'.regs 0).toNat % 256 = (keyEq s.mem p.toNat q.toNat).toNat) := by
+  janus64_ensures_old [Janus.Contracts.MemAmd64.CallerOK, Janus.Amd64.GoABI.GoMXCSR, Proof.KeyInput, Proof.window, Janus.Contracts.Mem.strPtr, Janus.Contracts.Mem.strLen, Janus.Contracts.MemAmd64.callerWindow]
   intro ret hret s hs ⟨hc, hm, ⟨hpb, hpa, hpo, hpsb, hpsa, hpso⟩, ⟨hqb, hqa, hqo, hqsb, hqsa, hqso⟩⟩
   janus64_intro hs
   have hc' := hc
@@ -150,7 +151,7 @@ theorem model (d : Nat) : MemAmd64.Memequal (Extracted.program.link implAt) cAdd
   subst hpc
   janus64_run until [A0]
   obtain ⟨⟨⟨g1, g2, g3⟩, hcall, hgo⟩, i1, i2⟩ := hpre
-  exact hA _ rfl ⟨⟨⟨g1, g2, g3⟩, hcall, hgo⟩, i1, i2⟩
+  exact hA _ rfl ⟨⟨⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hcall, hgo⟩, i1, i2⟩
 
 def ret : Nat := wret
 
@@ -164,8 +165,8 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [k, k] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [k, k] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 
@@ -174,13 +175,13 @@ theorem keyInput : KeyInput 64 s0 k.toNat := by
     simp only [window, MemAmd64.callerWindow, outside_cons, outside_nil, and_true] <;> decide
 
 theorem hpre : MemAmd64.CallerOK s0 64 40 8 ∧ GoMXCSR s0 ∧ KeyInput 64 s0 k.toNat ∧ KeyInput 64 s0 k.toNat :=
-  ⟨⟨⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide,
+  ⟨⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide, by decide,
     by simp only [outside_cons, outside_nil, and_true]; decide⟩, by unfold GoMXCSR; decide, keyInput, keyInput⟩
 
 theorem eqpre_pc {d n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : Janus.Contracts.MemAmd64.EqPre d n s) :
     Janus.Contracts.MemAmd64.EqPre d n { s with rip := a } := by
   obtain ⟨⟨g1, g2, g3⟩, c, o⟩ := h
-  exact ⟨⟨g1, g2, g3⟩, c, o⟩
+  exact ⟨⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, c, o⟩
 
 theorem input_pc {d n x k : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : Janus.Contracts.MemAmd64.Input s d n x k) :
     Janus.Contracts.MemAmd64.Input { s with rip := a } d n x k := by
@@ -199,9 +200,9 @@ theorem wsCall_pre : MemequalSite 64 wsCall :=
   ⟨eqpre_pc _ (Janus.Contracts.MemSatAmd64.wstate_eqPre _ 0 (by decide)), input_pc _ (by inp), input_pc _ (by inp)⟩
 
 /-- So the guarantee is reached: the key equals itself. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat % 256 = 1 := by
-  refine (correctness implAt 64 (model 64) k k ret hret s0 setup hpre).mono ?_
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat % 256 = 1 := by
+  refine ((correctness implAt 64 (model 64) k k) s0 setup hpre ret hret).mono ?_
   intro s' h
   exact ⟨h.1, by rw [h.2]; decide⟩
 
@@ -209,11 +210,11 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (d ret : Nat) (s : State) (p q : BitVec 64),
     MemAmd64.Memequal (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memequal") d ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, q] s ∧
+    CallSetup0 Extracted.entry [p, q] s ∧
     (MemAmd64.CallerOK s d 40 8 ∧ GoMXCSR s ∧ KeyInput d s p.toNat ∧ KeyInput d s q.toNat) ∧
     (∃ (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memequal") ∧ MemequalSite d s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat % 256 = (keyEq s.mem p.toNat q.toNat).toNat) :=
-  ⟨implAt, 64, ret, s0, k, k, model 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt 64 (model 64) k k ret hret s0 setup hpre⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat % 256 = (keyEq (s.setRet ret).mem p.toNat q.toNat).toNat) :=
+  ⟨implAt, 64, ret, s0, k, k, model 64, hret, setup, hpre, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt 64 (model 64) k k) s0 setup hpre ret hret⟩
 
 end Witness
 

@@ -19,9 +19,10 @@ namespace Proof
 theorem correctness {V : Type} (M : MapModel (BitVec 64) V) (hl : M.Laws)
     (m : BitVec 64) (f : AMap (BitVec 64) V) :
     Ensures Extracted.program Extracted.entry [m]
-      (fun s => StackWritable s 0 8 ∧ IsMap M s.mem m.toNat f)
+      (fun s => StackWritable s 0 8 ∧ Outside (s.regs regSP).toNat 8 M.priv ∧ IsMap M s.mem m.toNat f)
       (fun _ s' => ∀ ks, Keys f ks → (s'.regs 0).toNat = ks.length) := by
-  intro ret hret s hs ⟨⟨_, hb, hst⟩, hmap⟩
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Spec.Map.IsMap, Janus.Amd64.GoABI.regSP]
+  intro ret hret s hs ⟨⟨_, hb, hst⟩, _, hmap⟩
   janus64_intro hs
   simp only [regSP, Nat.sub_zero, Nat.zero_add] at hb hst
   by_cases h0 : m.toNat = 0
@@ -51,20 +52,20 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [m] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [m] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
-theorem hpre : StackWritable s0 0 8 ∧ IsMap (ME (BitVec 64)) s0.mem m.toNat f :=
-  ⟨⟨by decide, by decide, by decide⟩, by unfold IsMap; simp [m]; rfl⟩
+theorem hpre : StackWritable s0 0 8 ∧ Outside (s0.regs regSP).toNat 8 (ME (BitVec 64)).priv ∧ IsMap (ME (BitVec 64)) s0.mem m.toNat f :=
+  ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by simp only [ME_priv, priv0, outside_cons, outside_nil, and_true]; decide, by unfold IsMap; simp [m]; rfl⟩
 
 /-- All hypotheses of `correctness` hold together (the nil map, empty). -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (M : MapModel (BitVec 64) (BitVec 64)) (m : BitVec 64), M.Laws ∧ RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [m] s ∧
-    (StackWritable s 0 8 ∧ IsMap M s.mem m.toNat Witness.f) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ ∀ ks : List (BitVec 64), Keys Witness.f ks → (s'.regs 0).toNat = ks.length) :=
+    CallSetup0 Extracted.entry [m] s ∧
+    (StackWritable s 0 8 ∧ Outside (s.regs regSP).toNat 8 M.priv ∧ IsMap M s.mem m.toNat Witness.f) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ ∀ ks : List (BitVec 64), Keys Witness.f ks → (s'.regs 0).toNat = ks.length) :=
   ⟨ret, s0, ME (BitVec 64), m, ME_laws _, hret, setup, hpre,
-    correctness (ME (BitVec 64)) (ME_laws _) m f ret hret s0 setup hpre⟩
+    (correctness (ME (BitVec 64)) (ME_laws _) m f) s0 setup hpre ret hret⟩
 
 end Witness
 

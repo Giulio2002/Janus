@@ -214,6 +214,7 @@ theorem correctness (x : BitVec 64) (i : Int) (hi : truncInt binary64 x.toNat = 
       (fun s => StackWritable s 0 8 ∧ Extracted.program.DataLoaded s.mem ∧
         (s.xmm 0).toNat % 2 ^ 64 = x.toNat ∧ GoMXCSR s)
       (fun _ s' => (results 1 s').map BitVec.toNat = [i.toNat]) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hst, hdl, hx, hm⟩
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hst
@@ -269,21 +270,21 @@ def s0 : State :=
   { regs := fun r_ => if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun r_ => if r_ = 0 then BitVec.ofNat 128 x.toNat else 0, mem := withData Extracted.program.data wmem64 }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h, rfl⟩
 theorem hpre : (fun s => StackWritable s 0 8 ∧ Extracted.program.DataLoaded s.mem ∧
         (s.xmm 0).toNat % 2 ^ 64 = x.toNat ∧ GoMXCSR s) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) , RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (truncInt binary64 Witness.x.toNat = some Witness.i) ∧ (0 ≤ Witness.i) ∧ (Witness.i < 2 ^ 64) ∧ (StackWritable s 0 8 ∧ Extracted.program.DataLoaded s.mem ∧
+    CallSetup0 Extracted.entry [] s ∧ (truncInt binary64 Witness.x.toNat = some Witness.i) ∧ (0 ≤ Witness.i) ∧ (Witness.i < 2 ^ 64) ∧ (StackWritable s 0 8 ∧ Extracted.program.DataLoaded s.mem ∧
         (s.xmm 0).toNat % 2 ^ 64 = Witness.x.toNat ∧ GoMXCSR s) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ (results 1 s').map BitVec.toNat = [Witness.i.toNat]) :=
-  ⟨ret, s0, hret, setup, hi, h0, h1, hpre, correctness x i hi h0 h1 ret hret s0 setup hpre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ (results 1 s').map BitVec.toNat = [Witness.i.toNat]) :=
+  ⟨ret, s0, hret, setup, hi, h0, h1, hpre, (correctness x i hi h0 h1) s0 setup hpre ret hret⟩
 
 end Witness
 

@@ -20,12 +20,35 @@ open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec
 
 namespace Proof
 
+/-- The named global lies apart from the return slot `[rsp, rsp + 8)` (the precondition no longer sees the return
+address, so the flag's byte must not be the slot). -/
+def GlobalApart (gs : List Janus.GlobalSegment) (n : String) (rsp : Nat) : Prop :=
+  ∀ g, globalNamed gs n = some g → rsp + 8 ≤ g.base ∨ g.base + g.size ≤ rsp
+
+theorem GlobalApart.of_eq {gs : List Janus.GlobalSegment} {n : String} {g : Janus.GlobalSegment} {rsp : Nat}
+    (hg : globalNamed gs n = some g) (h : rsp + 8 ≤ g.base ∨ g.base + g.size ≤ rsp) : GlobalApart gs n rsp :=
+  fun g' hg' => by rw [hg] at hg'; cases hg'; exact h
+
+/-- `GlobalBytesIs` survives writing the return slot, when the global is apart from it. -/
+theorem globalBytesIs_setRet {gs : List Janus.GlobalSegment} {n : String} {off k v : Nat} {s : State} {ret : Nat}
+    (hap : GlobalApart gs n (s.regs 4).toNat) (h : GlobalBytesIs gs s.mem n off k v) :
+    GlobalBytesIs gs (s.setRet ret).mem n off k v := by
+  obtain ⟨g, hg, h1, h2, h3⟩ := h
+  have := hap g hg
+  refine ⟨g, hg, h1, by simpa using h2, ?_⟩
+  rw [readLE_setRet_of_disjoint (by omega)]
+  exact h3
+
 theorem correctness (x : BitVec 64) (v : Nat) :
     Ensures Extracted.program Extracted.entry [x]
       (fun s => StackWritable s 0 8 ∧
+        GlobalApart Extracted.program.globals "example.com/basic.useFast" (s.regs regSP).toNat ∧
         GlobalBytesIs Extracted.program.globals s.mem "example.com/basic.useFast" 0 1 v)
       (fun _ s' => results 1 s' = [x + x]) := by
-  intro ret hret s hs ⟨hsw, h⟩
+  refine Ensures.of_old (fun s ret _ _ hp => ?_) ?_
+  · obtain ⟨hw, hap, h⟩ := hp
+    exact ⟨by simpa [StackWritable] using hw, hap, globalBytesIs_setRet hap h⟩
+  intro ret hret s hs ⟨hsw, _, h⟩
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hsw
   simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
@@ -52,41 +75,51 @@ def s0 (m : Memory) : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := m }
 
-theorem setup0 : CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] (s0 mem0) :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup0 : CallSetup0 Extracted.entry [21#64] (s0 mem0) :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
-theorem setup1 : CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] (s0 mem1) :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup1 : CallSetup0 Extracted.entry [21#64] (s0 mem1) :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+
+theorem apart (m : Memory) :
+    GlobalApart Extracted.program.globals "example.com/basic.useFast" ((s0 m).regs regSP).toNat :=
+  GlobalApart.of_eq rfl (by
+    have h : (s0 m).regs regSP = BitVec.ofNat 64 wsp := by simp [s0, regSP]
+    rw [h]; decide)
 
 theorem pre0 : StackWritable (s0 mem0) 0 8 ∧
+    GlobalApart Extracted.program.globals "example.com/basic.useFast" ((s0 mem0).regs regSP).toNat ∧
     GlobalBytesIs Extracted.program.globals (s0 mem0).mem "example.com/basic.useFast" 0 1 0 :=
-  ⟨⟨by decide, by decide, by decide⟩,
+  ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), apart _,
     (globalsInit_image Extracted.program.globals wmem64 ["example.com/basic.useFast"]
       (by decide) (by decide)).bytesIs (n := "example.com/basic.useFast") (by simp) rfl
       (off := 0) (k := 1) (by decide)⟩
 
 theorem pre1 : StackWritable (s0 mem1) 0 8 ∧
+    GlobalApart Extracted.program.globals "example.com/basic.useFast" ((s0 mem1).regs regSP).toNat ∧
     GlobalBytesIs Extracted.program.globals (s0 mem1).mem "example.com/basic.useFast" 0 1 1 :=
-  ⟨⟨by decide, by decide, by decide⟩, ⟨_, rfl, by decide, by decide, by decide⟩⟩
+  ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), apart _, ⟨_, rfl, by decide, by decide, by decide⟩⟩
 
 /-- So the guarantee is reached on both paths: `Double(21)` returns `42`. -/
 theorem returns :
-    Returns (Extracted.program.withExit ret) (s0 mem0)
-      (fun s' => ABIReturn (s0 mem0) s' ∧ results 1 s' = [42#64]) ∧
-    Returns (Extracted.program.withExit ret) (s0 mem1)
-      (fun s' => ABIReturn (s0 mem1) s' ∧ results 1 s' = [42#64]) := by
-  refine ⟨(correctness 21#64 0 ret hret _ setup0 pre0).mono ?_,
-    (correctness 21#64 1 ret hret _ setup1 pre1).mono ?_⟩
+    Returns (Extracted.program.withExit ret) ((s0 mem0).setRet ret)
+      (fun s' => ABIReturn ((s0 mem0).setRet ret) s' ∧ results 1 s' = [42#64]) ∧
+    Returns (Extracted.program.withExit ret) ((s0 mem1).setRet ret)
+      (fun s' => ABIReturn ((s0 mem1).setRet ret) s' ∧ results 1 s' = [42#64]) := by
+  refine ⟨((correctness 21#64 0) _ setup0 pre0 ret hret).mono ?_,
+    ((correctness 21#64 1) _ setup1 pre1 ret hret).mono ?_⟩
   all_goals intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
 
 /-- The hypotheses of `correctness` hold together, for the flag clear and for the flag set. -/
 theorem nonvacuous : ∃ (ret : Nat) (s s' : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] s ∧
-    (StackWritable s 0 8 ∧ GlobalBytesIs Extracted.program.globals s.mem "example.com/basic.useFast" 0 1 0) ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [21#64] s' ∧
-    (StackWritable s' 0 8 ∧ GlobalBytesIs Extracted.program.globals s'.mem "example.com/basic.useFast" 0 1 1) ∧
-    Returns (Extracted.program.withExit ret) s (fun t => ABIReturn s t ∧ results 1 t = [42#64]) ∧
-    Returns (Extracted.program.withExit ret) s' (fun t => ABIReturn s' t ∧ results 1 t = [42#64]) :=
+    CallSetup0 Extracted.entry [21#64] s ∧
+    (StackWritable s 0 8 ∧ GlobalApart Extracted.program.globals "example.com/basic.useFast" (s.regs regSP).toNat ∧
+      GlobalBytesIs Extracted.program.globals s.mem "example.com/basic.useFast" 0 1 0) ∧
+    CallSetup0 Extracted.entry [21#64] s' ∧
+    (StackWritable s' 0 8 ∧ GlobalApart Extracted.program.globals "example.com/basic.useFast" (s'.regs regSP).toNat ∧
+      GlobalBytesIs Extracted.program.globals s'.mem "example.com/basic.useFast" 0 1 1) ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun t => ABIReturn (s.setRet ret) t ∧ results 1 t = [42#64]) ∧
+    Returns (Extracted.program.withExit ret) (s'.setRet ret) (fun t => ABIReturn (s'.setRet ret) t ∧ results 1 t = [42#64]) :=
   ⟨ret, s0 mem0, s0 mem1, hret, setup0, pre0, setup1, pre1, returns.1, returns.2⟩
 
 end Witness

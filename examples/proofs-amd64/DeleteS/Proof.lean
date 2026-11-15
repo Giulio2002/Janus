@@ -36,9 +36,10 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (Nat × Nat)
     Ensures (Extracted.program.link impl) Extracted.entry [m, kp, kl] (pre M m kp kl f)
       (fun s s' => IsMap M s'.mem m.toNat (f.erase (strKey s.mem kp.toNat kl.toNat)) ∧
         M.Env s'.mem (s.regs 14)) := by
+  janus64_ensures_old [Proof.pre, Janus.Contracts.MapAmd64.CallerOK, Proof.mapType, Janus.Spec.Map.IsMap, Proof.window]
   intro ret hret s hs ⟨hc, hty, hmap, hkb, hka, hko⟩
   have hc' := hc
-  obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
+  obtain ⟨henv, ⟨hg1, hg2, hg3, hg4⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
   janus_eval_nat hT : mapType
   rw [hT] at hty
@@ -106,7 +107,7 @@ theorem model : DeleteStr64 (Extracted.program.link implAt) cAddr 8 (ME (Nat × 
   subst hpc
   janus64_run until [A0]
   obtain ⟨⟨he, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
-  exact hA f _ rfl ⟨⟨he, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+  exact hA f _ rfl ⟨⟨he, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hrest⟩, hrest'⟩
 
 /-- The witness return address (the word at `[wsp]` of `mmem64`). -/
 def ret : Nat := wret
@@ -124,13 +125,13 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mmem64 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [mv, kp, kl] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [mv, kp, kl] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
 
 theorem pre0 : pre (ME (Nat × Nat)) mv kp kl AMap.empty s0 := by
-  refine ⟨⟨mmem64_zenv, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide,
+  refine ⟨⟨mmem64_zenv, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide,
     by decide, ?_, ?_, ?_⟩, trivial, (isMap_of_ne (by decide)).2 (mmem64_rep _), by decide, by decide, ?_⟩
   · simp only [ME_priv, ME_depth, priv0, outside_cons, outside_nil, and_true]; decide
   · unfold Janus.Spec.Disjoint; decide
@@ -140,7 +141,7 @@ theorem pre0 : pre (ME (Nat × Nat)) mv kp kl AMap.empty s0 := by
 theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
     RTPre M n { s with rip := a } := by
   obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
-  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+  exact ⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
 
 /-- The precondition of `DeleteStr64`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
 @[reducible] def DeleteStr64Site (M : MapModel (Nat × Nat) (BitVec (8 * 8))) (f : AMap (Nat × Nat) (BitVec (8 * 8))) (s_c : Janus.Amd64.State) : Prop :=
@@ -154,9 +155,9 @@ theorem wsCall_pre : DeleteStr64Site (ME (Nat × Nat)) AMap.empty wsCall := by
   exact ⟨rtpre_pc _ (mstate64_rtpre _ rfl rfl mmem64 rfl _ 4 (by decide) mmem64_zenv mmem64_guard mmem64_ret), trivial, (isMap_of_ne (by decide)).2 (mmem64_rep _), ⟨a, b, c⟩⟩
 
 /-- So the guarantee is reached: the map stays empty. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ IsMap (ME (Nat × Nat)) s'.mem mv.toNat AMap.empty := by
-  refine (correctness implAt (ME _) (ME_laws _) model mv kp kl AMap.empty ret hret s0 setup pre0).mono ?_
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ IsMap (ME (Nat × Nat)) s'.mem mv.toNat AMap.empty := by
+  refine ((correctness implAt (ME _) (ME_laws _) model mv kp kl AMap.empty) s0 setup pre0 ret hret).mono ?_
   intro s' h
   exact ⟨h.1, by simpa [erase_empty] using h.2.1⟩
 
@@ -166,13 +167,13 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (Nat ×
     M.Laws ∧ DeleteStr64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.mapdelete_faststr") 8 M ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, kp, kl] s ∧
+    CallSetup0 Extracted.entry [m, kp, kl] s ∧
     m.toNat ≠ 0 ∧ pre M m kp kl f s ∧
     (∃ (f : AMap (Nat × Nat) (BitVec (8 * 8))) (s_c : Janus.Amd64.State),
       s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapdelete_faststr") ∧ DeleteStr64Site M f s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (IsMap M s'.mem m.toNat (f.erase (strKey s.mem kp.toNat kl.toNat)) ∧
-        M.Env s'.mem (s.regs 14)) :=
-  ⟨implAt, ME _, ret, s0, mv, kp, kl, AMap.empty, ME_laws _, model, hret, setup, by decide, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, correctness implAt (ME _) (ME_laws _) model mv kp kl AMap.empty ret hret s0 setup pre0⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ (IsMap M s'.mem m.toNat (f.erase (strKey (s.setRet ret).mem kp.toNat kl.toNat)) ∧
+        M.Env s'.mem ((s.setRet ret).regs 14)) :=
+  ⟨implAt, ME _, ret, s0, mv, kp, kl, AMap.empty, ME_laws _, model, hret, setup, by decide, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, (correctness implAt (ME _) (ME_laws _) model mv kp kl AMap.empty) s0 setup pre0 ret hret⟩
 
 end Witness
 

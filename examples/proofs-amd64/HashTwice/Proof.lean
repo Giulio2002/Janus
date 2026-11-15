@@ -22,6 +22,7 @@ theorem correctness (h x : BitVec 64) :
         ((s.regs 4).toNat + 8 ≤ (s.regs 14).toNat + 16 ∨ (s.regs 14).toNat + 24 ≤ (s.regs 4).toNat - 104))
       (fun s s' => s'.regs 0 = x * BitVec.ofNat 64 (s.mem.readLE h.toNat 8) *
         BitVec.ofNat 64 (s.mem.readLE h.toNat 8)) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨⟨hhb, hh⟩, hg, ⟨hle, hnw, hacc⟩, hd, hgd⟩
   janus64_intro hs
   have hgl := hg.load
@@ -46,24 +47,24 @@ def s0 : State :=
   { regs := fun r_ => if r_ = 0 then h else if r_ = 3 then x else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [h, x] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [h, x] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 theorem hpre : (fun s => Buffer s h 8 false ∧ StackGuardOK s 72 ∧ StackWritable s 104 8 ∧
         ((s.regs 4).toNat + 8 ≤ h.toNat ∨ h.toNat + 8 ≤ (s.regs 4).toNat - 104) ∧
         ((s.regs 4).toNat + 8 ≤ (s.regs 14).toNat + 16 ∨ (s.regs 14).toNat + 24 ≤ (s.regs 4).toNat - 104)) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (h : BitVec 64) (x : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [h, x] s ∧ (Buffer s h 8 false ∧ StackGuardOK s 72 ∧ StackWritable s 104 8 ∧
+    CallSetup0 Extracted.entry [h, x] s ∧ (Buffer s h 8 false ∧ StackGuardOK s 72 ∧ StackWritable s 104 8 ∧
         ((s.regs 4).toNat + 8 ≤ h.toNat ∨ h.toNat + 8 ≤ (s.regs 4).toNat - 104) ∧
         ((s.regs 4).toNat + 8 ≤ (s.regs 14).toNat + 16 ∨ (s.regs 14).toNat + 24 ≤ (s.regs 4).toNat - 104)) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ s'.regs 0 = x * BitVec.ofNat 64 (s.mem.readLE h.toNat 8) *
-        BitVec.ofNat 64 (s.mem.readLE h.toNat 8)) :=
-  ⟨ret, s0, h, x, hret, setup, hpre, correctness h x ret hret s0 setup hpre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ s'.regs 0 = x * BitVec.ofNat 64 ((s.setRet ret).mem.readLE h.toNat 8) *
+        BitVec.ofNat 64 ((s.setRet ret).mem.readLE h.toNat 8)) :=
+  ⟨ret, s0, h, x, hret, setup, hpre, (correctness h x) s0 setup hpre ret hret⟩
 
 end Witness
 

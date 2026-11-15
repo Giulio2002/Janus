@@ -30,6 +30,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : Rt
       (fun s s' => (s'.regs 3).toNat = n.toNat ∧ (s'.regs 1).toNat = roundupsize n.toNat true ∧
         (0 < n.toNat → InRanges (s'.regs 0).toNat (s'.regs 1).toNat rt ∧
           BytesHold s'.mem (s'.regs 0).toNat n.toNat (s'.regs 1).toNat (strBytes s.mem p.toNat n.toNat))) := by
+  janus64_ensures_old [Proof.Pre, Janus.Amd64.GoABI.StackWritable, Janus.Contracts.StrIn, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hsg, ⟨hb, ha, hw⟩, hout, hal, ⟨ha1, ha2⟩, hao, hH⟩
   janus64_intro hs
   have hgl := hsg.load
@@ -78,11 +79,11 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mem0 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [0, 0] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases i with _ | _ | i <;> simp [s0, argReg, intArgRegs] at h ⊢ <;> omega, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [0, 0] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases i with _ | _ | i <;> simp [s0, argReg, intArgRegs] at h ⊢ <;> omega, rfl⟩
 
 theorem pre : Pre rtW H0 0 0 s0 := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, ?_⟩,
+  refine ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ⟨by decide, by decide, ?_⟩,
     by simp only [rtW, outside_cons, outside_nil]; decide, by decide,
     ⟨by decide, by simp⟩, by simp only [outside_cons, outside_nil]; decide, ?_⟩
   · have hw : mem0.accessible (wsp - 0x2000) 0x2100 true = true := by decide
@@ -112,21 +113,21 @@ theorem wsCall_pre : rpSite rtW H0 wsCall := by
     rw [ha 1, ha 2]
     simp [outside_zero]
 
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 3).toNat = 0 :=
-  (correctness implAt rtW H0 0 0 model ret hret s0 setup pre).mono fun _ h => ⟨h.1, by simpa using h.2.1⟩
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 3).toNat = 0 :=
+  ((correctness implAt rtW H0 0 0 model) s0 setup pre ret hret).mono fun _ h => ⟨h.1, by simpa using h.2.1⟩
 
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
     RtContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.stringtoslicebyte")
       rt 4096 H stringtoslicebyteSpec ∧ RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0] s ∧ Pre rt H 0 0 s ∧
+    CallSetup0 Extracted.entry [0, 0] s ∧ Pre rt H 0 0 s ∧
     (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.stringtoslicebyte") ∧
       rpSite rt H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
       ((s'.regs 3).toNat = (0 : BitVec 64).toNat ∧ (s'.regs 1).toNat = roundupsize (0 : BitVec 64).toNat true ∧
         (0 < (0 : BitVec 64).toNat → InRanges (s'.regs 0).toNat (s'.regs 1).toNat rt ∧
-          BytesHold s'.mem (s'.regs 0).toNat (0 : BitVec 64).toNat (s'.regs 1).toNat (strBytes s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat))) :=
-  ⟨implAt, rtW, H0, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt rtW H0 0 0 model ret hret s0 setup pre⟩
+          BytesHold s'.mem (s'.regs 0).toNat (0 : BitVec 64).toNat (s'.regs 1).toNat (strBytes (s.setRet ret).mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat))) :=
+  ⟨implAt, rtW, H0, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt rtW H0 0 0 model) s0 setup pre ret hret⟩
 
 end Witness
 

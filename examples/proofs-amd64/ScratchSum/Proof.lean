@@ -396,6 +396,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : PoolShape)
         ∃ d b', (b' = bud ∨ b' = bud - 32) ∧
           MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24), (d, d + 32)]) ∧
           LiveFrame s.mem s'.mem L [] ∧ R.inv b' L (s.regs 14).toNat (view R.rt L s'.mem)) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Proof.poolAddr, Proof.bufType, Janus.Spec.Pool.newOffset, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hB, hg, ⟨hb4, ha4, hw4⟩, hal, hd, hgo, hwrt, hwL, hrt0, hpin, hbin, hokG, hokP, hokN,
     hnew0, hinv, hbud⟩
   subst hB
@@ -840,8 +841,8 @@ def s0 : State :=
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
 set_option maxRecDepth 100000 in
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [3, 5] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [3, 5] s0 :=
+  ⟨rfl, rfl, by decide, by
       intro i h
       rcases i with _ | _ | i
       · rfl
@@ -882,16 +883,17 @@ theorem hb' : bT = (bufN) := by unfold bT; decide
 
 set_option maxRecDepth 100000 in
 theorem guard0 : StackGuardOK s0 4136 := by
-  refine ⟨?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_⟩
   · simp only [regG, stackguard0Offset, s0_g]; simp [g0]
   · simp only [regG, stackguard0Offset, s0_g]; decide
   · simp only [stackguard0, regG, regSP, stackguard0Offset, s0_g, s0_sp]; decide
+  · simp only [regG, regSP, stackguard0Offset, s0_g, s0_sp]; decide
 
 set_option maxRecDepth 100000 in
 theorem stack0 : StackWritable s0 4136 24 := by
   unfold StackWritable
   simp only [regSP, s0_sp]
-  exact ⟨by decide, by decide, by decide⟩
+  exact (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩)
 
 set_option maxRecDepth 100000 in
 theorem pre : StackGuardOK s0 4136 ∧ StackWritable s0 4136 24 ∧ (s0.regs 4).toNat % 8 = 0 ∧
@@ -1030,14 +1032,13 @@ theorem wsP_pre : putSite R [(HEAP, HEAP + 32)] 0x400 [(HEAP, HEAP + 32)] wsP :=
 
 /-- So the guarantee is reached: `ScratchSum(3, 5)` returns `3 ^ 5 = 6`, with the runtime's invariant
 again for the same (empty) live set. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = (3#64 ^^^ 5#64).toNat ∧
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = (3#64 ^^^ 5#64).toNat ∧
       ∃ d b', (b' = 0x400 ∨ b' = 0x400 - 32) ∧
-        MemFrame s0.mem s'.mem (R.rt ++ [((s0.regs 4).toNat - 4136, (s0.regs 4).toNat + 24), (d, d + 32)]) ∧
-        LiveFrame s0.mem s'.mem [] [] ∧ R.inv b' [] (s0.regs 14).toNat (view R.rt [] s'.mem) := by
-  have h := correctness implAt R BufObj (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
-    (by rw [aN]; exact hnew) 3 5 [] 0x400
-    ret hret s0 setup ⟨rfl, pre⟩
+        MemFrame (s0.setRet ret).mem s'.mem (R.rt ++ [(((s0.setRet ret).regs 4).toNat - 4136, ((s0.setRet ret).regs 4).toNat + 24), (d, d + 32)]) ∧
+        LiveFrame (s0.setRet ret).mem s'.mem [] [] ∧ R.inv b' [] ((s0.setRet ret).regs 14).toNat (view R.rt [] s'.mem) := by
+  have h := (correctness implAt R BufObj (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
+    (by rw [aN]; exact hnew) 3 5 [] 0x400) s0 setup ⟨rfl, pre⟩ ret hret
   exact h
 
 /-- All hypotheses of `correctness` hold together. -/
@@ -1050,7 +1051,7 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (ret : Nat) (s 
     NewobjectLiveContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.newobject")
       4096 R ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
+    CallSetup0 Extracted.entry [3, 5] s ∧
     (BufObj = BufObj ∧ StackGuardOK s 4136 ∧ StackWritable s 4136 24 ∧ (s.regs 4).toNat % 8 = 0 ∧
       Extracted.program.DataLoaded s.mem ∧
       Outside ((s.regs 14).toNat + 16) 8 (((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24) :: R.rt) ∧
@@ -1069,10 +1070,10 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (ret : Nat) (s 
       newSite R L b s_c) ∧
     (∃ (L : List (Nat × Nat)) (b : Nat) (rs : List (Nat × Nat)) (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "sync.(*Pool).Put") ∧
       putSite R L b rs s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (s'.regs 0).toNat = (3#64 ^^^ 5#64).toNat ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ (s'.regs 0).toNat = (3#64 ^^^ 5#64).toNat ∧
       ∃ d b', (b' = bud ∨ b' = bud - 32) ∧
-        MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24), (d, d + 32)]) ∧
-        LiveFrame s.mem s'.mem L [] ∧ R.inv b' L (s.regs 14).toNat (view R.rt L s'.mem) :=
+        MemFrame (s.setRet ret).mem s'.mem (R.rt ++ [(((s.setRet ret).regs 4).toNat - 4136, ((s.setRet ret).regs 4).toNat + 24), (d, d + 32)]) ∧
+        LiveFrame (s.setRet ret).mem s'.mem L [] ∧ R.inv b' L ((s.setRet ret).regs 14).toNat (view R.rt L s'.mem) :=
   ⟨implAt, R, ret, s0, [], 0x400, (by rw [aG, hPT]; exact hget), (by rw [aP, hPT]; exact hput),
     (by rw [aN]; exact hnew), hret, setup, ⟨rfl, pre⟩, ⟨[], 0x400, wsG, rfl, wsG_pre⟩, ⟨[], 0x400, wsN, rfl, wsN_pre⟩, ⟨[(HEAP, HEAP + 32)], 0x400, [(HEAP, HEAP + 32)], wsP, rfl, wsP_pre⟩, returns⟩
 

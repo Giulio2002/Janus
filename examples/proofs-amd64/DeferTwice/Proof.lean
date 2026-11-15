@@ -61,6 +61,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
           (P.priv ++ [((s.regs regSP).toNat - (P.depth + 32), (s.regs regSP).toNat + 8)]) ∧
         P.Env s'.mem)
       (fun _ _ _ => False) := by
+  janus64_ensures_old [Janus.Contracts.PanicAmd64.PanicCallerOK, Janus.Amd64.GoABI.regSP, Janus.Contracts.PanicAmd64.gOf]
   intro ret hret s hs ⟨hc, hd, hfo, hroom, hsave, hds⟩
   have hc' := hc
   obtain ⟨henv, hg, hal, hd', hb, hst, hout, hgd, hgo⟩ := hc'
@@ -415,7 +416,7 @@ theorem env_w : Env0 T0 wm := by
   refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
   · omega
   · unfold TableOK
-    exact ⟨by decide, by decide, by decide⟩
+    exact (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩)
 
 theorem hret : RetAddr (Extracted.program.link implW) ret := RetAddr.of_check (by decide)
 
@@ -428,14 +429,14 @@ def s0 : Janus.Amd64.State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wm }
 
-theorem setup : CallSetup ((Extracted.program.link implW).withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h, rfl⟩
 
 theorem pre : PanicCallerOK PW s0 32 8 ∧ Extracted.program.DataLoaded s0.mem ∧
     Outside fvA 8 (PW.priv ++ [((s0.regs regSP).toNat - (PW.depth + 32), (s0.regs regSP).toNat + 8)]) ∧
     2 ≤ PW.room s0.mem (gOf s0) ∧ PW.saved s0.mem (gOf s0) = none ∧
     ∀ d ∈ PW.defers s0.mem (gOf s0), (s0.regs regSP).toNat ≤ d.sp := by
-  refine ⟨⟨env_w, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, ?_, ?_, ?_⟩,
+  refine ⟨⟨env_w, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide, by decide, ?_, ?_, ?_⟩,
     dataLoaded, ?_, ?_, ?_, ?_⟩
   · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
   · unfold Spec.Disjoint; decide
@@ -477,14 +478,14 @@ theorem wsRet_pre : DeferreturnPre PW wsRet := by
     gOf, FrameOK, Panic.FrameOK]
 
 /-- So the guarantee is reached: `DeferTwice` returns from that state. -/
-theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) s0 fun o =>
+theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) (s0.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s0 s' ∧
-        (MemFrame s0.mem s'.mem
-          (PW.priv ++ [((s0.regs regSP).toNat - (PW.depth + 32), (s0.regs regSP).toNat + 8)]) ∧ PW.Env s'.mem)
+    | .returned s' => ABIReturn (s0.setRet ret) s' ∧
+        (MemFrame (s0.setRet ret).mem s'.mem
+          (PW.priv ++ [(((s0.setRet ret).regs regSP).toNat - (PW.depth + 32), ((s0.setRet ret).regs regSP).toNat + 8)]) ∧ PW.Env s'.mem)
     | .panicked v s' => False
     | .goexited _ => False :=
-  correctness implW PW (P0_laws T0 RPa) U1 hdp hdr ret hret s0 setup pre
+  (correctness implW PW (P0_laws T0 RPa) U1 hdp hdr) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime)
@@ -492,7 +493,7 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntim
     DeferprocContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferproc") P ∧
     DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
+    CallSetup0 Extracted.entry [] s ∧
     (PanicCallerOK P s 32 8 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside fvA 8 (P.priv ++ [((s.regs regSP).toNat - (P.depth + 32), (s.regs regSP).toNat + 8)]) ∧
       2 ≤ P.room s.mem (gOf s) ∧ P.saved s.mem (gOf s) = none ∧
@@ -501,11 +502,11 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntim
       dpSite P s_c) ∧
     (∃ s_r : Janus.Amd64.State, s_r.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") ∧
       DeferreturnPre P s_r) ∧
-    GoReturns ((Extracted.program.link impl).withExit ret) (goClass P) s fun o =>
+    GoReturns ((Extracted.program.link impl).withExit ret) (goClass P) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧
-        (MemFrame s.mem s'.mem
-          (P.priv ++ [((s.regs regSP).toNat - (P.depth + 32), (s.regs regSP).toNat + 8)]) ∧ P.Env s'.mem)
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧
+        (MemFrame (s.setRet ret).mem s'.mem
+          (P.priv ++ [(((s.setRet ret).regs regSP).toNat - (P.depth + 32), ((s.setRet ret).regs regSP).toNat + 8)]) ∧ P.Env s'.mem)
     | .panicked v s' => False
     | .goexited _ => False :=
   ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hdp, hdr, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, ⟨wsRet, rfl, wsRet_pre⟩, returns⟩

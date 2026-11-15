@@ -75,16 +75,17 @@ theorem eqPre_at {s S : State} {d frame nargs : Nat} (hg : StackGuardOK s (d + f
     (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg' : S.regs 14 = s.regs 14)
     (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
     (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame) : EqPre d nargs S := by
-  obtain ⟨hg1, hg2, hg3⟩ := hg
+  obtain ⟨hg1, hg2, hg3, hg4⟩ := hg
   simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3
   have hgo' := hgo
   simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil,
     and_true] at hgo'
-  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_⟩
+  refine ⟨⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_⟩
   · simp only [regG, stackguard0Offset, hg']; omega
   · simp only [regG, stackguard0Offset, hg', hf.accessible]; exact hg2
   · simp only [stackguard0, regG, regSP, stackguard0Offset, hg', hsp]
     rw [hf.readLE _ _ hgo]; omega
+  · first | omega | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega)
   · rw [hsp]; omega
   · rw [hsp]; omega
   · rw [hsp]; omega
@@ -156,14 +157,14 @@ theorem hPre_at' {H : Janus.Contracts.Hash.HashModel} {s S : State} {d frame nar
     (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg' : S.regs 14 = s.regs 14)
     (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
     (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame) : HPre H d nargs S := by
-  obtain ⟨-, ⟨hg1, hg2, hg3⟩, ⟨hal, hd, hb, hacc, -, -, -⟩, hout, hgo, hgp⟩ := hp
+  obtain ⟨-, ⟨hg1, hg2, hg3, hg4⟩, ⟨hal, hd, hb, hacc, -, -, -⟩, hout, hgo, hgp⟩ := hp
   simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3
   have hgo' := hgo
   simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil,
     and_true] at hgo'
   have hgw : Outside ((s.regs 14).toNat + 16) 8 (H.priv ++ calleeStack s (d + frame) 2) := by
     rw [outside_append]; exact ⟨hgp, hgo⟩
-  refine ⟨by rw [hg']; exact he, ⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_, ?_, by rw [hg']; exact hgp⟩
+  refine ⟨by rw [hg']; exact he, ⟨?_, ?_, ?_, by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega)⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_, ?_, by rw [hg']; exact hgp⟩
   · simp only [regG, stackguard0Offset, hg']; omega
   · simp only [regG, stackguard0Offset, hg', hf.accessible]; exact hg2
   · simp only [stackguard0, regG, regSP, stackguard0Offset, hg', hsp]
@@ -377,7 +378,7 @@ theorem pre : HPre H0 (64 + 56) 2 s0 ∧ Input s0 (64 + 56) 2 (s0.regs 0).toNat 
         (calleeStack s0 (64 + 56) 2)) := by
   have hw : Outside (TD + 20) 1 (calleeStack s0 (64 + 56) 2) := by
     simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil]; decide
-  refine ⟨⟨wmem64_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, ?_, fun _ => ?_⟩
+  refine ⟨⟨wmem64_henv _, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_, ?_, ?_⟩, ?_, fun _ => ?_⟩
   rotate_left 5
   · have e2 : itabType s0.mem (s0.regs 0).toNat = TD := by unfold itabType; decide
     rw [e2]
@@ -394,7 +395,7 @@ def wsCall : State :=
             regs := fun i => if i = 0 then BitVec.ofNat 64 TD else s0.regs i }
 
 theorem wsCall_pre : HPre H0 64 3 wsCall ∧ H0.Hashable (wsCall.regs 0).toNat wsCall.mem (wsCall.regs 3).toNat := by
-  refine ⟨⟨wmem64_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, by simp only [H0_hashable]; decide⟩ <;>
+  refine ⟨⟨wmem64_henv _, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_, ?_, ?_⟩, by simp only [H0_hashable]; decide⟩ <;>
     simp only [wsCall, s0, CallOK, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
       outside_cons, outside_nil] <;> decide
 

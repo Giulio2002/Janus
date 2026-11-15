@@ -25,12 +25,42 @@ pushed return address), the frame, the return-address slot and the four spill sl
 def window (R : IfaceModel) (s : State) : List (Nat × Nat) :=
   [((s.regs 4).toNat - (R.depth + 40), (s.regs 4).toNat + 40)]
 
+/-- Writing the return slot changes memory only inside `window` (which contains `[RSP, RSP + 8)`). -/
+theorem memFrame_setRet (R : IfaceModel) (s : State) (ret : Nat) :
+    MemFrame s.mem (s.setRet ret).mem (window R s) :=
+  ⟨fun a n h => readLE_setRet_of_disjoint (by simp only [window, outside_cons, outside_nil, and_true] at h; omega),
+   fun a n w => by simp⟩
+
+theorem callerOK_setRet {p : Janus.Amd64.Program} {entry : Nat} {args : List W64} (R : IfaceModel) (hl : R.Laws) :
+    ∀ s ret, CallSetup0 entry args s → RetAddr p ret → CallerOK R s 40 40 → CallerOK R (s.setRet ret) 40 40 := by
+  janus64_pre_setRet [Janus.Contracts.IfaceAmd64.CallerOK]
+
+/-- The precondition survives writing the return slot: the comparison's frame (`EqFrame`) covers the slot. The
+comparability of the two values at the entry state is part of the precondition (`ta = tb → Comparable …`), as the
+frame law only transports it forwards. -/
+theorem pre_setRet (R : IfaceModel) (hl : R.Laws) {p : Janus.Amd64.Program} {entry : Nat} {args : List W64} (ta pa tb pb : BitVec 64)
+    (s : State) (ret : Nat) (hs : CallSetup0 entry args s) (hret : RetAddr p ret)
+    (hp : CallerOK R s 40 40 ∧ (ta = tb → R.Comparable ta.toNat s.mem pa.toNat pb.toNat ∧
+        EqOK R s.mem ta.toNat pa.toNat pb.toNat ∧ EqFrame R ta.toNat s.mem pa.toNat pb.toNat (window R s))) :
+    CallerOK R (s.setRet ret) 40 40 ∧ (ta = tb → R.Comparable ta.toNat (s.setRet ret).mem pa.toNat pb.toNat ∧
+        EqOK R (s.setRet ret).mem ta.toNat pa.toNat pb.toNat ∧
+        EqFrame R ta.toNat (s.setRet ret).mem pa.toNat pb.toNat (window R (s.setRet ret))) := by
+  obtain ⟨hc, hq⟩ := hp
+  refine ⟨callerOK_setRet R hl s ret hs hret hc, fun h => ?_⟩
+  obtain ⟨hcmp, hok, hfr⟩ := hq h
+  have hf := memFrame_setRet R s ret
+  refine ⟨(hfr _ hf).1 hcmp, EqFrame.eqOK hfr hok hf, fun m' hf2 => ?_⟩
+  have hf' : MemFrame s.mem m' (window R s) := hf.trans hf2 (fun a n h => ⟨h, h⟩)
+  obtain ⟨c, e, d⟩ := hfr m' hf'
+  obtain ⟨c0, e0, d0⟩ := hfr _ hf
+  exact ⟨fun _ => c hcmp, e.trans e0.symm, d.trans d0.symm⟩
+
 theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
     (heq : Efaceeq (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.efaceeq") R)
     (ta pa tb pb : BitVec 64) :
     Ensures (Extracted.program.link impl) Extracted.entry [ta, pa, tb, pb]
-      (fun s => CallerOK R s 40 40 ∧ (ta = tb →
+      (fun s => CallerOK R s 40 40 ∧ (ta = tb → R.Comparable ta.toNat s.mem pa.toNat pb.toNat ∧
         EqOK R s.mem ta.toNat pa.toNat pb.toNat ∧ EqFrame R ta.toNat s.mem pa.toNat pb.toNat (window R s)))
       (fun s s' => (s'.regs 0).toNat % 256 =
           (ta == tb && efaceEqual R s.mem ta.toNat pa.toNat pb.toNat).toNat ∧
@@ -40,16 +70,17 @@ theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.L
           s.mem.accessible pb.toNat (tySize s.mem ta.toNat) false = true →
           (s'.regs 0).toNat % 256 = (s.mem.readLE pa.toNat (tySize s.mem ta.toNat) ==
             s.mem.readLE pb.toNat (tySize s.mem ta.toNat)).toNat)) := by
+  refine Ensures.of_old (fun s ret hs hret hp => pre_setRet R hl ta pa tb pb s ret hs hret hp) ?_
   intro ret hret s hs ⟨hc, hok⟩
   have hc' := hc
-  obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
+  obtain ⟨henv, ⟨hg1, hg2, hg3, hg4⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
   simp only [regG, regSP, stackguard0Offset, stackguard0, Janus.Spec.Disjoint] at hg1 hg2 hg3 hgd hgo hal hd hb hst hout
   have hsp40 : (s.regs 4 - 40#64).toNat = (s.regs 4).toNat - 40 := by
     rw [BitVec.toNat_sub]; simp; omega
   by_cases htt : ta = tb
   · subst htt
-    obtain ⟨hok1, hok2⟩ := hok rfl
+    obtain ⟨_, hok1, hok2⟩ := hok rfl
     janus64_run until [Extracted.program.contractAddr "runtime.efaceeq"]
     refine Reaches.call (Summary.withExit heq hret) rfl
       ⟨RTPre.of_caller hl hc (by janus_frame) (by simp [setRegF, hsp40]) (by simp [setRegF])
@@ -99,7 +130,7 @@ theorem linked_eq : Extracted.program.link implAt = linked := rfl
 theorem model : Efaceeq (Extracted.program.link implAt) cAddr R0 := by
   rw [linked_eq]
   intro s hpc ⟨hpre, hok⟩
-  obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
+  obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3, hg4⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   by_cases h0 : (s.regs 0).toNat = 0
   · janus64_run
@@ -151,17 +182,17 @@ def s0 : Janus.Amd64.State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mem0 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry
+theorem setup : CallSetup0 Extracted.entry
     [td, val, td, val] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl, rfl⟩
 
-theorem pre : CallerOK R0 s0 40 40 ∧ (td = td →
+theorem pre : CallerOK R0 s0 40 40 ∧ (td = td → R0.Comparable td.toNat s0.mem val.toNat val.toNat ∧
     EqOK R0 s0.mem td.toNat val.toNat val.toNat ∧
       EqFrame R0 td.toNat s0.mem val.toNat val.toNat (window R0 s0)) := by
-  refine ⟨⟨mem0_env (s0.regs 14), ⟨by decide, by decide, by decide⟩, by decide, by decide,
-    by decide, by decide, ?_, ?_, ?_⟩, fun _ => ⟨fun _ => ⟨Or.inl rfl, rfl, by decide,
+  refine ⟨⟨mem0_env (s0.regs 14), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide,
+    by decide, by decide, ?_, ?_, ?_⟩, fun _ => ⟨⟨rfl, by decide, by decide⟩, fun _ => ⟨Or.inl rfl, rfl, by decide,
     by decide⟩, ?_⟩⟩
   · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
   · unfold Janus.Spec.Disjoint; decide
@@ -179,7 +210,7 @@ theorem pre : CallerOK R0 s0 40 40 ∧ (td = td →
 theorem rtpre_pc {n : Nat} {R : IfaceModel} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre R n s) :
     RTPre R n { s with rip := a } := by
   obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
-  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+  exact ⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
 
 /-- The precondition of `Efaceeq`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
 @[reducible] def EfaceeqSite (R : IfaceModel) (s_c : Janus.Amd64.State) : Prop :=
@@ -192,33 +223,38 @@ theorem wsCall_pre : EfaceeqSite R0 wsCall :=
   ⟨rtpre_pc _ (wstate_rtpre _ 3 (by decide)), fun _ => ⟨Or.inl rfl, rfl, by decide, by decide⟩⟩
 
 /-- So the guarantee is reached: comparing the box with itself gives `true`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat % 256 = 1 := by
-  refine (correctness implAt R0 R0_laws model td val td val ret hret s0 setup pre).mono ?_
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat % 256 = 1 := by
+  refine ((correctness implAt R0 R0_laws model td val td val) s0 setup pre ret hret).mono ?_
   intro s' h
   refine ⟨h.1, ?_⟩
-  rw [h.2.1, show td.toNat = TD from rfl, show s0.mem = mem0 from rfl,
-    IfaceSat.efaceEqual_R0 (g := s0.regs 14) (mem0_env _)]
-  decide
+  have hout : Outside (s0.regs 4).toNat 8 R0.priv := by
+    simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
+  have henv : Env0 (s0.setRet ret).mem (s0.regs 14) := by
+    have h' : R0.Env (s0.setRet ret).mem (s0.regs 14) := by
+      rw [Janus.Contracts.SetRetFramesAmd64.iface_env_setRet R0_laws (s0.regs 14) hout]; exact mem0_env (s0.regs 14)
+    exact h'
+  rw [h.2.1, show td.toNat = TD from rfl, IfaceSat.efaceEqual_R0 (g := s0.regs 14) henv]
+  simp
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (ret : Nat)
     (s : Janus.Amd64.State) (ta pa tb pb : BitVec 64),
     R.Laws ∧ Efaceeq (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.efaceeq") R ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [ta, pa, tb, pb] s ∧
-    (CallerOK R s 40 40 ∧ (ta = tb →
+    CallSetup0 Extracted.entry [ta, pa, tb, pb] s ∧
+    (CallerOK R s 40 40 ∧ (ta = tb → R.Comparable ta.toNat s.mem pa.toNat pb.toNat ∧
       EqOK R s.mem ta.toNat pa.toNat pb.toNat ∧ EqFrame R ta.toNat s.mem pa.toNat pb.toNat (window R s))) ∧
     (∃ (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.efaceeq") ∧ EfaceeqSite R s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat % 256 =
-          (ta == tb && efaceEqual R s.mem ta.toNat pa.toNat pb.toNat).toNat ∧
-        (ta = tb → ta ≠ 0 → isRegularMemory s.mem ta.toNat = true →
-          isDirectIface s.mem ta.toNat = false →
-          s.mem.accessible pa.toNat (tySize s.mem ta.toNat) false = true →
-          s.mem.accessible pb.toNat (tySize s.mem ta.toNat) false = true →
-          (s'.regs 0).toNat % 256 = (s.mem.readLE pa.toNat (tySize s.mem ta.toNat) ==
-            s.mem.readLE pb.toNat (tySize s.mem ta.toNat)).toNat)) :=
-  ⟨implAt, R0, ret, s0, td, val, td, val, R0_laws, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt R0 R0_laws model td val td val ret hret s0 setup pre⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat % 256 =
+          (ta == tb && efaceEqual R (s.setRet ret).mem ta.toNat pa.toNat pb.toNat).toNat ∧
+        (ta = tb → ta ≠ 0 → isRegularMemory (s.setRet ret).mem ta.toNat = true →
+          isDirectIface (s.setRet ret).mem ta.toNat = false →
+          (s.setRet ret).mem.accessible pa.toNat (tySize (s.setRet ret).mem ta.toNat) false = true →
+          (s.setRet ret).mem.accessible pb.toNat (tySize (s.setRet ret).mem ta.toNat) false = true →
+          (s'.regs 0).toNat % 256 = ((s.setRet ret).mem.readLE pa.toNat (tySize (s.setRet ret).mem ta.toNat) ==
+            (s.setRet ret).mem.readLE pb.toNat (tySize (s.setRet ret).mem ta.toNat)).toNat)) :=
+  ⟨implAt, R0, ret, s0, td, val, td, val, R0_laws, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt R0 R0_laws model td val td val) s0 setup pre ret hret⟩
 
 end Witness
 

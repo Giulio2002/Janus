@@ -725,6 +725,7 @@ theorem correctness (z zl zc x xl xc y yl yc mw aw : BitVec 64) :
         (z = x ∨ Disjoint z (8 * zl.toNat) x (8 * zl.toNat)) ∧ Disjoint z (8 * zl.toNat) y (8 * zl.toNat) ∧
         Disjoint z (8 * zl.toNat) (s.regs 4) 104)
       (fun s s' => Post z.toNat x.toNat y.toNat zl.toNat mw.toNat aw.toNat s s') := by
+  janus64_ensures_old [Proof.hasADX, Janus.Amd64.GoABI.Buffer]
   intro ret hret s hs ⟨hua, ⟨hzb, hz⟩, ⟨hxb, hx⟩, ⟨hyb, hy⟩, hzx, hzy, hzf⟩
   simp only [hasADX] at hua
   janus64_addrs
@@ -793,8 +794,8 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := ⟨fun a => if a = 294921 then 8#8 else if a = 294922 then 3#8 else if a = 294928 then 2#8 else if a = 294936 then 2#8 else if a = 294945 then 9#8 else if a = 294946 then 3#8 else if a = 294952 then 2#8 else if a = 294960 then 2#8 else if a = 294969 then 10#8 else if a = 294970 then 3#8 else if a = 294976 then 2#8 else if a = 294984 then 2#8 else if a = 294992 then 3#8 else if a = 295000 then 1#8 else wmem64.bytes a, wmem64.regions ++ [⟨hasADX, 1, false⟩]⟩ } -- addr-ok: synthetic witness constant (stack/heap window of the concrete call state)
 set_option maxRecDepth 100000 in
-theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry [z, zl, zc, x, xl, xc, y, yl, yc, mw, aw] 1 s0 :=
-  ⟨rfl, by decide +kernel, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3 ∨ i = 4 ∨ i = 5 ∨ i = 6 ∨ i = 7 ∨ i = 8 ∨ i = 9 ∨ i = 10) with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> (simp only [List.getElem_cons_zero, List.getElem_cons_succ]; decide), by unfold FrameOK; decide, rfl⟩
+theorem setup : CallSetupF Extracted.entry [z, zl, zc, x, xl, xc, y, yl, yc, mw, aw] 1 s0 :=
+  ⟨rfl, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3 ∨ i = 4 ∨ i = 5 ∨ i = 6 ∨ i = 7 ∨ i = 8 ∨ i = 9 ∨ i = 10) with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> (simp only [List.getElem_cons_zero, List.getElem_cons_succ]; decide), by unfold FrameOK; decide, rfl⟩
 set_option maxRecDepth 100000 in
 theorem hpre : (fun s => s.mem.accessible hasADX 1 false = true ∧
         Buffer s z (8 * zl.toNat) true ∧ Buffer s x (8 * zl.toNat) false ∧
@@ -803,18 +804,18 @@ theorem hpre : (fun s => s.mem.accessible hasADX 1 false = true ∧
         Disjoint z (8 * zl.toNat) (s.regs 4) 104) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.Program.DataLoaded]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (z : BitVec 64) (zl : BitVec 64) (zc : BitVec 64) (x : BitVec 64) (xl : BitVec 64) (xc : BitVec 64) (y : BitVec 64) (yl : BitVec 64) (yc : BitVec 64) (mw : BitVec 64) (aw : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup0 (Extracted.program.withExit ret) Extracted.entry [z, zl, zc, x, xl, xc, y, yl, yc, mw, aw] 1 s ∧ (s.mem.accessible hasADX 1 false = true ∧
+    CallSetupF Extracted.entry [z, zl, zc, x, xl, xc, y, yl, yc, mw, aw] 1 s ∧ (s.mem.accessible hasADX 1 false = true ∧
         Buffer s z (8 * zl.toNat) true ∧ Buffer s x (8 * zl.toNat) false ∧
         Buffer s y (8 * zl.toNat) false ∧
         (z = x ∨ Disjoint z (8 * zl.toNat) x (8 * zl.toNat)) ∧ Disjoint z (8 * zl.toNat) y (8 * zl.toNat) ∧
         Disjoint z (8 * zl.toNat) (s.regs 4) 104) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn0 s s' ∧ Post z.toNat x.toNat y.toNat zl.toNat mw.toNat aw.toNat s s') :=
-  ⟨ret, s0, z, zl, zc, x, xl, xc, y, yl, yc, mw, aw, hret, setup, hpre, correctness z zl zc x xl xc y yl yc mw aw ret hret s0 setup hpre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn0 (s.setRet ret) s' ∧ Post z.toNat x.toNat y.toNat zl.toNat mw.toNat aw.toNat (s.setRet ret) s') :=
+  ⟨ret, s0, z, zl, zc, x, xl, xc, y, yl, yc, mw, aw, hret, setup, hpre, (correctness z zl zc x xl xc y yl yc mw aw) s0 setup hpre ret hret⟩
 
 end Witness
 

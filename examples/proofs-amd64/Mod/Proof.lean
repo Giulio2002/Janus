@@ -13,6 +13,7 @@ theorem correctness (x y : BitVec 64) (hy : y ≠ 0) :
     EnsuresResults Extracted.program Extracted.entry [x, y] 1
       (fun s => StackWritable s 16 8)
       (fun r => ∃ v, r = [v] ∧ v.toNat = x.toNat % y.toNat) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨hle, hnw, hacc⟩ := hpre
@@ -44,19 +45,19 @@ def s0 : State :=
   { regs := fun i => if i = 0 then x else if i = 3 then y else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [x, y] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 theorem hpre : (fun s => StackWritable s 16 8) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (y ≠ 0) ∧ (StackWritable s 16 8) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-    ABIReturn s s' ∧ ∃ v, (results 1 s') = [v] ∧ v.toNat = x.toNat % y.toNat) :=
-  ⟨ret, s0, x, y, hret, setup, hy, hpre, correctness x y hy ret hret s0 setup hpre⟩
+    CallSetup0 Extracted.entry [x, y] s ∧ (y ≠ 0) ∧ (StackWritable s 16 8) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+    ABIReturn (s.setRet ret) s' ∧ ∃ v, (results 1 s') = [v] ∧ v.toNat = x.toNat % y.toNat) :=
+  ⟨ret, s0, x, y, hret, setup, hy, hpre, (correctness x y hy) s0 setup hpre ret hret⟩
 
 def sP : State :=
   { regs := fun i => if i = 0 then x else if i = 3 then 0 else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
@@ -67,7 +68,7 @@ theorem setupP : CallSetup (Extracted.program.withExit ret) Extracted.entry [x, 
 theorem hpreP : (fun s => StackWritable s 16 8) sP := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 
 /-- All hypotheses of `panics` hold together, and the call panics. -/

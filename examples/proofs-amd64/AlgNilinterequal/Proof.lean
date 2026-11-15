@@ -188,7 +188,7 @@ theorem model : Janus.Contracts.IfaceAmd64.Efaceeq (Extracted.program.link implA
   subst hpc
   janus64_run until [A0]
   obtain ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
-  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hrest⟩, hrest'⟩
 
 theorem eqOK_wit64 : Janus.Contracts.Iface.EqOK R0 wmem64 TD VAL VAL :=
   fun _ => ⟨Or.inl rfl, rfl, by decide, by decide⟩
@@ -222,7 +222,7 @@ theorem pre : IfacePre R0 (R0.depth + 40) s0 ∧ Input s0 (R0.depth + 40) 2 (s0.
         (s0.mem.readLE ((s0.regs 0).toNat + 8) 8) (s0.mem.readLE ((s0.regs 3).toNat + 8) 8) ∧
       EqFrame R0 (s0.mem.readLE (s0.regs 0).toNat 8) s0.mem (s0.mem.readLE ((s0.regs 0).toNat + 8) 8)
         (s0.mem.readLE ((s0.regs 3).toNat + 8) 8) (calleeStack s0 (R0.depth + 40) 2)) := by
-  refine ⟨⟨wmem64_env0 (s0.regs 14), ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_⟩, ?_, ?_, fun _ => ?_⟩
+  refine ⟨⟨wmem64_env0 (s0.regs 14), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_, ?_⟩, ?_, ?_, fun _ => ?_⟩
   rotate_left 5
   · have e1 : s0.mem.readLE (s0.regs 0).toNat 8 = TD := by decide
     have e2 : s0.mem.readLE ((s0.regs 0).toNat + 8) 8 = VAL := by decide
@@ -240,7 +240,7 @@ def wsCall : State :=
             regs := fun i => if i = 0 then BitVec.ofNat 64 TD else if i = 3 then BitVec.ofNat 64 VAL else if i = 1 then BitVec.ofNat 64 VAL else s0.regs i }
 
 theorem wsCall_pre : Janus.Contracts.IfaceAmd64.RTPre R0 3 wsCall ∧ Janus.Contracts.Iface.EqOK R0 wsCall.mem (wsCall.regs 0).toNat (wsCall.regs 3).toNat (wsCall.regs 1).toNat := by
-  refine ⟨⟨wmem64_env0 (wsCall.regs 14), ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩,
+  refine ⟨⟨wmem64_env0 (wsCall.regs 14), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩,
     eqOK_wit64⟩ <;>
     simp only [wsCall, s0, R0_priv, R0_depth, outside_cons, outside_nil] <;> decide
 

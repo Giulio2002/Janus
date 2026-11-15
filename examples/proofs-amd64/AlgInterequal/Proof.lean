@@ -204,7 +204,7 @@ theorem model : Janus.Contracts.IfaceAmd64.Ifaceeq (Extracted.program.link implA
   subst hpc
   janus64_run until [A0]
   obtain ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
-  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hrest⟩, hrest'⟩
 
 theorem eqOK_wit64 : Janus.Contracts.Iface.EqOK R0 wmem64 TD VAL VAL :=
   fun _ => ⟨Or.inl rfl, rfl, by decide, by decide⟩
@@ -242,7 +242,7 @@ theorem pre : IfacePre R0 (R0.depth + 40) s0 ∧ Input s0 (R0.depth + 40) 2 (s0.
       EqFrame R0 (s0.mem.readLE (s0.mem.readLE (s0.regs 0).toNat 8 + 8) 8) s0.mem
         (s0.mem.readLE ((s0.regs 0).toNat + 8) 8) (s0.mem.readLE ((s0.regs 3).toNat + 8) 8)
         (calleeStack s0 (R0.depth + 40) 2)) := by
-  refine ⟨⟨wmem64_env0 (s0.regs 14), ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_⟩, ?_, ?_, fun _ _ => ?_⟩
+  refine ⟨⟨wmem64_env0 (s0.regs 14), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_, ?_⟩, ?_, ?_, fun _ _ => ?_⟩
   rotate_left 5
   · have e1 : s0.mem.readLE (s0.regs 0).toNat 8 = TAB := by decide
     have e2 : s0.mem.readLE ((s0.regs 0).toNat + 8) 8 = VAL := by decide
@@ -266,7 +266,7 @@ theorem wsCall_pre : Janus.Contracts.IfaceAmd64.RTPre R0 3 wsCall ∧ ((wsCall.r
       (wsCall.mem.readLE ((wsCall.regs 0).toNat + 8) 8 ≠ 0) ∧
       Janus.Contracts.Iface.EqOK R0 wsCall.mem (wsCall.mem.readLE ((wsCall.regs 0).toNat + 8) 8)
         (wsCall.regs 3).toNat (wsCall.regs 1).toNat) := by
-  refine ⟨⟨wmem64_env0 (wsCall.regs 14), ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩,
+  refine ⟨⟨wmem64_env0 (wsCall.regs 14), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩,
     fun _ => ⟨?_, ?_, by decide, ?_⟩⟩ <;>
     simp only [wsCall, s0, R0_priv, R0_depth, outside_cons, outside_nil] <;> first | decide | exact eqOK_wit64
 

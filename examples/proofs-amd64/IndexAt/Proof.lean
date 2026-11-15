@@ -13,6 +13,7 @@ theorem correctness (P : Spec.PanicRuntime) (ptr len cap i : BitVec 64) (hi : le
       (fun _ => goClass P)
       (fun _ _ => True)
       (fun _ v _ => v = P.boundsError) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hle, hnw, hacc⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
@@ -41,26 +42,26 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap, i] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [ptr, len, cap, i] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl, rfl⟩
 
 set_option maxRecDepth 100000 in
 theorem hpre : (fun s : State => StackWritable s 16 24) s0 := by
   dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 theorem hyps : (len.toNat ≤ i.toNat) := by decide
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (P : Janus.Spec.PanicRuntime) (ptr : BitVec 64) (len : BitVec 64) (cap : BitVec 64) (i : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap, i] s ∧ (len.toNat ≤ i.toNat) ∧ (StackWritable s 16 24) ∧
-    GoReturns (Extracted.program.withExit ret) (goClass P) s fun o =>
+    CallSetup0 Extracted.entry [ptr, len, cap, i] s ∧ (len.toNat ≤ i.toNat) ∧ (StackWritable s 16 24) ∧
+    GoReturns (Extracted.program.withExit ret) (goClass P) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧ (True)
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧ (True)
     | .panicked v s' => v = P.boundsError
     | .goexited _ => False :=
-  ⟨ret, s0, PW, ptr, len, cap, i, hret, setup, hyps, hpre, correctness PW ptr len cap i hyps ret hret s0 setup hpre⟩
+  ⟨ret, s0, PW, ptr, len, cap, i, hret, setup, hyps, hpre, (correctness PW ptr len cap i hyps) s0 setup hpre ret hret⟩
 
 end Witness
 

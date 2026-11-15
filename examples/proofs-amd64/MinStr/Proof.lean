@@ -36,6 +36,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (a la b lb : BitVec 64)
         ((s.regs 4).toNat + 40 ≤ (s.regs 14).toNat + 16 ∨ (s.regs 14).toNat + 24 ≤ (s.regs 4).toNat - 128))
       (fun s s' => if strCmp s.mem b.toNat a.toNat lb.toNat la.toNat < 0
         then s'.regs 0 = b ∧ s'.regs 3 = lb else s'.regs 0 = a ∧ s'.regs 3 = la) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Contracts.Cmpstring.StrOK, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hg, ⟨hle, hnw, hacc⟩, hal, hsa, hsb, hda, hdb, hgd⟩
   janus64_intro hs
   have hgl := hg.load
@@ -77,8 +78,8 @@ def s0 : Janus.Amd64.State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [0, 0, 0, 0] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [0, 0, 0, 0] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl, rfl⟩
 
@@ -90,8 +91,8 @@ theorem pre : StackGuardOK s0 64 ∧ StackWritable s0 128 40 ∧ (s0.regs 4).toN
     ((0 : BitVec 64).toNat = 0 ∨ (0 : BitVec 64).toNat + (0 : BitVec 64).toNat ≤ (s0.regs 4).toNat - 128 ∨
       (s0.regs 4).toNat + 40 ≤ (0 : BitVec 64).toNat) ∧
     ((s0.regs 4).toNat + 40 ≤ (s0.regs 14).toNat + 16 ∨ (s0.regs 14).toNat + 24 ≤ (s0.regs 4).toNat - 128) :=
-  ⟨⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩,
-    ⟨by decide, by decide, by decide⟩, by decide, Or.inl rfl, Or.inl rfl, Or.inl rfl, Or.inl rfl,
+  ⟨(by first | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide, by decide⟩ | exact ⟨by decide, by decide, by unfold stackguard0 stackguard0Offset regG regSP; decide⟩),
+    (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, Or.inl rfl, Or.inl rfl, Or.inl rfl, Or.inl rfl,
     Or.inl (by decide)⟩
 
 def cAddr : Nat := Extracted.program.contractAddr "runtime.cmpstring"
@@ -106,11 +107,11 @@ theorem wsCall_pre : Janus.Contracts.Cmpstring.CmpstringPre64 16 wsCall :=
   ⟨⟨by decide, by decide, by decide, by decide, by decide⟩, Or.inl rfl, Or.inl rfl⟩
 
 /-- The theorem fires: `MinStr("", "")` returns the first string. -/
-theorem returns : Returns ((Extracted.program.link impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
-    (if strCmp s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat < 0
+theorem returns : Returns ((Extracted.program.link impl).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
+    (if strCmp (s0.setRet ret).mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat < 0
       then s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 3 = (0 : BitVec 64)
       else s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 3 = (0 : BitVec 64)) :=
-  correctness impl 0 0 0 0 hcmp ret hret s0 setup pre
+  (correctness impl 0 0 0 0 hcmp) s0 setup pre ret hret
 
 /-- The hypotheses are satisfiable: a `runtime.cmpstring` meeting the contract (`hcmp`) and a call
 state of `MinStr("", "")` that satisfies the precondition. -/
@@ -118,7 +119,7 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (ret : Nat) (s : Janu
     CmpstringContract64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.cmpstring") 16 ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 0] s ∧
+    CallSetup0 Extracted.entry [0, 0, 0, 0] s ∧
     (StackGuardOK s 64 ∧ StackWritable s 128 40 ∧ (s.regs 4).toNat % 8 = 0 ∧
       StrOK s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat ∧
       StrOK s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat ∧
@@ -129,8 +130,8 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (ret : Nat) (s : Janu
       ((s.regs 4).toNat + 40 ≤ (s.regs 14).toNat + 16 ∨ (s.regs 14).toNat + 24 ≤ (s.regs 4).toNat - 128)) ∧
     (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.cmpstring") ∧
       Janus.Contracts.Cmpstring.CmpstringPre64 16 s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧
-    (if strCmp s.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat < 0
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧
+    (if strCmp (s.setRet ret).mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat (0 : BitVec 64).toNat < 0
       then s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 3 = (0 : BitVec 64)
       else s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 3 = (0 : BitVec 64)) :=
   ⟨impl, ret, s0, hcmp, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩

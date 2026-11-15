@@ -40,9 +40,10 @@ theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.L
       (fun s s' => (s'.regs 0).toNat = uint64Type ∧ BoxHolds R s'.mem (s'.regs 3).toNat 8 x.toNat ∧
         MemFrame s.mem s'.mem (R.priv ++ [((s.regs 4).toNat - (R.depth + 24), (s.regs 4).toNat + 8)]) ∧
         R.Env s'.mem (s.regs 14)) := by
+  janus64_ensures_old [Janus.Contracts.IfaceAmd64.CallerOK]
   intro ret hret s hs ⟨hc, hH⟩
   have hc' := hc
-  obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
+  obtain ⟨henv, ⟨hg1, hg2, hg3, hg4⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
   janus_eval_nat hT : uint64Type
   simp only [regG, regSP, stackguard0Offset, stackguard0, Janus.Spec.Disjoint] at hg1 hg2 hg3 hgd hgo hal hd hb hst hout
@@ -94,7 +95,7 @@ theorem linked_eq : Extracted.program.link implAt = linked := rfl
 theorem model : ConvT64 (Extracted.program.link implAt) cAddr R0 Htrue := by
   rw [linked_eq]
   intro s hpc ⟨hpre, _⟩
-  obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
+  obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3, hg4⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   janus64_run
   refine rtReturn_of R0 1 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
@@ -127,15 +128,15 @@ def s0 : Janus.Amd64.State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mem0 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [42#64] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [42#64] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
 theorem mem0_env (g : W64) : Env0 mem0 g := by
   refine ⟨by decide, by decide, ?_⟩
   unfold Desc; decide
 
 theorem pre : CallerOK R0 s0 24 8 := by
-  refine ⟨mem0_env (s0.regs 14), ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide,
+  refine ⟨mem0_env (s0.regs 14), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide,
     by decide, ?_, ?_, ?_⟩
   · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
   · unfold Janus.Spec.Disjoint; decide
@@ -144,7 +145,7 @@ theorem pre : CallerOK R0 s0 24 8 := by
 theorem rtpre_pc {n : Nat} {R : IfaceModel} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre R n s) :
     RTPre R n { s with rip := a } := by
   obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
-  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+  exact ⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
 
 /-- The precondition of `ConvT64`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
 @[reducible] def ConvT64Site (R : IfaceModel) (H : Janus.Contracts.RtReady) (s_c : Janus.Amd64.State) : Prop :=
@@ -157,9 +158,9 @@ theorem wsCall_pre : ConvT64Site R0 Htrue wsCall :=
   ⟨rtpre_pc _ (wstate_rtpre _ 1 (by decide)), trivial⟩
 
 /-- So the guarantee is reached: `Box(42)` returns a box holding `42`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = uint64Type ∧ BoxHolds R0 s'.mem (s'.regs 3).toNat 8 42 :=
-  (correctness implAt R0 R0_laws Htrue model 42#64 ret hret s0 setup ⟨pre, trivial⟩).mono fun _ h =>
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = uint64Type ∧ BoxHolds R0 s'.mem (s'.regs 3).toNat 8 42 :=
+  ((correctness implAt R0 R0_laws Htrue model 42#64) s0 setup ⟨pre, trivial⟩ ret hret).mono fun _ h =>
     ⟨h.1, h.2.1, h.2.2.1⟩
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
@@ -167,14 +168,14 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (H :
     (ret : Nat) (s : Janus.Amd64.State), R.Laws ∧
     ConvT64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.convT64") R H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [42#64] s ∧
+    CallSetup0 Extracted.entry [42#64] s ∧
     CallerOK R s 24 8 ∧
     H [42] (s.regs 14).toNat ((s.regs 4).toNat - 24) (Janus.Contracts.rtView R.priv s.mem) ∧
     (∃ (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.convT64") ∧ ConvT64Site R H s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ ((s'.regs 0).toNat = uint64Type ∧ BoxHolds R s'.mem (s'.regs 3).toNat 8 (42#64).toNat ∧
-        MemFrame s.mem s'.mem (R.priv ++ [((s.regs 4).toNat - (R.depth + 24), (s.regs 4).toNat + 8)]) ∧
-        R.Env s'.mem (s.regs 14)) :=
-  ⟨implAt, R0, Htrue, ret, s0, R0_laws, model, hret, setup, pre, trivial, ⟨wsCall, rfl, wsCall_pre⟩, correctness implAt R0 R0_laws Htrue model 42#64 ret hret s0 setup ⟨pre, trivial⟩⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = uint64Type ∧ BoxHolds R s'.mem (s'.regs 3).toNat 8 (42#64).toNat ∧
+        MemFrame (s.setRet ret).mem s'.mem (R.priv ++ [(((s.setRet ret).regs 4).toNat - (R.depth + 24), ((s.setRet ret).regs 4).toNat + 8)]) ∧
+        R.Env s'.mem ((s.setRet ret).regs 14)) :=
+  ⟨implAt, R0, Htrue, ret, s0, R0_laws, model, hret, setup, pre, trivial, ⟨wsCall, rfl, wsCall_pre⟩, (correctness implAt R0 R0_laws Htrue model 42#64) s0 setup ⟨pre, trivial⟩ ret hret⟩
 
 end Witness
 

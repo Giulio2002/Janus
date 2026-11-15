@@ -32,9 +32,10 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (Nat × Nat)
         Outside kp.toNat kl.toNat (window M s))
       (fun s s' => s'.regs 0 = (f (strKey s.mem kp.toNat kl.toNat)).getD 0 ∧
         (s'.regs 3).toNat % 256 = (f (strKey s.mem kp.toNat kl.toNat)).isSome.toNat) := by
+  janus64_ensures_old [Janus.Contracts.MapAmd64.CallerOK, Proof.mapType, Janus.Spec.Map.IsMap, Proof.window]
   intro ret hret s hs ⟨hc, hty, hmap, hkb, hka, hko⟩
   have hc' := hc
-  obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
+  obtain ⟨henv, ⟨hg1, hg2, hg3, hg4⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
   janus_eval_nat hT : mapType
   rw [hT] at hty
@@ -103,7 +104,7 @@ theorem model : Access2Str64 (Extracted.program.link implAt) cAddr MS0 := by
   subst hpc
   janus64_run until [A0]
   obtain ⟨⟨he, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
-  exact hA f _ rfl ⟨⟨he, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+  exact hA f _ rfl ⟨⟨he, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hrest⟩, hrest'⟩
 
 /-- The witness return address (the word at `[wsp]` of `wmem64`). -/
 def ret : Nat := wret
@@ -120,15 +121,15 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [0#64, kp, kl] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [0#64, kp, kl] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
 
 theorem pre0 : CallerOK MS0 s0 48 24 ∧ MS0.Typ mapType ∧ IsMap MS0 s0.mem (0#64).toNat AMap.empty ∧
     kp.toNat + kl.toNat ≤ 2 ^ 48 ∧ s0.mem.accessible kp.toNat kl.toNat false = true ∧
     Outside kp.toNat kl.toNat (window MS0 s0) := by
-  refine ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide,
+  refine ⟨⟨⟨by decide, by decide⟩, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide,
     by decide, ?_, ?_, ?_⟩, trivial, by simp [IsMap], by decide, by decide, ?_⟩
   · simp only [MS0, outside_cons, outside_nil, and_true]; decide
   · unfold Janus.Spec.Disjoint; decide
@@ -138,7 +139,7 @@ theorem pre0 : CallerOK MS0 s0 48 24 ∧ MS0.Typ mapType ∧ IsMap MS0 s0.mem (0
 theorem rtpre_pc {K V : Type} {M : MapModel K V} {n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : RTPre M n s) :
     RTPre M n { s with rip := a } := by
   obtain ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩ := h
-  exact ⟨e, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
+  exact ⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, c1, c2, c3, c4, c5, c6, c7, o⟩
 
 /-- The precondition of `Access2Str64`'s summary at the call state `s_c` (one conjunct: the audit matches the whole pre). -/
 @[reducible] def Access2Str64Site (M : MapModel (Nat × Nat) (BitVec 64)) (f : AMap (Nat × Nat) (BitVec 64)) (s_c : Janus.Amd64.State) : Prop :=
@@ -154,15 +155,15 @@ def wsCall : Janus.Amd64.State :=
     mem := Janus.Contracts.EqHashModel.wmem64 }
 
 theorem wsCall_pre : Access2Str64Site MS0 AMap.empty wsCall := by
-  refine ⟨⟨⟨by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide,
+  refine ⟨⟨⟨by decide, by decide⟩, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide,
       by decide, rfl, rfl, by decide, ?_⟩, trivial, by simp [IsMap, wsCall], by decide, by decide, ?_⟩
   · simp only [MS0, outside_cons, outside_nil, and_true]; decide
   · simp only [Janus.Contracts.MapAmd64.calleeStack, MS0, outside_cons, outside_nil, and_true]; decide
 
 /-- So the guarantee is reached: a lookup in a nil map gives `(0, false)`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ s'.regs 0 = 0 ∧ (s'.regs 3).toNat % 256 = 0 := by
-  refine (correctness implAt MS0 MS0_laws model 0#64 kp kl AMap.empty ret hret s0 setup pre0).mono ?_
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ s'.regs 0 = 0 ∧ (s'.regs 3).toNat % 256 = 0 := by
+  refine ((correctness implAt MS0 MS0_laws model 0#64 kp kl AMap.empty) s0 setup pre0 ret hret).mono ?_
   intro s' h
   exact ⟨h.1, by simpa [AMap.empty] using h.2.1, by simpa [AMap.empty] using h.2.2⟩
 
@@ -172,15 +173,15 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MapModel (Nat ×
     M.Laws ∧ Access2Str64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.mapaccess2_faststr") M ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m, kp, kl] s ∧
+    CallSetup0 Extracted.entry [m, kp, kl] s ∧
     (CallerOK M s 48 24 ∧ M.Typ mapType ∧ IsMap M s.mem m.toNat f ∧
       kp.toNat + kl.toNat ≤ 2 ^ 48 ∧ s.mem.accessible kp.toNat kl.toNat false = true ∧
       Outside kp.toNat kl.toNat (window M s)) ∧
     (∃ (f : AMap (Nat × Nat) (BitVec 64)) (s_c : Janus.Amd64.State),
       s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.mapaccess2_faststr") ∧ Access2Str64Site M f s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (s'.regs 0 = (f (strKey s.mem kp.toNat kl.toNat)).getD 0 ∧
-        (s'.regs 3).toNat % 256 = (f (strKey s.mem kp.toNat kl.toNat)).isSome.toNat) :=
-  ⟨implAt, MS0, ret, s0, 0#64, kp, kl, AMap.empty, MS0_laws, model, hret, setup, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, correctness implAt MS0 MS0_laws model 0#64 kp kl AMap.empty ret hret s0 setup pre0⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ (s'.regs 0 = (f (strKey (s.setRet ret).mem kp.toNat kl.toNat)).getD 0 ∧
+        (s'.regs 3).toNat % 256 = (f (strKey (s.setRet ret).mem kp.toNat kl.toNat)).isSome.toNat) :=
+  ⟨implAt, MS0, ret, s0, 0#64, kp, kl, AMap.empty, MS0_laws, model, hret, setup, pre0, ⟨AMap.empty, wsCall, rfl, wsCall_pre⟩, (correctness implAt MS0 MS0_laws model 0#64 kp kl AMap.empty) s0 setup pre0 ret hret⟩
 
 end Witness
 

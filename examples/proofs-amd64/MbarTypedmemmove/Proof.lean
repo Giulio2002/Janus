@@ -70,16 +70,17 @@ theorem eqPre_at {s S : State} {d frame nargs : Nat} (hg : StackGuardOK s (d + f
     (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg' : S.regs 14 = s.regs 14)
     (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
     (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame) : EqPre d nargs S := by
-  obtain ⟨hg1, hg2, hg3⟩ := hg
+  obtain ⟨hg1, hg2, hg3, hg4⟩ := hg
   simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3
   have hgo' := hgo
   simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil,
     and_true] at hgo'
-  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_⟩
+  refine ⟨⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_⟩
   · simp only [regG, stackguard0Offset, hg']; omega
   · simp only [regG, stackguard0Offset, hg', hf.accessible]; exact hg2
   · simp only [stackguard0, regG, regSP, stackguard0Offset, hg', hsp]
     rw [hf.readLE _ _ hgo]; omega
+  · first | omega | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega)
   · rw [hsp]; omega
   · rw [hsp]; omega
   · rw [hsp]; omega
@@ -271,7 +272,7 @@ theorem model (d : Nat) : Memmove (Extracted.program.link implAt) cAddr M0 d := 
   subst hpc
   janus64_run until [A0]
   obtain ⟨e, ⟨⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
-  exact hA _ rfl ⟨e, ⟨⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+  exact hA _ rfl ⟨e, ⟨⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hrest⟩, hrest'⟩
 
 /-- The witness memory: `EqHashModel.wmem64` with the (zero) flag word `runtime.writeBarrier`
 at `wb` readable. -/
@@ -292,7 +293,7 @@ theorem pre : TPre M0 wb (64 + 48) 3 s0 ∧ TypeOK s0.mem (s0.regs 0).toNat ∧
     Input s0 (64 + 48) 3 (s0.regs 1).toNat (typSize s0.mem (s0.regs 0).toNat) ∧
     Dest M0 s0 (64 + 48) 3 (s0.regs 3).toNat (typSize s0.mem (s0.regs 0).toNat) := by
   simp only [s0, mem0, wb, reduceRipTarget]
-  refine ⟨⟨trivial, ⟨by decide, by decide, by decide⟩, ?_, trivial, ?_, ?_, ?_, trivial⟩, ?_, ?_, ?_, ?_⟩ <;>
+  refine ⟨⟨trivial, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, trivial, ?_, ?_, ?_, trivial⟩, ?_, ?_, ?_, ?_⟩ <;>
     simp only [CallOK, Input, Dest, TypeOK, typSize, WriteBarrierOff, M0, calleeStack,
       Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil] <;> decide
 
@@ -309,7 +310,7 @@ theorem wsCall_pre : M0.Env wsCall.mem (wsCall.regs 14) ∧ EqPre 64 3 wsCall �
     Input wsCall 64 3 (wsCall.regs 3).toNat (wsCall.regs 1).toNat ∧
     Dest M0 wsCall 64 3 (wsCall.regs 0).toNat (wsCall.regs 1).toNat := by
   simp only [wsCall, s0, mem0, wb, reduceRipTarget]
-  refine ⟨trivial, ⟨⟨by decide, by decide, by decide⟩, ?_, ?_⟩, ?_, ?_, ?_⟩ <;>
+  refine ⟨trivial, ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_⟩, ?_, ?_, ?_⟩ <;>
     simp only [CallOK, Input, Dest, M0, calleeStack,
       Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil] <;> decide
 

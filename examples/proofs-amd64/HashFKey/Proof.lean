@@ -48,6 +48,7 @@ theorem correctness (impl : List Segment) (H : HashModel) (hl : H.Laws) (d : Nat
     (p h : BitVec 64) :
     Ensures (Extracted.program.link impl) Extracted.entry [p, h] (pre H d p)
       (fun s s' => KeyHash H s.mem p.toNat h.toNat (s'.regs 0).toNat) := by
+  janus64_ensures_old [Proof.pre, Janus.Contracts.MemAmd64.CallerOK, Janus.Amd64.GoABI.GoMXCSR, Proof.window, Janus.Contracts.Mem.strPtr, Janus.Contracts.Mem.strLen, Janus.Contracts.MemAmd64.callerWindow]
   intro ret hret s hs0 ⟨hc, henv, hpriv, hgp, hfp, hpb, hpa, hpo, hpp, hsb, hsa, hso, hsp'⟩
   janus64_intro hs0
   have hc' := hc
@@ -128,7 +129,7 @@ theorem correctness (impl : List Segment) (H : HashModel) (hl : H.Laws) (d : Nat
     have hg' := hm' _ _ hgp (by omega)
     refine Reaches.call (Summary.withExit hs hret) rfl ⟨⟨?_, ?sg, ?co, ?_, ?gc, ?gp⟩, ?_, ?_⟩ ?_
     case sg =>
-      refine ⟨?_, ?_, ?_⟩ <;>
+      refine ⟨?_, ?_, ?_, ?_⟩ <;>
         simp only [regG, regSP, stackguard0Offset, stackguard0, setRegF, reduceIte, Nat.reduceEqDiff,
           MapAmd64.keepABI, false_or, or_true, ite_true, hacc, hg', hsp32] <;> omega
     case co =>
@@ -233,7 +234,7 @@ theorem modelF (d : Nat) : HashAmd64.Fhash (Extracted.program.link implAt) fAddr
   subst hpc
   janus64_run until [A0]
   obtain ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
-  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hrest⟩, hrest'⟩
 
 theorem modelS (d : Nat) : HashAmd64.Strhash (Extracted.program.link implAt) sAddr H0 d := by
   rw [show Extracted.program.link implAt =
@@ -257,13 +258,13 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [k, h0] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [k, h0] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 
 theorem hpre : pre H0 64 k s0 := by
-  refine ⟨⟨⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide,
+  refine ⟨⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide, by decide,
     by simp only [outside_cons, outside_nil, and_true]; decide⟩, wmem64_henv _, ?_, ?_,
     by unfold GoMXCSR; decide, by decide, by decide, ?_, ?_, by decide, by decide, ?_, ?_⟩ <;>
     simp only [window, MemAmd64.callerWindow, H0_priv, outside_cons, outside_nil, and_true] <;> decide
@@ -271,7 +272,7 @@ theorem hpre : pre H0 64 k s0 := by
 theorem hpre_pc {H : HashModel} {d n : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : Janus.Contracts.HashAmd64.HPre H d n s) :
     Janus.Contracts.HashAmd64.HPre H d n { s with rip := a } := by
   obtain ⟨e, ⟨g1, g2, g3⟩, c, o1, o2, o3⟩ := h
-  exact ⟨e, ⟨g1, g2, g3⟩, c, o1, o2, o3⟩
+  exact ⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, c, o1, o2, o3⟩
 
 theorem input_pc {d n x k : Nat} {s : Janus.Amd64.State} (a : BitVec 64) (h : Janus.Contracts.MemAmd64.Input s d n x k) :
     Janus.Contracts.MemAmd64.Input { s with rip := a } d n x k := by
@@ -302,9 +303,9 @@ theorem wsCallS_pre : StrhashSite H0 64 wsCallS :=
   ⟨hpre_pc _ (wstate_hPre _ 2 (by decide)), strinput_pc _ (by inp)⟩
 
 /-- So the guarantee is reached: the result is a possible hash of the key. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ KeyHash H0 s0.mem (STR - 8) 0 (s'.regs 0).toNat :=
-  (correctness implAt H0 H0_laws 64 (modelF 64) (modelS 64) k h0 ret hret s0 setup hpre).mono
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ KeyHash H0 (s0.setRet ret).mem (STR - 8) 0 (s'.regs 0).toNat :=
+  ((correctness implAt H0 H0_laws 64 (modelF 64) (modelS 64) k h0) s0 setup hpre ret hret).mono
     fun _ h => ⟨h.1, h.2⟩
 
 /-- All hypotheses of `correctness` hold together. -/
@@ -314,11 +315,11 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (H : HashModel) (d re
       binary64 8 ∧
     HashAmd64.Strhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.strhash") H d ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, h] s ∧ pre H d p s ∧
+    CallSetup0 Extracted.entry [p, h] s ∧ pre H d p s ∧
     (∃ (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.f64hash") ∧ FhashSite H d s_c) ∧
     (∃ (s_c : Janus.Amd64.State), s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.strhash") ∧ StrhashSite H d s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (KeyHash H s.mem p.toNat h.toNat (s'.regs 0).toNat) :=
-  ⟨implAt, H0, 64, ret, s0, k, h0, H0_laws, modelF 64, modelS 64, hret, setup, hpre, ⟨wsCallF, rfl, wsCallF_pre⟩, ⟨wsCallS, rfl, wsCallS_pre⟩, correctness implAt H0 H0_laws 64 (modelF 64) (modelS 64) k h0 ret hret s0 setup hpre⟩
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ (KeyHash H (s.setRet ret).mem p.toNat h.toNat (s'.regs 0).toNat) :=
+  ⟨implAt, H0, 64, ret, s0, k, h0, H0_laws, modelF 64, modelS 64, hret, setup, hpre, ⟨wsCallF, rfl, wsCallF_pre⟩, ⟨wsCallS, rfl, wsCallS_pre⟩, (correctness implAt H0 H0_laws 64 (modelF 64) (modelS 64) k h0) s0 setup hpre ret hret⟩
 
 end Witness
 

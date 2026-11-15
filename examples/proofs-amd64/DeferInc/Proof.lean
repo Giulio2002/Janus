@@ -17,6 +17,7 @@ theorem correctness (P : Spec.PanicRuntime) (p x : BitVec 64) :
         s'.mem.readLE p.toNat 8 = (s.mem.readLE p.toNat 8 + 1) % 2 ^ 64)
       (fun _ _ _ => False) := by
   apply Ensures.toGo
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs hpre
   obtain ⟨hg, ⟨hle, hnw, hacc⟩, ⟨hbw, hb⟩, hd⟩ := hpre
   janus64_intro hs
@@ -47,26 +48,26 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [p, x] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [p, x] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 
 set_option maxRecDepth 100000 in
 theorem hpre : (fun s : State => StackGuardOK s 0 ∧ StackWritable s 64 48 ∧ Buffer s p 8 true ∧ Spec.Disjoint p.toNat 8 ((s.regs regSP).toNat - 64) 112) s0 := by
   dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 theorem hyps : True := by decide
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (P : Janus.Spec.PanicRuntime) (p : BitVec 64) (x : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [p, x] s ∧ (StackGuardOK s 0 ∧ StackWritable s 64 48 ∧ Buffer s p 8 true ∧ Spec.Disjoint p.toNat 8 ((s.regs regSP).toNat - 64) 112) ∧
-    GoReturns (Extracted.program.withExit ret) (goClass P) s fun o =>
+    CallSetup0 Extracted.entry [p, x] s ∧ (StackGuardOK s 0 ∧ StackWritable s 64 48 ∧ Buffer s p 8 true ∧ Spec.Disjoint p.toNat 8 ((s.regs regSP).toNat - 64) 112) ∧
+    GoReturns (Extracted.program.withExit ret) (goClass P) (s.setRet ret) fun o =>
     match o with
-    | .returned s' => ABIReturn s s' ∧ (s'.regs 0 = x ∧ s'.mem.readLE p.toNat 8 = (s.mem.readLE p.toNat 8 + 1) % 2 ^ 64)
+    | .returned s' => ABIReturn (s.setRet ret) s' ∧ (s'.regs 0 = x ∧ s'.mem.readLE p.toNat 8 = ((s.setRet ret).mem.readLE p.toNat 8 + 1) % 2 ^ 64)
     | .panicked v s' => False
     | .goexited _ => False :=
-  ⟨ret, s0, PW, p, x, hret, setup, hpre, correctness PW p x ret hret s0 setup hpre⟩
+  ⟨ret, s0, PW, p, x, hret, setup, hpre, (correctness PW p x) s0 setup hpre ret hret⟩
 
 end Witness
 

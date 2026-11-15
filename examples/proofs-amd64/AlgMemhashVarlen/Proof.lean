@@ -160,7 +160,7 @@ theorem model (d : Nat) : Memhash (Extracted.program.link implAt) cAddr H0 d := 
   subst hpc
   janus64_run until [A0]
   obtain ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
-  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3, (by first | (simp only [stackguard0Offset, regG, regSP] at *; omega) | omega | decide +kernel | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega))⟩, hrest⟩, hrest'⟩
 
 /-- The witness call state: `memhash_varlen(VAL, 7)` on `EqHashModel.wmem64` (model `H0`; return
 address `wret` at `[wsp]`) and the closure `VLEN` (size 8) in `RDX`, goroutine `wg`, `RSP = wsp`. -/
@@ -173,7 +173,7 @@ def s0 : State :=
 /-- The precondition holds at `s0` (`memhash`'s bound 64). -/
 theorem pre : HPre H0 (64 + 40) 2 s0 ∧ Input s0 (64 + 40) 2 ((s0.regs 2).toNat + 8) 8 ∧
     Input s0 (64 + 40) 2 (s0.regs 0).toNat (varlenSize s0) := by
-  refine ⟨⟨wmem64_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩ <;>
+  refine ⟨⟨wmem64_henv _, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_, ?_, ?_⟩, ?_, ?_⟩ <;>
     simp only [CallOK, Input, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
       outside_cons, outside_nil, varlenSize] <;> decide
 
@@ -182,7 +182,7 @@ contract's address, with its precondition for the stack bound `d = 64`. -/
 def wsCall : State := { s0 with rip := BitVec.ofNat 64 cAddr }
 
 theorem wsCall_pre : HPre H0 64 3 wsCall ∧ Input wsCall 64 3 (wsCall.regs 0).toNat (wsCall.regs 1).toNat := by
-  refine ⟨⟨wmem64_henv _, ⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_⟩, ?_⟩ <;>
+  refine ⟨⟨wmem64_henv _, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_, ?_, ?_, ?_⟩, ?_⟩ <;>
     simp only [wsCall, s0, CallOK, Input, H0_priv, calleeStack, Janus.Contracts.MapAmd64.calleeStack,
       outside_cons, outside_nil] <;> decide
 
