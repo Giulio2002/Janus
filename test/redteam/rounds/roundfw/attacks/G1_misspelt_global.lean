@@ -12,6 +12,7 @@ theorem correctness (n : BitVec 64) :
     Ensures Extracted.program Extracted.entry [n]
       (fun s => GlobalsInit Extracted.program.globals s.mem ["example.com/basic.karatsubaCutt"])
       (fun _ _ => False) := by
+  janus_ensures_old
   intro ret hret s hs h
   exfalso
   obtain ⟨g, hg, -⟩ := h _ (List.mem_singleton_self _)

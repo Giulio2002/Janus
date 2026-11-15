@@ -13,6 +13,7 @@ theorem correctness (n : BitVec 64) :
     Ensures Extracted.program Extracted.entry [n]
       (fun s => GlobalIs fake s.mem "example.com/basic.karatsubaCut" 1 ∧ False)
       (fun _ _ => False) := by
+  janus_ensures_old
   intro ret hret s hs h
   exact absurd h.2 id
 

@@ -14,6 +14,7 @@ theorem ctl1 (impl : List Janus.Amd64.Segment) (rt : List (Nat × Nat)) (H : RtR
     (hnew : NewobjectContract64 (Extracted.program.ofImpl impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs hp; exact hp.elim
 
 theorem ctl2 (impl : List Janus.Amd64.Segment) (rt rt' : List (Nat × Nat)) (H H' : RtReady) (a b : BitVec 64)
@@ -22,12 +23,14 @@ theorem ctl2 (impl : List Janus.Amd64.Segment) (rt rt' : List (Nat × Nat)) (H H
     (h2 : NewobjectContract64 (Extracted.program.ofImpl impl)
       (Extracted.program.contractAddr "runtime.newobject") rt' 4096 H') :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs hp; exact hp.elim
 
 theorem r1 (impl : List Janus.Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
     (hnew : NewobjectContract64 (Extracted.program.ofImpl Impl0)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs hp; exact hp.elim
 
 theorem r8 (impl : List Janus.Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
@@ -35,6 +38,7 @@ theorem r8 (impl : List Janus.Amd64.Segment) (rt : List (Nat × Nat)) (H : RtRea
     (hnew : NewobjectContract64 (Extracted.program.ofImpl impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs hp; exact hp.elim
 
 theorem r6 (impl : List Janus.Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
@@ -42,6 +46,7 @@ theorem r6 (impl : List Janus.Amd64.Segment) (rt : List (Nat × Nat)) (H : RtRea
     (hnew : NewobjectContract64 (Extracted.program.ofImpl impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs hp; exact hp.elim
 
 theorem r9 (impl : List Janus.Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
@@ -49,10 +54,12 @@ theorem r9 (impl : List Janus.Amd64.Segment) (rt : List (Nat × Nat)) (H : RtRea
     (hnew : NewobjectContract64 (Extracted.program.ofImpl impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs hp; exact hp.elim
 
 theorem r5 (impl : List Janus.Amd64.Segment) (a b : BitVec 64) :
     Ensures (Extracted.program.ofImpl impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  janus64_ensures_old
   intro ret hret s hs hp; exact hp.elim
 
 end Proof
