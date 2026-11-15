@@ -444,6 +444,25 @@ def indent_of(it, pos):
     return len(it[ls:pos]) - len(it[ls:pos].lstrip(' '))
 
 def migrate(t, amd0, reg, fname=''):
+    # a theorem of THIS file whose conclusion is not an Ensures form (`correctness : Panics .. ↔ .. ∧ ..`, a raw old-shaped
+    # statement) shadows a same-named Ensures theorem of another file of the tree: its applications keep the old shape
+    saved_names = reg.names
+    local_non = set()
+    for it0 in re.split(r'(?m)^(?=(?:theorem |lemma |@\[|private |protected ))', t):
+        m0 = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it0)
+        if not m0 or conclusion(it0): continue
+        sg0, _b0 = split_sig(it0)
+        ci0 = top_colon(sg0) if sg0 is not None else -1
+        mh = re.match(r'\s*(?:\w+\.)*(\w+)', sg0[ci0 + 1:]) if ci0 >= 0 else None
+        if mh and mh.group(1) in reg.ensdefs: continue
+        local_non.add(m0.group(1))
+    reg.names = saved_names - local_non
+    try:
+        return _migrate(t, amd0, reg, fname)
+    finally:
+        reg.names = saved_names
+
+def _migrate(t, amd0, reg, fname=''):
     warn = []
     RAW = re.search(r'∀ ret, RetAddr|\bret hret\b[^\n]*→ ∀ s', t) is not None   # a raw old-shaped statement (faults, panics, ...) in the file
     # split into top-level items
