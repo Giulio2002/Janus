@@ -1069,6 +1069,13 @@ def main(files):
             if nalt:
                 warn.append('%d `refine ⟨k, ?_, k⟩` alternatives got a 4-hole twin (StackGuardOK 4th field)' % nalt)
                 t2 = t5
+        if amd and '⟨?_, ?_, ?_⟩ <;>' in t2:
+            # `first | decide | (refine ⟨?_, ?_, ?_⟩ <;> TAIL) | …` proving a precondition with a StackGuardOK (4 fields now): a 4-hole twin first
+            t6, n6 = re.subn(r'(\| )\(refine ⟨\?_, \?_, \?_⟩ <;> ((?:[^()\n]|\((?:[^()\n]|\([^()\n]*\))*\))*)\)',
+                             lambda m: m.group(1) + '(refine ⟨?_, ?_, ?_, ?_⟩ <;> ' + m.group(2) + ') | (refine ⟨?_, ?_, ?_⟩ <;> ' + m.group(2) + ')', t2)
+            if n6:
+                warn.append('%d `refine ⟨?_, ?_, ?_⟩ <;> …` alternatives got a 4-hole twin (StackGuardOK 4th field)' % n6)
+                t2 = t6
         if t2 != t: open(f, 'w').write(t2)
         print(f, ('WARN: ' + '; '.join(warn)) if warn else 'ok')
 
