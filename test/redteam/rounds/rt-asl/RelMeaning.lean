@@ -183,16 +183,17 @@ def entry : Nat := 0x930c0
 theorem correctness (x y : BitVec 64) :
     Ensures program entry [x, y] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
 
 theorem covered : JanusASL.Classify.covered program = true := by decide +kernel
 
-theorem correctness_asl (x y : BitVec 64) {ret : Nat} (hret : RetAddr program ret) {js : State}
-    (hs : CallSetup (program.withExit ret) entry [x, y] js) {s : SState} (h : Rel js s) (hc : LinuxEL0Config s) :
+theorem correctness_asl (x y : BitVec 64) {ret : Nat} (hret : RetAddr program ret) {js₀ : State}
+    (hs : CallSetup0 entry [x, y] js₀) {s : SState} (h : Rel (js₀.setRet ret) s) (hc : LinuxEL0Config s) :
     ∃ fuel s' js', aslRun (program.withExit ret) fuel s = .returned s' ∧ Rel js' s' ∧ LinuxEL0Config s' ∧
-      ABIReturn js js' ∧ (js'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64 :=
+      ABIReturn (js₀.setRet ret) js' ∧ (js'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64 :=
   Ensures.toASL (correctness x y) (JanusASL.Verify.covered_words _ covered) (JanusASL.Verify.covered_code _ covered)
     (JanusASL.Verify.covered_stubs _ covered) hret hs trivial h hc
 
@@ -234,15 +235,25 @@ theorem Add_pure_asl (x y : BitVec 64) {ret : Nat} (hret : RetAddr AddProg.progr
       ∃ r, gprVal s' 0 = some r ∧ r.toNat = (x.toNat + y.toNat) % 2 ^ 64 := by
   obtain ⟨p, hp, he, hn, hs⟩ := hc.pstate
   have hr := ofSail_rel hg hsp hpc hp he hn hs (hsm p hp)
-  have hcs : CallSetup (AddProg.program.withExit ret) AddProg.entry [x, y] (ofSail s) :=
+  -- v0.4.0: the call state is the one BEFORE the return address is installed; `ofSail s` already holds `ret` in X30,
+  -- so `(ofSail s).setRet ret = ofSail s` and the Sail state `s` is related to it.
+  have hcs : CallSetup0 AddProg.entry [x, y] (ofSail s) :=
     { pc := by simp [ofSail, hpc]
-      lr := by simp [ofSail, regLR, h30, Program.withExit]
+      len := by simp [numIntRegs]
       args := by
         intro i hi
         simp only [List.length_cons, List.length_nil] at hi
         match i, hi with
         | 0, _ => simp [ofSail, h0]
         | 1, _ => simp [ofSail, h1] }
+  have hset : (ofSail s).setRet ret = ofSail s := by
+    simp only [Janus.Arm64.State.setRet]
+    congr 1
+    funext i
+    by_cases hi : i = regLR
+    · subst hi; simp [ofSail, regLR, h30]
+    · simp [hi]; rfl
+  rw [← hset] at hr
   obtain ⟨fuel, s', js', hrun, hrel, _, _, hx⟩ :=
     AddProg.correctness_asl x y hret hcs hr hc
   exact ⟨fuel, s', hrun, js'.regs 0, hrel.gpr 0 (by omega), hx⟩

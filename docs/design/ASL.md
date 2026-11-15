@@ -400,10 +400,10 @@ ASL corollary: Verified: JanusASLCorollary.correctness_asl (Arm's ASL, model 1ac
   Kernel replay: leanchecker passed (ArmASL, ArmASL.Defs, …; 116 modules; …)
   Statement:
     JanusASLCorollary.correctness_asl (x y : BitVec 64) {ret : Nat} (hret : Janus.GoABI.RetAddr Extracted.program ret)
-      {js : Janus.Arm64.State} (hs : Janus.GoABI.CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] js)
-      (hpre : True) {s : JanusASL.Proofs.SState} (h : JanusASL.Proofs.Rel js s) (hc : JanusASL.Proofs.LinuxEL0Config s) :
+      {js₀ : Janus.Arm64.State} (hs : Janus.GoABI.CallSetup0 Extracted.entry [x, y] js₀)
+      (hpre : True) {s : JanusASL.Proofs.SState} (h : JanusASL.Proofs.Rel (js₀.setRet ret) s) (hc : JanusASL.Proofs.LinuxEL0Config s) :
       ∃ fuel s' js', JanusASL.Proofs.aslRun (Extracted.program.withExit ret) fuel s = JanusASL.Proofs.AslOutcome.returned s' ∧
-        JanusASL.Proofs.Rel js' s' ∧ JanusASL.Proofs.LinuxEL0Config s' ∧ Janus.GoABI.ABIReturn js js' ∧
+        JanusASL.Proofs.Rel js' s' ∧ JanusASL.Proofs.LinuxEL0Config s' ∧ Janus.GoABI.ABIReturn (js₀.setRet ret) js' ∧
         BitVec.toNat (js'.regs 0) = (x.toNat + y.toNat) % 2 ^ 64
   Assumptions (see janus explain):
     - Rel js s: …

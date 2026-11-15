@@ -11,6 +11,7 @@ namespace Proof
 theorem correctness (p : Program) (hp : p = Extracted.program) (x y : BitVec 64) :
     Ensures p Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by
+  janus_ensures_old
   subst hp
   intro ret hret s hs _
   janus_intro hs
