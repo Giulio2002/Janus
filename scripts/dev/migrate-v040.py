@@ -385,6 +385,10 @@ def unfold_list(pre_text, reg, f, bound=()):
             if q: cands = q
         same = [c for c in cands if c[0] == f]
         vis = [c for c in cands if c[0] in closure]
+        opened0 = reg.opens.get(f, [])
+        if len(vis) > 1:       # several definitions of that name in the import closure: the ones whose namespace the file opens
+            ov = [c for c in vis if '.'.join(c[2].split('.')[:-1]) in opened0]
+            if ov: vis = ov
         key = (lambda c: (-common(c[2], owner), -len(os.path.commonprefix([c[0], f]))))
         if len(vis) > 1: vis.sort(key=key)
         if len(same) > 1: same.sort(key=key)
@@ -530,6 +534,7 @@ def _migrate(t, amd0, reg, fname=''):
             if sg is not None and reg.ensdefs and ':= by' in it[bs0 - 2:bs0 + 8] + it[bs0:bs0 + 8]:
                 ci0 = top_colon(sg)
                 hm = re.match(r'\s*((?:\w+\.)*\w+)', sg[ci0 + 1:]) if ci0 >= 0 else None
+                if hm and hm.group(1).split('.')[-1] in reg.ensdefs and m and m.group(1) != 'example': ens.setdefault(m.group(1), False)       # a row theorem too
                 if hm and hm.group(1).split('.')[-1] in reg.ensdefs and 'janus_ensures_old' not in it and 'janus64_ensures_old' not in it:
                     mi = re.search(r'(?m)^([ \t]*)intro ((?:[\w\'_]+ )*?)ret hret\b', it[bs0:])
                     if mi:
