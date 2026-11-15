@@ -733,7 +733,7 @@ def _migrate(t, amd0, reg, fname=''):
             for m in r.finditer(it):
                 toks, stop = tokens(it, m.end())
                 for k in range(len(toks) - 3):
-                    if toks[k + 1][0].split('.')[-1] == 'hret' and re.fullmatch(r"[\w'.]+", toks[k][0]):
+                    if re.fullmatch(r"hret[\w']*", toks[k + 1][0].split('.')[-1]) and re.fullmatch(r"[\w'.]+", toks[k][0]):
                         need = 5 if isk else 4          # ret hret s [k] setup  (+ pre follows)
                         if k + need <= len(toks):
                             out.append((m, toks, k, isk))
@@ -748,7 +748,7 @@ def _migrate(t, amd0, reg, fname=''):
                 for mx in re.finditer(r'(?<![\w.\'])' + re.escape(nmx) + r'(?![\w\'])', itx):
                     tk, _ = tokens(itx, mx.end())
                     for kx in range(len(tk) - 3):
-                        if tk[kx + 1][0].split('.')[-1] == 'hret' and kx + 3 < len(tk):
+                        if re.fullmatch(r"hret[\w']*", tk[kx + 1][0].split('.')[-1]) and kx + 3 < len(tk):
                             raw_used.add(tk[kx + 3][0].split('.')[-1]); break
         used_setups -= raw_used
     extra = {}
@@ -921,7 +921,7 @@ def rewrite_witness(it, apps, amd, name, warn, plain, kern, extra=()):
             toks, stop = tokens(it, m.end())
             kk = None
             for q in range(len(toks) - 1):
-                if toks[q + 1][0].split('.')[-1] == 'hret' and re.fullmatch(r"[\w'.]+", toks[q][0]):
+                if re.fullmatch(r"hret[\w']*", toks[q + 1][0].split('.')[-1]) and re.fullmatch(r"[\w'.]+", toks[q][0]):
                     kk = q; break
             need = 5 if isk else 4
             if kk is None or kk + need > len(toks):
