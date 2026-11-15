@@ -114,6 +114,7 @@ abbrev CallPre (n : BitVec 64) (s : State) : Prop :=
 theorem member_returns (i : Member) (n : BitVec 64) (hpc0 : entryOf i < 2 ^ 64) :
     Ensures Extracted.program (entryOf i) [n] (CallPre n)
       (fun _ s' => (s'.regs 0).toNat = res i n.toNat) := by
+  janus_ensures_old [Proof.CallPre]
   intro ret hret s hs ⟨hg, hst, hd⟩
   have h_pc := hs.pc
   have h_lr : s.regs 30 = BitVec.ofNat 64 ret := hs.lr
@@ -155,8 +156,8 @@ def s0 (pc : Nat) : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 pc,
     flags := ⟨false, false, false, false⟩, mem := wmem }
 
-theorem setup (pc : Nat) : CallSetup (Extracted.program.withExit ret) pc [n] (s0 pc) :=
-  ⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩
+theorem setup (pc : Nat) : CallSetup0 pc [n] (s0 pc) :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h; subst h; rfl⟩
 
 theorem hpre0 : CallPre n (s0 0) := by
   refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩, ?_⟩
@@ -167,22 +168,22 @@ theorem hpre (pc : Nat) : CallPre n (s0 pc) := hpre0
 
 /-- So the guarantee is reached: `IsEven(3)` returns `0` and `IsOdd(3)` returns `1`. -/
 theorem returns :
-    Returns (Extracted.program.withExit ret) (s0 Extracted.entry) (fun s' =>
-      ABIReturn (s0 Extracted.entry) s' ∧ (s'.regs 0).toNat = 0) ∧
-    Returns (Extracted.program.withExit ret) (s0 (segAddr Extracted.program "example.com/basic.IsOdd"))
-      (fun s' => ABIReturn (s0 (segAddr Extracted.program "example.com/basic.IsOdd")) s' ∧
+    Returns (Extracted.program.withExit ret) ((s0 Extracted.entry).setRet ret) (fun s' =>
+      ABIReturn ((s0 Extracted.entry).setRet ret) s' ∧ (s'.regs 0).toNat = 0) ∧
+    Returns (Extracted.program.withExit ret) ((s0 (segAddr Extracted.program "example.com/basic.IsOdd")).setRet ret)
+      (fun s' => ABIReturn ((s0 (segAddr Extracted.program "example.com/basic.IsOdd")).setRet ret) s' ∧
         (s'.regs 0).toNat = 1) := by
-  refine ⟨((correctness n).1 ret hret _ (setup _) (hpre _)).mono ?_,
-    ((correctness n).2 ret hret _ (setup _) (hpre _)).mono ?_⟩
+  refine ⟨((correctness n).1 _ (setup _) (hpre _) ret hret).mono ?_,
+    ((correctness n).2 _ (setup _) (hpre _) ret hret).mono ?_⟩
   all_goals intro s' h; exact ⟨h.1, by rw [h.2]; decide⟩
 
 /-- All hypotheses of `correctness` hold together, for both members, and both calls return. -/
 theorem nonvacuous : ∃ (ret : Nat) (s s' : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [n] s ∧ CallPre n s ∧
-    CallSetup (Extracted.program.withExit ret) (segAddr Extracted.program "example.com/basic.IsOdd")
+    CallSetup0 Extracted.entry [n] s ∧ CallPre n s ∧
+    CallSetup0 (segAddr Extracted.program "example.com/basic.IsOdd")
       [n] s' ∧ CallPre n s' ∧
-    Returns (Extracted.program.withExit ret) s (fun t => ABIReturn s t ∧ (t.regs 0).toNat = 0) ∧
-    Returns (Extracted.program.withExit ret) s' (fun t => ABIReturn s' t ∧ (t.regs 0).toNat = 1) :=
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun t => ABIReturn (s.setRet ret) t ∧ (t.regs 0).toNat = 0) ∧
+    Returns (Extracted.program.withExit ret) (s'.setRet ret) (fun t => ABIReturn (s'.setRet ret) t ∧ (t.regs 0).toNat = 1) :=
   ⟨ret, s0 _, s0 _, hret, setup _, hpre _, setup _, hpre _, returns.1, returns.2⟩
 
 end Witness
@@ -191,8 +192,8 @@ end Witness
 namespace OneMember.Witness
 open Proof.Witness
 theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [n] s ∧ CallPre n s ∧
-    Returns (Extracted.program.withExit ret) s (fun t => ABIReturn s t ∧ (t.regs 0).toNat = 0) :=
+    CallSetup0 Extracted.entry [n] s ∧ CallPre n s ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun t => ABIReturn (s.setRet ret) t ∧ (t.regs 0).toNat = 0) :=
   ⟨ret, s0 _, hret, setup _, hpre _, returns.1⟩
 end OneMember.Witness
 

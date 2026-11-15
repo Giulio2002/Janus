@@ -46,6 +46,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
         s'.mem.accessible ptr 16 true = true ∧
         s'.mem.readLE ptr 8 = a.toNat ∧ s'.mem.readLE (ptr + 8) 8 = b.toNat ∧
         MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)])) := by
+  janus_ensures_old [Proof.pairType, JanusASL.RedTeam.AddProg.entry]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hout, hH⟩
   janus_intro hs
   janus_eval_nat h_pt : pairType

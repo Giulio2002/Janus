@@ -43,6 +43,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
         Outside (s.sp.toNat - 4144) 4168 rt ∧
         H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem))
       (fun _ _ => False) := by
+  janus_ensures_old [Proof.pairType, JanusASL.RedTeam.AddProg.entry]
   intro ret hret s hs ⟨hpc, _⟩
   have h1 : BitVec.ofNat 64 Extracted.entry = 7 := hs.pc.symm.trans hpc
   exact absurd h1 (by decide)
@@ -82,8 +83,8 @@ def s0 : State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [3, 5] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [3, 5] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
@@ -117,7 +118,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtR
     NewobjectContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
+    CallSetup0 Extracted.entry [3, 5] s ∧
     (GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside (s.sp.toNat - 4144) 4168 rt ∧
       H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) :=

@@ -46,6 +46,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
         s'.mem.accessible ptr 16 true = true ∧
         s'.mem.readLE ptr 8 = a.toNat ∧ s'.mem.readLE (ptr + 8) 8 = b.toNat ∧
         MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)])) := by
+  janus_ensures_old [Proof.pairType, JanusASL.RedTeam.AddProg.entry]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hout, hH⟩
   janus_intro hs
   janus_eval_nat h_pt : pairType
@@ -96,8 +97,8 @@ def s0 : State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [3, 5] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [3, 5] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
@@ -131,7 +132,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtR
     NewobjectContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
+    CallSetup0 Extracted.entry [3, 5] s ∧
     (GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside (s.sp.toNat - 4144) 4168 rt ∧
       H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) :=
@@ -139,12 +140,12 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtR
 
 /-- The theorem fires: for this call and this allocator, `NewPair(3, 5)` returns a fresh object in
 `rt` holding 3 and 5. -/
-theorem returns : Returns ((Extracted.program.link AllocW.impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+theorem returns : Returns ((Extracted.program.link AllocW.impl).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
     ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
       s'.mem.accessible ptr 16 true = true ∧
       s'.mem.readLE ptr 8 = (3 : BitVec 64).toNat ∧ s'.mem.readLE (ptr + 8) 8 = (5 : BitVec 64).toNat ∧
-      MemFrame s0.mem s'.mem (rt ++ [(s0.sp.toNat - 4144, s0.sp.toNat + 24)]) :=
-  correctness impl rt H 3 5 hnew ret hret s0 setup pre
+      MemFrame (s0.setRet ret).mem s'.mem (rt ++ [((s0.setRet ret).sp.toNat - 4144, (s0.setRet ret).sp.toNat + 24)]) :=
+  (correctness impl rt H 3 5 hnew) s0 setup pre ret hret
 
 end Witness
 
@@ -161,16 +162,16 @@ theorem exc1 (impl : List Segment) (a b : BitVec 64) :
       (fun _ s' => (s'.regs 0).toNat = 0) := sorry
 
 namespace W1.Witness
-theorem returns : Returns ((Extracted.program.link Proof.Witness.AllocW.impl).withExit Proof.Witness.ret) Proof.Witness.s0
-    fun s' => ABIReturn Proof.Witness.s0 s' ∧ (1 + 1 = 2) :=
+theorem returns : Returns ((Extracted.program.link Proof.Witness.AllocW.impl).withExit Proof.Witness.ret) (Proof.Witness.s0.setRet Proof.Witness.ret)
+    fun s' => ABIReturn (Proof.Witness.s0.setRet Proof.Witness.ret) s' ∧ (1 + 1 = 2) :=
   Returns.mono (Proof.correctness Proof.Witness.AllocW.impl Proof.Witness.AllocW.rt Proof.Witness.AllocW.H 3 5 Proof.Witness.AllocW.hnew
-    Proof.Witness.ret Proof.Witness.hret Proof.Witness.s0 Proof.Witness.setup Proof.Witness.pre) (fun s' h => ⟨h.1, rfl⟩)
+    Proof.Witness.s0 Proof.Witness.setup Proof.Witness.pre Proof.Witness.ret Proof.Witness.hret) (fun s' h => ⟨h.1, rfl⟩)
 end W1.Witness
 namespace W2.Witness
-theorem returns : Returns ((Extracted.program.link Proof.Witness.AllocW.impl).withExit Proof.Witness.ret) Proof.Witness.s0
-    fun s' => ABIReturn Proof.Witness.s0 s' ∧ (decide True = true) :=
+theorem returns : Returns ((Extracted.program.link Proof.Witness.AllocW.impl).withExit Proof.Witness.ret) (Proof.Witness.s0.setRet Proof.Witness.ret)
+    fun s' => ABIReturn (Proof.Witness.s0.setRet Proof.Witness.ret) s' ∧ (decide True = true) :=
   Returns.mono (Proof.correctness Proof.Witness.AllocW.impl Proof.Witness.AllocW.rt Proof.Witness.AllocW.H 3 5 Proof.Witness.AllocW.hnew
-    Proof.Witness.ret Proof.Witness.hret Proof.Witness.s0 Proof.Witness.setup Proof.Witness.pre) (fun s' h => ⟨h.1, rfl⟩)
+    Proof.Witness.s0 Proof.Witness.setup Proof.Witness.pre Proof.Witness.ret Proof.Witness.hret) (fun s' h => ⟨h.1, rfl⟩)
 end W2.Witness
 
 end Proof
