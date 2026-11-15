@@ -12,6 +12,7 @@ theorem correctness (impl : List Segment) (fn k : Nat) (rt : List (Nat × Nat)) 
     (hc : ICallContract (Extracted.program.link impl) fn 4 k 48 rt (fun _ => []) R (fun _ => True)) :
     Ensures (Extracted.program.link impl) Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -37,14 +38,14 @@ theorem hc7 : ICallContract (Extracted.program.link ([] : List Segment)) 0 4 7 4
 
 theorem hret : RetAddr (Extracted.program.link ([] : List Segment)) ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup ((Extracted.program.link ([] : List Segment)).withExit ret) Extracted.entry [3, 4] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [3, 4] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
 theorem nonvacuous : ∃ (impl : List Segment) (fn k : Nat) (rt : List (Nat × Nat)) (R : Res) (ret : Nat) (s : State)
     (x y : BitVec 64),
     ICallContract (Extracted.program.link impl) fn 4 k 48 rt (fun _ => []) R (fun _ => True) ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [x, y] s :=
+    CallSetup0 Extracted.entry [x, y] s :=
   ⟨[], 0, 7, [], fun _ _ _ _ _ _ _ => True, ret, s0, 3, 4, hc7, hret, setup⟩
 
 end Witness

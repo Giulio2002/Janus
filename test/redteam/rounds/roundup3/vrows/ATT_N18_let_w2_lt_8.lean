@@ -13,6 +13,7 @@ theorem correctness (impl : List Segment) (fn k w a : Nat) (rt : List (Nat × Na
     (hc : ICallContract (Extracted.program.link impl) fn 4 k 48 rt (fun _ => []) R (fun _ => True)) :
     Ensures (Extracted.program.link impl) Extracted.entry [x, y] (fun _ => (let w2 := w; w2 < 8))
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -39,18 +40,18 @@ theorem hc7 : ICallContract (Extracted.program.link ([] : List Segment)) 0 4 7 4
 
 theorem hret : RetAddr (Extracted.program.link ([] : List Segment)) ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup ((Extracted.program.link ([] : List Segment)).withExit ret) Extracted.entry [3, 4] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [3, 4] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
-theorem returns : Returns ((Extracted.program.link ([] : List Segment)).withExit ret) s0 fun s' => ABIReturn s0 s' ∧
+theorem returns : Returns ((Extracted.program.link ([] : List Segment)).withExit ret) (s0.setRet ret) fun s' => ABIReturn (s0.setRet ret) s' ∧
     (s'.regs 0).toNat = ((3 : BitVec 64).toNat + (4 : BitVec 64).toNat) % 2 ^ 64 :=
-  correctness [] 0 7 7 0 [] (fun _ _ _ _ _ _ _ => True) 3 4 (by decide) hc7 ret hret s0 setup (by decide)
+  (correctness [] 0 7 7 0 [] (fun _ _ _ _ _ _ _ => True) 3 4 (by decide) hc7) s0 setup (by decide) ret hret
 
 theorem nonvacuous : ∃ (impl : List Segment) (fn k w a : Nat) (rt : List (Nat × Nat)) (R : Res) (ret : Nat) (s : State) (x y : BitVec 64),
     (k ≤ w) ∧ ICallContract (Extracted.program.link impl) fn 4 k 48 rt (fun _ => []) R (fun _ => True) ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [x, y] s ∧ (let w2 := w; w2 < 8) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' => ABIReturn s s' ∧ (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64 :=
+    CallSetup0 Extracted.entry [x, y] s ∧ (let w2 := w; w2 < 8) ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' => ABIReturn (s.setRet ret) s' ∧ (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64 :=
   ⟨[], 0, 7, 7, 0, [], fun _ _ _ _ _ _ _ => True, ret, s0, 3, 4, by decide, hc7, hret, setup, by decide, returns⟩
 
 end Witness

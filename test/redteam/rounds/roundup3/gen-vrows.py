@@ -4,7 +4,10 @@
   ATT_*   attacker witnesses: the contract holds vacuously (size pinned unsatisfiable by the pre), the witness omits the call-site state
           (the frozen U-WITNESS-CALLSITE must reject it with 'does not exhibit a call-site state')
   KA1     the known-accepted limitation (R empty only at the arguments of a call no witness run takes): ACCEPTED, with a full witness
-Usage: gen-vrows.py OUT_DIR"""
+Usage: gen-vrows.py OUT_DIR
+
+v0.4.0: the shapes in this script are the v0.3 forms; the tracked files are its output migrated with scripts/dev/migrate-v040.py
+(`janus_ensures_old`, `CallSetup0`, witness runs at `s.setRet ret`, `thm args s0 setup pre ret hret`). Re-run that script on the generated files after regenerating."""
 import sys, os
 out = sys.argv[1]; os.makedirs(out, exist_ok=True)
 HEAD = '''import Extracted

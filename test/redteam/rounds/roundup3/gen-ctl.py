@@ -2,7 +2,10 @@
 """Generate the witness-bearing control rows (test/redteam/rounds/roundup3/ctl/*.lean) from the Add-based control rows of
 test/redteam/rounds/roundup3/rows (N01-N06, N12) and V15 (/srv/janus-rt-n11/audit/roundn11/icall2): each row's main theorem plus a Witness namespace of the
 frozen shape (hypotheses, pre, call-site state, Returns run) instantiated at the stock writer of Janus.Contracts.ICallSat.
-Usage: gen-ctl.py ROWS_DIR OUT_DIR."""
+Usage: gen-ctl.py ROWS_DIR OUT_DIR.
+
+v0.4.0: the shapes in this script are the v0.3 forms; the tracked files are its output migrated with scripts/dev/migrate-v040.py
+(`janus_ensures_old`, `CallSetup0`, witness runs at `s.setRet ret`, `thm args s0 setup pre ret hret`). Re-run that script on the generated files after regenerating."""
 import re, sys, os
 rows, out = sys.argv[1], sys.argv[2]
 # row -> (values for fn fn2 k w n a, hypothesis list [(name,text)], nargs, stack, above) with values substituted as Nat literals

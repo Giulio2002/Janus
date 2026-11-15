@@ -13,6 +13,7 @@ theorem correctness (impl : List Segment) (fn : Nat) (rt : List (Nat × Nat)) (R
     (hc : ICallContract (Extracted.program.link impl) fn 4 16 48 rt (fun _ => []) R (fun sc => sc.regs 0 = 9)) :
     Ensures (Extracted.program.link impl) Extracted.entry [x, y] (fun _ => ∀ n e1 e2, ¬ R 1 2 3 4 n e1 e2)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -48,8 +49,8 @@ theorem hc0 : ICallContract (Extracted.program.link impl) A0 4 16 48 rt0 (fun _ 
 
 theorem hret : RetAddr (Extracted.program.link impl) ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 4] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [3, 4] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
 theorem pin : ∀ n e1 e2, ¬ RK 1 2 3 4 n e1 e2 := by
   intro n e1 e2 h; exact absurd h.1 (by decide)
@@ -65,13 +66,13 @@ theorem nonvacuous : ∃ (impl : List Segment) (fn : Nat) (rt : List (Nat × Nat
     (x y : BitVec 64),
     ICallContract (Extracted.program.link impl) fn 4 16 48 rt (fun _ => []) R (fun sc => sc.regs 0 = 9) ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [x, y] s ∧
+    CallSetup0 Extracted.entry [x, y] s ∧
     (∀ n e1 e2, ¬ R 1 2 3 4 n e1 e2) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 fn ∧ ICallPre 4 16 48 rt (fun sc => sc.regs 0 = 9) s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s
-      (fun s' => ABIReturn s s' ∧ (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) :=
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret)
+      (fun s' => ABIReturn (s.setRet ret) s' ∧ (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) :=
   ⟨impl, A0, rt0, RK, ret, s0, 3, 4, hc0, hret, setup, pin, ⟨wsCall, rfl, wsCall_pre⟩,
-    correctness impl A0 rt0 RK 3 4 hc0 ret hret s0 setup pin⟩
+    (correctness impl A0 rt0 RK 3 4 hc0) s0 setup pin ret hret⟩
 
 end Witness
 end Proof

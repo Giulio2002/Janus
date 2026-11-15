@@ -13,6 +13,7 @@ theorem correctness (impl : List Segment) (fn fn2 k w n a : Nat) (rt : List (Nat
     (hc : ICallContract (Extracted.program.link impl) fn 4 k 48 rt (fun _ => []) R (fun _ => True)) :
     Ensures (Extracted.program.link impl) Extracted.entry [x, y] (fun _ => let w2 := w; w2 < 8)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
