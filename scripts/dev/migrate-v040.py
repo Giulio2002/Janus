@@ -658,7 +658,7 @@ def migrate(t, amd0, reg, fname=''):
             for m in r.finditer(it):
                 toks, stop = tokens(it, m.end())
                 for k in range(len(toks) - 3):
-                    if toks[k + 1][0] == 'hret' and re.fullmatch(r"[\w']+", toks[k][0]):
+                    if toks[k + 1][0].split('.')[-1] == 'hret' and re.fullmatch(r"[\w'.]+", toks[k][0]):
                         need = 5 if isk else 4          # ret hret s [k] setup  (+ pre follows)
                         if k + need <= len(toks):
                             out.append((m, toks, k, isk))
@@ -808,7 +808,7 @@ def rewrite_witness(it, apps, amd, name, warn, plain, kern, extra=()):
             toks, stop = tokens(it, m.end())
             kk = None
             for q in range(len(toks) - 1):
-                if toks[q + 1][0] == 'hret' and re.fullmatch(r"[\w']+", toks[q][0]):
+                if toks[q + 1][0].split('.')[-1] == 'hret' and re.fullmatch(r"[\w'.]+", toks[q][0]):
                     kk = q; break
             need = 5 if isk else 4
             if kk is None or kk + need > len(toks):
