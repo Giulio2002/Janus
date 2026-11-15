@@ -3,6 +3,7 @@
 BEFORE the return address is installed).
 
 Usage: scripts/dev/migrate-v040.py FILE.lean [FILE.lean ...]     (rewrites in place; prints what needs a manual look)
+       scripts/dev/migrate-v040.py --check-idempotent FILE.lean ...  (migrates a temporary copy twice; exit 1 unless the second run changes nothing)
 
 Give it the WHOLE tree in one call (`find lean -name '*.lean' | xargs scripts/dev/migrate-v040.py`): a first pass over
 all files collects the names of the theorems whose conclusion is an `Ensures` form (so applications of them in other
@@ -577,6 +578,7 @@ def _migrate(t, amd0, reg, fname=''):
         bstripped = body.lstrip()
         nm = (re.match(r'\s*', body).end())
         if gen:
+            if '.SetRetInv' in it[:bs] or re.search(r'(?<![\w.\'])(?:\w+\.)*Ensures0?\.of_old\b', it[bs:]): continue      # already migrated (idempotent)
             P, ent, args, pre = gen
             hn = 'hinv'
             if re.search(r'\bhinv\b', it): hn = 'hinv\''
@@ -650,15 +652,15 @@ def _migrate(t, amd0, reg, fname=''):
             ptac = 'janus64_pre_setRet' if isa[i] else 'janus_pre_setRet'
             dl = tac_with_defs(ptac, cc[1], cc[2], reg, fname, cc[3])
             if dl != ptac:
-                gre = re.compile(r'(?<![\w.\'])((?:[\w]+\.)*(?:' + '|'.join(re.escape(n) for n in sorted(reg.generic, key=len, reverse=True)) + r'))(?![\w\'])')
+                gre = re.compile(r'(?<![\w.\'])((?:[\w]+\.)*(?:' + '|'.join(re.escape(n) for n in sorted(reg.generic, key=len, reverse=True)) + r'))(?![\w\'])(?!\s*\(hinv\s*:=)')
                 se = split_sig(it)[1] or 0
                 it = it[:se] + gre.sub(lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[se:])
         if cc and re.search(r'(?<![\w.\'])(?:\w+\.)*Ensures0?\.mono(?![\w\'])', it[split_sig(it)[1] or 0:]):
             ptac = 'janus64_pre_setRet' if isa[i] else 'janus_pre_setRet'
             dl = tac_with_defs(ptac, cc[1], cc[2], reg, fname, cc[3])
             if dl != ptac:
-                it = re.sub(r'(?<![\w.\'])((?:\w+\.)*Ensures0?\.mono)(?![\w\'_])', lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[split_sig(it)[1] or 0:]) if False else \
-                    it[:split_sig(it)[1]] + re.sub(r'(?<![\w.\'])((?:\w+\.)*Ensures0?\.mono)(?![\w\'_])', lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[split_sig(it)[1]:])
+                it = re.sub(r'(?<![\w.\'])((?:\w+\.)*Ensures0?\.mono)(?![\w\'_])(?!\s*\(hinv\s*:=)', lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[split_sig(it)[1] or 0:]) if False else \
+                    it[:split_sig(it)[1]] + re.sub(r'(?<![\w.\'])((?:\w+\.)*Ensures0?\.mono)(?![\w\'_])(?!\s*\(hinv\s*:=)', lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[split_sig(it)[1]:])
         it = add_hlen(it, isa[i], warn, m.group(1), reg)
         items[i] = it
     # ---- pass 2: old-shaped applications of Ensures-form theorems (and hypotheses) -> `(thm args).toOld ret hret …`
@@ -998,6 +1000,7 @@ def fix_stackguard_terms(t):
     rx = re.compile(r'(?<![\w])⟨(' + comp + r'), (' + comp + r'), (' + comp + r')⟩')
     def tri(m):
         a, b, c = m.group(1), m.group(2), m.group(3)
+        if t[:m.start()].endswith('exact ⟨%s, %s, %s, by decide⟩ | exact ' % (a, b, c)): return m.group(0)      # the 3-field fallback of an earlier run (idempotent)
         return '(by first | exact ⟨%s, %s, %s, by decide⟩ | exact ⟨%s, %s, %s⟩)' % (a, b, c, a, b, c)
     t2, k = rx.subn(tri, t)
     return t2, n + k
@@ -1114,12 +1117,41 @@ def main(files):
         if amd and '⟨?_, ?_, ?_⟩ <;>' in t2:
             # `first | decide | (refine ⟨?_, ?_, ?_⟩ <;> TAIL) | …` proving a precondition with a StackGuardOK (4 fields now): a 4-hole twin first
             t6, n6 = re.subn(r'(\| )\(refine ⟨\?_, \?_, \?_⟩ <;> ((?:[^()\n]|\((?:[^()\n]|\([^()\n]*\))*\))*)\)',
-                             lambda m: m.group(1) + '(refine ⟨?_, ?_, ?_, ?_⟩ <;> ' + m.group(2) + ') | (refine ⟨?_, ?_, ?_⟩ <;> ' + m.group(2) + ')', t2)
+                             lambda m: m.group(0) if t2[:m.start()].endswith('(refine ⟨?_, ?_, ?_, ?_⟩ <;> ' + m.group(2) + ') ') else
+                             m.group(1) + '(refine ⟨?_, ?_, ?_, ?_⟩ <;> ' + m.group(2) + ') | (refine ⟨?_, ?_, ?_⟩ <;> ' + m.group(2) + ')', t2)
+            if n6: n6 = sum(1 for _ in re.finditer(r'\(refine ⟨\?_, \?_, \?_, \?_⟩ <;>', t6)) - sum(1 for _ in re.finditer(r'\(refine ⟨\?_, \?_, \?_, \?_⟩ <;>', t2))
             if n6:
                 warn.append('%d `refine ⟨?_, ?_, ?_⟩ <;> …` alternatives got a 4-hole twin (StackGuardOK 4th field)' % n6)
                 t2 = t6
         if t2 != t: open(f, 'w').write(t2)
         print(f, ('WARN: ' + '; '.join(warn)) if warn else 'ok')
 
+def check_idempotent(files):
+    """`migrate-v040.py --check-idempotent FILE...`: copy the files to a temporary tree, migrate it twice, and fail when the second run
+    changes any file (a migrated tree must be a fixed point of the script). The originals are never written."""
+    import tempfile, shutil, io, contextlib
+    tmp = tempfile.mkdtemp(prefix='mig-idem-')
+    try:
+        cp = []
+        for f in sorted(dict.fromkeys(files)):
+            rel = os.path.relpath(os.path.abspath(f), os.path.commonpath([os.path.abspath(x) for x in files]) if len(files) > 1 else os.path.dirname(os.path.abspath(f)))
+            i = os.path.abspath(f).rfind('/lean/')
+            rel = os.path.abspath(f)[i + 1:] if i >= 0 else rel
+            dst = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(f, dst); cp.append(dst)
+        snap = lambda: {c: open(c).read() for c in cp}
+        with contextlib.redirect_stdout(io.StringIO()): main(cp)
+        s1 = snap()
+        with contextlib.redirect_stdout(io.StringIO()): main(cp)
+        s2 = snap()
+        bad = [c for c in cp if s1[c] != s2[c]]
+        print('first run changed %d of %d files; second run changed %d' % (sum(1 for f, c in zip(sorted(dict.fromkeys(files)), cp) if open(f).read() != s1[c]), len(cp), len(bad)))
+        for c in bad[:20]: print('NOT IDEMPOTENT:', os.path.relpath(c, tmp))
+        return 1 if bad else 0
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == '--check-idempotent': sys.exit(check_idempotent(sys.argv[2:]))
     main(sys.argv[1:])
