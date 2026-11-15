@@ -42,15 +42,19 @@ echo
 echo "== R2 (LOW, self-disclosing): theorem-level instance binder + tying hypothesis =="
 echo "Prints 's.regs 0 = x * y' but carries the visible binder [inst : HMul ...] and the hypothesis"
 echo "(h : x * y = x + y); the '*' is the abstract bound instance, and the result equals x + y by h."
-echo "Expected: Verified (the misleading '*' is fully disclosed by the printed binder and hypothesis)."
-v --proof test/redteam/rounds/round3/attacks/R2_inst_binder.lean $W/Add | grep -m1 -E 'Verified:|Invalid' | sed 's/^/  R2 /'
+echo "Expected: the AUDIT passes (the misleading '*' is fully disclosed by the printed binder and hypothesis). The file has no Witness,"
+echo "so it is run --audit-only (a full verify rejects any main theorem without a witness: that is not what this row tests)."
+r2=$(v --audit-only --proof test/redteam/rounds/round3/attacks/R2_inst_binder.lean $W/Add | grep -m1 -E '^(Audit-only|Verified|Invalid)')
+case "$r2" in Audit-only*|Verified*) echo "  R2 ok       $r2" | cut -c1-160 ;; *) echo "  R2 >>> BROKEN: $r2"; broken+=(R2) ;; esac
 }
 regression_block() {
 echo
 echo "== Regression: legitimate proofs with honest proof-local defs still verify =="
 for p in "examples/proofs/Add.lean:$W/Add" ; do
   f=${p%%:*}; d=${p##*:}
-  v --proof "$f" "$d" | grep -m1 -E 'Verified:|Invalid' | sed "s#^#  $(basename $f) #"
+  # the honest proof verifies together with its Witness.nonvacuous (a main theorem is verified only with one)
+  r=$(v --proof "$f" "$d" --theorem Proof.correctness --theorem Proof.Witness.nonvacuous | grep -m1 -E 'Verified:|Invalid')
+  case "$r" in Verified*) echo "  $(basename $f) ok       $r" | cut -c1-160 ;; *) echo "  $(basename $f) >>> BROKEN: $r"; broken+=(regression-$(basename $f)) ;; esac
 done
 }
 notes_block() {
