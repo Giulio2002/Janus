@@ -701,7 +701,7 @@ def fix_setup_body(it, amd, warn, name):
     if sig is None: return it
     body = it[bs:]
     k = body.find('⟨')
-    if k < 0 or body[:k].strip() not in ('', 'by', 'by exact'):
+    if k < 0 or not re.fullmatch(r'\s*(?:by\s*(?:refine|exact)?)?\s*', body[:k]):
         if 'CallSetup0' in sig or 'CallSetupF' in sig:
             warn.append('setup %s: not an anonymous constructor; adjust the return-address field by hand' % name)
         return it
