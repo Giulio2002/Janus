@@ -37,6 +37,7 @@ theorem correctness (x : BitVec 64) (b : Bool) :
       (fun s => StackGuardOK s 0 ∧ StackWritable s 24 8 ∧ CpuFlag s.mem hasPOPCNT b ∧
         Spec.Disjoint hasPOPCNT 1 ((s.regs regSP).toNat - 24) 32)
       (fun _ s' => (s'.regs 0).toNat = popNat 64 x.toNat) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Contracts.Misc.CpuFlag, Proof.hasPOPCNT, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hg, ⟨hle, hnw, hacc⟩, hf, hfd⟩
   janus64_intro hs
   have hgl := hg.load
@@ -79,8 +80,8 @@ def s0 : Janus.Amd64.State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0xff : BitVec 64)] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [(0xff : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0) with rfl <;> first | rfl | decide, rfl⟩
@@ -89,15 +90,15 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Amd64.State) (x : BitVec 64) (b : Bool), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s ∧ (StackGuardOK s 0 ∧ StackWritable s 24 8 ∧ CpuFlag s.mem hasPOPCNT b ∧
+    CallSetup0 Extracted.entry [x] s ∧ (StackGuardOK s 0 ∧ StackWritable s 24 8 ∧ CpuFlag s.mem hasPOPCNT b ∧
         Spec.Disjoint hasPOPCNT 1 ((s.regs regSP).toNat - 24) 32) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 0).toNat = popNat 64 x.toNat)) := by
-  refine ⟨ret, s0, 0xff, true, hret, setup, ?pre, correctness 0xff true ret hret s0 setup ?pre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = popNat 64 x.toNat)) := by
+  refine ⟨ret, s0, 0xff, true, hret, setup, ?pre, (correctness 0xff true) s0 setup ?pre ret hret⟩
   case pre =>
     try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Program.DataLoaded]
     repeat' apply And.intro
-    all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+    all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
 
 end Witness
 

@@ -703,6 +703,7 @@ theorem correctness :
           ((s.xmm 2).toNat % 2 ^ 64) ((s.xmm 3).toNat % 2 ^ 64)).1 ((s'.xmm 0).toNat % 2 ^ 64) ∧
         ResultIs binary64 (cdiv false ((s.xmm 0).toNat % 2 ^ 64) ((s.xmm 1).toNat % 2 ^ 64)
           ((s.xmm 2).toNat % 2 ^ 64) ((s.xmm 3).toNat % 2 ^ 64)).2 ((s'.xmm 1).toNat % 2 ^ 64)) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.GoMXCSR, Janus.Contracts.Misc.RuntimeInf, Janus.Amd64.GoABI.regSP, Janus.Contracts.Misc.infBits]
   intro ret hret s hs ⟨hg, ⟨hle, hnw, hacc⟩, hgd, hm, ⟨hi1, hi2, hi3⟩, hid, hdl⟩
   janus64_intro hs
   have hgl := hg.load
@@ -750,27 +751,27 @@ def s0 : Janus.Amd64.State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, by decide +kernel, rfl, by decide, by intro i h; simp at h, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h, rfl⟩
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Amd64.State) , RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (StackGuardOK s 40 ∧ StackWritable s 48 8 ∧
+    CallSetup0 Extracted.entry [] s ∧ (StackGuardOK s 40 ∧ StackWritable s 48 8 ∧
         Janus.Spec.Disjoint ((s.regs 14).toNat + 16) 8 ((s.regs 4).toNat - 48) 56 ∧ GoABI.GoMXCSR s ∧
         RuntimeInf s.mem infAddr ∧ Janus.Spec.Disjoint infAddr 8 ((s.regs 4).toNat - 48) 56 ∧
         Extracted.program.DataLoaded s.mem) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (ResultIs binary64 (cdiv false ((s.xmm 0).toNat % 2 ^ 64) ((s.xmm 1).toNat % 2 ^ 64)
-          ((s.xmm 2).toNat % 2 ^ 64) ((s.xmm 3).toNat % 2 ^ 64)).1 ((s'.xmm 0).toNat % 2 ^ 64) ∧
-        ResultIs binary64 (cdiv false ((s.xmm 0).toNat % 2 ^ 64) ((s.xmm 1).toNat % 2 ^ 64)
-          ((s.xmm 2).toNat % 2 ^ 64) ((s.xmm 3).toNat % 2 ^ 64)).2 ((s'.xmm 1).toNat % 2 ^ 64))) := by
-  refine ⟨ret, s0, hret, setup, ?pre, correctness  ret hret s0 setup ?pre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (ResultIs binary64 (cdiv false (((s.setRet ret).xmm 0).toNat % 2 ^ 64) (((s.setRet ret).xmm 1).toNat % 2 ^ 64)
+          (((s.setRet ret).xmm 2).toNat % 2 ^ 64) (((s.setRet ret).xmm 3).toNat % 2 ^ 64)).1 ((s'.xmm 0).toNat % 2 ^ 64) ∧
+        ResultIs binary64 (cdiv false (((s.setRet ret).xmm 0).toNat % 2 ^ 64) (((s.setRet ret).xmm 1).toNat % 2 ^ 64)
+          (((s.setRet ret).xmm 2).toNat % 2 ^ 64) (((s.setRet ret).xmm 3).toNat % 2 ^ 64)).2 ((s'.xmm 1).toNat % 2 ^ 64))) := by
+  refine ⟨ret, s0, hret, setup, ?pre, (correctness) s0 setup ?pre ret hret⟩
   case pre =>
     try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR]
     repeat' apply And.intro
-    all_goals first | exact dataLoaded | decide +kernel | (refine ⟨?_, ?_, ?_⟩ <;> decide +kernel)
+    all_goals first | exact dataLoaded | decide +kernel | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide +kernel) | (refine ⟨?_, ?_, ?_⟩ <;> decide +kernel)
 
 end Witness
 

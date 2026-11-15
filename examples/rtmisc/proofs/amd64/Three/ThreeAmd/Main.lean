@@ -35,6 +35,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (n x : Bit
       (Extracted.program.contractAddr "runtime.gcWriteBarrier2") 4096 R 2) :
     Ensures (Extracted.program.link impl) Extracted.entry [n, x]
       (fun s => Pre R b n s) (fun s s' => Post R n x s s') := by
+  janus64_ensures_old [ThreeAmd.Pre]
   intro ret hret s hs hpre
   have hpre' := hpre
   obtain ⟨hg, ⟨hb', ha, hw⟩, hal, hd, hout, hga, hgr, hflag, hty1, hty2, hn, hn2,

@@ -41,7 +41,7 @@ local macro "cgoN" : term => `(janus_eval% cgoAddr)
 
 theorem correctness : KeepAliveContract64 Extracted.program Extracted.entry cgoAddr := by
   intro s hpc ⟨hpre, hcgo, hdis⟩
-  obtain ⟨-, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx, hdf, hra, hout⟩ := hpre
+  obtain ⟨-, ⟨hg1, hg2, hg3, hg4⟩, hal, hd1, hd2, hst, hx, hdf, hra, hout⟩ := hpre
   obtain ⟨hc1, hc2, hc3⟩ := hcgo
   simp only [softEnv, softDepth, regSP, regG, stackguard0Offset, stackguard0] at hg1 hg2 hg3 hal hd1 hd2 hst hra hout
   janus_eval_nat hC : cgoAddr
@@ -73,8 +73,8 @@ def s0 : State :=
 theorem pre : RTPre64 softEnv 2 s0 ∧ Misc.CgoAlwaysFalse s0.mem cgoAddr ∧
     Spec.Disjoint cgoAddr 1 ((s0.regs 4).toNat - softDepth) (softDepth + 8 + 8 * 2) := by
   rw [cgoAddr_eq]
-  refine ⟨⟨trivial, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, rfl, rfl,
-    by decide, ?_⟩, ⟨by decide, by decide, by decide⟩, by unfold Spec.Disjoint; decide⟩
+  refine ⟨⟨trivial, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide, by decide, rfl, rfl,
+    by decide, ?_⟩, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by unfold Spec.Disjoint; decide⟩
   simp [softEnv, outside_nil]
 
 /-- So the guarantee is reached: the call returns to the return address, changing only its frame. -/

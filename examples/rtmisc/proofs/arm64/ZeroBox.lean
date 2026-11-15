@@ -39,6 +39,7 @@ theorem correctness :
       (fun s s' => (s'.regs 0).toNat = arrType ∧ (s'.regs 1).toNat = zeroAddr ∧ s'.mem = s.mem ∧
         (ZeroVal s.mem zeroAddr → s'.mem.accessible (s'.regs 1).toNat 32 false = true ∧
           s'.mem.readLE (s'.regs 1).toNat 32 = 0)) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_eval_nat hT : arrType
@@ -68,19 +69,19 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h⟩
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h⟩
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Arm64.State) , RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (True) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 0).toNat = arrType ∧ (s'.regs 1).toNat = zeroAddr ∧ s'.mem = s.mem ∧
-        (ZeroVal s.mem zeroAddr → s'.mem.accessible (s'.regs 1).toNat 32 false = true ∧
+    CallSetup0 Extracted.entry [] s ∧ (True) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = arrType ∧ (s'.regs 1).toNat = zeroAddr ∧ s'.mem = (s.setRet ret).mem ∧
+        (ZeroVal (s.setRet ret).mem zeroAddr → s'.mem.accessible (s'.regs 1).toNat 32 false = true ∧
           s'.mem.readLE (s'.regs 1).toNat 32 = 0))) := by
-  refine ⟨ret, s0, hret, setup, ?pre, correctness  ret hret s0 setup ?pre⟩
+  refine ⟨ret, s0, hret, setup, ?pre, (correctness) s0 setup ?pre ret hret⟩
   case pre =>
     simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, mem0, bytes0, sp0, g0] <;> decide
 

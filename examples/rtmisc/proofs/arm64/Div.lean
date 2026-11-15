@@ -415,6 +415,7 @@ theorem correctness :
       (fun s s' =>
         ResultIs binary64 (cdiv true (s.getV 0 64) (s.getV 1 64) (s.getV 2 64) (s.getV 3 64)).1 (s'.getV 0 64) ∧
         ResultIs binary64 (cdiv true (s.getV 0 64) (s.getV 1 64) (s.getV 2 64) (s.getV 3 64)).2 (s'.getV 1 64)) := by
+  janus_ensures_old [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Contracts.Misc.RuntimeInf, Proof.infAddr, Janus.Contracts.Misc.infBits, Proof.cdivAddr]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hgd, hf, ⟨hi1, hi2, hi3⟩, hid⟩
   janus_intro hs
   simp only [Disjoint] at hgd hid
@@ -446,19 +447,19 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h⟩
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h⟩
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Arm64.State) , RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (GuardOK s 0 ∧ StackOK s 56 0 ∧ Disjoint ((s.regs 28).toNat + 16) 8 (s.sp.toNat - 56) 56 ∧
+    CallSetup0 Extracted.entry [] s ∧ (GuardOK s 0 ∧ StackOK s 56 0 ∧ Disjoint ((s.regs 28).toNat + 16) 8 (s.sp.toNat - 56) 56 ∧
         s.fpcr = 0 ∧ RuntimeInf s.mem infAddr ∧ Disjoint infAddr 8 (s.sp.toNat - 56) 56) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (ResultIs binary64 (cdiv true (s.getV 0 64) (s.getV 1 64) (s.getV 2 64) (s.getV 3 64)).1 (s'.getV 0 64) ∧
-        ResultIs binary64 (cdiv true (s.getV 0 64) (s.getV 1 64) (s.getV 2 64) (s.getV 3 64)).2 (s'.getV 1 64))) := by
-  refine ⟨ret, s0, hret, setup, ?pre, correctness  ret hret s0 setup ?pre⟩
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (ResultIs binary64 (cdiv true ((s.setRet ret).getV 0 64) ((s.setRet ret).getV 1 64) ((s.setRet ret).getV 2 64) ((s.setRet ret).getV 3 64)).1 (s'.getV 0 64) ∧
+        ResultIs binary64 (cdiv true ((s.setRet ret).getV 0 64) ((s.setRet ret).getV 1 64) ((s.setRet ret).getV 2 64) ((s.setRet ret).getV 3 64)).2 (s'.getV 1 64))) := by
+  refine ⟨ret, s0, hret, setup, ?pre, (correctness) s0 setup ?pre ret hret⟩
   case pre =>
     try unfold Janus.Spec.GuardOK Janus.Spec.StackOK Janus.Spec.Disjoint Janus.Contracts.Misc.RuntimeInf
     repeat' apply And.intro

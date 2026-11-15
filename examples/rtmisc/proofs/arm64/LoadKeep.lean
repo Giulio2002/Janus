@@ -29,6 +29,7 @@ theorem correctness (p : BitVec 64) :
       (fun s => Ptr s.mem p 8 false ∧ StackOK s 0 16 ∧ Disjoint p.toNat 8 (s.sp.toNat + 8) 8)
       (fun s s' => (s'.regs 0).toNat = s.mem.readLE p.toNat 8 ∧
         s'.mem = s.mem.writeLE (s.sp.toNat + 8) 8 p.toNat) := by
+  janus_ensures_old [Janus.Spec.Ptr, Janus.Spec.StackOK]
   intro ret hret s hs ⟨⟨hp, hp'⟩, ⟨hal, _, hb, hw⟩, hd⟩
   simp only [Disjoint] at hd
   janus_intro hs
@@ -53,8 +54,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x300000 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(0x300000 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0) with rfl <;> rfl⟩
@@ -63,11 +64,11 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Arm64.State) (p : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [p] s ∧ (Ptr s.mem p 8 false ∧ StackOK s 0 16 ∧ Disjoint p.toNat 8 (s.sp.toNat + 8) 8) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 0).toNat = s.mem.readLE p.toNat 8 ∧
-        s'.mem = s.mem.writeLE (s.sp.toNat + 8) 8 p.toNat)) := by
-  refine ⟨ret, s0, 0x300000, hret, setup, ?pre, correctness 0x300000 ret hret s0 setup ?pre⟩
+    CallSetup0 Extracted.entry [p] s ∧ (Ptr s.mem p 8 false ∧ StackOK s 0 16 ∧ Disjoint p.toNat 8 (s.sp.toNat + 8) 8) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = (s.setRet ret).mem.readLE p.toNat 8 ∧
+        s'.mem = (s.setRet ret).mem.writeLE ((s.setRet ret).sp.toNat + 8) 8 p.toNat)) := by
+  refine ⟨ret, s0, 0x300000, hret, setup, ?pre, (correctness 0x300000) s0 setup ?pre ret hret⟩
   case pre =>
     simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Ptr32, Janus.Spec.Disjoint, Janus.Spec.Aliasing, Janus.Program.DataLoaded, Janus.Arm64.State.getV, s0, mem0, bytes0, sp0, g0] <;> decide
 

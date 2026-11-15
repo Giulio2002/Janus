@@ -50,9 +50,33 @@ theorem correctness (impl : List Janus.Amd64.Segment) (C : CheckptrModel) (hl : 
       (fun s s' => (s'.regs 0).toNat = s.mem.readLE p.toNat 8 ∧
         MemFrame s.mem s'.mem (C.priv ++ [((s.regs 4).toNat - (C.depth + 40), (s.regs 4).toNat + 16)]) ∧
         C.Env s'.mem (s.regs 14)) := by
+  refine Ensures.of_old ?hinv ?_
+  case hinv =>
+    intro s ret hs hret hp
+    have hle := hl.env
+    have oapp : ∀ (a n : Nat) (xs ys : List (Nat × Nat)), Outside a n xs → Outside a n ys → Outside a n (xs ++ ys) := by
+      intro a n xs ys hx hy
+      induction xs with
+      | nil => simpa using hy
+      | cons x xs ih =>
+        obtain ⟨lo, hi⟩ := x
+        simp only [List.cons_append, outside_cons] at hx ⊢
+        exact ⟨hx.1, ih hx.2⟩
+    -- the base of the object holding `p` reads only the runtime's memory and the goroutine's stack bounds,
+    -- which the return slot `[RSP, RSP + 8)` does not touch
+    have hbase : C.base (s.setRet ret).mem ((s.setRet ret).regs 14) = C.base s.mem (s.regs 14) := by
+      have hp' := hp
+      obtain ⟨hcal, -, -, -, -, -, -, hgd16⟩ := hp'
+      obtain ⟨-, -, hal, hdp, hb, hst, hout, hgd, hgo⟩ := hcal
+      unfold Janus.Spec.Disjoint at hgd16
+      have hg : (s.setRet ret).regs 14 = s.regs 14 := by simp
+      rw [hg]
+      exact hl.base_frame _ _ _ (Janus.Contracts.SetRetFramesAmd64.agrees_setRet
+        (oapp _ _ _ _ (Janus.Outside.of_sub hout (by omega) (by omega)) ⟨by omega, trivial⟩))
+    janus64_pre_setRet_core s ret hs hret hp [Janus.Contracts.Instrument.CallerOK64, Janus.Program.DataLoaded, Janus.Amd64.GoABI.Buffer, Janus.Contracts.Instrument.NoStraddle, hbase]
   intro ret hret s hs ⟨hcal, hd, ⟨hp', hp⟩, hp0, hns, hpo, hpd, hgd16⟩
   have hc' := hcal
-  obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hdp, hb, hst, hout, hgd, hgo⟩ := hc'
+  obtain ⟨henv, ⟨hg1, hg2, hg3, hg4⟩, hal, hdp, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
   janus_eval_nat hT : elemType
   simp only [regG, regSP, stackguard0Offset, stackguard0, Spec.Disjoint] at hg1 hg2 hg3 hgd hpd hgd16 hal hdp hb hst hout
@@ -130,7 +154,7 @@ theorem linked_eq : Extracted.program.link implAt = linked := rfl
 theorem model : CheckptrAlignment64 (Extracted.program.link implAt) cAddr C0 := by
   rw [linked_eq]
   intro s hpc ⟨hpre, _⟩
-  obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx, hdf, hra, hout⟩ := hpre
+  obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3, hg4⟩, hal, hd1, hd2, hst, hx, hdf, hra, hout⟩ := hpre
   simp only [regSP, regG, stackguard0Offset, stackguard0] at hg1 hg2 hg3 hal hd1 hd2 hst hra
   janus64_run
   exact RTReturn64.intro C0.toRtEnv 3 s _ _ rfl rfl rfl rfl rfl rfl (by simp [hdf]) rfl
@@ -164,15 +188,15 @@ def s0 : Janus.Amd64.State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mem2 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [pv] s0 :=
-  ⟨rfl, by decide +kernel, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [pv] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
 theorem pre : CallerOK64 C0.toRtEnv s0 40 16 ∧ Extracted.program.DataLoaded s0.mem ∧
     Buffer s0 pv 8 false ∧ pv.toNat ≠ 0 ∧ NoStraddle C0 s0.mem (s0.regs 14) pv.toNat 8 ∧
     Outside pv.toNat 8 C0.priv ∧
     Spec.Disjoint pv.toNat 8 ((s0.regs 4).toNat - (C0.depth + 40)) (C0.depth + 56) ∧
     Spec.Disjoint (s0.regs 14).toNat 16 ((s0.regs 4).toNat - (C0.depth + 40)) (C0.depth + 56) := by
-  refine ⟨⟨mem2_env (s0.regs 14), ⟨by decide, by decide, by decide +kernel⟩, by decide, by decide,
+  refine ⟨⟨mem2_env (s0.regs 14), (by first | exact ⟨by decide, by decide, by decide +kernel, by decide⟩ | exact ⟨by decide, by decide, by decide +kernel⟩), by decide, by decide,
     by decide, by decide +kernel, ?_, ?_, ?_⟩, mem2_data, ⟨by decide, by decide +kernel⟩, by decide,
     ?_, ?_, ?_, ?_⟩
   · simp only [C0_priv, outside_cons, outside_nil, and_true]; decide
@@ -190,22 +214,22 @@ def sCall : Janus.Amd64.State :=
 
 theorem sCall_pre : RTPre64 C0.toRtEnv 3 sCall ∧
     AlignOK C0 sCall.mem (sCall.regs 14) (sCall.regs 0).toNat (sCall.regs 3).toNat (sCall.regs 1).toNat := by
-  refine ⟨⟨mem2_env (sCall.regs 14), ⟨by decide, by decide, by decide +kernel⟩, by decide, by decide,
+  refine ⟨⟨mem2_env (sCall.regs 14), (by first | exact ⟨by decide, by decide, by decide +kernel, by decide⟩ | exact ⟨by decide, by decide, by decide +kernel⟩), by decide, by decide,
     by decide, by decide +kernel, rfl, rfl, by decide +kernel, ?_⟩, Or.inl rfl⟩
   simp only [C0_priv, outside_cons, outside_nil, and_true]; decide
 
-theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ ((s'.regs 0).toNat = s0.mem.readLE pv.toNat 8 ∧
-      MemFrame s0.mem s'.mem (C0.priv ++ [((s0.regs 4).toNat - (C0.depth + 40), (s0.regs 4).toNat + 16)]) ∧
-      C0.Env s'.mem (s0.regs 14)) :=
-  correctness implAt C0 C0_laws model pv ret hret s0 setup pre
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ ((s'.regs 0).toNat = (s0.setRet ret).mem.readLE pv.toNat 8 ∧
+      MemFrame (s0.setRet ret).mem s'.mem (C0.priv ++ [(((s0.setRet ret).regs 4).toNat - (C0.depth + 40), ((s0.setRet ret).regs 4).toNat + 16)]) ∧
+      C0.Env s'.mem ((s0.setRet ret).regs 14)) :=
+  (correctness implAt C0 C0_laws model pv) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (C : CheckptrModel) (ret : Nat)
     (s : Janus.Amd64.State), C.Laws ∧
     CheckptrAlignment64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.checkptrAlignment") C ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [pv] s ∧
+    CallSetup0 Extracted.entry [pv] s ∧
     (CallerOK64 C.toRtEnv s 40 16 ∧ Extracted.program.DataLoaded s.mem ∧
       Buffer s pv 8 false ∧ pv.toNat ≠ 0 ∧ NoStraddle C s.mem (s.regs 14) pv.toNat 8 ∧
       Outside pv.toNat 8 C.priv ∧
@@ -214,16 +238,16 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (C : CheckptrModel) (
     (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.checkptrAlignment") ∧
       RTPre64 C.toRtEnv 3 s_c ∧
       AlignOK C s_c.mem (s_c.regs 14) (s_c.regs 0).toNat (s_c.regs 3).toNat (s_c.regs 1).toNat) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 0).toNat = s.mem.readLE pv.toNat 8 ∧
-        MemFrame s.mem s'.mem (C.priv ++ [((s.regs 4).toNat - (C.depth + 40), (s.regs 4).toNat + 16)]) ∧
-        C.Env s'.mem (s.regs 14)) :=
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = (s.setRet ret).mem.readLE pv.toNat 8 ∧
+        MemFrame (s.setRet ret).mem s'.mem (C.priv ++ [(((s.setRet ret).regs 4).toNat - (C.depth + 40), ((s.setRet ret).regs 4).toNat + 16)]) ∧
+        C.Env s'.mem ((s.setRet ret).regs 14)) :=
   ⟨implAt, C0, ret, s0, C0_laws, model, hret, setup, pre,
     ⟨sCall, rfl, sCall_pre⟩, returnsF⟩
 
 /-- So the guarantee is reached: `Word(&v)` returns `42`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = 42 := by
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = 42 := by
   refine Returns.mono returnsF ?_
   intro s' ⟨habi, h0, _, _⟩
   refine ⟨habi, ?_⟩

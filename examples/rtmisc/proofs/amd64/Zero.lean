@@ -34,6 +34,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List 
         R.inv b L (s.regs 14).toNat (view R.rt L s'.mem) ∧
         MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4128, (s.regs 4).toNat + 16),
           (ptr.toNat, ptr.toNat + len.toNat)])) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hg, ⟨hb', ha, hw⟩, hal, hout, hga, hgr, hinv, hLs, hdest⟩
   have harg1 : s.regs 3 = len := by
     have := hs.args 1 (by simp)
@@ -104,8 +105,8 @@ def s0 : Amd64.State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [BitVec.ofNat 64 ptr0, 12, 12] s0 :=
-  ⟨rfl, by decide, rfl, by decide,
+theorem setup : CallSetup0 Extracted.entry [BitVec.ofNat 64 ptr0, 12, 12] s0 :=
+  ⟨rfl, rfl, by decide,
     by intro i h; match i, h with | 0, _ => rfl | 1, _ => rfl | 2, _ => rfl, rfl⟩
 
 theorem bytes0_bump : mem0.readLE BUMP 8 = HEAP := by decide
@@ -134,7 +135,7 @@ theorem pre : StackGuardOK s0 4128 ∧ StackWritable s0 4128 16 ∧ (s0.regs 4).
       Apart (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat ((s0.regs 4).toNat - 4128) 4144 ∧
       (InRanges (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat [] ∨
         Outside (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat R.rt)) := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, by decide, ?_, by decide, ?_,
+  refine ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, ?_, by decide, ?_,
     inv0, fun r hr => absurd hr (by simp), fun _ => ⟨?_, by decide, by decide, by decide, Or.inr ?_⟩⟩
   · rw [rt_eq]; simp only [outside_cons, outside_nil, and_true]; decide
   · rw [rt_eq]; simp only [outside_cons, outside_nil, and_true]; decide
@@ -154,7 +155,7 @@ theorem cs_mem (a x y : Nat) : (callS a x y).mem = mem0 := rfl
 
 theorem cs_eqpre (a x y : Nat) : MemPre64 4096 2 (callS a x y) := by
   have hw : mem0.accessible (sp0 - 4096) (4096 + 8 + 8 * 2) true = true := by decide
-  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩
+  refine ⟨⟨?_, ?_, ?_, by simp only [stackguard0Offset, regG, regSP, cs_g, cs_rsp]; decide⟩, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩
   · simp only [regG, stackguard0Offset, cs_g, cs_mem]; decide
   · simp only [regG, stackguard0Offset, cs_g, cs_mem]; decide
   · simp only [stackguard0, regG, regSP, stackguard0Offset, cs_g, cs_rsp, cs_mem]; decide
@@ -192,20 +193,19 @@ theorem site_cl : clSite R clA [] 0x400 sCl := by
     · rw [rt_eq]; simp only [outside_cons, outside_nil, and_true]; decide
     · simp only [sCl, cs_rsp, outside_cons, outside_nil, and_true, ptr0, sp0]; omega
 
-theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (Mem.Zeroed s'.mem (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat ∧
-      R.inv 0x400 [] (s0.regs 14).toNat (view R.rt [] s'.mem) ∧
-      MemFrame s0.mem s'.mem (R.rt ++ [((s0.regs 4).toNat - 4128, (s0.regs 4).toNat + 16),
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (Mem.Zeroed s'.mem (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat ∧
+      R.inv 0x400 [] ((s0.setRet ret).regs 14).toNat (view R.rt [] s'.mem) ∧
+      MemFrame (s0.setRet ret).mem s'.mem (R.rt ++ [(((s0.setRet ret).regs 4).toNat - 4128, ((s0.setRet ret).regs 4).toNat + 16),
         ((BitVec.ofNat 64 ptr0).toNat, (BitVec.ofNat 64 ptr0).toNat + (12 : BitVec 64).toNat)])) :=
-  correctness implAt R 0x400 [] (BitVec.ofNat 64 ptr0) 12 12 (by rw [addr_cl]; exact model_cl)
-    ret hret s0 setup pre
+  (correctness implAt R 0x400 [] (BitVec.ofNat 64 ptr0) 12 12 (by rw [addr_cl]; exact model_cl)) s0 setup pre ret hret
 
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List (Nat × Nat)) (ret : Nat)
     (s : Amd64.State),
     MemclrNoHeapPointersLive64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") 4096 R ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 ptr0, 12, 12] s ∧
+    CallSetup0 Extracted.entry [BitVec.ofNat 64 ptr0, 12, 12] s ∧
     (StackGuardOK s 4128 ∧ StackWritable s 4128 16 ∧ (s.regs 4).toNat % 8 = 0 ∧
       Outside ((s.regs 4).toNat - 4128) 4144 R.rt ∧
       Apart ((s.regs 14).toNat + 16) 8 ((s.regs 4).toNat - 4128) 4144 ∧
@@ -223,16 +223,16 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : 
     (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Janus.Amd64.State),
       s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") ∧
       clSite R (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") L b s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (Mem.Zeroed s'.mem (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat ∧
-        R.inv b L (s.regs 14).toNat (view R.rt L s'.mem) ∧
-        MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4128, (s.regs 4).toNat + 16),
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (Mem.Zeroed s'.mem (BitVec.ofNat 64 ptr0).toNat (12 : BitVec 64).toNat ∧
+        R.inv b L ((s.setRet ret).regs 14).toNat (view R.rt L s'.mem) ∧
+        MemFrame (s.setRet ret).mem s'.mem (R.rt ++ [(((s.setRet ret).regs 4).toNat - 4128, ((s.setRet ret).regs 4).toNat + 16),
           ((BitVec.ofNat 64 ptr0).toNat, (BitVec.ofNat 64 ptr0).toNat + (12 : BitVec 64).toNat)])) :=
   ⟨implAt, R, 0x400, [], ret, s0, by rw [addr_cl]; exact model_cl, hret, setup, pre,
     ⟨[], 0x400, sCl, by rw [addr_cl]; rfl, by rw [addr_cl]; exact site_cl⟩, returnsF⟩
 
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ Mem.Zeroed s'.mem ptr0 12 :=
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ Mem.Zeroed s'.mem ptr0 12 :=
   returnsF.mono fun _ ⟨habi, hz, _⟩ => ⟨habi, by simpa [ptr0] using hz⟩
 
 end Witness

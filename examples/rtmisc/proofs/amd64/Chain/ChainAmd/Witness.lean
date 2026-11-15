@@ -122,9 +122,9 @@ def s0 : Amd64.State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [BitVec.ofNat 64 dstP, 1, 1, BitVec.ofNat 64 srcP, 1, 1,
+theorem setup : CallSetup0 Extracted.entry [BitVec.ofNat 64 dstP, 1, 1, BitVec.ofNat 64 srcP, 1, 1,
     BitVec.ofNat 64 bxP, 2] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+  ⟨rfl, rfl, by decide, by
     intro i h
     match i, h with
     | 0, _ => rfl | 1, _ => rfl | 2, _ => rfl | 3, _ => rfl | 4, _ => rfl | 5, _ => rfl | 6, _ => rfl | 7, _ => rfl,
@@ -162,7 +162,7 @@ theorem inv0 : R.inv 0x100 liveL (s0.regs 14).toNat (view R.rt liveL s0.mem) := 
 theorem rt_eq : R.rt = [(HEAP, HEND), (BUMP, BUMP + 8), (WBUF, WBUF + 64)] := rfl
 
 theorem pre : Pre R 0x100 liveL (BitVec.ofNat 64 dstP) 1 (BitVec.ofNat 64 srcP) 1 (BitVec.ofNat 64 bxP) 2 s0 := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, by decide, dataLoaded, ?_, ?_, ?_,
+  refine ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, dataLoaded, ?_, ?_, ?_,
     by decide, ?_, by decide, by decide, by decide, by decide, by decide, by decide, ?_, ?_, ?_, ?_, inv0, ?_,
     ?_, ?_, ?_, by decide, by decide, by decide, by decide, by decide, by decide, ?_, ?_, ?_, ?_, ?_, by decide⟩
   · rw [rt_eq]; simp only [outside_cons, outside_nil, and_true]; decide
@@ -204,13 +204,13 @@ theorem cs_callOK (a x y z n : Nat) (hn : n ≤ 5) : CallOK64 (callS a x y z) 40
 
 theorem cs_room (a x y z n : Nat) (hn : n ≤ 5) : StackRoom64 (callS a x y z) 4096 n := by
   simp only [StackRoom64, GuardOK64, cs_g, cs_rsp, cs_mem, calleeStack64]
-  refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
+  refine ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_⟩
   simp only [outside_cons, outside_nil, and_true, sp0, g0]
   omega
 
 theorem cs_eqpre (a x y z n : Nat) (hn : n ≤ 5) : MemPre64 4096 n (callS a x y z) := by
   have hw : mem0.accessible (sp0 - 4096) (4096 + 8 + 8 * 5) true = true := by decide
-  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩
+  refine ⟨⟨?_, ?_, ?_, by simp only [stackguard0Offset, regG, regSP, cs_g, cs_rsp]; decide⟩, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩
   · simp only [regG, stackguard0Offset, cs_g, cs_mem]; decide
   · simp only [regG, stackguard0Offset, cs_g, cs_mem]; decide
   · simp only [stackguard0, regG, regSP, stackguard0Offset, cs_g, cs_rsp, cs_mem]; decide
@@ -295,11 +295,11 @@ theorem site_wb : wbSite R wbA liveL 0x100 sWb := by
     omega
 
 /-- The returning run, exactly as `correctness` states it at the witness. -/
-theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ Post R 0x100 (BitVec.ofNat 64 dstP) 1 (BitVec.ofNat 64 srcP) 1 (BitVec.ofNat 64 bxP) 2 s0 s' :=
-  correctness implAt R 0x100 liveL (BitVec.ofNat 64 dstP) 1 1 (BitVec.ofNat 64 srcP) 1 1 (BitVec.ofNat 64 bxP) 2
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ Post R 0x100 (BitVec.ofNat 64 dstP) 1 (BitVec.ofNat 64 srcP) 1 (BitVec.ofNat 64 bxP) 2 (s0.setRet ret) s' :=
+  (correctness implAt R 0x100 liveL (BitVec.ofNat 64 dstP) 1 1 (BitVec.ofNat 64 srcP) 1 1 (BitVec.ofNat 64 bxP) 2
     (by rw [addr_mv]; exact model_mv) (by rw [addr_mk]; exact model_mk)
-    (by rw [addr_wb]; exact model_wb) ret hret s0 setup pre
+    (by rw [addr_wb]; exact model_wb)) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` hold together: a runtime (`impl`, `R`), a live set, a budget and a
 call of `Chain(dst, src, bx, 2)` (one-word slices) satisfying the precondition; a call-site state for each
@@ -311,7 +311,7 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : 
     WbLiveContract64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.gcWriteBarrier2") 4096 R 2 ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 dstP, 1, 1,
+    CallSetup0 Extracted.entry [BitVec.ofNat 64 dstP, 1, 1,
       BitVec.ofNat 64 srcP, 1, 1, BitVec.ofNat 64 bxP, 2] s ∧
     Pre R b L (BitVec.ofNat 64 dstP) 1 (BitVec.ofNat 64 srcP) 1 (BitVec.ofNat 64 bxP) 2 s ∧
     (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Janus.Amd64.State),
@@ -323,8 +323,8 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : 
     (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Janus.Amd64.State),
       s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gcWriteBarrier2") ∧
       wbSite R (Extracted.program.contractAddr "runtime.gcWriteBarrier2") L b s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
-      ABIReturn s s' ∧ Post R b (BitVec.ofNat 64 dstP) 1 (BitVec.ofNat 64 srcP) 1 (BitVec.ofNat 64 bxP) 2 s s' :=
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ Post R b (BitVec.ofNat 64 dstP) 1 (BitVec.ofNat 64 srcP) 1 (BitVec.ofNat 64 bxP) 2 (s.setRet ret) s' :=
   ⟨implAt, R, 0x100, liveL, ret, s0, by rw [addr_mv]; exact model_mv, by rw [addr_mk]; exact model_mk,
     by rw [addr_wb]; exact model_wb, hret, setup, pre,
     ⟨liveL, 0x100, sMv, by rw [addr_mv]; rfl, by rw [addr_mv]; exact site_mv⟩,
@@ -333,8 +333,8 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : 
 
 /-- So the guarantee is reached: `Chain(dst, src, bx, 2)` stores a fresh array `t` (apart from the three
 caller objects) in `bx.P` and `2` in `bx.N`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ ∃ t : Nat, s'.mem.readLE bxP 8 = t ∧ s'.mem.readLE (bxP + 8) 8 = 2 ∧
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ ∃ t : Nat, s'.mem.readLE bxP 8 = t ∧ s'.mem.readLE (bxP + 8) 8 = 2 ∧
       Apart t 16 dstP 8 ∧ Apart t 16 srcP 8 ∧ Apart t 16 bxP 16 :=
   returnsF.mono
     fun _ ⟨habi, t, h1, h2, h3, h4, h5, h6, _⟩ => by

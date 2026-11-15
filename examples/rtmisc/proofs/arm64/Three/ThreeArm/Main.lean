@@ -35,6 +35,7 @@ theorem correctness (impl : List Segment) (R : RtInv) (b : Nat) (n x : BitVec 64
       (Extracted.program.contractAddr "runtime.gcWriteBarrier2") 4096 R 2) :
     Ensures (Extracted.program.link impl) Extracted.entry [n, x]
       (fun s => Pre R b n s) (fun s s' => Post R n x s s') := by
+  janus_ensures_old
   intro ret hret s hs hpre
   have hpre' := hpre
   obtain ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb', ha, hw⟩, hd, hout, hga, hgr, hflag, hty1, hty2, hn, hn2,

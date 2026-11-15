@@ -44,6 +44,7 @@ theorem correctness (b : BitVec 64) :
       (fun s s' => (s'.regs 0).toNat = uint8Type ∧ (s'.regs 1).toNat = staticAddr + 8 * (b.toNat % 256) ∧
         s'.mem.accessible (s'.regs 1).toNat 8 false = true ∧
         s'.mem.readLE (s'.regs 1).toNat 8 = b.toNat % 256 ∧ s'.mem = s.mem) := by
+  janus_ensures_old
   intro ret hret s hs hd
   have hst := staticAddr_holds hd
   janus_intro hs
@@ -85,8 +86,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x42 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(0x42 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0) with rfl <;> rfl⟩
@@ -95,12 +96,12 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Arm64.State) (b : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [b] s ∧ (Extracted.program.DataLoaded s.mem) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 0).toNat = uint8Type ∧ (s'.regs 1).toNat = staticAddr + 8 * (b.toNat % 256) ∧
+    CallSetup0 Extracted.entry [b] s ∧ (Extracted.program.DataLoaded s.mem) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = uint8Type ∧ (s'.regs 1).toNat = staticAddr + 8 * (b.toNat % 256) ∧
         s'.mem.accessible (s'.regs 1).toNat 8 false = true ∧
-        s'.mem.readLE (s'.regs 1).toNat 8 = b.toNat % 256 ∧ s'.mem = s.mem)) := by
-  refine ⟨ret, s0, 0x42, hret, setup, ?pre, correctness 0x42 ret hret s0 setup ?pre⟩
+        s'.mem.readLE (s'.regs 1).toNat 8 = b.toNat % 256 ∧ s'.mem = (s.setRet ret).mem)) := by
+  refine ⟨ret, s0, 0x42, hret, setup, ?pre, (correctness 0x42) s0 setup ?pre ret hret⟩
   case pre =>
     exact dataLoaded
 

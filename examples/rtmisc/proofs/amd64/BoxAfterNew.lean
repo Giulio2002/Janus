@@ -49,6 +49,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List 
         ∃ b' L', b - 40 ≤ b' ∧ R.inv b' L' (s.regs 14).toNat (view R.rt L' s'.mem) ∧
           InRanges (s'.regs 0).toNat 16 L' ∧
           MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4144, (s.regs 4).toNat + 32)])) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Proof.tNode, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hg, ⟨hb', ha, hw⟩, hal, hd, hout, hga, hgr, hty, hok1, hok2, hok3, hinv, hbud, hLs⟩
   janus64_intro hs
   have hgl := hg.load
@@ -185,8 +186,8 @@ def s0 : Amd64.State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [BitVec.ofNat 64 sPtr, 5, 300] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; match i, h with | 0, _ => rfl | 1, _ => rfl | 2, _ => rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [BitVec.ofNat 64 sPtr, 5, 300] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; match i, h with | 0, _ => rfl | 1, _ => rfl | 2, _ => rfl, rfl⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
@@ -225,7 +226,7 @@ theorem pre : StackGuardOK s0 4144 ∧ StackWritable s0 4144 32 ∧ (s0.regs 4).
     R.ok (Extracted.program.contractAddr "runtime.convT64") [(300 : BitVec 64).toNat] ∧
     R.inv 0x400 [] (s0.regs 14).toNat (view R.rt [] s0.mem) ∧ 40 ≤ 0x400 ∧
     (∀ r ∈ ([] : List (Nat × Nat)), Outside r.1 (r.2 - r.1) [((s0.regs 4).toNat - 4144, (s0.regs 4).toNat + 32)]) := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, by decide, dataLoaded, ?_, ?_, ?_,
+  refine ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, dataLoaded, ?_, ?_, ?_,
     ?_, ?_, ?_, ?_, inv0, by decide, fun r hr => absurd hr (by simp)⟩
   · rw [rt_eq]; simp only [outside_cons, outside_nil, and_true]; decide
   · simp only [Apart]; decide
@@ -256,7 +257,7 @@ theorem cs_callOK (a x y n : Nat) (hn : n ≤ 3) : CallOK64 (callS a x y) 4096 n
 
 theorem cs_room (a x y n : Nat) (hn : n ≤ 3) : StackRoom64 (callS a x y) 4096 n := by
   simp only [StackRoom64, GuardOK64, cs_g, cs_rsp, cs_mem, calleeStack64]
-  refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
+  refine ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_⟩
   simp only [outside_cons, outside_nil, and_true, sp0, g0]
   omega
 
@@ -304,18 +305,18 @@ theorem site_64 : RtLivePre64 4096 R convT64Spec convT64Live c64A [] 0x400 s64 :
   refine ⟨Or.inr (Or.inr ⟨rfl, rfl⟩), inv0, ?_, fun r hr => absurd hr (by simp), cs_winR _ _ _ _ (by decide)⟩
   simp only [convT64Live, arg, List.getD_cons_zero]; decide
 
-theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (InRanges (s'.regs 0).toNat 16 R.rt ∧
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (InRanges (s'.regs 0).toNat 16 R.rt ∧
         s'.mem.readLE (s'.regs 0).toNat 8 = (300 : BitVec 64).toNat ∧
         s'.mem.readLE ((s'.regs 0).toNat + 8) 8 = ((300 : BitVec 64) + 1).toNat ∧
         (s'.regs 3).toNat = tStr ∧ (s'.regs 7).toNat = tU64 ∧
         ((5 : BitVec 64).toNat ≠ 0 → BoxWords' R.rt s'.mem (s'.regs 1).toNat [(BitVec.ofNat 64 sPtr).toNat, (5 : BitVec 64).toNat]) ∧
         BoxHolds' R.rt s'.mem (s'.regs 6).toNat 8 (300 : BitVec 64).toNat ∧
-        ∃ b' L', 0x400 - 40 ≤ b' ∧ R.inv b' L' (s0.regs 14).toNat (view R.rt L' s'.mem) ∧
+        ∃ b' L', 0x400 - 40 ≤ b' ∧ R.inv b' L' ((s0.setRet ret).regs 14).toNat (view R.rt L' s'.mem) ∧
           InRanges (s'.regs 0).toNat 16 L' ∧
-          MemFrame s0.mem s'.mem (R.rt ++ [((s0.regs 4).toNat - 4144, (s0.regs 4).toNat + 32)])) :=
-  correctness implAt R 0x400 [] (BitVec.ofNat 64 sPtr) 5 300 (by rw [addr_new]; exact model_new)
-    (by rw [addr_cs]; exact model_cs) (by rw [addr_64]; exact model_64) ret hret s0 setup pre
+          MemFrame (s0.setRet ret).mem s'.mem (R.rt ++ [(((s0.setRet ret).regs 4).toNat - 4144, ((s0.setRet ret).regs 4).toNat + 32)])) :=
+  (correctness implAt R 0x400 [] (BitVec.ofNat 64 sPtr) 5 300 (by rw [addr_new]; exact model_new)
+    (by rw [addr_cs]; exact model_cs) (by rw [addr_64]; exact model_64)) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` hold together: a runtime (`impl`, `R`), a budget and a call of
 `BoxAfterNew("hello", 300)` satisfying the precondition. -/
@@ -327,7 +328,7 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : 
     RtLiveContract64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.convT64") 4096 R convT64Spec convT64Live ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 sPtr, 5, 300] s ∧
+    CallSetup0 Extracted.entry [BitVec.ofNat 64 sPtr, 5, 300] s ∧
     (StackGuardOK s 4144 ∧ StackWritable s 4144 32 ∧ (s.regs 4).toNat % 8 = 0 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside ((s.regs 4).toNat - 4144) 4176 R.rt ∧
       Apart ((s.regs 14).toNat + 16) 8 ((s.regs 4).toNat - 4144) 4176 ∧ Outside ((s.regs 14).toNat + 16) 8 R.rt ∧
@@ -346,16 +347,16 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : 
     (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Amd64.State),
       s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.convT64") ∧
       RtLivePre64 4096 R convT64Spec convT64Live (Extracted.program.contractAddr "runtime.convT64") L b s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (InRanges (s'.regs 0).toNat 16 R.rt ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (InRanges (s'.regs 0).toNat 16 R.rt ∧
         s'.mem.readLE (s'.regs 0).toNat 8 = (300 : BitVec 64).toNat ∧
         s'.mem.readLE ((s'.regs 0).toNat + 8) 8 = ((300 : BitVec 64) + 1).toNat ∧
         (s'.regs 3).toNat = tStr ∧ (s'.regs 7).toNat = tU64 ∧
         ((5 : BitVec 64).toNat ≠ 0 → BoxWords' R.rt s'.mem (s'.regs 1).toNat [(BitVec.ofNat 64 sPtr).toNat, (5 : BitVec 64).toNat]) ∧
         BoxHolds' R.rt s'.mem (s'.regs 6).toNat 8 (300 : BitVec 64).toNat ∧
-        ∃ b' L', b - 40 ≤ b' ∧ R.inv b' L' (s.regs 14).toNat (view R.rt L' s'.mem) ∧
+        ∃ b' L', b - 40 ≤ b' ∧ R.inv b' L' ((s.setRet ret).regs 14).toNat (view R.rt L' s'.mem) ∧
           InRanges (s'.regs 0).toNat 16 L' ∧
-          MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4144, (s.regs 4).toNat + 32)])) :=
+          MemFrame (s.setRet ret).mem s'.mem (R.rt ++ [(((s.setRet ret).regs 4).toNat - 4144, ((s.setRet ret).regs 4).toNat + 32)])) :=
   ⟨implAt, R, 0x400, [], ret, s0, by rw [addr_new]; exact model_new, by rw [addr_cs]; exact model_cs,
     by rw [addr_64]; exact model_64, hret, setup, pre,
     ⟨[], 0x400, sNew, by rw [addr_new]; rfl, by rw [addr_new]; exact site_new⟩,
@@ -363,8 +364,8 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : 
     ⟨[], 0x400, s64, by rw [addr_64]; rfl, by rw [addr_64]; exact site_64⟩, returnsF⟩
 
 /-- So the guarantee is reached: the call returns the string and `uint64` type descriptors. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 3).toNat = tStr ∧ (s'.regs 7).toNat = tU64 :=
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 3).toNat = tStr ∧ (s'.regs 7).toNat = tU64 :=
   returnsF.mono
     fun _ h => ⟨h.1, h.2.2.2.2.1, h.2.2.2.2.2.1⟩
 

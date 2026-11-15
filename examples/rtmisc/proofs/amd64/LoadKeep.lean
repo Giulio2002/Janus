@@ -26,6 +26,7 @@ theorem correctness (p : BitVec 64) :
       (fun s => StackWritable s 0 16 ∧ Buffer s p 8 false ∧ Janus.Spec.Disjoint p.toNat 8 ((s.regs regSP).toNat + 8) 8)
       (fun s s' => (s'.regs 0).toNat = valueAt s p 8 ∧
         s'.mem = s.mem.writeLE ((s.regs regSP).toNat + 8) 8 p.toNat) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨⟨_, hnw, hacc⟩, ⟨hpb, hp⟩, hd⟩
   janus64_intro hs
   simp only [regSP] at hacc hnw hd ⊢
@@ -54,8 +55,8 @@ def s0 : Janus.Amd64.State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0x300000 : BitVec 64)] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [(0x300000 : BitVec 64)] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0) with rfl <;> first | rfl | decide, rfl⟩
@@ -64,15 +65,15 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 /-- All hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Amd64.State) (p : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [p] s ∧ (StackWritable s 0 16 ∧ Buffer s p 8 false ∧ Janus.Spec.Disjoint p.toNat 8 ((s.regs regSP).toNat + 8) 8) ∧
-    (Returns (Extracted.program.withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 0).toNat = valueAt s p 8 ∧
-        s'.mem = s.mem.writeLE ((s.regs regSP).toNat + 8) 8 p.toNat)) := by
-  refine ⟨ret, s0, 0x300000, hret, setup, ?pre, correctness 0x300000 ret hret s0 setup ?pre⟩
+    CallSetup0 Extracted.entry [p] s ∧ (StackWritable s 0 16 ∧ Buffer s p 8 false ∧ Janus.Spec.Disjoint p.toNat 8 ((s.regs regSP).toNat + 8) 8) ∧
+    (Returns (Extracted.program.withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = valueAt (s.setRet ret) p 8 ∧
+        s'.mem = (s.setRet ret).mem.writeLE (((s.setRet ret).regs regSP).toNat + 8) 8 p.toNat)) := by
+  refine ⟨ret, s0, 0x300000, hret, setup, ?pre, (correctness 0x300000) s0 setup ?pre ret hret⟩
   case pre =>
     try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint, Janus.Amd64.GoABI.GoMXCSR, Janus.Program.DataLoaded]
     repeat' apply And.intro
-    all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
+    all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | (refine ⟨?_, ?_, ?_⟩ <;> first | decide | decide +kernel) | decide +kernel
 
 end Witness
 

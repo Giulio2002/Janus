@@ -72,6 +72,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List 
           (∃ b' L', R.inv b' L' (s.regs 14).toNat (view R.rt L' s'.mem) ∧
             InRanges (s'.regs 0).toNat (s'.regs 1).toNat L') ∧
           MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4176, (s.regs 4).toNat + 40)]))) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Proof.u8Type, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨hg, ⟨hb', ha, hw⟩, hal, hd, hout, hga, hgr, hinv, hLs, hlc, hc, hpb,
     hdj, hdt, hroom, hgrow⟩
   janus64_intro hs
@@ -206,8 +207,8 @@ def s0 : Amd64.State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [0, 0, 0, 7] s0 :=
-  ⟨rfl, by decide, rfl, by decide,
+theorem setup : CallSetup0 Extracted.entry [0, 0, 0, 7] s0 :=
+  ⟨rfl, rfl, by decide,
     by intro i h; match i, h with | 0, _ => rfl | 1, _ => rfl | 2, _ => rfl | 3, _ => rfl, rfl⟩
 
 set_option maxRecDepth 100000 in
@@ -258,7 +259,7 @@ theorem pre : StackGuardOK s0 4176 ∧ StackWritable s0 4176 40 ∧ (s0.regs 4).
             [(0 : BitVec 64).toNat, (0 : BitVec 64).toNat + 1, (0 : BitVec 64).toNat, 1, u8Type] ∧
           roundupsize (nextslicecap ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat) true ≤ 0x400 ∧
           (0 < (0 : BitVec 64).toNat → s0.mem.accessible (0 : BitVec 64).toNat (0 : BitVec 64).toNat false = true)) := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, by decide, dataLoaded, ?_, ?_, ?_,
+  refine ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, dataLoaded, ?_, ?_, ?_,
     inv0, fun r hr => absurd hr (by simp), by decide, by decide, by decide, by decide, by decide,
     fun h => absurd h (by decide), fun _ => ⟨?_, by decide, fun h => absurd h (by decide)⟩⟩
   · rw [rt_eq]; simp only [outside_cons, outside_append, outside_nil, and_true]; decide
@@ -302,7 +303,7 @@ theorem site_gr : RtLivePre64 4096 R growsliceSpec growsliceLive grA [] 0x400 sG
   · show True
     trivial
   · simp only [StackRoom64, GuardOK64, gr_g, gr_rsp, gr_mem, calleeStack64, growsliceSpec]
-    refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
+    refine ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), ?_⟩
     simp only [outside_cons, outside_nil, and_true, sp0, g0]
     omega
   · rw [ha]
@@ -315,30 +316,29 @@ theorem site_gr : RtLivePre64 4096 R growsliceSpec growsliceLive grA [] 0x400 sG
       rcases hx with (rfl | rfl) | rfl <;>
         simp only [outside_cons, outside_append, outside_nil, and_true, sp0, HEAP, HEND, BUMP, WBUF] <;> first | decide | omega
 
-theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ ((s'.regs 3).toNat = (0 : BitVec 64).toNat + 1 ∧
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ ((s'.regs 3).toNat = (0 : BitVec 64).toNat + 1 ∧
         ((0 : BitVec 64).toNat < (0 : BitVec 64).toNat → s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64) ∧
           s'.mem.readLE ((0 : BitVec 64).toNat + (0 : BitVec 64).toNat) 1 = (7 : BitVec 64).toNat % 256 ∧
-          R.inv 0x400 ([] : List (Nat × Nat)) (s0.regs 14).toNat (view R.rt ([] : List (Nat × Nat)) s'.mem) ∧
-          MemFrame s0.mem s'.mem [((0 : BitVec 64).toNat + (0 : BitVec 64).toNat, (0 : BitVec 64).toNat + (0 : BitVec 64).toNat + 1),
-            ((s0.regs 4).toNat - 4176, (s0.regs 4).toNat + 40)]) ∧
+          R.inv 0x400 ([] : List (Nat × Nat)) ((s0.setRet ret).regs 14).toNat (view R.rt ([] : List (Nat × Nat)) s'.mem) ∧
+          MemFrame (s0.setRet ret).mem s'.mem [((0 : BitVec 64).toNat + (0 : BitVec 64).toNat, (0 : BitVec 64).toNat + (0 : BitVec 64).toNat + 1),
+            (((s0.setRet ret).regs 4).toNat - 4176, ((s0.setRet ret).regs 4).toNat + 40)]) ∧
         ((0 : BitVec 64).toNat ≤ (0 : BitVec 64).toNat →
           (s'.regs 1).toNat = growCap 1 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat ∧
           InRanges (s'.regs 0).toNat (s'.regs 1).toNat R.rt ∧
-          (∀ i, i < (0 : BitVec 64).toNat → s'.mem.bytes ((s'.regs 0).toNat + i) = s0.mem.bytes ((0 : BitVec 64).toNat + i)) ∧
+          (∀ i, i < (0 : BitVec 64).toNat → s'.mem.bytes ((s'.regs 0).toNat + i) = (s0.setRet ret).mem.bytes ((0 : BitVec 64).toNat + i)) ∧
           s'.mem.readLE ((s'.regs 0).toNat + (0 : BitVec 64).toNat) 1 = (7 : BitVec 64).toNat % 256 ∧
-          (∃ b' L', R.inv b' L' (s0.regs 14).toNat (view R.rt L' s'.mem) ∧
+          (∃ b' L', R.inv b' L' ((s0.setRet ret).regs 14).toNat (view R.rt L' s'.mem) ∧
             InRanges (s'.regs 0).toNat (s'.regs 1).toNat L') ∧
-          MemFrame s0.mem s'.mem (R.rt ++ [((s0.regs 4).toNat - 4176, (s0.regs 4).toNat + 40)]))) :=
-  correctness implAt R 0x400 [] 0 0 0 7 (by rw [addr_gr]; exact model_gr)
-    ret hret s0 setup pre
+          MemFrame (s0.setRet ret).mem s'.mem (R.rt ++ [(((s0.setRet ret).regs 4).toNat - 4176, ((s0.setRet ret).regs 4).toNat + 40)]))) :=
+  (correctness implAt R 0x400 [] 0 0 0 7 (by rw [addr_gr]; exact model_gr)) s0 setup pre ret hret
 
 theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List (Nat × Nat)) (ret : Nat)
     (s : Amd64.State),
     RtLiveContract64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.growslice") 4096 R growsliceSpec growsliceLive ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0, 7] s ∧
+    CallSetup0 Extracted.entry [0, 0, 0, 7] s ∧
     (StackGuardOK s 4176 ∧ StackWritable s 4176 40 ∧ (s.regs 4).toNat % 8 = 0 ∧ Extracted.program.DataLoaded s.mem ∧
         Outside ((s.regs 4).toNat - 4176) 4216 R.rt ∧
         Apart ((s.regs 14).toNat + 16) 8 ((s.regs 4).toNat - 4176) 4216 ∧
@@ -358,26 +358,26 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : 
     (∃ (L : List (Nat × Nat)) (b : Nat) (s_c : Amd64.State),
       s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.growslice") ∧
       RtLivePre64 4096 R growsliceSpec growsliceLive (Extracted.program.contractAddr "runtime.growslice") L b s_c) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ((s'.regs 3).toNat = (0 : BitVec 64).toNat + 1 ∧
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ((s'.regs 3).toNat = (0 : BitVec 64).toNat + 1 ∧
         ((0 : BitVec 64).toNat < (0 : BitVec 64).toNat → s'.regs 0 = (0 : BitVec 64) ∧ s'.regs 1 = (0 : BitVec 64) ∧
           s'.mem.readLE ((0 : BitVec 64).toNat + (0 : BitVec 64).toNat) 1 = (7 : BitVec 64).toNat % 256 ∧
-          R.inv b L (s.regs 14).toNat (view R.rt L s'.mem) ∧
-          MemFrame s.mem s'.mem [((0 : BitVec 64).toNat + (0 : BitVec 64).toNat, (0 : BitVec 64).toNat + (0 : BitVec 64).toNat + 1),
-            ((s.regs 4).toNat - 4176, (s.regs 4).toNat + 40)]) ∧
+          R.inv b L ((s.setRet ret).regs 14).toNat (view R.rt L s'.mem) ∧
+          MemFrame (s.setRet ret).mem s'.mem [((0 : BitVec 64).toNat + (0 : BitVec 64).toNat, (0 : BitVec 64).toNat + (0 : BitVec 64).toNat + 1),
+            (((s.setRet ret).regs 4).toNat - 4176, ((s.setRet ret).regs 4).toNat + 40)]) ∧
         ((0 : BitVec 64).toNat ≤ (0 : BitVec 64).toNat →
           (s'.regs 1).toNat = growCap 1 true ((0 : BitVec 64).toNat + 1) (0 : BitVec 64).toNat ∧
           InRanges (s'.regs 0).toNat (s'.regs 1).toNat R.rt ∧
-          (∀ i, i < (0 : BitVec 64).toNat → s'.mem.bytes ((s'.regs 0).toNat + i) = s.mem.bytes ((0 : BitVec 64).toNat + i)) ∧
+          (∀ i, i < (0 : BitVec 64).toNat → s'.mem.bytes ((s'.regs 0).toNat + i) = (s.setRet ret).mem.bytes ((0 : BitVec 64).toNat + i)) ∧
           s'.mem.readLE ((s'.regs 0).toNat + (0 : BitVec 64).toNat) 1 = (7 : BitVec 64).toNat % 256 ∧
-          (∃ b' L', R.inv b' L' (s.regs 14).toNat (view R.rt L' s'.mem) ∧
+          (∃ b' L', R.inv b' L' ((s.setRet ret).regs 14).toNat (view R.rt L' s'.mem) ∧
             InRanges (s'.regs 0).toNat (s'.regs 1).toNat L') ∧
-          MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4176, (s.regs 4).toNat + 40)]))) :=
+          MemFrame (s.setRet ret).mem s'.mem (R.rt ++ [(((s.setRet ret).regs 4).toNat - 4176, ((s.setRet ret).regs 4).toNat + 40)]))) :=
   ⟨implAt, R, 0x400, [], ret, s0, by rw [addr_gr]; exact model_gr, hret, setup, pre,
     ⟨[], 0x400, sGr, by rw [addr_gr]; rfl, by rw [addr_gr]; exact site_gr⟩, returnsF⟩
 
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 3).toNat = 1 ∧ (s'.regs 1).toNat = 8 ∧
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 3).toNat = 1 ∧ (s'.regs 1).toNat = 8 ∧
       InRanges (s'.regs 0).toNat 8 R.rt ∧ s'.mem.readLE (s'.regs 0).toNat 1 = 7 :=
   returnsF.mono
     fun s' ⟨habi, h1, _, hg⟩ => by

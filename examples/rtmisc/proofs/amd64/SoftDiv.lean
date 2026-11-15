@@ -28,9 +28,10 @@ theorem correctness (impl : List Janus.Amd64.Segment)
       (fun s => CallerOK64 softEnv s 40 16 ∧ GoMXCSR s ∧ ¬ DivTiny a.toNat b.toNat)
       (fun s s' => ResultIs binary64 (div binary64 .rne a.toNat b.toNat) (s'.regs 0).toNat ∧
         MemFrame s.mem s'.mem [((s.regs 4).toNat - (softDepth + 40), (s.regs 4).toNat + 16)]) := by
+  janus64_ensures_old [Janus.Contracts.Instrument.CallerOK64, Janus.Amd64.GoABI.GoMXCSR, Janus.Contracts.SoftFloat.softEnv]
   intro ret hret s hs ⟨hcal, hmx, hnt⟩
   have hc' := hcal
-  obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hdp, hb, hst, hout, hgd, hgo⟩ := hc'
+  obtain ⟨henv, ⟨hg1, hg2, hg3, hg4⟩, hal, hdp, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
   simp only [softEnv, softDepth, regG, regSP, stackguard0Offset, stackguard0, Spec.Disjoint] at hg1 hg2 hg3 hgd hal hdp hb hst hout
   have hsp40 : (s.regs 4 - 40#64).toNat = (s.regs 4).toNat - 40 := by
@@ -73,7 +74,7 @@ theorem linked_eq : Extracted.program.link implAt = linked := rfl
 theorem model : SoftFdivContract64 (Extracted.program.link implAt) cAddr := by
   rw [linked_eq]
   intro s hpc ⟨⟨hpre, hmx⟩, hnt⟩
-  obtain ⟨-, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx, hdf, hra, hout⟩ := hpre
+  obtain ⟨-, ⟨hg1, hg2, hg3, hg4⟩, hal, hd1, hd2, hst, hx, hdf, hra, hout⟩ := hpre
   simp only [regSP, regG, stackguard0Offset, stackguard0] at hg1 hg2 hg3 hal hd1 hd2 hst hra
   janus64_run [GoMXCSR.ctl hmx, GoMXCSR.unmasked hmx, GoMXCSR.mod hmx]
   have ha := (s.regs 0).isLt
@@ -113,12 +114,12 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := smem }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [a1, a1] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [a1, a1] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 
 theorem pre : CallerOK64 softEnv s0 40 16 ∧ GoMXCSR s0 ∧ ¬ DivTiny a1.toNat a1.toNat := by
-  refine ⟨⟨trivial, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide,
+  refine ⟨⟨trivial, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide, by decide,
     ?_, ?_, ?_⟩, rfl, by decide⟩
   · simp [softEnv, outside_nil]
   · unfold Spec.Disjoint; decide
@@ -128,32 +129,32 @@ theorem pre : CallerOK64 softEnv s0 40 16 ∧ GoMXCSR s0 ∧ ¬ DivTiny a1.toNat
 def sCall : State := { s0 with rip := BitVec.ofNat 64 cAddr }
 
 theorem sCall_pre : SoftPre64 sCall ∧ ¬ DivTiny (sCall.regs 0).toNat (sCall.regs 3).toNat := by
-  refine ⟨⟨⟨trivial, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, rfl, rfl,
+  refine ⟨⟨⟨trivial, (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), by decide, by decide, by decide, by decide, rfl, rfl,
     by decide, ?_⟩, rfl⟩, by decide⟩
   simp [softEnv, outside_nil]
 
-theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (ResultIs binary64 (div binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat ∧
-      MemFrame s0.mem s'.mem [((s0.regs 4).toNat - (softDepth + 40), (s0.regs 4).toNat + 16)]) :=
-  correctness implAt model a1 a1 ret hret s0 setup pre
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (ResultIs binary64 (div binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat ∧
+      MemFrame (s0.setRet ret).mem s'.mem [(((s0.setRet ret).regs 4).toNat - (softDepth + 40), ((s0.setRet ret).regs 4).toNat + 16)]) :=
+  (correctness implAt model a1 a1) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (ret : Nat) (s : State),
     SoftFdivContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.fdiv64") ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [a1, a1] s ∧
+    CallSetup0 Extracted.entry [a1, a1] s ∧
     (CallerOK64 softEnv s 40 16 ∧ GoMXCSR s ∧ ¬ DivTiny a1.toNat a1.toNat) ∧
     (∃ s_c : Janus.Amd64.State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.fdiv64") ∧
       SoftPre64 s_c ∧ ¬ DivTiny (s_c.regs 0).toNat (s_c.regs 3).toNat) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (ResultIs binary64 (div binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat ∧
-      MemFrame s.mem s'.mem [((s.regs 4).toNat - (softDepth + 40), (s.regs 4).toNat + 16)]) :=
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (ResultIs binary64 (div binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat ∧
+      MemFrame (s.setRet ret).mem s'.mem [(((s.setRet ret).regs 4).toNat - (softDepth + 40), ((s.setRet ret).regs 4).toNat + 16)]) :=
   ⟨implAt, ret, s0, model, hret, setup, pre,
     ⟨sCall, rfl, sCall_pre⟩, returnsF⟩
 
 /-- So the guarantee is reached: `1.0 / 1.0` is the IEEE quotient (`1.0`). -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ ResultIs binary64 (div binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat :=
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ ResultIs binary64 (div binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat :=
   returnsF.mono fun _ h => ⟨h.1, h.2.1⟩
 
 end Witness
