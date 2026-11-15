@@ -413,6 +413,7 @@ def unfold_list(pre_text, reg, f, bound=()):
             # a framework predicate (`Janus/…`): the file sees it through its `open`s (namespace of the definition opened)
             opened = reg.opens.get(f, [])
             lib = [c for c in cands if c[0].startswith('Janus/') and '.'.join(c[2].split('.')[:-1]) in opened]
+            if len(lib) > 1: lib = [c for c in lib if not isa_bad(c)]       # `Contracts.Iface` and `Contracts.IfaceAmd64` both opened: the file's ISA decides
             if len(lib) == 1: pick = lib[0]
         if pick is None or pick[2] in seen_set: continue
         seen_set.add(pick[2])
@@ -764,6 +765,7 @@ def _migrate(t, amd0, reg, fname=''):
                         break
         return out
     used_setups = set(reg.setupused)
+    raw_setups, both_used = set(), set()      # setup lemmas applied by raw old-shaped theorems; and by rows too: the old lemma stays, `NAME_at0` is the new-shaped twin
     # a setup lemma applied only by the raw old-shaped theorems of this file (`local_non`) keeps its v0.3 form
     if reg.local_non:
         raw_used, row_used = set(), set()
@@ -774,6 +776,7 @@ def _migrate(t, amd0, reg, fname=''):
                     for kx in range(len(tk) - 3):
                         if re.fullmatch(r"hret[\w']*", tk[kx + 1][0].split('.')[-1]) and kx + 3 < len(tk):
                             raw_used.add(tk[kx + 3][0].split('.')[-1]); break
+        raw_setups = set(raw_used)
         used_setups -= raw_used
     extra = {}
     for i, it in enumerate(items):
@@ -782,15 +785,27 @@ def _migrate(t, amd0, reg, fname=''):
             it2, st2 = untoold(it, reg.setupnames)
             if st2:
                 items[i] = it2; extra[i] = st2
+                for sx in st2:
+                    if sx.startswith('__setup__'): used_setups.add(sx[9:])
     for it in items:
         for m, toks, k, isk in find_apps(it):
             sidx = k + (4 if isk else 3)
-            if sidx < len(toks): used_setups.add(toks[sidx][0])
+            if sidx < len(toks):
+                used_setups.add(toks[sidx][0])
+                if toks[sidx][0].split('.')[-1] in raw_setups: both_used.add(toks[sidx][0].split('.')[-1])
+    both_used |= {n.split('.')[-1] for n in used_setups if n.split('.')[-1] in raw_setups}
     for i, it in enumerate(items):
         amd = isa[i]
         m = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
         if not m: continue
         name = m.group(1)
+        if SETUP_RE.search(it) and any(re.search(r'theorem\s+' + re.escape(name) + r'_at0\b', x) for x in items): continue     # its twin exists already (idempotent)
+        if name.split('.')[-1] in both_used and name in used_setups and SETUP_RE.search(it):
+            # the old setup lemma stays (raw theorems apply it); the new-shaped twin `NAME_at0` is what the rows and witnesses use
+            twin = re.sub(r'(theorem\s+)' + re.escape(name) + r'\b', lambda mm: mm.group(1) + name + '_at0', it, count=1)
+            twin = fix_setup_body(fix_setups(twin), amd, warn, name + '_at0')
+            items[i] = it + '\n' + twin
+            continue
         if name in used_setups and SETUP_RE.search(it):
             it = fix_setups(it)
             it = fix_setup_body(it, amd, warn, name)
@@ -805,6 +820,10 @@ def _migrate(t, amd0, reg, fname=''):
         exw = '∃' in sig0 and SETUP_RE.search(it) is not None
         if (apps or extra.get(i) or (exw and inw[i] and (name in FORCE or (ens and not RAW)))) and (name not in ens or inw[i]) and not conclusion(it) is not None:
             it = rewrite_witness(it, apps, amd, name, warn, plain, kern, extra.get(i, ()))
+            for bn in both_used:      # the rewritten witness applies the new-shaped twin of a setup lemma the raw theorems still apply
+                bsx = split_sig(it)[1]
+                if bsx is not None and not name == bn:
+                    it = it[:bsx] + re.sub(r"(?<![\w.'])" + re.escape(bn) + r"(?![\w'])", bn + '_at0', it[bsx:])
             items[i] = it
     return ''.join(items), warn
 
@@ -816,6 +835,7 @@ def fix_reexported_run(it):
     sg, bs = split_sig(it)
     if sg is None: return it
     if not re.fullmatch(r"\s*[\w.']+\s*", it[bs:]): return it
+    if SETUP_RE.search(sg): return it      # a statement with a call setup is rewritten as a whole by `rewrite_witness`
     m = re.search(r'(?:Returns\w*|RunsAtLeast \d+|ReturnsWithin \d+) \([^()]*\.withExit ([\w.\']+)\) ([\w.\']+)(?=[\s])', sg)
     if not m or 'setRet' in m.group(2) or m.group(2).startswith('(') : return it
     R, S = m.group(1), m.group(2)
@@ -868,6 +888,7 @@ def untoold(it, setups):
             pos = m.end(); continue
         last = 3 if len(toks) >= 3 else 2
         states.add(toks[0][0]); states.add('__raw__')
+        states.add('__setup__' + sname.group(1).split('.')[-1])
         new = ')' + m.group(1) + ' ' + it[toks[0][1]:toks[last - 1][2]] + ' ret hret'
         it = it[:m.start()] + new + it[toks[last - 1][2]:]
         pos = m.start() + len(new)
