@@ -386,6 +386,8 @@ def unfold_list(pre_text, reg, f, bound=()):
             todo.append((w2, pick[2]))
     return seen
 
+TACTIC_WORDS = {'exact', 'refine', 'apply', 'simp', 'intro', 'rw', 'have', 'show', 'calc', 'decide', 'omega', 'rfl', 'trivial', 'assumption', 'constructor', 'cases', 'rcases', 'obtain', 'by', 'fun'}
+
 def collect(t, reg):
     items = re.split(r'(?m)^(?=(?:theorem |lemma |example |def |abbrev |namespace |end |set_option |/--|@\[|private |protected ))', t)
     for it in items:
@@ -398,6 +400,7 @@ def collect(t, reg):
             reg.argthms.append((m.group(1).split('.')[-1], it[bs0:]))
         c = conclusion(it)
         if not c: continue
+        if m.group(1) in TACTIC_WORDS: continue      # a theorem named `exact` must not turn the tactic `exact thm ..` into an application
         reg.names.add(m.group(1))
         if is_generic(c[1], c[2], c[3]): reg.generic.add(m.group(1))
 
