@@ -283,11 +283,12 @@ theorem rtPre_nxt {K V : Type} {M : MapModel K V} {n : Nat} {s : State} {m : Jan
     (hg : m.readLE ((s.regs 14).toNat + 16) 8 = s.mem.readLE ((s.regs 14).toNat + 16) 8)
     (hra : m.readLE (s.regs 4).toNat 8 = s.mem.readLE (s.regs 4).toNat 8)
     (he : M.Env m (s.regs 14)) : RTPre M n (nxt s m k) := by
-  obtain ⟨-, ⟨g1, g2, g3⟩, c1, c2, c3, c4, c5, c6, c7, ho⟩ := h
-  refine ⟨he, ⟨g1, ?_, ?_⟩, c1, c2, c3, ?_, c5, c6, ?_, ho⟩
+  obtain ⟨-, ⟨g1, g2, g3, g4⟩, c1, c2, c3, c4, c5, c6, c7, ho⟩ := h
+  refine ⟨he, ⟨g1, ?_, ?_, ?_⟩, c1, c2, c3, ?_, c5, c6, ?_, ho⟩
   · show m.accessible _ 8 false = true; rw [hacc]; exact g2
   · show m.readLE ((s.regs 14).toNat + 16) 8 + M.depth < (s.regs 4).toNat
     rw [hg]; exact g3
+  · exact g4
   · show m.accessible _ _ true = true; rw [hacc]; exact c4
   · show m.readLE (s.regs 4).toNat 8 < 2 ^ 47; rw [hra]; exact c7
 
