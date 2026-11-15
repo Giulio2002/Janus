@@ -526,7 +526,7 @@ def _migrate(t, amd0, reg, fname=''):
     for it in items:
         for ol in re.findall(r'(?m)^open [^\n]*', it):
             if 'Janus.Amd64' in ol: cur = True
-            elif 'Janus.Arm64' in ol or 'Janus.GoABI' in ol: cur = False
+            elif ('Janus.Arm64' in ol or 'Janus.GoABI' in ol) and not re.search(r'\bJanus\.(?:Arm64|GoABI)[\w.]*\s*\(', ol): cur = False      # `open Janus.Arm64 (elem)` opens single names only
         if re.search(r'Janus\.Amd64\.GoABI\.(?:Ensures|CallSetup)', it.split(':=', 1)[0]): cur = True
         isa.append(cur)
     inw, w = [], False
