@@ -337,7 +337,8 @@ def collect_defs(t, f, reg):
         # a definition that reads the state or its memory (`win s stk above`, `CallEnv R L s …`, `stLen m st`, `NatLive m …`):
         # installing the return address changes its argument, so it is unfolded; the others (`Serves R`, `Held R L p n`) cannot change
         nullary = concl == 'Nat' and not re.search(r'[({\[]', re.sub(r'@\[[^\]]*\]', '', sig[:ci]))      # `def gA : Nat := …`: an address constant
-        if not nullary and not re.search(r'[:\s(]\s*(?:Janus\.)?(?:Amd64\.|Arm64\.)?(?:State|Memory)\b', sig[:ci]):
+        if not nullary and not re.search(r'[:\s(]\s*(?:Janus\.)?(?:Amd64\.|Arm64\.)?(?:State|Memory)\b', sig[:ci]) \
+                and not re.match(r'(?:Janus\.)?(?:Amd64\.|Arm64\.)?State\s*(?:→|->)', concl):      # `abbrev PreRaw (z) : State → Prop := fun s => …` reads the state too
             # an alias of such a definition (`def Pre := PreS 4440`): resolved after every file is collected
             reg.aliases.append((name.split('.')[-1], f, it[bs:], qn))
             continue
@@ -712,6 +713,8 @@ def _migrate(t, amd0, reg, fname=''):
         while True:
             m = are.search(it, max(pos, sigend))
             if not m: break
+            if re.match(r'\s*=>', it[m.end():]) or re.search(r'\|\s*$', it[max(0, m.start() - 12):m.start()]):
+                out.append(it[pos:m.end()]); pos = m.end(); continue      # a match arm (`| zero => …`) that shares its name with a theorem, not an application
             toks, stop = tokens(it, m.end())
             idx = None
             for k in range(len(toks) - 1):
@@ -756,6 +759,7 @@ def _migrate(t, amd0, reg, fname=''):
             r = app_re(names)
             if not r: continue
             for m in r.finditer(it):
+                if re.match(r'\s*=>', it[m.end():]) or re.search(r'\|\s*$', it[max(0, m.start() - 12):m.start()]): continue      # a match arm sharing a theorem's name
                 toks, stop = tokens(it, m.end())
                 for k in range(len(toks) - 3):
                     if re.fullmatch(r"hret[\w']*", toks[k + 1][0].split('.')[-1]) and re.fullmatch(r"[\w'.]+", toks[k][0]):
@@ -776,7 +780,7 @@ def _migrate(t, amd0, reg, fname=''):
                     for kx in range(len(tk) - 3):
                         if re.fullmatch(r"hret[\w']*", tk[kx + 1][0].split('.')[-1]) and kx + 3 < len(tk):
                             raw_used.add(tk[kx + 3][0].split('.')[-1]); break
-        raw_setups = set(raw_used)
+        raw_setups = set(raw_used) & reg.setupnames      # genuine `theorem NAME : CallSetup (P.withExit R) …` lemmas only
         used_setups -= raw_used
     extra = {}
     for i, it in enumerate(items):
@@ -1000,6 +1004,16 @@ def rewrite_witness(it, apps, amd, name, warn, plain, kern, extra=()):
             # keep line structure: put the moved pair on the same line as the end
             it = it[:ret_t[1]] + new + it[rest_end:]
             pos = ret_t[1] + len(new)
+    # `hr.mono fun s' hq => ⟨hq.1, (post_iff … s s').1 hq.2⟩`: the lambda's body speaks about the run that now starts at `S.setRet R`, so the
+    # lemma instances that took `s s'` take `(s.setRet ret) s'`
+    mm = re.search(r'\.mono\s+\(?fun\s', it[sig_end:])
+    if mm:
+        k0 = sig_end + mm.start()
+        head_, tail_ = it[:k0], it[k0:]
+        for st in sorted(states):
+            if st.startswith('__') or not re.fullmatch(r"[\w']+", st): continue
+            tail_ = re.sub(r"(?<![\w.'])" + re.escape(st) + r"(?= s'(?![\w']))", '(' + st + '.setRet ' + retv + ')', tail_)
+        it = head_ + tail_
     return it
 
 ALT3 = re.compile(r"(?m)^([ \t]*)\| \(refine ⟨((?:by decide \+kernel|\?_)), ((?:by decide \+kernel|\?_)), ((?:by decide \+kernel|\?_))⟩;(?:[^()]|\((?:[^()]|\([^()]*\))*\))*?\)$")
