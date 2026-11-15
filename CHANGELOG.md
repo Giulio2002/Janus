@@ -147,6 +147,12 @@ Direct style (no bridge; for a new proof or a precondition the bridge cannot dis
   StackGuardOK s adj` is a simp lemma (`stackGuardOK_setRet`), so `janus64_pre_setRet` needs no extra conjunct. `TlsG` keeps its
   three fields: `tlsG_setRet_iff` needs `fsBase ≤ RSP ∨ RSP + 16 ≤ fsBase` (a precondition conjunct, as in `proofs-sys/amd64/Pid`).
   The `RTPre`/`CallerOK`/`PanicPre`/`EqPre` families discharge the new field from their `Disjoint (g + 16) …` conjunct.
+  **Consumer recipe (one line):** every destructuring `⟨hg1, hg2, hg3⟩` of a `StackGuardOK` gets a 4th binder, `⟨hg1, hg2, hg3, hg4⟩`
+  (`migrate-v040.py` does this, also for other binder names before a `⟨hb', …⟩` region triple), and every construction of a
+  `StackGuardOK` (`refine ⟨?_, ?_, ?_⟩`, `⟨a, b, c⟩`, a `first | (refine ⟨k, ?_, k⟩; …) | …` list) adds a 4th component proving
+  `g + stackguard0Offset + 8 ≤ RSP ∨ RSP + 8 ≤ g + stackguard0Offset`, usually
+  `by simp only [stackguard0Offset, regG, regSP] at *; omega` from the `g`/stack layout facts in scope (the script emits that closer and,
+  in `first` lists, a 4-hole twin of each 3-hole alternative whose extra hole is `by decide +kernel`).
 
 ### Phase 1d: the inner proofs keep compiling (pilot on fv-modexp, 2026-11-14)
 

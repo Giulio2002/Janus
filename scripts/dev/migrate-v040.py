@@ -845,7 +845,9 @@ def fix_stackguard(t):
     """amd64 `StackGuardOK` has a 4th field (`apart`: the guard word is not the return slot): the destructuring
     the nested pattern `⟨hg1, hg2, hg3⟩` (the customary names of its three fields) becomes `⟨hg1, hg2, hg3, hg4⟩`. Constructions
     `⟨…, hg1, hg2, hg3, …⟩` of another state still need their own proof of `hg4` (reported)."""
-    return re.sub(r'⟨hg1, hg2, hg3⟩', '⟨hg1, hg2, hg3, hg4⟩', t)
+    t = re.sub(r'⟨hg1, hg2, hg3⟩', '⟨hg1, hg2, hg3, hg4⟩', t)
+    # any other three binders followed by the region triple `⟨hb', …⟩` (the `CallEnv` shape: StackGuardOK, then the region)
+    return re.sub(r"⟨([\w'-]+), ([\w'-]+), ([\w'-]+)⟩(, ⟨hb)", lambda m: '⟨%s, %s, %s, %s⟩%s' % (m.group(1), m.group(2), m.group(3), '-' if m.group(3) == '-' else '_', m.group(4)), t)
 
 SG_CLOSER = "first | omega | (simp_all only [stackguard0Offset, regG, regSP, Apart]; omega)"
 
@@ -916,7 +918,7 @@ def main(files):
         t = texts[f]
         amd = 'Janus.Amd64' in t
         t2, warn = migrate(t, amd, reg, f)
-        if amd and '⟨hg1, hg2, hg3⟩' in t2:
+        if amd and ('⟨hg1, hg2, hg3⟩' in t2 or re.search(r"⟨[\w'-]+, [\w'-]+, [\w'-]+⟩, ⟨hb", t2)):
             t3 = fix_stackguard(t2)
             if t3 != t2: warn.append('StackGuardOK patterns `hg1, hg2, hg3` extended by `hg4` (a construction of another state needs its own proof of the guard word apart from [RSP, RSP+8))')
             t2 = t3
