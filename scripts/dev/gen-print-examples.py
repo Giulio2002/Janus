@@ -68,7 +68,7 @@ for ex, (n, _) in EX.items():
     DO = "Janus.Print.DataOutside" if arm else "Janus.Amd64.Print.DataOutside"
     EK = "Janus.Kernel.EnsuresK" if arm else "Janus.Amd64.Kernel.EnsuresK"
     SEG = "Segment" if arm else "Amd64.Segment"
-    SETUP = "⟨h5.pc, h5.lr, h5.args⟩" if arm else "⟨h5.rip, h5.ret, h5.zero, h5.len, h5.args, h5.df⟩"
+    SETUP = "⟨h5.pc, h5.len, h5.args⟩" if arm else "⟨h5.rip, h5.zero, h5.len, h5.args, h5.df⟩"
     pre_tail = "hp.2.2.2" if has_rest else None
     xfer_pre = (("⟨hp.1, equiv.dataLoaded hp.2.1, {DO}.of_equiv equiv hp.2.2.1, hp.2.2.2.1, hp.2.2.2.2.1, hp.2.2.2.2.2.1, hp.2.2.2.2.2.2.1, hp.2.2.2.2.2.2.2⟩" if has_rest else "⟨hp.1, equiv.dataLoaded hp.2.1, {DO}.of_equiv equiv hp.2.2⟩")).replace("{DO}", DO)
     eqs = "rw [← pk_eq, ← bi_eq, ← bl_eq, ← ow_eq, ← dl_eq]"
