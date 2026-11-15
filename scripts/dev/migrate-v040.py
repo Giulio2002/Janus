@@ -826,6 +826,21 @@ def rewrite_witness(it, apps, amd, name, warn, plain, kern, extra=()):
             pos = ret_t[1] + len(new)
     return it
 
+ALT3 = re.compile(r"(?m)^([ \t]*)\| \(refine ⟨((?:by decide \+kernel|\?_)), ((?:by decide \+kernel|\?_)), ((?:by decide \+kernel|\?_))⟩;(?:[^()]|\((?:[^()]|\([^()]*\))*\))*?\)$")
+
+def fix_stackguard_alts(t):
+    """`first | … | (refine ⟨k, ?_, k⟩; rw [..]; decide +kernel) | …` proving a `pre` that contains a StackGuardOK: the guard
+    has a 4th field (`apart`), so every 3-hole alternative gets a 4-hole twin (the extra hole a kernel `decide`)."""
+    out, pos, n = [], 0, 0
+    for m in ALT3.finditer(t):
+        alt = m.group(0)
+        if '+kernel⟩' in alt.split(';')[0] and alt.split(';')[0].count(',') >= 3: continue
+        twin = alt.replace('⟩;', ', by decide +kernel⟩;', 1)
+        if twin in t: continue
+        out.append(t[pos:m.end()]); out.append('\n' + twin); pos = m.end(); n += 1
+    out.append(t[pos:])
+    return ''.join(out), n
+
 def fix_stackguard(t):
     """amd64 `StackGuardOK` has a 4th field (`apart`: the guard word is not the return slot): the destructuring
     the nested pattern `⟨hg1, hg2, hg3⟩` (the customary names of its three fields) becomes `⟨hg1, hg2, hg3, hg4⟩`. Constructions
@@ -910,6 +925,11 @@ def main(files):
             if nchg:
                 warn.append('%d `refine ⟨⟨?_, ?_, ?_⟩, …⟩` StackGuardOK constructions got a 4th hole and a closing bullet' % nchg)
                 t2 = t4
+        if amd and '(refine ⟨by decide +kernel' in t2 or amd and '(refine ⟨?_, by decide +kernel' in t2:
+            t5, nalt = fix_stackguard_alts(t2)
+            if nalt:
+                warn.append('%d `refine ⟨k, ?_, k⟩` alternatives got a 4-hole twin (StackGuardOK 4th field)' % nalt)
+                t2 = t5
         if t2 != t: open(f, 'w').write(t2)
         print(f, ('WARN: ' + '; '.join(warn)) if warn else 'ok')
 
