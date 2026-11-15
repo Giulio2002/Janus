@@ -3,7 +3,8 @@ import «Proof»
 /-! Positive control (round 3): the amd64 `Equal64` precondition is satisfiable, so the shipped
 `Proof.correctness` is not vacuous. Concrete call state: the return address on the stack, a
 readable `g.stackguard0`, a 48-byte writable stack window, two readable 64-byte arrays `a`, `b`,
-and a readable `internal/cpu.X86.HasAVX2` feature byte, all pairwise disjoint. The theorem holds
+and a readable `internal/cpu.X86.HasAVX2` feature byte, all pairwise disjoint. The feature byte's address is `Proof.hasAVX2`, derived from the
+extracted code (`ripTarget` of the `CMPB` in `memequal`), never written as a literal: it moves with the Go toolchain's layout. The theorem holds
 for any value of that byte (both the AVX2 and the SSE path), so the byte is left 0. -/
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
@@ -23,7 +24,7 @@ def s0 : State :=
     xmm := fun _ => 0,
     mem := ⟨bytes,
             [⟨0x10000 - 40, 48, true⟩, ⟨0x20010, 8, false⟩,
-             ⟨0x30000, 64, false⟩, ⟨0x40000, 64, false⟩, ⟨0x579264, 1, false⟩]⟩ }
+             ⟨0x30000, 64, false⟩, ⟨0x40000, 64, false⟩, ⟨Proof.hasAVX2, 1, false⟩]⟩ }
 
 theorem hret : RetAddr Extracted.program ret := by
   refine ⟨?_, ?_, ?_⟩ <;> decide
@@ -41,11 +42,8 @@ theorem pre :
       (b.toNat + 64 ≤ (s0.regs regSP).toNat - 40 ∨ (s0.regs regSP).toNat ≤ b.toNat) ∧
       s0.mem.accessible Proof.hasAVX2 1 false = true ∧
       (Proof.hasAVX2 + 1 ≤ (s0.regs regSP).toNat - 40 ∨ (s0.regs regSP).toNat ≤ Proof.hasAVX2) := by
-  have hav : Proof.hasAVX2 = 0x579264 := by
-    simp only [Proof.hasAVX2, reduceSegAddr, reduceRipTarget]
-  rw [hav]
   refine ⟨⟨by decide, by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;>
-    simp only [StackWritable, Buffer, regSP, s0, a, b] <;> decide
+    simp only [StackWritable, Buffer, regSP, s0, a, b, Proof.hasAVX2, reduceSegAddr, reduceRipTarget] <;> decide
 
 theorem fires : Returns (Extracted.program.withExit ret) (s0.setRet ret)
     (fun s' => ABIReturn (s0.setRet ret) s' ∧

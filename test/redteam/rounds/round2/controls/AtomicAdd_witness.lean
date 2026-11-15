@@ -3,7 +3,7 @@ import «Proof»
 /-! Positive control: the AtomicAdd precondition is satisfiable (not vacuous). We build a
 concrete call state, discharge CallSetup and the precondition by `decide`/`native`-free kernel
 computation, and instantiate `Proof.correctness` to obtain a concrete `Returns`.
-hasAtomics = 1636076 (computed). p = 0x3000 (8-aligned, writable), the LSE flag byte = 1. -/
+hasAtomics is `Proof.hasAtomics`, recomputed from the extracted `ADRP`/`LDRB` words (no literal: the address moves with the Go toolchain's layout). p = 0x3000 (8-aligned, writable), the LSE flag byte = 1. -/
 open Janus Janus.Arm64 Janus.GoABI Janus.Spec
 
 namespace AtomicAddWitness
@@ -11,7 +11,7 @@ namespace AtomicAddWitness
 def ret : Nat := 0x1000
 def p : BitVec 64 := 0x3000
 def d : BitVec 64 := 7
-def haAddr : Nat := 1636076
+def haAddr : Nat := Proof.hasAtomics
 
 def s0 : State :=
   { regs := fun i => if i = 0 then p else if i = 1 then d
@@ -28,7 +28,7 @@ theorem setup : CallSetup0 Extracted.entry [p, d] s0 :=
 
 theorem pre : s0.mem.accessible (Proof.hasAtomics) 1 false = true ∧
     s0.mem.readLE Proof.hasAtomics 1 % 2 = 1 ∧ Ptr s0.mem p 8 true ∧ p.toNat % 8 = 0 := by
-  have hha : Proof.hasAtomics = haAddr := by rfl
+  have hha : Proof.hasAtomics = haAddr := rfl
   rw [hha]
   refine ⟨?_, ?_, ?_, ?_⟩ <;> (try rfl) <;> (unfold Ptr Memory.accessible <;> decide)
 
