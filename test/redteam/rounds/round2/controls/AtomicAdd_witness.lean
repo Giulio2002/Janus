@@ -23,8 +23,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [p, d] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h; rcases i with _ | _ | i <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [p, d] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h; rcases i with _ | _ | i <;> simp [s0] at h ⊢ <;> omega⟩
 
 theorem pre : s0.mem.accessible (Proof.hasAtomics) 1 false = true ∧
     s0.mem.readLE Proof.hasAtomics 1 % 2 = 1 ∧ Ptr s0.mem p 8 true ∧ p.toNat % 8 = 0 := by
@@ -33,10 +33,10 @@ theorem pre : s0.mem.accessible (Proof.hasAtomics) 1 false = true ∧
   refine ⟨?_, ?_, ?_, ?_⟩ <;> (try rfl) <;> (unfold Ptr Memory.accessible <;> decide)
 
 /-- The non-vacuous payload: `correctness` really fires on a satisfying state. -/
-theorem fires : Returns (Extracted.program.withExit ret) s0
-    (fun s' => ABIReturn s0 s' ∧
-      (s'.regs 0).toNat = (s0.mem.readLE p.toNat 8 + d.toNat) % 2 ^ 64 ∧
-      s'.mem = s0.mem.writeLE p.toNat 8 ((s0.mem.readLE p.toNat 8 + d.toNat) % 2 ^ 64)) :=
-  Proof.correctness p d ret hret s0 setup pre
+theorem fires : Returns (Extracted.program.withExit ret) (s0.setRet ret)
+    (fun s' => ABIReturn (s0.setRet ret) s' ∧
+      (s'.regs 0).toNat = ((s0.setRet ret).mem.readLE p.toNat 8 + d.toNat) % 2 ^ 64 ∧
+      s'.mem = (s0.setRet ret).mem.writeLE p.toNat 8 (((s0.setRet ret).mem.readLE p.toNat 8 + d.toNat) % 2 ^ 64)) :=
+  (Proof.correctness p d) s0 setup pre ret hret
 
 end AtomicAddWitness

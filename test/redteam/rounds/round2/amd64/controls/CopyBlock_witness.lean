@@ -23,8 +23,8 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [0x2000, 0x3000] s0 := by
-  refine ⟨rfl, by decide, rfl, by decide, ?_⟩
+theorem setup : CallSetup0 Extracted.entry [0x2000, 0x3000] s0 := by
+  refine ⟨rfl, rfl, by decide, ?_, rfl⟩
   intro i h; simp at h
   rcases i with _ | _ | i <;> first | rfl | omega
 
@@ -32,16 +32,16 @@ theorem pre : StackGuardOK s0 0 ∧ StackWritable s0 40 8 ∧ Buffer s0 0x2000 1
     Buffer s0 0x3000 128 false ∧
     ((0x2000 : BitVec 64).toNat + 128 ≤ (s0.regs regSP).toNat - 40 ∨ (s0.regs regSP).toNat + 8 ≤ (0x2000 : BitVec 64).toNat) ∧
     ((0x3000 : BitVec 64).toNat + 128 ≤ (s0.regs regSP).toNat - 40 ∨ (s0.regs regSP).toNat ≤ (0x3000 : BitVec 64).toNat) := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide⟩,
+  refine ⟨⟨by decide, by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide⟩,
     ⟨by decide, by decide⟩, by decide, by decide⟩
 
 /-- The 128-byte value at `src` before the call (bytes 1..128). -/
 def srcVal : Nat := Janus.Amd64.GoABI.listLE ((List.range 128).map (· + 1)) 128
 
 set_option maxRecDepth 200000 in
-example : ∃ fuel s', (Extracted.program.withExit ret).run fuel s0 = .ok (.returned s') ∧
+example : ∃ fuel s', (Extracted.program.withExit ret).run fuel (s0.setRet ret) = .ok (.returned s') ∧
     s'.mem.readLE 0x2000 128 = srcVal := by
-  obtain ⟨f, s', h1, _, h2⟩ := Proof.correctness 0x2000 0x3000 ret hret s0 setup pre
+  obtain ⟨f, s', h1, _, h2⟩ := (Proof.correctness 0x2000 0x3000) s0 setup pre ret hret
   refine ⟨f, s', h1, ?_⟩
   have : s0.mem.readLE 0x3000 128 = srcVal := by decide
   simp only [valueAt] at h2

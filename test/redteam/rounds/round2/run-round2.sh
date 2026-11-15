@@ -87,13 +87,23 @@ medium1_block() {
 echo
 echo "== MEDIUM-1 (amd64 DF): see test/redteam/rounds/round2/amd64/README.txt; with artifacts/examples-amd64 built:"
 if [ -f artifacts/examples-amd64 ]; then
-  "$J" extract artifacts/examples-amd64 example.com/basic.CopyBlock $W/amd64-CopyBlock >/dev/null &&
-  df_out=$(v --proof test/redteam/rounds/round2/amd64/controls/DFMemmove.lean --theorem DFRepro.memmove_backward_rep_copies_forward $W/amd64-CopyBlock | verdict_line)
-  echo "$df_out"; case "$df_out" in NOVERDICT*|AMBIGUOUS*) broken+=(DF-noverdict) ;; esac
+  "$J" extract artifacts/examples-amd64 example.com/basic.CopyBlock $W/amd64-CopyBlock >/dev/null || { broken+=(DF-extract); return; }
+  # (a) the control compiles against the extraction (the REP MOVSQ address is derived from the symbol runtime.memmove, not
+  #     hard-coded; fetch_rep checks the code bytes). Run as a Lean compile: a statement that names a concrete State literal is
+  #     rejected by `janus verify` (undefined-value-stream rule), see (b).
+  mkdir -p $W/amd64-CopyBlock/olean
+  if LEAN_PATH="$root/.lake/build/lib/lean" lake env lean -R $W/amd64-CopyBlock -o $W/amd64-CopyBlock/olean/Extracted.olean $W/amd64-CopyBlock/Extracted.lean >/dev/null 2>&1 &&
+     df_c=$(LEAN_PATH="$root/.lake/build/lib/lean:$root/$W/amd64-CopyBlock/olean" lake env lean test/redteam/rounds/round2/amd64/controls/DFMemmove.lean 2>&1); then
+    echo "  DF control (Lean compile)    ok       DFMemmove.lean compiles: with DF = 0 the model copies forward (the state t leaves df at its default false)"
+  else echo "  DF control (Lean compile)    >>> BROKEN: $(head -c 300 <<<"$df_c")"; broken+=(DF-control); fi
+  # (b) as a verify row the same statement is rejected for what it is, a concrete State literal (never for an elaboration failure)
+  df_out=$(v --proof test/redteam/rounds/round2/amd64/controls/DFMemmove.lean --theorem DFRepro.memmove_backward_rep_copies_forward $W/amd64-CopyBlock)
+  if grep -q 'undefined-value stream' <<<"$df_out" && ! grep -q 'Lean rejected' <<<"$df_out"; then
+    echo "  DF verify row                blocked  Invalid: the audit rejects a statement naming a concrete State literal (undefined-value stream)"
+  else echo "  DF verify row                >>> BROKEN: $(verdict_line <<<"$df_out")"; broken+=(DF-verify); fi
 fi
-echo "(MEDIUM-1 is fixed: amd64 models DF. This repro's concrete state t leaves df at its default"
-echo " false, and with DF = 0 a forward copy is correct, so the theorem is now true and honest about"
-echo " a state real executions never reach; Verified is expected. The fix itself is checked by"
+echo "(MEDIUM-1 is fixed: amd64 models DF. The repro's concrete state t leaves df at its default false, and with DF = 0 a forward copy is"
+echo " correct, so the theorem is true and honest about a state real executions never reach. The fix itself is checked by"
 echo " JanusTests.Amd64.df_backward_not_forward: with DF = 1 (after STD) the model copies backward.)"
 echo "Model repros: test/redteam/rounds/round2/model/README.txt (arm64, run from a copy of agent/arm64cov2), test/redteam/rounds/round2/amd64/README.txt."
 }

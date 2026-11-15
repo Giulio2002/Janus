@@ -22,17 +22,17 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [0x2000, 50] s0 := by
-  refine ⟨rfl, by decide, rfl, by decide, ?_⟩
+theorem setup : CallSetup0 Extracted.entry [0x2000, 50] s0 := by
+  refine ⟨rfl, rfl, by decide, ?_, rfl⟩
   intro i h; simp at h; rcases i with _ | _ | i <;> simp_all [s0, argReg, intArgRegs] <;> omega
 
 theorem pre : StackWritable s0 0 8 ∧ Buffer s0 0x2000 8 true ∧ Disjoint 0x2000 8 (s0.regs regSP) 8 := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide⟩, ?_⟩
+  refine ⟨⟨by decide, by decide, by decide, by decide⟩, ⟨by decide, by decide⟩, ?_⟩
   simp [Disjoint, s0, regSP]
 
-example : ∃ fuel s', (Extracted.program.withExit ret).run fuel s0 = .ok (.returned s') ∧
+example : ∃ fuel s', (Extracted.program.withExit ret).run fuel (s0.setRet ret) = .ok (.returned s') ∧
     s'.regs 0 = 40 ∧ s'.mem.readLE 0x2000 8 = 50 := by
-  obtain ⟨f, s', h1, _, h2, h3⟩ := Proof.correctness 0x2000 50 ret hret s0 setup pre
+  obtain ⟨f, s', h1, _, h2, h3⟩ := (Proof.correctness 0x2000 50) s0 setup pre ret hret
   have e : s0.mem.readLE (0x2000 : BitVec 64).toNat 8 = 40 := by decide
   rw [e] at h2 h3
   exact ⟨f, s', h1, h2, h3⟩

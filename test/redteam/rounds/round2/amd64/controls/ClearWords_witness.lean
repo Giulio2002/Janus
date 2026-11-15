@@ -36,9 +36,9 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry
+theorem setup : CallSetup0 Extracted.entry
     [BitVec.ofNat 64 B, 300, 300] s0 := by
-  refine ⟨rfl, by decide, rfl, by decide, ?_⟩
+  refine ⟨rfl, rfl, by decide, ?_, rfl⟩
   intro i h; simp at h
   rcases i with _ | _ | _ | i <;> first | rfl | omega
 
@@ -52,19 +52,19 @@ theorem pre :
       ((BitVec.ofNat 64 B).toNat + 8 * (300 : BitVec 64).toNat ≤ Proof.hasAVX2 ∨ Proof.hasERMS + 1 ≤ (BitVec.ofNat 64 B).toNat) ∧
       (Proof.hasERMS + 1 ≤ (s0.regs regSP).toNat - 32 ∨ (s0.regs regSP).toNat + 16 ≤ Proof.hasAVX2) := by
   rw [avx2_eq, erms_eq]
-  exact ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide⟩,
+  exact ⟨⟨by decide, by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, ⟨by decide, by decide⟩,
     by decide, by decide, by decide, by decide, by decide, by decide⟩
 
-example : ∃ fuel s', (Extracted.program.withExit ret).run fuel s0 = .ok (.returned s') ∧
+example : ∃ fuel s', (Extracted.program.withExit ret).run fuel (s0.setRet ret) = .ok (.returned s') ∧
     s'.mem.readLE (B + 8 * 299) 8 = 0 ∧ s'.mem.bytes (B + 2400) = 0 := by
   obtain ⟨f, s', h1, _, h2, h3⟩ :=
-    Proof.correctness (BitVec.ofNat 64 B) 300 300 ret hret s0 setup pre
+    (Proof.correctness (BitVec.ofNat 64 B) 300 300) s0 setup pre ret hret
   refine ⟨f, s', h1, h2 299 (by decide), ?_⟩
   rw [h3 (B + 2400) (by right; decide) (by left; decide)]; decide
 
 /-- Independent check: evaluate the model (not the proof). -/
 def runIt : String :=
-  match (Extracted.program.withExit ret).run 2000 s0 with
+  match (Extracted.program.withExit ret).run 2000 (s0.setRet ret) with
   | .ok (.returned s') =>
     s!"returned; words zero: {(List.range 300).all (fun j => s'.mem.readLE (B + 8 * j) 8 = 0)}; RSP={(s'.regs 4).toNat == SP + 8}"
   | .ok (.stub n _ _) => s!"stub {n}"

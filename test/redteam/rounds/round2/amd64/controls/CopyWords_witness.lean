@@ -23,9 +23,9 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry
+theorem setup : CallSetup0 Extracted.entry
     [0x2000, 2, 2, 0x3000, 3, 3] s0 := by
-  refine ⟨rfl, by decide, rfl, by decide, ?_⟩
+  refine ⟨rfl, rfl, by decide, ?_, rfl⟩
   intro i h; simp at h
   rcases i with _ | _ | _ | _ | _ | _ | i <;> first | rfl | omega
 
@@ -34,13 +34,13 @@ theorem pre : StackWritable s0 0 40 ∧ Buffer s0 0x2000 (8 * (2 : BitVec 64).to
     Disjoint 0x2000 (8 * (2 : BitVec 64).toNat) 0x3000 (8 * (3 : BitVec 64).toNat) ∧
     Disjoint 0x2000 (8 * (2 : BitVec 64).toNat) (s0.regs regSP) 40 ∧
     Disjoint 0x3000 (8 * (3 : BitVec 64).toNat) (s0.regs regSP) 40 := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide⟩, ⟨by decide, by decide⟩, ?_, ?_, ?_⟩ <;>
+  refine ⟨⟨by decide, by decide, by decide, by decide⟩, ⟨by decide, by decide⟩, ⟨by decide, by decide⟩, ?_, ?_, ?_⟩ <;>
     simp [Disjoint, s0, regSP, rv] <;> decide
 
-example : ∃ fuel s', (Extracted.program.withExit ret).run fuel s0 = .ok (.returned s') ∧
+example : ∃ fuel s', (Extracted.program.withExit ret).run fuel (s0.setRet ret) = .ok (.returned s') ∧
     s'.regs 0 = 2 ∧ s'.mem.readLE 0x2000 8 = 7 ∧ s'.mem.readLE 0x2008 8 = 9 := by
   obtain ⟨f, s', h1, _, h2, h3⟩ :=
-    Proof.correctness 0x2000 2 2 0x3000 3 3 (by decide) (by decide) ret hret s0 setup pre
+    (Proof.correctness 0x2000 2 2 0x3000 3 3 (by decide) (by decide)) s0 setup pre ret hret
   have h0 := h3 0 (by decide); have h1' := h3 1 (by decide)
   simp only [results_one, List.cons.injEq, and_true] at h2
   refine ⟨f, s', h1, by rw [h2]; decide, ?_, ?_⟩

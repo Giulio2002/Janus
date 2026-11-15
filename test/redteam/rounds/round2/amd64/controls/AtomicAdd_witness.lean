@@ -22,17 +22,17 @@ def s0 : State :=
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mem }
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [0x2000, 2] s0 := by
-  refine ⟨rfl, by decide, rfl, by decide, ?_⟩
+theorem setup : CallSetup0 Extracted.entry [0x2000, 2] s0 := by
+  refine ⟨rfl, rfl, by decide, ?_, rfl⟩
   intro i h; simp at h; rcases i with _ | _ | i <;> simp_all [s0, argReg, intArgRegs] <;> omega
 
 theorem pre : StackWritable s0 0 8 ∧ Buffer s0 0x2000 8 true ∧ Disjoint 0x2000 8 (s0.regs regSP) 8 := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide⟩, ?_⟩
+  refine ⟨⟨by decide, by decide, by decide, by decide⟩, ⟨by decide, by decide⟩, ?_⟩
   simp [Disjoint, s0, regSP]
 
-example : ∃ fuel s', (Extracted.program.withExit ret).run fuel s0 = .ok (.returned s') ∧
+example : ∃ fuel s', (Extracted.program.withExit ret).run fuel (s0.setRet ret) = .ok (.returned s') ∧
     s'.regs 0 = 42 ∧ s'.mem.readLE 0x2000 8 = 42 := by
-  obtain ⟨f, s', h1, _, h2, h3⟩ := Proof.correctness 0x2000 2 ret hret s0 setup pre
+  obtain ⟨f, s', h1, _, h2, h3⟩ := (Proof.correctness 0x2000 2) s0 setup pre ret hret
   have e : s0.mem.readLE (0x2000 : BitVec 64).toNat 8 = 40 := by decide
   rw [e] at h2
   refine ⟨f, s', h1, by rw [h2]; decide, ?_⟩
@@ -53,17 +53,17 @@ def s0 : State :=
   { regs := fun i => if i = 0 then 0x203C else if i = 3 then 2 else if i = 4 then 0x8000 else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := mem }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [0x203C, 2] s0 := by
-  refine ⟨rfl, by decide, rfl, by decide, ?_⟩
+theorem setup : CallSetup0 Extracted.entry [0x203C, 2] s0 := by
+  refine ⟨rfl, rfl, by decide, ?_, rfl⟩
   intro i h; simp at h; rcases i with _ | _ | i <;> simp_all [s0, argReg, intArgRegs] <;> omega
 theorem pre : StackWritable s0 0 8 ∧ Buffer s0 0x203C 8 true ∧ Disjoint 0x203C 8 (s0.regs regSP) 8 := by
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide⟩, ?_⟩
+  refine ⟨⟨by decide, by decide, by decide, by decide⟩, ⟨by decide, by decide⟩, ?_⟩
   simp [Disjoint, s0, regSP]
 /-- The word straddles the cache line at `0x2040`. -/
 example : 0x203C / 64 ≠ (0x203C + 7) / 64 := by decide
-example : ∃ fuel s', (Extracted.program.withExit ret).run fuel s0 = .ok (.returned s') ∧
+example : ∃ fuel s', (Extracted.program.withExit ret).run fuel (s0.setRet ret) = .ok (.returned s') ∧
     s'.regs 0 = 42 := by
-  obtain ⟨f, s', h1, _, h2, _⟩ := Proof.correctness 0x203C 2 ret hret s0 setup pre
+  obtain ⟨f, s', h1, _, h2, _⟩ := (Proof.correctness 0x203C 2) s0 setup pre ret hret
   have e : s0.mem.readLE (0x203C : BitVec 64).toNat 8 = 40 := by decide
   rw [e] at h2
   exact ⟨f, s', h1, by rw [h2]; decide⟩
