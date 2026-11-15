@@ -34,8 +34,9 @@ theorem pre : StackWritable s0 0 40 ∧ Buffer s0 0x2000 (8 * (2 : BitVec 64).to
     Disjoint 0x2000 (8 * (2 : BitVec 64).toNat) 0x3000 (8 * (3 : BitVec 64).toNat) ∧
     Disjoint 0x2000 (8 * (2 : BitVec 64).toNat) (s0.regs regSP) 40 ∧
     Disjoint 0x3000 (8 * (3 : BitVec 64).toNat) (s0.regs regSP) 40 := by
-  refine ⟨⟨by decide, by decide, by decide, by decide⟩, ⟨by decide, by decide⟩, ⟨by decide, by decide⟩, ?_, ?_, ?_⟩ <;>
-    simp [Disjoint, s0, regSP, rv] <;> decide
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide) | (simp [s0, regSP, rv] <;> decide)
 
 example : ∃ fuel s', (Extracted.program.withExit ret).run fuel (s0.setRet ret) = .ok (.returned s') ∧
     s'.regs 0 = 2 ∧ s'.mem.readLE 0x2000 8 = 7 ∧ s'.mem.readLE 0x2008 8 = 9 := by
@@ -43,11 +44,14 @@ example : ∃ fuel s', (Extracted.program.withExit ret).run fuel (s0.setRet ret)
     (Proof.correctness 0x2000 2 2 0x3000 3 3 (by decide) (by decide)) s0 setup pre ret hret
   have h0 := h3 0 (by decide); have h1' := h3 1 (by decide)
   simp only [results_one, List.cons.injEq, and_true] at h2
+  -- the theorem's source reads are at `s0.setRet ret`; the return slot `[0x8000, 0x8008)` is outside the source buffer
+  have r0 : (s0.setRet ret).mem.readLE (0x3000 + 8 * 0) 8 = 7 := by
+    rw [readLE_setRet_of_disjoint (by simp [s0, rv] <;> decide)]; decide
+  have r1 : (s0.setRet ret).mem.readLE (0x3000 + 8 * 1) 8 = 9 := by
+    rw [readLE_setRet_of_disjoint (by simp [s0, rv] <;> decide)]; decide
   refine ⟨f, s', h1, by rw [h2]; decide, ?_, ?_⟩
-  · have : s0.mem.readLE 0x3000 8 = 7 := by decide
-    simpa [this] using h0
-  · have : s0.mem.readLE 0x3008 8 = 9 := by decide
-    simpa [this] using h1'
+  · simpa [(by decide : (BitVec.toNat (0x3000 : BitVec 64)) = 0x3000), r0] using h0
+  · simpa [(by decide : (BitVec.toNat (0x3000 : BitVec 64)) = 0x3000), r1] using h1'
 
 end AuditWitness
 

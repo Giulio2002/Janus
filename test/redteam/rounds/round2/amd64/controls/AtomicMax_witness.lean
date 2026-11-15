@@ -26,15 +26,21 @@ theorem setup : CallSetup0 Extracted.entry [0x2000, 50] s0 := by
   refine ⟨rfl, rfl, by decide, ?_, rfl⟩
   intro i h; simp at h; rcases i with _ | _ | i <;> simp_all [s0, argReg, intArgRegs] <;> omega
 
-theorem pre : StackWritable s0 0 8 ∧ Buffer s0 0x2000 8 true ∧ Disjoint 0x2000 8 (s0.regs regSP) 8 := by
-  refine ⟨⟨by decide, by decide, by decide, by decide⟩, ⟨by decide, by decide⟩, ?_⟩
-  simp [Disjoint, s0, regSP]
+/-- `s0.setRet ret` agrees with `s0` on the word at `p` (the return slot `[0x8000, 0x8008)` is elsewhere): the theorem's readLE terms are about the
+state the run starts from, `s0.setRet ret`, and `readLE_setRet_of_disjoint` moves them back to `s0`. -/
+theorem rd_setRet : (s0.setRet ret).mem.readLE (0x2000 : BitVec 64).toNat 8 = 40 := by
+  rw [readLE_setRet_of_disjoint (by simp [s0])]; decide
+
+theorem pre : StackWritable s0 0 8 ∧ Buffer s0 0x2000 8 true ∧ (0x2000 : BitVec 64).toNat % 8 = 0 ∧
+    Disjoint 0x2000 8 (s0.regs regSP) 8 := by
+  try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
+  repeat' apply And.intro
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 example : ∃ fuel s', (Extracted.program.withExit ret).run fuel (s0.setRet ret) = .ok (.returned s') ∧
     s'.regs 0 = 40 ∧ s'.mem.readLE 0x2000 8 = 50 := by
   obtain ⟨f, s', h1, _, h2, h3⟩ := (Proof.correctness 0x2000 50) s0 setup pre ret hret
-  have e : s0.mem.readLE (0x2000 : BitVec 64).toNat 8 = 40 := by decide
-  rw [e] at h2 h3
+  rw [rd_setRet] at h2 h3
   exact ⟨f, s', h1, h2, h3⟩
 
 end AuditWitness
