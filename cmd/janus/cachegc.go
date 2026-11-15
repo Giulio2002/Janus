@@ -106,7 +106,15 @@ type gcEntry struct {
 	marks  []string
 	pinned bool
 	inUse  bool // a lock is held by another process (found by du / dry run)
+	View   bool `json:"view,omitempty"` // a replay view with an owner lock (<view>/.lock): collectable once the lock is free
 }
+
+// viewLockName is the lock file an owner holds in its replay view; deadViewGrace the age a view must have before its free lock
+// means "dead".
+const (
+	viewLockName  = ".lock"
+	deadViewGrace = 5 * time.Minute
+)
 
 // gcPins are the entry directories this process uses (never collected by its own GC).
 var (
@@ -326,7 +334,13 @@ func scanCache(root string) *gcScan {
 					s.trash = append(s.trash, q)
 				}
 				n, newest := treeUsage(q)
-				s.entries = append(s.entries, &gcEntry{Kind: t.Name(), Path: q, Size: n, Used: newest})
+				ge := &gcEntry{Kind: t.Name(), Path: q, Size: n, Used: newest}
+				if t.Name() == "run" && strings.HasPrefix(e.Name(), "replay-view-") && e.IsDir() {
+					if _, err := os.Lstat(filepath.Join(q, viewLockName)); err == nil {
+						ge.View, ge.locks = true, []string{filepath.Join(q, viewLockName)}
+					}
+				}
+				s.entries = append(s.entries, ge)
 			}
 		}
 	}
@@ -630,8 +644,11 @@ func collectCache(o gcOptions, block bool) (*gcReport, error) {
 		}
 		switch {
 		case e.Kind == "tmp" || e.Kind == "run":
-			// Temporary trees: only by age (they have no lock; their process may still run).
-			if age > tmpAge {
+			// Temporary trees: only by age (they have no lock; their process may still run), except a replay view that has a
+			// .lock: evict() collects it when nobody holds the lock (a run killed by `timeout` leaves one of the closure's
+			// size behind, and these counted against the budget until they were a day old, so the collector evicted the
+			// module store instead). A view younger than deadViewGrace is left (the owner may not have taken its lock yet).
+			if age > tmpAge || (e.View && age > deadViewGrace) {
 				evict(e)
 			}
 			continue
@@ -933,13 +950,21 @@ func printCacheDu(w io.Writer, s *gcScan, fsi fsInfo, budget int64, asJSON bool)
 			d.Newest = e.Used
 		}
 	}
+	dead, deadSize := 0, int64(0)
+	for _, e := range s.entries {
+		if e.View && !e.inUse {
+			dead++
+			deadSize += e.Size
+		}
+	}
 	if asJSON {
 		var kinds []*duKind
 		for _, k := range gcKinds {
 			kinds = append(kinds, byKind[k])
 		}
 		b, _ := json.MarshalIndent(map[string]any{"root": s.root, "total": s.total(), "other": s.other, "budget": budget,
-			"filesystemSize": fsi.size, "freeSpace": fsi.avail, "ram": fsi.ram, "kinds": kinds}, "", "  ")
+			"filesystemSize": fsi.size, "freeSpace": fsi.avail, "ram": fsi.ram, "kinds": kinds,
+			"deadReplayViews": map[string]any{"entries": dead, "size": deadSize}}, "", "  ")
 		fmt.Fprintf(w, "%s\n", b)
 		return nil
 	}
@@ -969,6 +994,9 @@ func printCacheDu(w io.Writer, s *gcScan, fsi fsInfo, budget int64, asJSON bool)
 		b = fmtBytes(budget)
 	}
 	fmt.Fprintf(w, "Total: %s; budget: %s.\n", fmtBytes(s.total()), b)
+	if dead > 0 {
+		fmt.Fprintf(w, "Dead replay views (owner gone, lock free): %d entries, %s; `janus cache gc` removes them.\n", dead, fmtBytes(deadSize))
+	}
 	return nil
 }
 
@@ -985,9 +1013,13 @@ func printCacheGC(w io.Writer, rep *gcReport, asJSON bool) error {
 	if rep.DryRun {
 		verb = "Would remove"
 	}
-	var freed int64
+	var freed, deadViews, deadSize int64
 	for _, e := range rep.Evicted {
 		freed += e.Size
+		if e.View {
+			deadViews++
+			deadSize += e.Size
+		}
 		fmt.Fprintf(w, "  %-9s %10s  last used %s  %s\n", e.Kind, fmtBytes(e.Size),
 			e.Used.Local().Format("2006-01-02 15:04"), displayPath(e.Path))
 	}
@@ -997,8 +1029,12 @@ func printCacheGC(w io.Writer, rep *gcReport, asJSON bool) error {
 	}
 	fmt.Fprintf(w, "%s %d entries (%s); cache %s -> %s (budget %s); %d in use skipped, %d recent or pinned kept.\n", verb, len(rep.Evicted), fmtBytes(freed),
 		fmtBytes(rep.Before), fmtBytes(rep.After), b, rep.Skipped, rep.Recent)
+	if deadViews > 0 {
+		fmt.Fprintf(w, "  of which %d dead replay views (owner gone), %s.\n", deadViews, fmtBytes(deadSize))
+	}
 	if rep.Reason != "" {
 		fmt.Fprintf(w, "Budget reduced: %s.\n", rep.Reason)
 	}
 	return nil
 }
+

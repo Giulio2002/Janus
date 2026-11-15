@@ -473,7 +473,16 @@ func (p *replayPlan) makeClosureView(mods []string) (string, func(), error) {
 	if err != nil {
 		return "", func() {}, err
 	}
-	cleanup := func() { os.RemoveAll(dir) }
+	// The owner holds an exclusive flock on <view>/.lock for the view's lifetime: the collector removes a view whose lock it can
+	// take (the owner is gone: killed by `timeout`, say), never one whose lock is held, whatever pid namespace the owner is in.
+	// A view without a .lock (older janus) is collected by age like any temporary tree.
+	vlk, lerr := lockFileMode(filepath.Join(dir, viewLockName), false, true)
+	cleanup := func() {
+		if lerr == nil {
+			vlk.unlock()
+		}
+		os.RemoveAll(dir)
+	}
 	for _, m := range need {
 		olean := p.resolved[m]
 		stem := strings.TrimSuffix(olean, ".olean")

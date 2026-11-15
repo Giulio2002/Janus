@@ -2,6 +2,10 @@
 
 ## v0.4.0 (unreleased)
 
+### Fixed
+
+- Cache: a replay view (`run/replay-view-*`, a copy of the replayed modules' closure, several GiB) left behind by a killed run (`timeout`, SIGKILL) counted against the cache budget until it was a day old, so the collector evicted the module store and consumers re-compiled their whole closure. The owner of a view now holds an flock on `<view>/.lock`; the collector removes a view whose lock is free (and which is older than 5 minutes) at once and never one whose lock is held, whatever pid namespace the owner runs in. Views without a lock (older janus) keep the 24 h rule. `janus cache du` and `cache gc` report the dead views and their size.
+
 **BREAKING: `Ensures` and its sibling forms evaluate the precondition BEFORE the return address is installed.**
 No precondition can restrict the caller's return address any more, by construction. This closes the known gap of
 v0.3.3 (a precondition that pins `[RSP]` on amd64 in a spelling the auditor's syntactic rule did not recognise, or

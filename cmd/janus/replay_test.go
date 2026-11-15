@@ -526,7 +526,7 @@ func TestClosureViewExact(t *testing.T) {
 	}
 	var got []string
 	filepath.WalkDir(view, func(path string, d os.DirEntry, err error) error {
-		if err == nil && !d.IsDir() {
+		if err == nil && !d.IsDir() && d.Name() != viewLockName { // the owner's lock is not module data
 			rel, _ := filepath.Rel(view, path)
 			got = append(got, filepath.ToSlash(rel))
 		}
@@ -538,6 +538,9 @@ func TestClosureViewExact(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(view, "B.olean.server")); string(b) != "server B" {
 		t.Fatalf("view file bytes %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(view, viewLockName)); err != nil {
+		t.Fatalf("the view has no owner lock: %v", err)
 	}
 	cleanup()
 	if _, err := os.Stat(view); err == nil {
