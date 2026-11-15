@@ -130,6 +130,14 @@ def conclusion(it):
     ci = top_colon(sig)
     if ci < 0: return None
     concl = sig[ci + 1:]
+    if not CONCL.match(concl):
+        # `H₁ → H₂ → Ensures …` (hypotheses after the colon): the conclusion is what follows the last top-level arrow
+        d = 0; last = -1
+        for q, c in enumerate(concl):
+            if c in OPEN: d += 1
+            elif c in CLOSE: d -= 1
+            elif d == 0 and c == '→': last = q
+        if last >= 0: concl = concl[last + 1:]
     m = CONCL.match(concl)
     if not m: return None
     return m.group(1), m.group(2), concl, sig, bs, ci
@@ -283,6 +291,7 @@ class Reg:
     ensdefs = {}        # defs whose body is `∀ …, Ensures …` (a spec: `Hyp2 impl R …`) -> (file, body)
     setupnames = set()  # theorems `name : CallSetup (P.withExit R) …` (last component)
     setupused = set()   # those passed as the setup of a `ret hret s SETUP` application anywhere in the consumer tree
+    opens = {}          # file -> namespaces it opens
     defs = {}           # last component of a def/abbrev name -> [(file, body text)] for the Prop-valued ones
 
 DEFRE = re.compile(r'(?m)^(?:@\[[^\]]*\]\s*)?(?:private |protected |noncomputable )*(?:def|abbrev) ([\w.\']+)')
@@ -379,6 +388,11 @@ def unfold_list(pre_text, reg, f, bound=()):
         if len(vis) > 1: vis.sort(key=key)
         if len(same) > 1: same.sort(key=key)
         pick = same[0] if same else (vis[0] if vis else (cands[0] if len(cands) == 1 else None))
+        if pick is None and not same and not vis:
+            # a framework predicate (`Janus/…`): the file sees it through its `open`s (namespace of the definition opened)
+            opened = reg.opens.get(f, [])
+            lib = [c for c in cands if c[0].startswith('Janus/') and '.'.join(c[2].split('.')[:-1]) in opened]
+            if len(lib) == 1: pick = lib[0]
         if pick is None or pick[2] in seen_set: continue
         seen_set.add(pick[2])
         seen.append(pick[2])
@@ -403,6 +417,18 @@ def collect(t, reg):
         if m.group(1) in TACTIC_WORDS: continue      # a theorem named `exact` must not turn the tactic `exact thm ..` into an application
         reg.names.add(m.group(1))
         if is_generic(c[1], c[2], c[3]): reg.generic.add(m.group(1))
+
+def split_conj_ensures(concl):
+    """The conjuncts of `E₁ ∧ E₂ ∧ …` when each starts with an Ensures-form head (top-level `∧` only), else [concl]."""
+    d = 0; cuts = [0]
+    for q, c in enumerate(concl):
+        if c in OPEN: d += 1
+        elif c in CLOSE: d -= 1
+        elif d == 0 and c == '∧' and CONCL.match(concl[q + 1:]): cuts.append(q + 1)
+    if len(cuts) == 1: return [concl]
+    parts = [concl[cuts[k]:(cuts[k + 1] - 1 if k + 1 < len(cuts) else len(concl))] for k in range(len(cuts))]
+    if any(not CONCL.match(x) or CONCL.match(x).group(2) in ('EnsuresK', 'EnsuresGrow', 'EnsuresGrow64') for x in parts): return [concl]
+    return parts
 
 def tac_with_defs(tac, head, concl, reg, fname, sig=''):
     """`janus_ensures_old [Pre, CallEnv, …]`: the consumer's Prop-valued definitions reachable from the precondition."""
@@ -455,6 +481,7 @@ def migrate(t, amd0, reg, fname=''):
         ci0 = top_colon(sg0) if sg0 is not None else -1
         mh = re.match(r'\s*(?:\w+\.)*(\w+)', sg0[ci0 + 1:]) if ci0 >= 0 else None
         if mh and mh.group(1) in reg.ensdefs: continue
+        if ci0 >= 0 and (HEADRE.search(sg0[ci0 + 1:]) or any(w in reg.ensdefs for w in re.findall(r"[A-Za-z_][\w']*", sg0[ci0 + 1:]))): continue
         local_non.add(m0.group(1))
     reg.names = saved_names - local_non
     try:
@@ -517,6 +544,17 @@ def _migrate(t, amd0, reg, fname=''):
             continue
         pre_, head, concl, sig, bs, ci = c
         tac = tac_with_defs(tac, head, concl, reg, fname, sig)
+        cparts = split_conj_ensures(concl)
+        if len(cparts) > 1:
+            # `E₁ ∧ E₂ ∧ …` (several rows proved together): one `suffices` that keeps the old-shaped conjunction as the goal
+            ptac0 = 'janus64_pre_setRet' if amd else 'janus_pre_setRet'
+            brs = []
+            for k, part in enumerate(cparts):
+                mk = CONCL.match(part)
+                dlk = tac_with_defs(ptac0, mk.group(2), part, reg, fname, sig)
+                proj = 'h' if len(cparts) == 1 else ('h' + '.2' * k + ('.1' if k < len(cparts) - 1 else ''))
+                brs.append('%s%s.of_old (by %s) %s' % (mk.group(1), mk.group(2), dlk, proj))
+            tac = 'suffices h : ' + ' ∧ '.join(['_'] * len(cparts)) + ' from ⟨' + ', '.join(brs) + '⟩'
         if 'Witness' in sig.split(':', 1)[0] and False: continue
         if head in ('EnsuresGrow', 'EnsuresGrow64'):
             warn.append('theorem %s: EnsuresGrow needs the manual `caller` split (see CHANGELOG, v0.4.0: GCaller, correctness_old + of_old_with); not rewritten' % name)
@@ -645,6 +683,10 @@ def _migrate(t, amd0, reg, fname=''):
                 if toks[k][0] == 'ret' and toks[k + 1][0] == 'hret' and k + 2 < len(toks) + 1:
                     idx = k; break
             if idx is None:
+                # `(thm args).1 ret hret …` (a conjunction of rows, one projected): `(thm args).1.toOld ret hret …`
+                mp = re.compile(r'\)((?:\.(?:\d+|left|right))+)(?=\s+ret\s+hret\b)').match(it, stop) if stop < len(it) and it[stop] == ')' else None
+                if mp and all(t[0] not in ('·', '<;>', 'at', 'with', 'from', 'by', 'then', 'else', '|') for t in toks):
+                    out.append(it[pos:mp.end()]); out.append('.toOld'); pos = mp.end(); changed = True; continue
                 out.append(it[pos:m.end()]); pos = m.end(); continue
             argtoks = toks[:idx]
             argend = argtoks[-1][2] if argtoks else m.end()
@@ -690,7 +732,7 @@ def _migrate(t, amd0, reg, fname=''):
     extra = {}
     for i, it in enumerate(items):
         mm0 = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
-        if mm0 and mm0.group(1) not in ens and '.toOld ret hret' in it:
+        if mm0 and (mm0.group(1) not in ens or inw[i]) and '.toOld ret hret' in it:
             it2, st2 = untoold(it, reg.setupnames)
             if st2:
                 items[i] = it2; extra[i] = st2
@@ -755,14 +797,14 @@ def untoold(it, setups):
     states = set()
     pos = 0
     while True:
-        m = re.compile(r'\)\.toOld\s+ret\s+hret\s+').search(it, pos)
+        m = re.compile(r'\)((?:\.(?:\d+|left|right))*)\.toOld\s+ret\s+hret\s+').search(it, pos)
         if not m: break
         toks, stop = tokens(it, m.end())
         if len(toks) < 2 or toks[1][0].split('.')[-1] not in setups:
             pos = m.end(); continue
         last = 3 if len(toks) >= 3 else 2
         states.add(toks[0][0])
-        new = ') ' + it[toks[0][1]:toks[last - 1][2]] + ' ret hret'
+        new = ')' + m.group(1) + ' ' + it[toks[0][1]:toks[last - 1][2]] + ' ret hret'
         it = it[:m.start()] + new + it[toks[last - 1][2]:]
         pos = m.start() + len(new)
     return it, states
@@ -941,8 +983,31 @@ def main(files):
         collect_defs(t, f, reg)
         collect_ensdefs(t, reg)
         reg.imports[f] = re.findall(r'(?m)^import\s+([\w.]+)', t)
+        reg.opens[f] = [w for ol in re.findall(r'(?m)^open ([^\n]*(?:\n[ \t]+[\w.][^\n]*)*)', t) for w in ol.split() if re.fullmatch(r'[\w.]+', w)]
         reg.modfile[modname(f)] = f
         reg.modfile[f.replace('/', '.')[:-5]] = f
+    # the framework's own predicates (`CallerOK`, `IsMap`, …) are unfolded by `janus_pre_setRet` too: collect the definitions of the
+    # Janus library next to this script (definitions and import graph only; nothing there is rewritten)
+    libroot = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'Janus')
+    if os.path.isdir(libroot) and not os.environ.get('JANUS_MIG_NOLIB'):
+        for dp, _dn, fns in os.walk(libroot):
+            for fn in fns:
+                if not fn.endswith('.lean'): continue
+                lf = os.path.join(dp, fn)
+                lt = open(lf).read()
+                rel = os.path.relpath(lf, os.path.dirname(libroot))
+                collect_defs(lt, rel, reg)
+                reg.imports[rel] = re.findall(r'(?m)^import\s+([\w.]+)', lt)
+                reg.modfile[rel.replace('/', '.')[:-5]] = rel
+    # theorems whose conclusion is a spec definition that unfolds to an Ensures form (`case_dzp : CaseDZP`): row theorems too
+    for f in files:
+        for it0 in re.split(r'(?m)^(?=(?:theorem |lemma |@\[|private |protected ))', texts[f]):
+            m0 = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it0)
+            if not m0 or conclusion(it0) or m0.group(1) in TACTIC_WORDS: continue
+            sg0, _b0 = split_sig(it0)
+            ci0 = top_colon(sg0) if sg0 is not None else -1
+            mh = re.match(r'\s*(?:\w+\.)*(\w+)', sg0[ci0 + 1:]) if ci0 >= 0 else None
+            if mh and mh.group(1) in reg.ensdefs: reg.names.add(m0.group(1))
     for f in files:
         for mm in re.finditer(r"\bret\s+hret\s+[\w'.]+\s+([\w.']+)", texts[f]):
             if mm.group(1).split('.')[-1] in reg.setupnames: reg.setupused.add(mm.group(1).split('.')[-1])
