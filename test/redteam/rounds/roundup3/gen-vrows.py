@@ -6,8 +6,9 @@
   KA1     the known-accepted limitation (R empty only at the arguments of a call no witness run takes): ACCEPTED, with a full witness
 Usage: gen-vrows.py OUT_DIR
 
-v0.4.0: the shapes in this script are the v0.3 forms; the tracked files are its output migrated with scripts/dev/migrate-v040.py
-(`janus_ensures_old`, `CallSetup0`, witness runs at `s.setRet ret`, `thm args s0 setup pre ret hret`). Re-run that script on the generated files after regenerating."""
+v0.4.0: the shapes in this script are the v0.3 forms; the script ends by running scripts/dev/migrate-v040.py on every file it wrote
+(`janus_ensures_old`, `CallSetup0`, witness runs at `s.setRet ret`, `thm args s0 setup pre ret hret`), so regenerating reproduces the tracked files exactly.
+(The unused KA1 draft text is written only with JANUS_KA1_DRAFT=1.)"""
 import sys, os
 out = sys.argv[1]; os.makedirs(out, exist_ok=True)
 HEAD = '''import Extracted
@@ -135,4 +136,8 @@ theorem hc : ICallContract (Extracted.program.link impl) A0 4 16 48 rt0 (fun _ =
 end Witness
 '''
 # the KA1 witness body is written by hand below once the stock writer's R is adapted; see run-verify-rows.sh (row skipped if absent)
-open(f'{out}/_KA1_draft.lean.txt', 'w').write(KA)
+if os.environ.get('JANUS_KA1_DRAFT'): open(f'{out}/_KA1_draft.lean.txt', 'w').write(KA)
+
+import subprocess
+_mig = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../../scripts/dev/migrate-v040.py")
+subprocess.run(["python3", _mig] + sorted(os.path.join(out, f) for f in os.listdir(out) if f.endswith(".lean")), check=True, stdout=subprocess.DEVNULL)

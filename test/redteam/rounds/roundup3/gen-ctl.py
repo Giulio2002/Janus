@@ -4,8 +4,9 @@ test/redteam/rounds/roundup3/rows (N01-N06, N12) and V15 (/srv/janus-rt-n11/audi
 frozen shape (hypotheses, pre, call-site state, Returns run) instantiated at the stock writer of Janus.Contracts.ICallSat.
 Usage: gen-ctl.py ROWS_DIR OUT_DIR.
 
-v0.4.0: the shapes in this script are the v0.3 forms; the tracked files are its output migrated with scripts/dev/migrate-v040.py
-(`janus_ensures_old`, `CallSetup0`, witness runs at `s.setRet ret`, `thm args s0 setup pre ret hret`). Re-run that script on the generated files after regenerating."""
+v0.4.0: the shapes in this script are the v0.3 forms; this script ends by running scripts/dev/migrate-v040.py on every file it wrote
+(`janus_ensures_old`, `CallSetup0`, witness runs at `s.setRet ret`, `thm args s0 setup pre ret hret`), so regenerating from the tracked (migrated) rows
+reproduces the tracked ctl files exactly."""
 import re, sys, os
 rows, out = sys.argv[1], sys.argv[2]
 # row -> (values for fn fn2 k w n a, hypothesis list [(name,text)], nargs, stack, above) with values substituted as Nat literals
@@ -85,3 +86,7 @@ end Witness
 '''
     # the hypotheses in the main theorem are separate binders (hk hw ...): the witness has them as a conjunction `h1 ∧ h2 ∧ ...`
     open(f'{out}/{name}.lean', 'w').write(head.replace('Expected: Verified', 'Expected: Verified (witness-bearing control)') + tm + W + '\nend Proof\n')
+
+import subprocess
+_mig = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../../scripts/dev/migrate-v040.py")
+subprocess.run(["python3", _mig] + sorted(os.path.join(out, f) for f in os.listdir(out) if f.endswith(".lean")), check=True, stdout=subprocess.DEVNULL)
