@@ -294,6 +294,8 @@ class Reg:
     setupused = set()   # those passed as the setup of a `ret hret s SETUP` application anywhere in the consumer tree
     local_non = set()   # raw old-shaped theorems of the file being migrated
     opens = {}          # file -> namespaces it opens
+    isa_amd = {}        # file -> True when it works on the amd64 model
+    fns = {}            # file -> its namespace (the first `namespace X` line)
     defs = {}           # last component of a def/abbrev name -> [(file, body text)] for the Prop-valued ones
 
 DEFRE = re.compile(r'(?m)^(?:@\[[^\]]*\]\s*)?(?:private |protected |noncomputable )*(?:def|abbrev) ([\w.\']+)')
@@ -390,7 +392,17 @@ def unfold_list(pre_text, reg, f, bound=()):
         if len(vis) > 1:       # several definitions of that name in the import closure: the ones whose namespace the file opens
             ov = [c for c in vis if '.'.join(c[2].split('.')[:-1]) in opened0]
             if ov: vis = ov
-        key = (lambda c: (-common(c[2], owner), -len(os.path.commonprefix([c[0], f]))))
+        # precedence (Lean's name resolution, then fixed tie-breaks; never the discovery order of files or dict/set iteration):
+        #   1. the definition whose namespace shares the most with the enclosing definition (inside a definition body),
+        #   2. a definition in the namespace the file is in (or an enclosing one) beats one that is merely visible, the innermost first,
+        #   3. a definition in an opened namespace, 4. the nearest file path, 5. qualified name, then file path.
+        nsf = reg.fns.get(f, '')
+        def encl(c):
+            n_ = c[2].rsplit('.', 1)[0] if '.' in c[2] else ''
+            return len(n_.split('.')) if n_ and (nsf == n_ or nsf.startswith(n_ + '.')) else 0
+        file_amd = reg.isa_amd.get(f, 'Amd64' in f)
+        isa_bad = lambda c: (('Amd64' in c[2] or 'Amd64' in c[0]) != file_amd)     # `Janus.Program.DataLoaded` (arm64) vs `Janus.Amd64.Program.DataLoaded`
+        key = (lambda c: (-common(c[2], owner), -encl(c), isa_bad(c), -len(os.path.commonprefix([c[0], f])), c[2], c[0]))
         if len(vis) > 1: vis.sort(key=key)
         if len(same) > 1: same.sort(key=key)
         pick = same[0] if same else (vis[0] if vis else (cands[0] if len(cands) == 1 else None))
@@ -1044,6 +1056,7 @@ def fix_stackguard_construct(t):
     return '\n'.join(out), changed
 
 def main(files):
+    files = sorted(dict.fromkeys(files))      # a defined processing and registry order (the output never depends on the argument order)
     reg = Reg()
     texts = {}
     for f in files:
@@ -1053,6 +1066,9 @@ def main(files):
         collect_defs(t, f, reg)
         collect_ensdefs(t, reg)
         reg.imports[f] = re.findall(r'(?m)^import\s+([\w.]+)', t)
+        mns = re.search(r'(?m)^namespace\s+([\w.]+)', t)
+        reg.fns[f] = mns.group(1) if mns else ''
+        reg.isa_amd[f] = 'Janus.Amd64' in t
         reg.opens[f] = [w for ol in re.findall(r'(?m)^open ([^\n]*(?:\n[ \t]+[\w.][^\n]*)*)', t) for w in ol.split() if re.fullmatch(r'[\w.]+', w)]
         reg.modfile[modname(f)] = f
         reg.modfile[f.replace('/', '.')[:-5]] = f
