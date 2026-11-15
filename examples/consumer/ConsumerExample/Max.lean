@@ -13,7 +13,9 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 namespace ConsumerExample.Max
 
 theorem correctness : Computes Extracted.program Extracted.entry maxSpec := by
-  intro x y ret hret s hs _
+  intro x y
+  janus_ensures_old
+  intro ret hret s hs _
   janus_intro hs
   janus_run [maxSpec]
   all_goals split <;> first | rfl | omega
@@ -22,8 +24,9 @@ theorem correctness : Computes Extracted.program Extracted.entry maxSpec := by
 theorem result_ge_left (x y : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => x.toNat ≤ (s'.regs 0).toNat) := by
+  janus_ensures_old
   intro ret hret s hs hpre
-  refine Returns.mono (correctness x y ret hret s hs hpre) fun s' h => ⟨h.1, ?_⟩
+  refine Returns.mono ((correctness x y).toOld ret hret s hs hpre) fun s' h => ⟨h.1, ?_⟩
   have h2 : s'.regs 0 = maxSpec x y := h.2
   show x.toNat ≤ (s'.regs 0).toNat
   rw [h2]
@@ -42,21 +45,21 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(3 : BitVec 64), (4 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(3 : BitVec 64), (4 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
 
 /-- The theorem fires at a concrete call: `Max(3, 4)` returns `maxSpec 3 4`. -/
-theorem returns : Returns (Extracted.program.withExit ret) s0
-    (fun s' => ABIReturn s0 s' ∧ s'.regs 0 = maxSpec 3 4) :=
-  correctness 3 4 ret hret s0 setup trivial
+theorem returns : Returns (Extracted.program.withExit ret) (s0.setRet ret)
+    (fun s' => ABIReturn (s0.setRet ret) s' ∧ s'.regs 0 = maxSpec 3 4) :=
+  (correctness 3 4) s0 setup trivial ret hret
 
 /-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ True ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => ABIReturn s s' ∧ s'.regs 0 = maxSpec x y) ∧
+    CallSetup0 Extracted.entry [x, y] s ∧ True ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => ABIReturn (s.setRet ret) s' ∧ s'.regs 0 = maxSpec x y) ∧
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True) (fun _ s' => s'.regs 0 = maxSpec x y) :=
   ⟨ret, s0, 3, 4, hret, setup, trivial, returns, correctness 3 4⟩
 
