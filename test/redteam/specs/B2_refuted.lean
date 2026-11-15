@@ -20,5 +20,5 @@ theorem br_zero_not_ensures : ¬ Ensures brProg 0x1000 [0] (fun _ => True) (fun 
     have h1 : Program.Steps (brProg.withExit 0x2000) s 1 { s with pc := 0 } :=
       .single (by decide) (by decide) (by decide) hst
     exact ⟨1 + 1, .noCode 0, by rw [Program.run_steps h1]; rfl, by decide⟩
-  exact (h.returns hret hs trivial).not_faults hf
+  exact (h.toOld 0x2000 hret s hs trivial).not_faults hf   -- v0.4.0: Ensures.toOld (the run starts at the state that already holds ret)
 #print axioms br_zero_not_ensures

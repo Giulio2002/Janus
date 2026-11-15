@@ -15,6 +15,7 @@ def brSeg : Segment := ⟨"f", 0x1000, [0xd61f0000]⟩
 def brProg : Program := { segments := [brSeg], stubs := [], exitAddr := 0 }
 
 theorem br_zero_returns : Ensures brProg 0x1000 [0] (fun _ => True) (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs _
   have hpc : s.pc.toNat = 0x1000 := hs.pc_toNat (by decide)
   have hx0 : s.regs 0 = 0 := hs.reg (i := 0) (by simp)
