@@ -10,7 +10,7 @@ theorem correctness (x y : BitVec 64) :
     EnsuresResults Extracted.program Extracted.entry [x, y] 1
       (fun s => StackWritable s 0 8)
       (fun r => r = [if y.toNat < x.toNat then x else y]) := by
-  janus64_ensures_old
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre
@@ -20,7 +20,7 @@ theorem correctness (x y : BitVec 64) :
 
 theorem real (x y : BitVec 64) :
     EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun s => StackWritable s 0 8) (fun _ s' => results 1 s' = [if y.toNat < x.toNat then x else y]) := by
-  janus64_ensures_old
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre
@@ -47,7 +47,7 @@ theorem setup : CallSetup0 Extracted.entry [x, y] s0 :=
 theorem hpre : (fun s => StackWritable s 0 8) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64) (y : BitVec 64), RetAddr Extracted.program ret ∧
     CallSetup0 Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧

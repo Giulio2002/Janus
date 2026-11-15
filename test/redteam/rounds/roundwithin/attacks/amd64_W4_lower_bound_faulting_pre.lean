@@ -24,7 +24,7 @@ set_option maxRecDepth 100000 in
 theorem hpre : (fun s : State => s.mem.accessible 0 8 false = false) s0 := by
   dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 theorem atLeast0 : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
     CallSetup0 Extracted.entry [0#64] s ∧ (s.mem.accessible 0 8 false = false) ∧
     RunsAtLeast 0 (Extracted.program.withExit ret) (s.setRet ret) :=

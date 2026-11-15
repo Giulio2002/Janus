@@ -9,7 +9,7 @@ open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Float
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 0) Extracted.program Extracted.entry [x, y]
       (fun s => StackWritable s 0 8 ∧ s.regs 0 = 1 ∧ s.regs 0 = 2) (fun _ s' => s'.regs 0 = 7) := by
-  janus64_ensures_old
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs hp
   exact absurd (hp.2.1.symm.trans hp.2.2) (by decide)
 

@@ -8,7 +8,7 @@ open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Float
 
 theorem real (x y : BitVec 64) :
     EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun s => StackWritable s 0 8) (fun _ s' => results 1 s' = [if y.toNat < x.toNat then x else y]) := by
-  janus64_ensures_old
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre
@@ -19,7 +19,7 @@ theorem real (x y : BitVec 64) :
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 0) Extracted.program Extracted.entry [x, y]
       (fun s => StackWritable s 0 8 ∧ s.regs 0 = 1 ∧ s.regs 0 = 2) (fun _ s' => s'.regs 0 = 7) := by
-  janus64_ensures_old
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs hp
   exact absurd (hp.2.1.symm.trans hp.2.2) (by decide)
 
@@ -39,7 +39,7 @@ theorem setup : CallSetup0 Extracted.entry [x, y] s0 :=
 theorem hpre : (fun s => StackWritable s 0 8) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 theorem within : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
     CallSetup0 Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧

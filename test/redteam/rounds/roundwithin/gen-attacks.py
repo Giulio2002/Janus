@@ -2,9 +2,9 @@
 """Generates the attack files of the instruction-count-bound round (attacks/*.lean) from the shapes below, so that every
 row shares the same Max/LoadField witness prelude. Run from anywhere; the files are tracked, this script documents them.
 
-v0.4.0: the shapes below are written in the v0.3 form (`intro ret hret s hs`, `CallSetup (P.withExit ret)`, `thm args ret hret s0 setup pre`); the
-tracked files are their output migrated with scripts/dev/migrate-v040.py (`janus_ensures_old`, `CallSetup0`, `thm args s0 setup pre ret hret`),
-plus the new-shaped binders of `EnsuresWithin.mono` (`fun s ret s' hp h`) and `mono_bound` (`fun s ret hp`), which this file already has.
+v0.4.0: the shapes below are written in the v0.3 form (`intro ret hret s hs`, `CallSetup (P.withExit ret)`, `thm args ret hret s0 setup pre`); this
+script ends by running scripts/dev/migrate-v040.py on every file it wrote (`janus_ensures_old`, `CallSetup0`, `thm args s0 setup pre ret hret`), so
+regenerating reproduces the tracked v0.4 files exactly (git diff is empty), including the new-shaped binders of `EnsuresWithin.mono` (`fun s ret s' hp h`) and `mono_bound` (`fun s ret hp`), which this file already has.
 The rows W7, W8 and amd64 W6e (the removed [RSP]-word rule) are expected VERIFIED now (run-roundwithin.sh)."""
 import os
 D = os.path.join(os.path.dirname(os.path.abspath(__file__)), "attacks")
@@ -524,3 +524,27 @@ end Witness
 end Proof
 """)
 print(len(os.listdir(D)), "attack files")
+
+import subprocess
+_mig = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../../scripts/dev/migrate-v040.py")
+subprocess.run(["python3", _mig] + sorted(os.path.join(D, f) for f in os.listdir(D) if f.endswith(".lean")), check=True, stdout=subprocess.DEVNULL)
+
+# The two def-wrapped rows W6a (arm64, amd64): the migrator recognises the application of a main theorem in a witness only when the theorem's
+# conclusion is an `Ensures` form, and here it is `Stmt x y` (a def), so it leaves their `setup` and the application in the v0.3 shape. They are
+# written in the v0.4 shape here (the same rewrite the migrator does for every other row).
+_FIX = {
+ "W6a_defwrapped_with_witness.lean": [
+  ("theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(3 : BitVec 64), (5 : BitVec 64)] s0 :=\n  ⟨rfl, rfl, by\n",
+   "theorem setup : CallSetup0 Extracted.entry [(3 : BitVec 64), (5 : BitVec 64)] s0 :=\n  ⟨rfl, by first | decide | simp | omega, by\n"),
+  ("Proof.within (3) (5) ret hret s0 setup trivial⟩", "(Proof.within (3) (5)) s0 setup trivial ret hret⟩")],
+ "amd64_W6a_defwrapped_with_witness.lean": [
+  ("theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s0 :=\n  ⟨rfl, by decide, rfl, by decide, by intro",
+   "theorem setup : CallSetup0 Extracted.entry [x, y] s0 :=\n  ⟨rfl, rfl, by decide, by intro"),
+  ("Proof.within x y ret hret s0 setup hpre⟩", "(Proof.within x y) s0 setup hpre ret hret⟩")],
+}
+for _f, _subs in _FIX.items():
+    _p = os.path.join(D, _f); _s = open(_p).read()
+    for _a, _b in _subs:
+        assert _a in _s, (_f, _a)
+        _s = _s.replace(_a, _b)
+    open(_p, "w").write(_s)

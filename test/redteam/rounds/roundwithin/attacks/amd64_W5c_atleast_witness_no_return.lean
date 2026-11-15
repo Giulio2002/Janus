@@ -31,7 +31,7 @@ theorem setup : CallSetup0 Extracted.entry [x, y] s0 :=
 theorem hpre : (fun s => StackWritable s 0 8) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
-  all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
+  all_goals first | decide | (refine ⟨?_, ?_, ?_, ?_⟩ <;> decide) | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 theorem atLeast : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
     CallSetup0 Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧
