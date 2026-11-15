@@ -417,7 +417,7 @@ theorem within : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracte
   ⟨ret, s0, x, y, hret, setup, hpre, Proof.within x y ret hret s0 setup hpre⟩
 end Witness
 """)
-m("W7_rsp_word_in_pre", "Expected: VERIFIED (v0.4.0). Was rejected by the removed [RSP]-word rule; the precondition is evaluated before the return address is installed, so a conjunct about the word at RSP cannot restrict `ret` and the row is harmless.", M_REAL + """
+m("W7_rsp_word_in_pre", "Expected: VERIFIED (v0.4.0). Was rejected by the removed [RSP]-word rule; the precondition is evaluated before the return address is installed, so a conjunct about the word at RSP cannot restrict `ret` and the row is harmless. WHY: under v0.4.0 (option A) the precondition is evaluated on the call state BEFORE the return address is installed, so a conjunct that reads the word at [RSP] reads the pre-call stack word and cannot restrict `ret`. WHAT IS PROVED: for every call state s of Max with the stack window writable (the conjunct `readLE [RSP] 8 = readLE [RSP] 8` is a tautology) and EVERY admissible return address ret, the program started from s.setRet ret returns to ret within the stated bound with the stated result; the ret-pinning the removed rule guarded against is impossible. ", M_REAL + """
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y]
       (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = s.mem.readLE (s.regs regSP).toNat 8) %s :=
@@ -440,7 +440,7 @@ def Stmt (x y : BitVec 64) : Prop :=
 theorem within (x y : BitVec 64) : Stmt x y :=
   real x y |>.mono (fun _ h => h.1) (fun _ _ _ _ h => h)
 """ % M_POST)
-m("W8_atleast_rsp_word", "Expected: VERIFIED (v0.4.0). Was rejected by the removed [RSP]-word rule; the precondition is evaluated before the return address is installed, so a conjunct about the word at RSP cannot restrict `ret` and the row is harmless.", M_REAL + """
+m("W8_atleast_rsp_word", "Expected: VERIFIED (v0.4.0). Was rejected by the removed [RSP]-word rule; the precondition is evaluated before the return address is installed, so a conjunct about the word at RSP cannot restrict `ret` and the row is harmless. WHY: under v0.4.0 (option A) the precondition is evaluated on the call state BEFORE the return address is installed, so a conjunct that reads the word at [RSP] reads the pre-call stack word and cannot restrict `ret`. WHAT IS PROVED: for every call state s of Max with the stack window writable (the conjunct `readLE [RSP] 8 = readLE [RSP] 8` is a tautology) and EVERY admissible return address ret, the program started from s.setRet ret returns to ret within the stated bound with the stated result; the ret-pinning the removed rule guarded against is impossible. ", M_REAL + """
 theorem atLeast (x y : BitVec 64) :
     RunsAtLeastOnCall (fun _ => 3) Extracted.program Extracted.entry [x, y]
       (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = s.mem.readLE (s.regs regSP).toNat 8) := by
@@ -472,7 +472,7 @@ theorem within : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracte
   ⟨ret, s0, x, y, hret, setup, hpre⟩
 end Witness
 """)
-m("W6e_pre_in_local_def", "Expected: VERIFIED (v0.4.0; was the removed [RSP]-word rule on a precondition hidden in a proof-local definition inside a visible EnsuresWithin: harmless now, the precondition is evaluated before the return address is installed (the audit expands it).", M_REAL + """
+m("W6e_pre_in_local_def", "Expected: VERIFIED (v0.4.0; was the removed [RSP]-word rule on a precondition hidden in a proof-local definition inside a visible EnsuresWithin: harmless now. WHY: under v0.4.0 (option A) the precondition is evaluated on the call state BEFORE the return address is installed, so a conjunct that reads the word at [RSP] reads the pre-call stack word and cannot restrict `ret`. WHAT IS PROVED: for every call state s of Max with the stack window writable (the conjunct `readLE [RSP] 8 = readLE [RSP] 8` is a tautology) and EVERY admissible return address ret, the program started from s.setRet ret returns to ret within the stated bound with the stated result; the ret-pinning the removed rule guarded against is impossible. (The audit expands the local definition.)", M_REAL + """
 def PreBad (s : State) : Prop := StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = s.mem.readLE (s.regs regSP).toNat 8
 
 theorem within (x y : BitVec 64) :

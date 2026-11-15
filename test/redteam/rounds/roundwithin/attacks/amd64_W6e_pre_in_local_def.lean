@@ -1,7 +1,7 @@
 import Janus
 import Extracted
 
-/-! Expected: VERIFIED (v0.4.0; was the removed [RSP]-word rule on a precondition hidden in a proof-local definition inside a visible EnsuresWithin: harmless now, the precondition is evaluated before the return address is installed (the audit expands it). -/
+/-! Expected: VERIFIED (v0.4.0; was the removed [RSP]-word rule on a precondition hidden in a proof-local definition inside a visible EnsuresWithin: harmless now. WHY: under v0.4.0 (option A) the precondition is evaluated on the call state BEFORE the return address is installed, so a conjunct that reads the word at [RSP] reads the pre-call stack word and cannot restrict `ret`. WHAT IS PROVED: for every call state s of Max with the stack window writable (the conjunct `readLE [RSP] 8 = readLE [RSP] 8` is a tautology) and EVERY admissible return address ret, the program started from s.setRet ret returns to ret within the stated bound with the stated result; the ret-pinning the removed rule guarded against is impossible. (The audit expands the local definition.) -/
 
 namespace Proof
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Float
