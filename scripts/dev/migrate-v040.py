@@ -964,6 +964,11 @@ def fix_stackguard(t):
     """amd64 `StackGuardOK` has a 4th field (`apart`: the guard word is not the return slot): the destructuring
     the nested pattern `⟨hg1, hg2, hg3⟩` (the customary names of its three fields) becomes `⟨hg1, hg2, hg3, hg4⟩`. Constructions
     `⟨…, hg1, hg2, hg3, …⟩` of another state still need their own proof of `hg4` (reported)."""
+    parts = re.split(r'(?m)^(?=(?:theorem |lemma |def |abbrev |namespace |end |set_option |/--|@\[|private |protected ))', t)
+    # `RtContract64` / `GuardOK64` (the runtime contracts' own three-field guard) is not the StackGuardOK
+    return ''.join(p_ if re.search(r'RtContract64|GuardOK64', p_) else _fix_stackguard_item(p_) for p_ in parts)
+
+def _fix_stackguard_item(t):
     t = re.sub(r'⟨hg1, hg2, hg3⟩', '⟨hg1, hg2, hg3, hg4⟩', t)
     # any other three binders followed by the region triple `⟨hb', …⟩` (the `CallEnv` shape: StackGuardOK, then the region)
     def ext(m):
