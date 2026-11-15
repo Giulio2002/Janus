@@ -8,8 +8,11 @@
 #               W2   a bound computed from the run (depends on the post-state)       W3  fuel off by one (not provable)
 #               W4   RunsAtLeast whose precondition admits only a faulting call       W5  untied witnesses (EnsuresWithin / RunsAtLeastOnCall)
 #               W6   def-wrapped EnsuresWithin (rejected like a def-wrapped Ensures: the statement must mention Extracted.program), and parts
-#                    of a visible EnsuresWithin hidden in local defs (the bound of a run, the [RSP]-word precondition): the audit expands them
-#               W7/W8 the [RSP]-word rule on EnsuresWithin / RunsAtLeastOnCall
+#                    of a visible EnsuresWithin hidden in local defs (the bound of a run): the audit expands them
+#               W7/W8, amd64_W6e_pre_in_local_def  were attacks of the removed [RSP]-word rule (EnsuresWithin / RunsAtLeastOnCall). v0.4.0 (option A):
+#                    the precondition is evaluated BEFORE the return address is installed, so a precondition conjunct about [RSP] cannot restrict `ret`;
+#                    these rows are now `verified` (harmless: the theorem still covers every admissible ret); no verdict was weakened for a row that
+#                    tests anything else (the def-wrapped amd64_W6b_defwrapped_rsp stays blocked, by the statement-identity rule)
 # Usage: test/redteam/rounds/roundwithin/run-roundwithin.sh   (env: JANUS_AUDIT_BIN, JANUS_AUDIT_PREBUILT=1, ROUNDWITHIN_ONLY=ROW-REGEX)   Exits 1 if a row differs.
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
@@ -97,10 +100,10 @@ runrow amd64_W4_faulting_pre blocked $A/amd64_W4_lower_bound_faulting_pre.lean L
 runrow amd64_W5_untied_within blocked $A/amd64_W5_untied_witness.lean Max64 correctness,within,Witness.nonvacuous within
 runrow amd64_W5b_witness_no_run blocked $A/amd64_W5b_witness_has_no_run.lean Max64 within,Witness.within Witness.within
 runrow amd64_W5c_atleast_no_return blocked $A/amd64_W5c_atleast_witness_no_return.lean Max64 atLeast,Witness.atLeast Witness.atLeast
-runrow amd64_W7_rsp_word blocked $A/amd64_W7_rsp_word_in_pre.lean Max64 within,Witness.within within
+runrow amd64_W7_rsp_word verified $A/amd64_W7_rsp_word_in_pre.lean Max64 within,Witness.within within
 runrow amd64_W6b_defwrapped_rsp blocked $A/amd64_W6b_defwrapped_rsp_word.lean Max64 within within
-runrow amd64_W6e_pre_in_local_def blocked $A/amd64_W6e_pre_in_local_def.lean Max64 within,Witness.within within
-runrow amd64_W8_atleast_rsp blocked $A/amd64_W8_atleast_rsp_word.lean Max64 atLeast,Witness.atLeast atLeast
+runrow amd64_W6e_pre_in_local_def verified $A/amd64_W6e_pre_in_local_def.lean Max64 within,Witness.within within
+runrow amd64_W8_atleast_rsp verified $A/amd64_W8_atleast_rsp_word.lean Max64 atLeast,Witness.atLeast atLeast
 echo
 if [ ${#broken[@]} -gt 0 ]; then echo "round within: BROKEN rows: ${broken[*]}"; exit 1; fi
 echo "round within: all rows as expected"

@@ -9,6 +9,7 @@ namespace Proof
 /-- the true bound: used by the attacks to obtain a kernel-checked statement of the weaker shape. -/
 theorem real (x y : BitVec 64) :
     EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun _ => True) (fun _ s' => s'.regs 0 = if y.toNat < x.toNat then x else y) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
@@ -31,14 +32,14 @@ def s0 : State :=
       else if i = 30 then BitVec.ofNat 64 ret else 0,
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(3 : BitVec 64), (5 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(3 : BitVec 64), (5 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
 
 theorem within : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (True) :=
+    CallSetup0 Extracted.entry [x, y] s ∧ (True) :=
   ⟨ret, s0, (3), (5), hret, setup, trivial⟩
 end Witness
 

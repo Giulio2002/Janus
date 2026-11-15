@@ -8,6 +8,7 @@ namespace Proof
 
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 3) Extracted.program Extracted.entry [x, y] (fun _ => True) (fun _ s' => s'.regs 0 = if y.toNat < x.toNat then x else y) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run

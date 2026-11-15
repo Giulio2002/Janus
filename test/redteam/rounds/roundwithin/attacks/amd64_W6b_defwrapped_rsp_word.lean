@@ -8,6 +8,7 @@ open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Float
 
 theorem real (x y : BitVec 64) :
     EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun s => StackWritable s 0 8) (fun _ s' => results 1 s' = [if y.toNat < x.toNat then x else y]) := by
+  janus64_ensures_old
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre
@@ -20,6 +21,6 @@ def Stmt (x y : BitVec 64) : Prop :=
       (fun s => StackWritable s 0 8 ∧ s.mem.readLE (s.regs regSP).toNat 8 = s.mem.readLE (s.regs regSP).toNat 8) (fun _ s' => results 1 s' = [if y.toNat < x.toNat then x else y])
 
 theorem within (x y : BitVec 64) : Stmt x y :=
-  real x y |>.mono (fun _ h => h.1) (fun _ _ _ h => h)
+  real x y |>.mono (fun _ h => h.1) (fun _ _ _ _ h => h)
 
 end Proof

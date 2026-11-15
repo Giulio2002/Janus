@@ -24,8 +24,8 @@ def s0 : State :=
       else if i = 30 then BitVec.ofNat 64 ret else 0,
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := wmem }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0 : BitVec 64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(0 : BitVec 64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     have : i = 0 := by omega
@@ -33,8 +33,8 @@ theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [(0 :
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 theorem atLeast0 : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧ (s.mem.accessible 0 8 false = false) ∧
-    RunsAtLeast 0 (Extracted.program.withExit ret) s := by
+    CallSetup0 Extracted.entry [0#64] s ∧ (s.mem.accessible 0 8 false = false) ∧
+    RunsAtLeast 0 (Extracted.program.withExit ret) (s.setRet ret) := by
   refine ⟨ret, s0, hret, setup, ?pre, rfl⟩
   case pre =>
     try simp only [Janus.Spec.GuardOK, Janus.Spec.StackOK, Janus.Spec.Ptr, Janus.Spec.Disjoint, s0, wmem, wbytes, sp0, g0, hp]

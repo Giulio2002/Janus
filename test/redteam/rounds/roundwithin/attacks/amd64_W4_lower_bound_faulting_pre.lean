@@ -18,16 +18,16 @@ def s0 : State :=
   { regs := fun r_ => if r_ = 0 then 0#64 else if r_ = 4 then BitVec.ofNat 64 wsp else if r_ = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [0#64] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 set_option maxRecDepth 100000 in
 theorem hpre : (fun s : State => s.mem.accessible 0 8 false = false) s0 := by
   dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
   all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 theorem atLeast0 : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [0#64] s ∧ (s.mem.accessible 0 8 false = false) ∧
-    RunsAtLeast 0 (Extracted.program.withExit ret) s :=
+    CallSetup0 Extracted.entry [0#64] s ∧ (s.mem.accessible 0 8 false = false) ∧
+    RunsAtLeast 0 (Extracted.program.withExit ret) (s.setRet ret) :=
   ⟨ret, s0, hret, setup, hpre, rfl⟩
 end Witness
 

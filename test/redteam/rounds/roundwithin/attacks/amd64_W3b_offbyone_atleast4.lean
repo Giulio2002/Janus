@@ -8,6 +8,7 @@ open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Float
 
 theorem atLeast (x y : BitVec 64) :
     RunsAtLeastOnCall (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun s => StackWritable s 0 8) := by
+  janus64_ensures_old
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre

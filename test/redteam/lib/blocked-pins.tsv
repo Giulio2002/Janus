@@ -257,7 +257,7 @@ rounds/round14/run-round14.sh	WeakB.Witness.nonvacuous	List.nil) (BitVec.toNat (
 rounds/round14/run-round14.sh	WeakC.Witness.nonvacuous	Proof.WeakC.Witness.nonvacuous does not instantiate any main theorem of the
 rounds/round14/run-round14.sh	WeakC.Witness.nonvacuous	(Extracted.program.link ?impl) (Extracted.pro
 rounds/round14/run-round14.sh	WeakD.Witness.nonvacuous	Proof.WeakD.Witness.nonvacuous does not instantiate any main theorem of the
-rounds/round14/run-round14.sh	WeakD.Witness.nonvacuous	((Extracted.program.link impl).withExit ret) Extracted.en
+rounds/round14/run-round14.sh	WeakD.Witness.nonvacuous	Janus.GoABI.CallSetup0 Extracted.entry
 rounds/round14/run-round14.sh	WeakE.Witness.nonvacuous	Proof.WeakE.Witness.nonvacuous is not of the form `∃ …, …` (a state and runtime
 rounds/round14/run-round14.sh	WeakE.Witness.nonvacuous	exhibiting the main theorem's hypotheses) (round 14, W2)
 rounds/round14/run-round14.sh	WeakF.Witness.returns	Proof.WeakF.Witness.returns is not the guarantee of any main theorem of the
@@ -285,7 +285,7 @@ rounds/round14/run-round14.sh	fake3	hypothesis; only the contracts and the model
 rounds/round11/run-round11.sh	A1d2_abbrev_of_bad_spec	the statement assumes the runtime contract Janus.Contracts.RtContract for the
 rounds/round11/run-round11.sh	A1d2_abbrev_of_bad_spec	not even from imported parts such as `default` (round 11)
 rounds/round14/run-round14.sh	OneMember.Witness.nonvacuous	Proof.OneMember.Witness.nonvacuous does not instantiate any main theorem of the
-rounds/round14/run-round14.sh	OneMember.Witness.nonvacuous	(Extracted.program.withExit ret) (Janus.Tactic.segAdd
+rounds/round14/run-round14.sh	OneMember.Witness.nonvacuous	Janus.GoABI.CallSetup0 (Janus.Tactic.segAdd
 rounds/round13/run-round13.sh	F2_tampered_funcs_verify	test/redteam/rounds/round13/work/DeferOrder-tampered/Extracted.lean was modified after
 rounds/round13/run-round13.sh	F2_tampered_funcs_verify	2025d293fd55bc24d69380343becec293be3f8a5649a58e3569a414c785.
 rounds/round14/run-round14.sh	correctness	Proof.correctness assumes runtime contracts
@@ -852,10 +852,7 @@ rounds/roundwithin/run-roundwithin.sh	amd64_W4_faulting_pre	U-WITNESS-RUN
 rounds/roundwithin/run-roundwithin.sh	amd64_W5_untied_within	Proof.within has no kernel-checked non-vacuity witness verified in this run
 rounds/roundwithin/run-roundwithin.sh	amd64_W5c_atleast_no_return	is not exhibited with a RETURNING run
 rounds/roundwithin/run-roundwithin.sh	amd64_W5c_atleast_no_return	U-WITNESS-RUN
-rounds/roundwithin/run-roundwithin.sh	amd64_W7_rsp_word	constrains the memory word at the entry `RSP`
 rounds/roundwithin/run-roundwithin.sh	amd64_W6b_defwrapped_rsp	the statement does not mention Extracted.program or Extracted.entry
-rounds/roundwithin/run-roundwithin.sh	amd64_W6e_pre_in_local_def	constrains the memory word at the entry `RSP`
-rounds/roundwithin/run-roundwithin.sh	amd64_W8_atleast_rsp	constrains the memory word at the entry `RSP`
 rounds/roundwithin/run-roundwithin.sh	W6e_bound_in_local_def	the statement has the instruction bound
 rounds/roundwithin/run-roundwithin.sh	W6e_bound_in_local_def	U-BOUND-PURE
 rounds/roundwithin/run-roundwithin.sh	amd64_W5b_witness_no_run	is not exhibited as a RUN

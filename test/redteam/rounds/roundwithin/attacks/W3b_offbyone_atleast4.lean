@@ -8,6 +8,7 @@ namespace Proof
 
 theorem atLeast (x y : BitVec 64) :
     RunsAtLeastOnCall (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun _ => True) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run

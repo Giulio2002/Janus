@@ -8,6 +8,7 @@ open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Float
 
 theorem real (x y : BitVec 64) :
     EnsuresWithin (fun _ => 4) Extracted.program Extracted.entry [x, y] (fun s => StackWritable s 0 8) (fun _ s' => results 1 s' = [if y.toNat < x.toNat then x else y]) := by
+  janus64_ensures_old
   intro ret hret s hs hpre
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hpre
@@ -18,6 +19,7 @@ theorem real (x y : BitVec 64) :
 theorem within (x y : BitVec 64) :
     EnsuresWithin (fun _ => 0) Extracted.program Extracted.entry [x, y]
       (fun s => StackWritable s 0 8 ∧ s.regs 0 = 1 ∧ s.regs 0 = 2) (fun _ s' => s'.regs 0 = 7) := by
+  janus64_ensures_old
   intro ret hret s hs hp
   exact absurd (hp.2.1.symm.trans hp.2.2) (by decide)
 
@@ -32,17 +34,17 @@ def s0 : State :=
   { regs := fun i => if i = 0 then x else if i = 3 then y else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
     rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
     xmm := fun _ => 0, mem := wmem64 }
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+theorem setup : CallSetup0 Extracted.entry [x, y] s0 :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 theorem hpre : (fun s => StackWritable s 0 8) s0 := by
   try dsimp only [Janus.Amd64.GoABI.Disjoint, Janus.Spec.Disjoint]
   repeat' apply And.intro
   all_goals first | decide | (refine ⟨?_, ?_, ?_⟩ <;> decide)
 
 theorem within : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧
-    ReturnsWithin 4 (Extracted.program.withExit ret) s (fun s' => ABIReturn s s') :=
-  ⟨ret, s0, x, y, hret, setup, hpre, (Proof.real x y ret hret s0 setup hpre).post_mono fun _ h => h.1⟩
+    CallSetup0 Extracted.entry [x, y] s ∧ (StackWritable s 0 8) ∧
+    ReturnsWithin 4 (Extracted.program.withExit ret) (s.setRet ret) (fun s' => ABIReturn (s.setRet ret) s') :=
+  ⟨ret, s0, x, y, hret, setup, hpre, ((Proof.real x y) s0 setup hpre ret hret).post_mono fun _ h => h.1⟩
 end Witness
 
 end Proof
