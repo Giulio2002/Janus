@@ -325,3 +325,25 @@ rules match `(x ^^^ y).toNat`, so apply them before `BitVec.toNat_xor` rewrites 
 
 Also `Janus.Tactic.add_sub_norm : c ≤ a → a + d - c = d + (a - c)` (the byte address `K + ptr - 1` as `ptr + (K - 1)`), a public lemma for
 `simp (disch := omega) only [add_sub_norm, Nat.reduceSub, …]`, not in any simp set.
+
+# Migrating from v0.3 to v0.4
+
+v0.4.0 changes the statement of the main-theorem forms (BREAKING; CHANGELOG.md, "v0.4.0", has the full migration guide):
+`Ensures p entry args pre post` (and `EnsuresWithin`, `EnsuresGo`/`EnsuresGoX`, `RunsAtLeastOnCall`, `Ensures0`, `CEnsures`/`CEnsuresA`,
+`EnsuresC`, `EnsuresK`, `EnsuresGrow`/`EnsuresGrow64`) is now
+
+```lean
+∀ s, CallSetup0 entry args s → pre s → ∀ ret, RetAddr p ret →
+  Returns (p.withExit ret) (s.setRet ret) (fun s' => ABIReturn (s.setRet ret) s' ∧ post (s.setRet ret) s')
+```
+
+so `pre` is evaluated on the call state before the return address is installed and cannot restrict it.
+
+* A proof of the old statement migrates by one line, `janus_ensures_old` (`janus64_ensures_old` on amd64), placed first; the rest of
+  the proof (`intro ret hret s hs hpre`, `janus_intro hs`, `janus_run`) is unchanged. `scripts/dev/migrate-v040.py FILE.lean ...`
+  does this, and the witness rewrite, for the usual shapes (give it the whole tree in one call).
+* A witness states `CallSetup0 E args s` (no return-address field), runs at `s.setRet ret` and applies the theorem as
+  `thm args s0 setup hpre ret hret`.
+* amd64: `StackGuardOK` has a fourth field (`apart`); `⟨hg1, hg2, hg3⟩` patterns still work, constructions need a fourth component.
+* `EnsuresGrow`/`EnsuresGrow64` take the caller's frame chain as the separate argument `caller` (evaluated at `s.setRet ret`).
+* The auditor's syntactic `[RSP]` precondition rule is gone: no spelling of a precondition can restrict the return address any more.

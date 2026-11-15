@@ -241,6 +241,12 @@ Auditor and CLI fixes requested by fv-modexp.
 - Round n9 rows whose expectation changed (the rule that blocked them is gone, and none of them restricts the return
   address any more): b1-b7, b9-b11, b13-b16, b18, b19 were `blocked`, are now `Verified` (audit-only). b8, b12, b17, b20
   stay `Verified`.
+- Red-team migration to the v0.4.0 shape (all rounds under `test/redteam`, `docs/`): rows keep their expected verdicts, with one exception.
+  `roundwithin` amd64 W7, W8 and W6e attacked the removed `[RSP]`-word rule and are now expected **Verified**: the precondition is evaluated on
+  the call state before the return address is installed, so a conjunct about the word at `[RSP]` cannot restrict `ret`; the proved theorem still
+  covers every admissible return address. Pinned reason texts that quoted the old setup (round 14 WeakD / OneMember: the missing premise is now
+  `CallSetup0 …`) and round 7 G1c's witness-statement pattern follow the new shape. Round 3 R2 (no witness by design) is asserted with
+  `--audit-only` and its Add regression row with its witness; round 2's DF control derives the `REP MOVSQ` address from the `runtime.memmove` symbol.
 
 ## v0.3.3 (2026-11-13)
 

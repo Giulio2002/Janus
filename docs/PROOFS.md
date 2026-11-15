@@ -596,6 +596,7 @@ hypothesis by a lemma of `Janus.Spec.Dynamic`, the literals by kernel-checked ev
 Equations named `h_dyn…` are rewrite rules of every step:
 
 ```lean
+  janus_ensures_old
   intro ret hret s hs ⟨hi, ⟨hh, hhb⟩, hd, ⟨hg1, hg2, hg3⟩, hal, hb, ha, hw⟩
   janus_intro hs
   janus_dyn hi
