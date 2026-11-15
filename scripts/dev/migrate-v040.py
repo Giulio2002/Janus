@@ -616,7 +616,9 @@ def _migrate(t, amd0, reg, fname=''):
             continue
         # a row theorem
         if bstripped.startswith('by'):
-            if re.match(r'\s*by\s*\n\s*(?:--[^\n]*\n\s*)*janus6?4?_ensures_old', body): continue
+            if re.match(r'\s*by\s*\n\s*(?:--[^\n]*\n\s*)*(?:(?:apply|refine) (?:[\w.]+\.)?toGoX?\b[^\n]*\n\s*(?:--[^\n]*\n\s*)*)?(?:janus6?4?_ensures_old|suffices h : _ (?:∧ _ )*from ⟨(?:[\w.]+\.)?\w+\.of_old \(by janus6?4?_pre_setRet)', body): continue     # already migrated (idempotent)
+            mhd = re.search(r"(?m)^[ \t]*intro (?:[\w'_]+ )*?ret hret", body)
+            if mhd and re.search(r'janus6?4?_ensures_old', body[:mhd.start()]): continue     # `intro H1 H2` / `apply Ensures.toGo` + the bridge before the old-shaped intro: already migrated (idempotent)
             kind = proof_kind(body, reg)
             if kind == 'new': continue          # starts from a new-shaped lemma (`refine Ensures0.of_summary0 …`, a helper): unchanged
             if kind == 'none':
@@ -710,7 +712,7 @@ def _migrate(t, amd0, reg, fname=''):
             idx = None
             for k in range(len(toks) - 1):
                 if toks[k][0] in ('·', '<;>', 'at', 'with', 'from', 'by', 'then', 'else', '|'): break      # the application ended
-                if toks[k][0] == 'ret' and toks[k + 1][0] == 'hret' and k + 2 < len(toks) + 1:
+                if toks[k][0] == 'ret' and toks[k + 1][0] == 'hret' and k + 2 < len(toks):     # old shape: ret hret s hs hp; a trailing ret hret is the migrated shape (idempotent)
                     idx = k; break
             if idx is None:
                 # `(thm args).1 ret hret …` (a conjunction of rows, one projected): `(thm args).1.toOld ret hret …`
