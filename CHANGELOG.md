@@ -142,6 +142,8 @@ Direct style (no bridge; for a new proof or a precondition the bridge cannot dis
   `s.setRet ret` from `pre s` and `caller (s.setRet ret)`. The alignment and range facts of `X30` / `[RSP]` come from `RetAddr`.
   `BigLocal`, `SumRec` and `HoldPtr` (both ISAs) are migrated this way and verify with their witnesses; on amd64 the
   slot-invariance lemmas `StackAmd64.gStack_setRet`, `noStackPtr_setRet`, `rtView_setRet`, `inRanges_slot` do the memory part.
+- **arm64 `Janus.GoABI.stackGuardOK_setRet`** (`StackGuardOK (s.setRet ret) adj ↔ StackGuardOK s adj`, a simp lemma, used by `janus_pre_setRet`): a precondition
+  that reaches `StackGuardOK` through a framework predicate (`Map.CallerOK`, `Iface.CallerOK`, …) is invariant under `setRet` like the amd64 one.
 - **amd64 `StackGuardOK` carries the apartness of the guard word from `[RSP, RSP + 8)`** (new field `apart`; BREAKING for the
   3-field pattern `⟨noWrap, readable, below⟩`: it is now `⟨noWrap, readable, below, apart⟩`). `StackGuardOK (s.setRet ret) adj ↔
   StackGuardOK s adj` is a simp lemma (`stackGuardOK_setRet`), so `janus64_pre_setRet` needs no extra conjunct. `TlsG` keeps its

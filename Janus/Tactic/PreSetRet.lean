@@ -151,6 +151,7 @@ macro_rules
          Janus.GoABI.setRet_mem, Janus.GoABI.setRet_dczid, Janus.GoABI.setRet_vregs,
          Janus.GoABI.setRet_tpidr, Janus.GoABI.setRet_fpcr, Janus.GoABI.setRet_fpsr,
          Janus.GoABI.setRet_excl, Janus.GoABI.setRet_exclPass] at $hp:ident ⊢
+       try simp only [Janus.GoABI.stackGuardOK_setRet] at $hp:ident ⊢
        try simp (disch := first | decide | simp) only [Janus.GoABI.setRet_regs_of_ne] at $hp:ident ⊢
        all_goals (have hu := ($hret).user; have ha4 := ($hret).aligned)
        try simp (disch := omega) only [Janus.GoABI.setRet_lr_toNat] at ⊢

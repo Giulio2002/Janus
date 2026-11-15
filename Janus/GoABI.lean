@@ -234,6 +234,16 @@ structure StackGuardOK (s : State) (adj : Nat) : Prop where
   readable : s.mem.accessible ((s.regs regG).toNat + stackguard0Offset) 8 false = true
   below : stackguard0 s + adj < s.sp.toNat
 
+/-- Installing the return address leaves the stack-guard precondition unchanged (`g` is `X28`; `SP` and the memory are untouched). -/
+@[simp] theorem stackGuardOK_setRet {s : State} {ret adj : Nat} :
+    StackGuardOK (s.setRet ret) adj ↔ StackGuardOK s adj := by
+  have h28 : (s.setRet ret).regs regG = s.regs regG := setRet_regs_of_ne (by decide)
+  constructor
+  · rintro ⟨a, b, c⟩
+    exact ⟨by simpa [h28] using a, by simpa [h28] using b, by simpa [stackguard0, h28] using c⟩
+  · rintro ⟨a, b, c⟩
+    exact ⟨by simpa [h28] using a, by simpa [h28] using b, by simpa [stackguard0, h28] using c⟩
+
 /-! ## Obligations on return -/
 
 /-- What every Go function must restore on return, relative to its call state `s₀`:
