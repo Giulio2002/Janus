@@ -821,10 +821,11 @@ def untoold(it, setups):
         m = re.compile(r'\)((?:\.(?:\d+|left|right))*)\.toOld\s+ret\s+hret\s+').search(it, pos)
         if not m: break
         toks, stop = tokens(it, m.end())
-        if len(toks) < 2 or toks[1][0].split('.')[-1] not in setups:
+        sname = re.match(r'\(?([\w.\']+)', toks[1][0]) if len(toks) >= 2 else None
+        if sname is None or sname.group(1).split('.')[-1] not in setups:
             pos = m.end(); continue
         last = 3 if len(toks) >= 3 else 2
-        states.add(toks[0][0])
+        states.add(toks[0][0]); states.add('__raw__')
         new = ')' + m.group(1) + ' ' + it[toks[0][1]:toks[last - 1][2]] + ' ret hret'
         it = it[:m.start()] + new + it[toks[last - 1][2]:]
         pos = m.start() + len(new)
@@ -880,6 +881,12 @@ def rewrite_witness(it, apps, amd, name, warn, plain, kern, extra=()):
             pos = end; continue
         head = m.group(0)
         tail = it[m.end():end]
+        tk0, _ = tokens(tail, 0)
+        extra_st = []
+        if tk0 and tk0[0][0].startswith('(') and '.setRet' not in tk0[0][0] and tk0[0][0] not in ('(fun', ) and not tk0[0][0].startswith('(fun'):
+            extra_st = [tk0[0][0]]       # a state given by an expression (`(s0 mem0)`), not a variable
+        for st in extra_st:
+            tail = re.sub(r'(?<![\w.\'])' + re.escape(st) + r'(?![\w\'])', '(' + st + '.setRet ' + retv + ')', tail)
         for st in states:
             tail = re.sub(r'(?<![\w.\'])' + re.escape(st) + r'(?![\w\'])', '(' + st + '.setRet ' + retv + ')', tail)
         it = it[:m.end()] + tail + it[end:]
