@@ -15,6 +15,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
         fun _ _ _ _ _ _ _ => False⟩) :
     Ensures (Extracted.program.link impl) Extracted.entry [ap, an, bp, bn] (fun _ => False)
       (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs h; exact h.elim
 
 end Proof

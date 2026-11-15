@@ -12,6 +12,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
       (Extracted.program.contractAddr "runtime.newobjеct") rt 4096 H) :
     Ensures Extracted.program Extracted.entry [x, y] (fun s => GuardOK s 0 ∧ StackOK s 0 0)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by
+  janus_ensures_old
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, hal, hb, ha, hw⟩
   janus_intro hs
   janus_run

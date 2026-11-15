@@ -25,6 +25,7 @@ theorem correctness (impl : List Segment) (H : RtReady) (a b : BitVec 64)
       (fun s => GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
         H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView [] s.mem))
       (fun _ s' => s'.regs 0 = 42) := by
+  janus_ensures_old [Proof.pairType, JanusASL.RedTeam.AddProg.entry]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hH⟩
   janus_intro hs
   janus_eval_nat h_pt : pairType

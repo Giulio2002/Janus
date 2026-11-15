@@ -10,6 +10,7 @@ theorem correctness (x y : BitVec 64) :
     EnsuresResults Extracted.program Extracted.entry [x, y] 1
       (fun s => StackWritable s 0 8)
       (fun r => r = [x + y + BitVec.ofNat 64 (dataBase Extracted.program 3)]) := by
+  janus64_ensures_old
   have h0 : dataBase Extracted.program 3 = 0 := by rfl
   rw [h0]; simp only [BitVec.add_zero]
   intro ret hret s hs hpre

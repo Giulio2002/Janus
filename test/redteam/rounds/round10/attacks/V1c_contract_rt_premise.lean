@@ -23,6 +23,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (hrt : rt = [
       (fun s => GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
         H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem))
       (fun _ s' => s'.regs 0 = 42) := by
+  janus_ensures_old [Proof.pairType, JanusASL.RedTeam.AddProg.entry]
   subst hrt
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hH⟩
   janus_intro hs

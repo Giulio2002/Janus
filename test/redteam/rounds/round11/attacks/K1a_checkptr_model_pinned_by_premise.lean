@@ -30,6 +30,7 @@ theorem correctness (impl : List Segment) (C : CheckptrModel) (hl : C.Laws)
       (fun s s' => (s'.regs 0).toNat = s.mem.readLE p.toNat 8 ∧
         MemFrame s.mem s'.mem (C.priv ++ [(s.sp.toNat - (C.depth + 48), s.sp.toNat + 16)]) ∧
         C.Env s'.mem (s.regs 28)) := by
+  janus_ensures_old [Janus.Contracts.Instrument.CallerOK, Janus.Program.DataLoaded, Janus.Spec.Ptr, Janus.Contracts.Instrument.NoStraddle]
   intro ret hret s hs ⟨hcal, hd, ⟨hp, hp'⟩, hp0, hpo, hpd, hgd16⟩
   have hc' := hcal
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hdp, hb, hst, hout, hgd, hgo⟩ := hc'

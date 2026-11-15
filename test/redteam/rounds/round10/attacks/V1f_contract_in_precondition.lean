@@ -54,6 +54,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (a b : BitVec
         (Extracted.program.contractAddr "runtime.newobject") rt 4096 (fun _ _ _ _ => True) ∧
         GuardOK s 0)
       (fun _ s' => s'.regs 0 = 42) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hnew, _⟩
   exact absurd hnew (unsat _ _ _)
 

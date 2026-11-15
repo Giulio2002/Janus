@@ -102,8 +102,8 @@ def s0 : State :=
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (linked.withExit ret) Extracted.entry [3, 5] s0 :=
-  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [3, 5] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
@@ -132,6 +132,6 @@ theorem pre : GuardOK s0 0 ∧ StackOK s0 4144 24 ∧ Extracted.program.DataLoad
 
 /- **The theorem fires**: for this call, with this allocator, `NewPair(3, 5)` returns a fresh
 16-aligned object in `rt` holding 3 and 5. -/
-example := Proof.correctness impl rt H 3 5 hnew ret hret s0 setup pre
+example := (Proof.correctness impl rt H 3 5 hnew) s0 setup pre ret hret
 
 end NewPairWitness

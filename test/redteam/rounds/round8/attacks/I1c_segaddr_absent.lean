@@ -7,6 +7,7 @@ namespace Proof
 theorem correctness (x y : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => s'.regs 0 = x + y + BitVec.ofNat 64 (segAddr Extracted.program "example.com/basic.Mul")) := by
+  janus_ensures_old
   have h0 : segAddr Extracted.program "example.com/basic.Mul" = 0 := by rfl
   rw [h0]
   intro ret hret s hs _

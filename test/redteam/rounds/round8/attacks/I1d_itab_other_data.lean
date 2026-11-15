@@ -8,6 +8,7 @@ theorem correctness (tab h x : BitVec 64) :
       (fun s => ItabIs [] s.mem tab
           "go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher" ∧ Ptr s.mem h 8 false)
       (fun s s' => s'.regs 0 = 0) := by
+  janus_ensures_old
   intro ret hret s hs ⟨⟨d, hd, _⟩, _⟩
   cases hd
 end Proof

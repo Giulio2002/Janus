@@ -17,6 +17,7 @@ theorem correctness (impl : List Segment) (H : HashModel) (hl : H.Laws) (d : Nat
     (p h : BitVec 64) :
     Ensures (Extracted.program.link impl) Extracted.entry [p, h] (fun _ => False)
       (fun _ _ => True) := by
+  janus_ensures_old
   intro ret hret s hs h; exact h.elim
 
 end Proof

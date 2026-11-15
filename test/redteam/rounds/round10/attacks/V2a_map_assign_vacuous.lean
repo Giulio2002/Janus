@@ -113,6 +113,7 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64))
     Ensures (Extracted.program.link impl) Extracted.entry [m, k, v]
       (fun s => CallerOK M s 48 32 ∧ M.Typ mapType ∧ m.toNat ≠ 0 ∧ M.Rep s.mem m.toNat f)
       (fun s s' => M.Rep s'.mem m.toNat (f.set k (v + 1)) ∧ M.Env s'.mem (s.regs 28)) := by
+  janus_ensures_old [Proof.mapType, JanusASL.RedTeam.AddProg.entry]
   intro ret hret s hs ⟨hc, hty, hm0, hmap⟩
   exfalso
   have hc' := hc
