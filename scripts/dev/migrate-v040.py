@@ -602,6 +602,10 @@ def _migrate(t, amd0, reg, fname=''):
             if pos is None:
                 warn.append('theorem %s: cannot find the first tactic' % name); continue
             p, ind, nl = pos
+            # `apply Ensures.toGo` (an EnsuresGo derived from an Ensures) comes first: the bridge goes after it, on the Ensures it leaves
+            mt = re.match(r'(?:apply|refine) (?:[\w.]+\.)?toGoX?\b[^\n]*\n([ \t]*)', it[p:])
+            if mt:
+                p += mt.end(); ind = len(mt.group(1)); nl = True
             # statement-level hypotheses: `intro h₁ h₂ ret hret …` introduces them first
             rest = it[p:]
             mi = re.match(r'intro ((?:[\w\'_]+ )*?)ret hret', rest)
