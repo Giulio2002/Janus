@@ -71,6 +71,10 @@ macro_rules (kind := janus64PreSetRetCore)
     let v1 := mkIdent `Janus.Contracts.view_setRet
     let v2 := mkIdent `Janus.Contracts.StackAmd64.rtView_setRet
     let c1 := mkIdent `Janus.Amd64.CABI.CStack
+    let m1 := mkIdent `Janus.Contracts.MapAmd64.laws_env_setRet
+    let m2 := mkIdent `Janus.Contracts.MapAmd64.laws_rep_setRet
+    let m3 := mkIdent `Janus.Contracts.MapAmd64.laws_isMap_setRet
+    let m4 := mkIdent `Janus.Contracts.MapAmd64.laws_iter_setRet
     -- the definitions the user lists are unfolded one by one: an ambiguous or unknown name fails only its own `simp`
     -- all at once (definitions inside each other unfold to a fixpoint), then one by one twice (what is left when a name is ambiguous)
     let mut us ← `(tactic| try simp only [$ds,*] at $hp:ident ⊢)
@@ -106,6 +110,7 @@ macro_rules (kind := janus64PreSetRetCore)
          try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$v1:ident] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$v2:ident] at ⊢
+         try simp (disch := first | assumption | janus_outside_slot) only [$m1:ident, $m2:ident, $m3:ident, $m4:ident] at ⊢
          all_goals first
            | with_reducible exact Janus.Tactic.Hide.elim hp0
            | (repeat' (first | with_reducible assumption | with_reducible refine And.intro ?_ ?_)

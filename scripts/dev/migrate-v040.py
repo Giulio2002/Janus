@@ -361,6 +361,9 @@ def import_closure(f, reg):
             if h: stack.append(h)
     return out
 
+# masked runtime views stay folded: `view_setRet` / `rtView_setRet` (amd64 janus64_pre_setRet) rewrite them as they are
+NO_UNFOLD = {'rtView', 'view'}
+
 def unfold_list(pre_text, reg, f, bound=()):
     """The consumer's state-reading definitions reachable from `pre_text`, as fully qualified names (the definition visible
     from this file: the same file, else the import closure, else the only one; inside a definition body, the one in the
@@ -379,7 +382,7 @@ def unfold_list(pre_text, reg, f, bound=()):
         w, owner = todo.pop(0)
         if w in bound: continue
         base = w.split('.')[-1]
-        if base not in reg.defs: continue
+        if base not in reg.defs or base in NO_UNFOLD: continue
         cands = reg.defs[base]
         if '.' in w and len(w.split('.')[0]) <= 1 and not any(c[2].endswith('.' + w) or c[2] == w for c in cands):
             continue      # `R.ok`: a field of a bound variable (`Q.NatMul.MPre` is a namespace)

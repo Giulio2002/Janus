@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- amd64 map models: `Janus.Contracts.MapAmd64.laws_env_setRet` / `laws_rep_setRet` / `laws_isMap_setRet` / `laws_iter_setRet` (with `hl : M.Laws` and the precondition's `Outside` window over `[RSP, RSP + 8)`), used by `janus64_pre_setRet`: a precondition with `M.Env s.mem g` / `M.Rep s.mem mp f` / `IsMap` / `M.Iter` is invariant under `setRet` (the return slot is outside `M.priv`). Without them every amd64 map-contract row failed `janus64_pre_setRet` on the abstract model predicates. `migrate-v040.py` no longer unfolds `rtView`/`view` (`view_setRet` / `rtView_setRet` rewrite them folded).
 - Cache: a replay view (`run/replay-view-*`, a copy of the replayed modules' closure, several GiB) left behind by a killed run (`timeout`, SIGKILL) counted against the cache budget until it was a day old, so the collector evicted the module store and consumers re-compiled their whole closure. The owner of a view now holds an flock on `<view>/.lock`; the collector removes a view whose lock is free (and which is older than 5 minutes) at once and never one whose lock is held, whatever pid namespace the owner runs in. Views without a lock (older janus) keep the 24 h rule. `janus cache du` and `cache gc` report the dead views and their size.
 
 **BREAKING: `Ensures` and its sibling forms evaluate the precondition BEFORE the return address is installed.**

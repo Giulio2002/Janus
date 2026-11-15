@@ -20,6 +20,29 @@ namespace Janus.Contracts.MapAmd64
 
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec.Map
 
+/-! ### The return slot is outside the runtime's private memory
+
+`State.setRet` writes only `[RSP, RSP + 8)`. When a precondition keeps that slot outside `M.priv` (the stack window of
+`CallerOK` does), the model's `Env`/`Rep`/`IsMap`/`Iter` facts about the call state survive installing the return address
+(used by `janus64_pre_setRet`, with `hl : M.Laws` and the `Outside` fact from the precondition in the context). -/
+
+theorem laws_env_setRet {K V : Type} {M : MapModel K V} (hl : M.Laws) {s : State} {ret : Nat} (g : W64)
+    (h : Outside (s.regs 4).toNat 8 M.priv) : M.Env (s.setRet ret).mem g = M.Env s.mem g :=
+  hl.env_writeLE ret g h
+
+theorem laws_rep_setRet {K V : Type} {M : MapModel K V} (hl : M.Laws) {s : State} {ret : Nat} (mp : Nat)
+    (f : AMap K V) (h : Outside (s.regs 4).toNat 8 M.priv) : M.Rep (s.setRet ret).mem mp f = M.Rep s.mem mp f :=
+  hl.rep_writeLE ret mp f h
+
+theorem laws_isMap_setRet {K V : Type} {M : MapModel K V} (hl : M.Laws) {s : State} {ret : Nat} (mp : Nat)
+    (f : AMap K V) (h : Outside (s.regs 4).toNat 8 M.priv) : IsMap M (s.setRet ret).mem mp f = IsMap M s.mem mp f :=
+  hl.isMap_writeLE ret mp f h
+
+theorem laws_iter_setRet {K V : Type} {M : MapModel K V} (hl : M.Laws) {s : State} {ret : Nat} (it mp : Nat)
+    (f : AMap K V) (ks : List K) (h : Outside (s.regs 4).toNat 8 (M.priv ++ [(it, it + iterSize)])) :
+    M.Iter (s.setRet ret).mem it mp f ks = M.Iter s.mem it mp f ks :=
+  hl.iter_writeLE ret it mp f ks h
+
 /-- The register file after a Go call (amd64): `RSP` popped past the return address, `RBP` and
 `R14` from `f`, everything else from `r`. -/
 def keepABI (f r : Nat → W64) : Nat → W64 :=
