@@ -1069,6 +1069,13 @@ def main(files):
             if nalt:
                 warn.append('%d `refine ⟨k, ?_, k⟩` alternatives got a 4-hole twin (StackGuardOK 4th field)' % nalt)
                 t2 = t5
+        if amd and '⟨by decide, by decide, by decide⟩' in t2:
+            # a constructor of three `by decide` (a StackGuardOK before the 4th field `apart`, or a 3-field TlsG): both shapes, the 4-field one first
+            t7, n7 = re.subn(r'(?<![\w])⟨by decide, by decide, by decide⟩',
+                             '(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩)', t2)
+            if n7:
+                warn.append('%d `⟨by decide, by decide, by decide⟩` constructors accept the 4-field StackGuardOK too' % n7)
+                t2 = t7
         if amd and '⟨?_, ?_, ?_⟩ <;>' in t2:
             # `first | decide | (refine ⟨?_, ?_, ?_⟩ <;> TAIL) | …` proving a precondition with a StackGuardOK (4 fields now): a 4-hole twin first
             t6, n6 = re.subn(r'(\| )\(refine ⟨\?_, \?_, \?_⟩ <;> ((?:[^()\n]|\((?:[^()\n]|\([^()\n]*\))*\))*)\)',
