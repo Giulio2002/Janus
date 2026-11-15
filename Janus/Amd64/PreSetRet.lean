@@ -53,12 +53,18 @@ elab "janus_outside_slot" : tactic => do
       if d.isImplementationDetail then continue
       let ty ← instantiateMVars d.type
       if ty.isAppOfArity ``Janus.Outside 3 then acc := acc.push d.toExpr
+      else if ty.isAppOfArity `Janus.Contracts.LiveSep 2 then acc := acc.push d.toExpr
     return acc
   for hy in hyps do
     let st ← saveState
     try
       let hs ← g.withContext (Term.exprToSyntax hy)
-      Tactic.withoutRecover <| evalTactic (← `(tactic| exact Janus.Outside.of_sub $hs (by omega) (by omega)))
+      let lso := mkIdent `Janus.Contracts.SetRetFramesAmd64.liveSep_outside
+      -- `LiveSep [win, …] rt` (a window of the live set that covers the return slot) separates the slot from `rt` too
+      Tactic.withoutRecover <| evalTactic (← `(tactic| first
+        | exact Janus.Outside.of_sub $hs (by omega) (by omega)
+        | exact $lso:ident $hs
+            (by first | exact List.mem_singleton_self _ | exact List.mem_cons_self .. | exact List.mem_cons_of_mem _ (List.mem_cons_self ..)) (by omega) (by omega)))
       return
     catch _ => st.restore
   throwError "janus_outside_slot: no hypothesis `Outside` contains the goal"
@@ -75,6 +81,17 @@ macro_rules (kind := janus64PreSetRetCore)
     let m2 := mkIdent `Janus.Contracts.MapAmd64.laws_rep_setRet
     let m3 := mkIdent `Janus.Contracts.MapAmd64.laws_isMap_setRet
     let m4 := mkIdent `Janus.Contracts.MapAmd64.laws_iter_setRet
+    let f0 := mkIdent `Janus.Contracts.SetRetFramesAmd64.mem_env_setRet
+    let f1 := mkIdent `Janus.Contracts.SetRetFramesAmd64.iface_env_setRet
+    let f2 := mkIdent `Janus.Contracts.SetRetFramesAmd64.hash_env_setRet
+    let f3 := mkIdent `Janus.Contracts.SetRetFramesAmd64.rt_env_setRet
+    let f4 := mkIdent `Janus.Contracts.SetRetFramesAmd64.panic_env_setRet
+    let f5 := mkIdent `Janus.Contracts.SetRetFramesAmd64.panic_panics_setRet
+    let f6 := mkIdent `Janus.Contracts.SetRetFramesAmd64.panic_defers_setRet
+    let f7 := mkIdent `Janus.Contracts.SetRetFramesAmd64.panic_saved_setRet
+    let f8 := mkIdent `Janus.Contracts.SetRetFramesAmd64.panic_rp_setRet
+    let f9 := mkIdent `Janus.Contracts.SetRetFramesAmd64.panic_room_setRet
+    let f10 := mkIdent `Janus.Contracts.SetRetFramesAmd64.panic_calm_setRet
     -- the definitions the user lists are unfolded one by one: an ambiguous or unknown name fails only its own `simp`
     -- all at once (definitions inside each other unfold to a fixpoint), then one by one twice (what is left when a name is ambiguous)
     let mut us ← `(tactic| try simp only [$ds,*] at $hp:ident ⊢)
@@ -111,6 +128,7 @@ macro_rules (kind := janus64PreSetRetCore)
          try simp (disch := first | assumption | janus_outside_slot) only [$v1:ident] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$v2:ident] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$m1:ident, $m2:ident, $m3:ident, $m4:ident] at ⊢
+         try simp (disch := first | assumption | janus_outside_slot) only [$f0:ident, $f1:ident, $f2:ident, $f3:ident, $f4:ident, $f5:ident, $f6:ident, $f7:ident, $f8:ident, $f9:ident, $f10:ident] at ⊢
          all_goals first
            | with_reducible exact Janus.Tactic.Hide.elim hp0
            | (repeat' (first | with_reducible assumption | with_reducible refine And.intro ?_ ?_)

@@ -246,3 +246,4 @@ import Janus.Contracts.SbtsStaticSat
 import Janus.Contracts.SbtsStaticSatAmd64
 import Janus.Contracts.LiveStubSbts
 import Janus.Contracts.LiveStubSbtsAmd64
+import Janus.Contracts.SetRetFramesAmd64
