@@ -77,7 +77,7 @@ out="$("$J" extract $W/asmstrip main.Add $W/StripAdd 2>&1)"; row G1e_stripped_bi
 cp -r $W/AsmAdd $W/AsmAdd-c
 par_run 'v G1a_asm_runtime_stub_panics $W/AsmAdd;      row G1a_asm_runtime_stub_panics blocked'
 par_run 'v G1b_asm_runtime_stub_neverpanics $W/AsmInc; row G1b_asm_runtime_stub_neverpanics blocked'
-g1c_pat="ABIReturn s s' ∧ s'.regs 0 = x + y"
+g1c_pat="ABIReturn (s.setRet ret) s' ∧ s'.regs 0 = x + y"   # v0.4.0: the witness runs at s.setRet ret
 par_run 'vw G1c_asmstub_returns $W/AsmAdd-c;            row G1c_asmstub_returns Verified "$g1c_pat"'
 par_wait
 
