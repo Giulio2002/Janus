@@ -724,7 +724,7 @@ def fix_setup_body(it, amd, warn, name):
     elif abi0:
         parts = [parts[0]] + parts[2:]        # (pc, lr, argWords, frame, spAligned) -> (pc, argWords, frame, spAligned)
     else:
-        parts = [parts[0], ' by decide'] + parts[2:]   # (pc, lr, args) -> (pc, len, args)
+        parts = [parts[0], ' by first | decide | simp | omega'] + parts[2:]   # (pc, lr, args) -> (pc, len, args)
     return it[:bs] + body[:k + 1] + ','.join(parts) + body[j:]
 
 def untoold(it, setups):
@@ -779,6 +779,23 @@ def rewrite_witness(it, apps, amd, name, warn, plain, kern, extra=()):
             k = j
         k += 1
     it = '\n'.join(lines)
+    # a lambda `(fun (S.setRet R) s' => body)` applied to the state: the binder stays `S`, the body reads the binder
+    for st in states:
+        key = '(fun (' + st + '.setRet ' + retv + ')'
+        pos = 0
+        while True:
+            q = it.find(key, pos)
+            if q < 0: break
+            d, j = 0, q
+            while j < len(it):
+                if it[j] == '(': d += 1
+                elif it[j] == ')':
+                    d -= 1
+                    if d == 0: break
+                j += 1
+            seg = it[q:j + 1].replace('(' + st + '.setRet ' + retv + ')', st)
+            it = it[:q] + seg + it[j + 1:]
+            pos = q + len(seg)
     # applications: `thm args RET hret S SETUP PRE` -> `thm args S SETUP PRE RET hret`
     sig_end = split_sig(it)[1] if split_sig(it)[0] is not None else 0
     for names, isk in ((plain, False), (kern, True)):
