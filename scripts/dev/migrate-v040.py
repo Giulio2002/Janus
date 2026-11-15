@@ -408,8 +408,9 @@ def collect(t, reg):
     for it in items:
         m = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
         if not m: continue
-        ms = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)\s*:\s*CallSetup\s*\(', it)
-        if ms and '.withExit' in it.split(':=', 1)[0]: reg.setupnames.add(ms.group(1).split('.')[-1])
+        sgs, _bss = split_sig(it)
+        cis = top_colon(sgs) if sgs is not None else -1
+        if cis >= 0 and re.match(r'\s*CallSetup\s*\(', sgs[cis + 1:]) and '.withExit' in sgs[cis + 1:]: reg.setupnames.add(m.group(1).split('.')[-1])
         sg0, bs0 = split_sig(it)
         if sg0 is not None and re.search(r'\{args\s*:\s*List', sg0):
             reg.argthms.append((m.group(1).split('.')[-1], it[bs0:]))
