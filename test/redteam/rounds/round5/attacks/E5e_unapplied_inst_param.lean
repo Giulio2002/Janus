@@ -11,6 +11,7 @@ def isProd (x y r : BitVec 64) [_i : HMul (BitVec 64) (BitVec 64) (BitVec 64)] :
 theorem correctness (x y : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => @Exists (HMul (BitVec 64) (BitVec 64) (BitVec 64)) (@isProd x y (s'.regs 0))) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run

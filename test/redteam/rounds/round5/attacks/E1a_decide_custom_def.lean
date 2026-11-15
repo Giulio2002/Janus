@@ -8,6 +8,7 @@ def myDec (x : BitVec 64) : Decidable (x = x) := .isTrue rfl
 theorem correctness (x y : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => s'.regs 0 = x + y ∧ @decide (x = x) (myDec x) = true) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run

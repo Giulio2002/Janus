@@ -9,6 +9,7 @@ noncomputable def cdec (p : Prop) : Decidable p := Classical.propDecidable p
 theorem correctness (x y : BitVec 64) (_h : @ite Prop (x = 0) (cdec _) False True) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => s'.regs 0 = x + y) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run

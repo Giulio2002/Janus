@@ -9,6 +9,7 @@ theorem correctness (x y : BitVec 64)
     (_h : ∀ [_i : HMul (BitVec 64) (BitVec 64) (BitVec 64)], x * y = x + y) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => s'.regs 0 = x + y) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run

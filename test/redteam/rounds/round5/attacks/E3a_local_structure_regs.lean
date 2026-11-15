@@ -11,6 +11,7 @@ def view (x y : BitVec 64) (_s : State) : View := ⟨fun _ => x * y⟩
 theorem correctness (x y : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => (view x y s').regs 0 = x * y) := by
+  janus_ensures_old
   intro ret hret s hs _
   janus_intro hs
   janus_run
