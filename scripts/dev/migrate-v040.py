@@ -754,7 +754,7 @@ def _migrate(t, amd0, reg, fname=''):
     extra = {}
     for i, it in enumerate(items):
         mm0 = re.match(r'(?:@\[[^\]]*\]\s*)?(?:private |protected )*(?:theorem|lemma) ([\w.\']+)', it)
-        if mm0 and (mm0.group(1) not in ens or inw[i]) and '.toOld ret hret' in it:
+        if mm0 and (mm0.group(1) not in ens or inw[i]) and re.search(r'\.toOld\s+ret\s+hret', it):
             it2, st2 = untoold(it, reg.setupnames)
             if st2:
                 items[i] = it2; extra[i] = st2
