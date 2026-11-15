@@ -24,6 +24,10 @@ map contract; `UnsatFixed.lean` shows this argument no longer goes through, and
 `Janus.Contracts.MapSat` / `MapSatAmd64` give witnesses for the fixed contracts.
 
 The old definitions are copied verbatim below (renamed `Old…`).
+
+v0.4.0 maintenance: the only change is in the two amd64 destructurings of `RTReturn`, which gained the existentials `zh kr`
+(zmmHi, kreg) since this file was written (the arm64 half was unchanged and compiled). The attack is untouched: the `Old…`
+contracts are the same statements, and each theorem still proves them unsatisfiable, with standard axioms only.
 -/
 
 namespace Janus.Audit.MapsR3
@@ -321,7 +325,7 @@ theorem old_assign64_unsat (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel 
       m.readLE R 8 = s.mem.readLE R 8
   have step : ∀ m f ks k, Inv m f ks → f k = none → ∃ m', Inv m' (f.set k 0) (k :: ks) := by
     intro m f ks k ⟨hk, hr, he, hacc, hgd, hrd⟩ hn
-    obtain ⟨_, s', -, -, r, x, y, fl, m', -, hfr, -, -, hw, hin, hall⟩ :=
+    obtain ⟨_, s', -, -, r, x, y, fl, m', zh, kr, -, hfr, -, -, hw, hin, hall⟩ :=
       hA f (nxt s m k) hpc ⟨rtPre_nxt k hrt hacc hgd hrd he,
         by rw [nxt_regs _ _ _ 0 (by decide)]; exact hty,
         by rw [nxt_regs _ _ _ 3 (by decide)]; exact hne, by rw [nxt_regs _ _ _ 3 (by decide)]; exact hr⟩
@@ -370,7 +374,7 @@ theorem old_makeSmall64_unsat {K V : Type} (p : Janus.Amd64.Program) (addr : Nat
       m.readLE R 8 = s.mem.readLE R 8
   have step : ∀ m L, Inv m L → ∃ m' a, Inv m' (a :: L) := by
     intro m L ⟨hnd, hL, he, hacc, hgd, hrd⟩
-    obtain ⟨_, s', -, -, r, x, y, fl, m', -, hfr, he', hok, hne0, hnew, hdist⟩ :=
+    obtain ⟨_, s', -, -, r, x, y, fl, m', zh, kr, -, hfr, he', hok, hne0, hnew, hdist⟩ :=
       hA (nxt s m (s.regs 1)) hpc (rtPre_nxt _ hpre hacc hgd hrd he)
     have hg2 : Outside G 8 (rtWrites M (nxt s m (s.regs 1)) 0 ++ []) := by
       rw [List.append_nil]; exact hg
