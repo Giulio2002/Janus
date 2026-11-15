@@ -1030,7 +1030,7 @@ def main(files):
             mh = re.match(r'\s*(?:\w+\.)*(\w+)', sg0[ci0 + 1:]) if ci0 >= 0 else None
             if mh and mh.group(1) in reg.ensdefs: reg.names.add(m0.group(1))
     for f in files:
-        for mm in re.finditer(r"\bret\s+hret\s+[\w'.]+\s+([\w.']+)", texts[f]):
+        for mm in re.finditer(r"\bret\s+hret\s+[\w'.]+\s+\(?([\w.']+)", texts[f]):
             if mm.group(1).split('.')[-1] in reg.setupnames: reg.setupused.add(mm.group(1).split('.')[-1])
     changed = True
     while changed:                    # theorems with a generic `args` that call `Ensures.toSummaryIn` or such a theorem
