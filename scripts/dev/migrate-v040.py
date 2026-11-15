@@ -792,6 +792,9 @@ def _migrate(t, amd0, reg, fname=''):
             if re.search(r'\b(?:CallSetup0?|CCallA?)\b\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\.withExit', it): warn.append('setup %s not rewritten' % name)
             items[i] = it
             continue
+        if inw[i] and name not in ens and not find_apps(it) and not conclusion(it):
+            it2 = fix_reexported_run(it)
+            if it2 != it: items[i] = it2; continue
         apps = find_apps(it)
         sig0 = it.split(':=', 1)[0]
         exw = '∃' in sig0 and SETUP_RE.search(it) is not None
@@ -799,6 +802,20 @@ def _migrate(t, amd0, reg, fname=''):
             it = rewrite_witness(it, apps, amd, name, warn, plain, kern, extra.get(i, ()))
             items[i] = it
     return ''.join(items), warn
+
+def fix_reexported_run(it):
+    """A claim file restates a witness run in its `Witness` namespace and proves it by the proof module's theorem of the same name:
+    `theorem returns : Returns (P.withExit Wit.ret) Wit.s0 fun s' => ABIReturn Wit.s0 s' ∧ … := Wit.returns`. The proof module's
+    theorem is now stated at `Wit.s0.setRet Wit.ret` (see `rewrite_witness`), so the restatement follows: every `Wit.s0` after the
+    `withExit` becomes `(Wit.s0.setRet Wit.ret)`. Only a bare identifier body (a re-export) is rewritten."""
+    sg, bs = split_sig(it)
+    if sg is None: return it
+    if not re.fullmatch(r"\s*[\w.']+\s*", it[bs:]): return it
+    m = re.search(r'(?:Returns\w*|RunsAtLeast \d+|ReturnsWithin \d+) \([^()]*\.withExit ([\w.\']+)\) ([\w.\']+)(?=[\s])', sg)
+    if not m or 'setRet' in m.group(2) or m.group(2).startswith('(') : return it
+    R, S = m.group(1), m.group(2)
+    tail = re.sub(r"(?<![\w.'])" + re.escape(S) + r"(?![\w'])", '(' + S + '.setRet ' + R + ')', sg[m.end(2):])
+    return sg[:m.start(2)] + '(' + S + '.setRet ' + R + ')' + tail + it[len(sg):]
 
 def fix_setup_body(it, amd, warn, name):
     """Drop/replace the return-address field of the anonymous constructor that proves a `CallSetup`."""
