@@ -836,7 +836,7 @@ def rewrite_witness(it, apps, amd, name, warn, plain, kern, extra=()):
     stmt = it[:sig_end]
     # states set up by the statement, and the return-address variable
     states = {'s'} | set(extra)
-    for mm in re.finditer(r"(?:CallSetup0|CallSetupF|CCallF|CCallAF)\b[^\n]*?\s(\w+'?)(?=\s*(?:∧|$|:=))", stmt, re.M):
+    for mm in re.finditer(r"(?:CallSetup0|CallSetupF|CCallF|CCallAF)\b(?:[^∧:=]|\n|=(?!>)|:(?!=))*?\s(\w+'?)(?=\s*(?:∧|$|:=))", stmt, re.M):
         states.add(mm.group(1))
     for m, toks, k, isk in apps:
         sidx = k + 2
