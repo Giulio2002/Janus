@@ -94,8 +94,8 @@ theorem full_output (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E : KE
         DataOutside P rt)
       (fun s k _ k' => (k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.ofString "x = " ++ Janus.Spec.Print.decimal x.toNat ++ [10#8]).length →
         k'.output 2 = k.output 2 ++ (Janus.Spec.Print.ofString "x = " ++ Janus.Spec.Print.decimal x.toNat ++ [10#8])) := by
-  intro ret hret s k hs hpre
-  refine (correctness impl rt E hl hu hmm x ret hret s k hs hpre).mono ?_ (fun _ _ h => h)
+  intro s k hs hpre ret hret
+  refine ((correctness impl rt E hl hu hmm x) s k hs hpre ret hret).mono ?_ (fun _ _ h => h)
   rintro s' k' ⟨habi, es, rfl, hem⟩
   refine ⟨habi, fun hlen => ?_⟩
   have h := hem.full (k := k) (by simpa [List.append_assoc] using hlen)
@@ -131,22 +131,22 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (r
     Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024 ∧
     Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024 ∧
     MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove") ∧
-    GoABI.RetAddr (P.link impl) ret ∧ GoABI.CallSetup ((P.link impl).withExit ret) Extracted.entry [42#64] s ∧
+    GoABI.RetAddr (P.link impl) ret ∧ GoABI.CallSetup0 Extracted.entry [42#64] s ∧
     (PrintReady ⟨PK, BI, BL, OW, DL⟩ rt 1088 16 256 s ∧ Amd64.Program.DataLoaded P s.mem ∧ DataOutside P rt) ∧
     (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.lock2") ∧ CallOK64 s_c 1024 1 ∧
       Amd64.Print.LockPre rt 0 s_c ∧ ¬ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
     (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.unlock2") ∧ CallOK64 s_c 1024 1 ∧
       Amd64.Print.LockPre rt 1 s_c ∧ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
     (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.memmove") ∧ Amd64.Print.MemmovePre s_c) ∧
-    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn s s' ∧ ∃ es, k' = k.appendTrace es ∧
+    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn (s.setRet ret) s' ∧ ∃ es, k' = k.appendTrace es ∧
           Emits 2 [Janus.Spec.Print.ofString "x = ", Janus.Spec.Print.decimal (42#64 : BitVec 64).toNat, [10#8]] es)
-      (fun _ _ => False) s k ∧
-    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn s s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.ofString "x = " ++ Janus.Spec.Print.decimal (42#64 : BitVec 64).toNat ++ [10#8]).length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.ofString "x = " ++ Janus.Spec.Print.decimal (42#64 : BitVec 64).toNat ++ [10#8])))
-      (fun _ _ => False) s k := by
+      (fun _ _ => False) (s.setRet ret) k ∧
+    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn (s.setRet ret) s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.ofString "x = " ++ Janus.Spec.Print.decimal (42#64 : BitVec 64).toNat ++ [10#8]).length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.ofString "x = " ++ Janus.Spec.Print.decimal (42#64 : BitVec 64).toNat ++ [10#8])))
+      (fun _ _ => False) (s.setRet ret) k := by
   obtain ⟨impl, rt, ret, s, E, k, h1, h2, h3, h4, h5, hp, hl2, hu2, hm2, hrun, hrun2⟩ := PrintFn.X.Witness.nonvacuous
   refine ⟨impl, rt, ret, s, E, k, Amd64.Print.Lock2Contract.of_equiv equiv.symm impl rt 1024 h1, Amd64.Print.Unlock2Contract.of_equiv equiv.symm impl rt 1024 h2,
     Amd64.Print.MemmoveContract.of_equiv equiv.symm impl h3, equiv.symm.retAddr impl h4, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · exact ⟨h5.rip, h5.ret, h5.zero, h5.len, h5.args, h5.df⟩
+  · exact ⟨h5.rip, h5.zero, h5.len, h5.args, h5.df⟩
   · rw [pk_eq, bi_eq, bl_eq, ow_eq, dl_eq]
     exact ⟨hp.1, equiv.symm.dataLoaded hp.2.1, Janus.Amd64.Print.DataOutside.of_equiv equiv.symm hp.2.2⟩
   · obtain ⟨sc, hpc, hco, hlp, hn⟩ := hl2
@@ -168,22 +168,22 @@ theorem full_output : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (
     Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024 ∧
     Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024 ∧
     MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove") ∧
-    GoABI.RetAddr (P.link impl) ret ∧ GoABI.CallSetup ((P.link impl).withExit ret) Extracted.entry [42#64] s ∧
+    GoABI.RetAddr (P.link impl) ret ∧ GoABI.CallSetup0 Extracted.entry [42#64] s ∧
     (PrintReady ⟨PK, BI, BL, OW, DL⟩ rt 1088 16 256 s ∧ Amd64.Program.DataLoaded P s.mem ∧ DataOutside P rt) ∧
     (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.lock2") ∧ CallOK64 s_c 1024 1 ∧
       Amd64.Print.LockPre rt 0 s_c ∧ ¬ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
     (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.unlock2") ∧ CallOK64 s_c 1024 1 ∧
       Amd64.Print.LockPre rt 1 s_c ∧ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
     (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.memmove") ∧ Amd64.Print.MemmovePre s_c) ∧
-    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn s s' ∧ ∃ es, k' = k.appendTrace es ∧
+    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn (s.setRet ret) s' ∧ ∃ es, k' = k.appendTrace es ∧
           Emits 2 [Janus.Spec.Print.ofString "x = ", Janus.Spec.Print.decimal (42#64 : BitVec 64).toNat, [10#8]] es)
-      (fun _ _ => False) s k ∧
-    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn s s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.ofString "x = " ++ Janus.Spec.Print.decimal (42#64 : BitVec 64).toNat ++ [10#8]).length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.ofString "x = " ++ Janus.Spec.Print.decimal (42#64 : BitVec 64).toNat ++ [10#8])))
-      (fun _ _ => False) s k := by
+      (fun _ _ => False) (s.setRet ret) k ∧
+    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn (s.setRet ret) s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.ofString "x = " ++ Janus.Spec.Print.decimal (42#64 : BitVec 64).toNat ++ [10#8]).length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.ofString "x = " ++ Janus.Spec.Print.decimal (42#64 : BitVec 64).toNat ++ [10#8])))
+      (fun _ _ => False) (s.setRet ret) k := by
   obtain ⟨impl, rt, ret, s, E, k, h1, h2, h3, h4, h5, hp, hl2, hu2, hm2, hrun, hrun2⟩ := PrintFn.X.Witness.nonvacuous
   refine ⟨impl, rt, ret, s, E, k, Amd64.Print.Lock2Contract.of_equiv equiv.symm impl rt 1024 h1, Amd64.Print.Unlock2Contract.of_equiv equiv.symm impl rt 1024 h2,
     Amd64.Print.MemmoveContract.of_equiv equiv.symm impl h3, equiv.symm.retAddr impl h4, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · exact ⟨h5.rip, h5.ret, h5.zero, h5.len, h5.args, h5.df⟩
+  · exact ⟨h5.rip, h5.zero, h5.len, h5.args, h5.df⟩
   · rw [pk_eq, bi_eq, bl_eq, ow_eq, dl_eq]
     exact ⟨hp.1, equiv.symm.dataLoaded hp.2.1, Janus.Amd64.Print.DataOutside.of_equiv equiv.symm hp.2.2⟩
   · obtain ⟨sc, hpc, hco, hlp, hn⟩ := hl2
@@ -202,10 +202,10 @@ theorem full_output : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (
 /-- So the guarantee is reached: from the witness state, for every kernel, `println("x =", 42)` returns and the trace gains what the three writes may append. -/
 theorem returns (E : KEnv) (k : Kern) :
     Amd64.Kernel.ReturnsK ((Extracted.program.link implAt).withExit ret) E
-      (fun s' k' => ABIReturn (wstate (fun i => if i = 0 then 42#64 else 0)) s' ∧
+      (fun s' k' => ABIReturn ((wstate (fun i => if i = 0 then 42#64 else 0)).setRet ret) s' ∧
         ∃ es, k' = k.appendTrace es ∧
           Emits 2 [Janus.Spec.Print.ofString "x = ", Janus.Spec.Print.decimal (42#64 : BitVec 64).toNat, [10#8]] es)
-      (fun _ _ => False) (wstate (fun i => if i = 0 then 42#64 else 0)) k := by
+      (fun _ _ => False) ((wstate (fun i => if i = 0 then 42#64 else 0)).setRet ret) k := by
   rw [implAt_eq, wstate_eq]
   
   exact (((equiv.sim PrintFn.Witness.implAt).withExit ret).symm).returnsK (PrintFn.X.Witness.returns E k)

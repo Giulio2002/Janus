@@ -91,8 +91,8 @@ theorem full_output (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
         DataOutside P rt)
       (fun s k _ k' => (k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.fmtBool b ++ [10#8]).length →
         k'.output 2 = k.output 2 ++ (Janus.Spec.Print.fmtBool b ++ [10#8])) := by
-  intro ret hret s k hs hpre
-  refine (correctness impl rt E hl hu hmm b ret hret s k hs hpre).mono ?_ (fun _ _ h => h)
+  intro s k hs hpre ret hret
+  refine ((correctness impl rt E hl hu hmm b) s k hs hpre ret hret).mono ?_ (fun _ _ h => h)
   rintro s' k' ⟨habi, es, rfl, hem⟩
   refine ⟨habi, fun hlen => ?_⟩
   have h := hem.full (k := k) (by simpa [List.append_assoc] using hlen)
@@ -128,21 +128,21 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : N
     Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024 ∧
     Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024 ∧
     MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove") ∧
-    RetAddr (P.link impl) ret ∧ CallSetup ((P.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 true.toNat] s ∧
+    RetAddr (P.link impl) ret ∧ CallSetup0 Extracted.entry [BitVec.ofNat 64 true.toNat] s ∧
     (PrintReady ⟨PK, BI, BL, OW, DL⟩ rt 1088 16 256 s ∧ P.DataLoaded s.mem ∧ DataOutside P rt) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (P.contractAddr "runtime.lock2") ∧ CallOK s_c 1024 1 ∧
       LockPre rt 0 s_c ∧ ¬ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (P.contractAddr "runtime.unlock2") ∧ CallOK s_c 1024 1 ∧
       LockPre rt 1 s_c ∧ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (P.contractAddr "runtime.memmove") ∧ MemmovePre s_c) ∧
-    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC s s' ∧ ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.fmtBool true, [10#8]] es)
-      (fun _ _ => False) s k ∧
-    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC s s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.fmtBool true ++ [10#8]).length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.fmtBool true ++ [10#8])))
-      (fun _ _ => False) s k := by
+    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC (s.setRet ret) s' ∧ ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.fmtBool true, [10#8]] es)
+      (fun _ _ => False) (s.setRet ret) k ∧
+    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC (s.setRet ret) s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.fmtBool true ++ [10#8]).length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.fmtBool true ++ [10#8])))
+      (fun _ _ => False) (s.setRet ret) k := by
   obtain ⟨impl, rt, ret, s, E, k, h1, h2, h3, h4, h5, hp, hl2, hu2, hm2, hrun, hrun2⟩ := PrintFn.Bool.Witness.nonvacuous
   refine ⟨impl, rt, ret, s, E, k, Lock2Contract.of_equiv equiv.symm impl rt 1024 h1, Unlock2Contract.of_equiv equiv.symm impl rt 1024 h2,
     MemmoveContract.of_equiv equiv.symm impl h3, equiv.symm.retAddr impl h4, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · exact ⟨h5.pc, h5.lr, h5.args⟩
+  · exact ⟨h5.pc, h5.len, h5.args⟩
   · rw [pk_eq, bi_eq, bl_eq, ow_eq, dl_eq]
     exact ⟨hp.1, equiv.symm.dataLoaded hp.2.1, Janus.Print.DataOutside.of_equiv equiv.symm hp.2.2⟩
   · obtain ⟨sc, hpc, hco, hlp, hn⟩ := hl2
@@ -164,21 +164,21 @@ theorem full_output : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : 
     Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024 ∧
     Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024 ∧
     MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove") ∧
-    RetAddr (P.link impl) ret ∧ CallSetup ((P.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 true.toNat] s ∧
+    RetAddr (P.link impl) ret ∧ CallSetup0 Extracted.entry [BitVec.ofNat 64 true.toNat] s ∧
     (PrintReady ⟨PK, BI, BL, OW, DL⟩ rt 1088 16 256 s ∧ P.DataLoaded s.mem ∧ DataOutside P rt) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (P.contractAddr "runtime.lock2") ∧ CallOK s_c 1024 1 ∧
       LockPre rt 0 s_c ∧ ¬ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (P.contractAddr "runtime.unlock2") ∧ CallOK s_c 1024 1 ∧
       LockPre rt 1 s_c ∧ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (P.contractAddr "runtime.memmove") ∧ MemmovePre s_c) ∧
-    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC s s' ∧ ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.fmtBool true, [10#8]] es)
-      (fun _ _ => False) s k ∧
-    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC s s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.fmtBool true ++ [10#8]).length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.fmtBool true ++ [10#8])))
-      (fun _ _ => False) s k := by
+    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC (s.setRet ret) s' ∧ ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.fmtBool true, [10#8]] es)
+      (fun _ _ => False) (s.setRet ret) k ∧
+    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC (s.setRet ret) s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.fmtBool true ++ [10#8]).length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.fmtBool true ++ [10#8])))
+      (fun _ _ => False) (s.setRet ret) k := by
   obtain ⟨impl, rt, ret, s, E, k, h1, h2, h3, h4, h5, hp, hl2, hu2, hm2, hrun, hrun2⟩ := PrintFn.Bool.Witness.nonvacuous
   refine ⟨impl, rt, ret, s, E, k, Lock2Contract.of_equiv equiv.symm impl rt 1024 h1, Unlock2Contract.of_equiv equiv.symm impl rt 1024 h2,
     MemmoveContract.of_equiv equiv.symm impl h3, equiv.symm.retAddr impl h4, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · exact ⟨h5.pc, h5.lr, h5.args⟩
+  · exact ⟨h5.pc, h5.len, h5.args⟩
   · rw [pk_eq, bi_eq, bl_eq, ow_eq, dl_eq]
     exact ⟨hp.1, equiv.symm.dataLoaded hp.2.1, Janus.Print.DataOutside.of_equiv equiv.symm hp.2.2⟩
   · obtain ⟨sc, hpc, hco, hlp, hn⟩ := hl2
@@ -197,9 +197,9 @@ theorem full_output : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : 
 /-- So the guarantee is reached: from the witness state, for every kernel, `println(true)` returns and the trace gains what the two writes may append. -/
 theorem returns (E : KEnv) (k : Kern) :
     ReturnsK ((Extracted.program.link implAt).withExit ret) E
-      (fun s' k' => FFI.ABIReturnC (wstate (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)) s' ∧
+      (fun s' k' => FFI.ABIReturnC ((wstate (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)).setRet ret) s' ∧
         ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.fmtBool true, [10#8]] es)
-      (fun _ _ => False) (wstate (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)) k := by
+      (fun _ _ => False) ((wstate (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)).setRet ret) k := by
   rw [implAt_eq, wstate_eq]
   
   exact (((equiv.sim PrintFn.Witness.implAt).withExit ret).symm).returnsK (PrintFn.Bool.Witness.returns E k)

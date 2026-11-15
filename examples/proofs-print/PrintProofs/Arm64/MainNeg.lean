@@ -37,6 +37,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
         DataOutside P rt)
       (fun _ k _ k' => ∃ es, k' = k.appendTrace es ∧
         Emits 2 [Janus.Spec.Print.ofString "-17"] es) := by
+  janus_ensures_old [Janus.Print.PrintReady, Proof.Witness.k, Janus.Contracts.MapModel0.MP, Janus.Print.gM, Janus.Spec.StackOK, Janus.Spec.GuardOK, Janus.GoABI.stackguard0, Janus.Print.gWritebuf, Janus.Print.mLocks, Janus.Print.mDying, Janus.Print.mPrintlock, Janus.Print.lockHeld, Janus.GoABI.regG, Janus.GoABI.stackguard0Offset]
   intro ret hret s k hs ⟨hpr, hd, hdo⟩
   dsimp only [PrintReady] at hpr
   obtain ⟨⟨hal, hb, ha, hw⟩, ⟨hg1, hg2, hg3⟩, hg0, hgl, hgm, hwb, h_rd_wb, hm1, hm2, h_rd_dy, h_rd_c,
@@ -124,8 +125,8 @@ theorem full_output (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
         DataOutside P rt)
       (fun s k _ k' => (k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.ofString "-17").length →
         k'.output 2 = k.output 2 ++ (Janus.Spec.Print.ofString "-17")) := by
-  intro ret hret s k hs hpre
-  refine (correctness impl rt E hl hu hmm ret hret s k hs hpre).mono ?_ (fun _ _ h => h)
+  intro s k hs hpre ret hret
+  refine ((correctness impl rt E hl hu hmm) s k hs hpre ret hret).mono ?_ (fun _ _ h => h)
   rintro s' k' ⟨habi, es, rfl, hem⟩
   refine ⟨habi, fun hlen => ?_⟩
   have h := hem.full (k := k) (by simpa [List.append_assoc] using hlen)
@@ -135,8 +136,8 @@ namespace Witness
 
 open PrintFn.Witness
 
-theorem setup : CallSetup ((P.link implAt).withExit ret) PrintCode.entryPrintNeg [] (wstate PrintCode.entryPrintNeg fun _ => 0) :=
-  ⟨rfl, rfl, by intro i h; simp at h⟩
+theorem setup : CallSetup0 PrintCode.entryPrintNeg [] (wstate PrintCode.entryPrintNeg fun _ => 0) :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h⟩
 
 /-- All hypotheses of `correctness` hold together: the witness code at the three contract
 addresses, the ranges `wrt`, an admissible return address and a call state ready to print. -/
@@ -144,32 +145,32 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : N
     Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024 ∧
     Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024 ∧
     MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove") ∧
-    RetAddr (P.link impl) ret ∧ CallSetup ((P.link impl).withExit ret) PrintCode.entryPrintNeg [] s ∧
+    RetAddr (P.link impl) ret ∧ CallSetup0 PrintCode.entryPrintNeg [] s ∧
     (PrintReady ⟨PK, BI, BL, OW, DL⟩ rt 1088 16 256 s ∧ P.DataLoaded s.mem ∧ DataOutside P rt) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (P.contractAddr "runtime.lock2") ∧ CallOK s_c 1024 1 ∧
       LockPre rt 0 s_c ∧ ¬ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (P.contractAddr "runtime.unlock2") ∧ CallOK s_c 1024 1 ∧
       LockPre rt 1 s_c ∧ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (P.contractAddr "runtime.memmove") ∧ MemmovePre s_c) ∧
-    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC s s' ∧ ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.ofString "-17"] es)
-      (fun _ _ => False) s k ∧
-    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC s s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.ofString "-17").length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.ofString "-17")))
-      (fun _ _ => False) s k := by
+    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC (s.setRet ret) s' ∧ ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.ofString "-17"] es)
+      (fun _ _ => False) (s.setRet ret) k ∧
+    ReturnsK ((P.link impl).withExit ret) E (fun s' k' => FFI.ABIReturnC (s.setRet ret) s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.ofString "-17").length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.ofString "-17")))
+      (fun _ _ => False) (s.setRet ret) k := by
   refine ⟨implAt, wrt, ret, wstate PrintCode.entryPrintNeg fun _ => 0, ⟨[], 0⟩, {}, lock2_model wrt 1024, unlock2_model wrt 1024, memmove_model, hret, setup, ?pre,
     ⟨_, rfl, site_lock _⟩, ⟨_, rfl, site_unlock _⟩, ⟨_, rfl, site_memmove _⟩, ?run, ?run2⟩
   case pre => exact ⟨ready _ _ 16 (Or.inl rfl), wmem_data, wrt_data⟩
-  case run => exact correctness implAt wrt ⟨[], 0⟩ (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model  ret hret _ {} setup (⟨ready _ _ 16 (Or.inl rfl), wmem_data, wrt_data⟩)
-  case run2 => exact full_output implAt wrt ⟨[], 0⟩ (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model  ret hret _ {} setup (⟨ready _ _ 16 (Or.inl rfl), wmem_data, wrt_data⟩)
+  case run => exact (correctness implAt wrt ⟨[], 0⟩ (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model) _ {} setup (⟨ready _ _ 16 (Or.inl rfl), wmem_data, wrt_data⟩) ret hret
+  case run2 => exact (full_output implAt wrt ⟨[], 0⟩ (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model) _ {} setup (⟨ready _ _ 16 (Or.inl rfl), wmem_data, wrt_data⟩) ret hret
 
 /-- So the guarantee is reached: from the witness state, for every kernel, `print(-17)` returns
 and the trace gains what `write(2, "-17")` may append. -/
 theorem returns (E : KEnv) (k : Kern) :
     ReturnsK ((P.link implAt).withExit ret) E
-      (fun s' k' => FFI.ABIReturnC (wstate PrintCode.entryPrintNeg fun _ => 0) s' ∧
+      (fun s' k' => FFI.ABIReturnC ((wstate PrintCode.entryPrintNeg fun _ => 0).setRet ret) s' ∧
         ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.ofString "-17"] es)
-      (fun _ _ => False) (wstate PrintCode.entryPrintNeg fun _ => 0) k :=
-  correctness implAt wrt E (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model ret hret _ k setup
-    ⟨ready _ _ 16 (Or.inl rfl), wmem_data, wrt_data⟩
+      (fun _ _ => False) ((wstate PrintCode.entryPrintNeg fun _ => 0).setRet ret) k :=
+  (correctness implAt wrt E (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model) _ k setup
+    ⟨ready _ _ 16 (Or.inl rfl), wmem_data, wrt_data⟩ ret hret
 
 end Witness
 

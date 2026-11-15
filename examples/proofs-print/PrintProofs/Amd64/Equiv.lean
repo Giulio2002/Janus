@@ -203,11 +203,9 @@ theorem _root_.Janus.Amd64.Kernel.EnsuresK.of_equiv {p q : Program} (h : Equiv p
     (hq : EnsuresK (q.link impl) E entry args pre post)
     (hpre : ∀ s k, pre' s k → pre s k) (hpost : ∀ s k s' k', post s k s' k' → post' s k s' k') :
     EnsuresK (p.link impl) E entry args pre' post' := by
-  intro ret hret s k hs hp
+  intro s k hs hp ret hret
   have hsim := (h.sim impl).withExit ret
-  have hs' : GoABI.CallSetup ((q.link impl).withExit ret) entry args s :=
-    ⟨hs.rip, hs.ret, hs.zero, hs.len, hs.args, hs.df⟩
-  have := hsim.symm.returnsK ((hq ret (h.retAddr impl hret) s k hs' (hpre s k hp)))
+  have := hsim.symm.returnsK ((hq s k hs (hpre s k hp) ret (h.retAddr impl hret)))
   exact this.mono (fun s' k' ⟨a, b⟩ => ⟨a, hpost _ _ _ _ b⟩) (fun _ _ x => x)
 
 end Janus.Amd64.Program

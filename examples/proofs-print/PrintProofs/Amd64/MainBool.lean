@@ -36,6 +36,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E : KE
         DataOutside P rt)
       (fun _ k _ k' => ∃ es, k' = k.appendTrace es ∧
         Emits 2 [Janus.Spec.Print.fmtBool b, [10#8]] es) := by
+  janus64_ensures_old [Janus.Amd64.Print.PrintReady, Janus.Print.sep_cons, Janus.Print.sep_nil, Proof.Witness.k, Janus.Contracts.MapModel0.MP, Janus.Print.gM, Janus.Print.gWritebuf, Janus.Print.mLocks, Janus.Print.mDying, Janus.Print.mPrintlock, Janus.Print.lockHeld]
   intro ret hret s k hs ⟨hpr, hd, hdo⟩
   dsimp only [Amd64.Print.PrintReady] at hpr
   obtain ⟨hb, ha, hw, hal, hgp, hg2, hg3, hg0, hg1, hgm, hwb, h_rd_wb, hfs1, hfsu, hfs2, h_rd_tl, hm1,
@@ -156,8 +157,8 @@ theorem full_output (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E : KE
         DataOutside P rt)
       (fun s k _ k' => (k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.fmtBool b ++ [10#8]).length →
         k'.output 2 = k.output 2 ++ (Janus.Spec.Print.fmtBool b ++ [10#8])) := by
-  intro ret hret s k hs hpre
-  refine (correctness impl rt E hl hu hmm b ret hret s k hs hpre).mono ?_ (fun _ _ h => h)
+  intro s k hs hpre ret hret
+  refine ((correctness impl rt E hl hu hmm b) s k hs hpre ret hret).mono ?_ (fun _ _ h => h)
   rintro s' k' ⟨habi, es, rfl, hem⟩
   refine ⟨habi, fun hlen => ?_⟩
   have h := hem.full (k := k) (by simpa [List.append_assoc] using hlen)
@@ -167,8 +168,8 @@ namespace Witness
 
 open PrintFn.Witness
 
-theorem setup : GoABI.CallSetup ((P.link implAt).withExit ret) PrintCode.entryPrintBool [BitVec.ofNat 64 true.toNat] (wstate PrintCode.entryPrintBool (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)) :=
-  ⟨rfl, by decide +kernel, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+theorem setup : GoABI.CallSetup0 PrintCode.entryPrintBool [BitVec.ofNat 64 true.toNat] (wstate PrintCode.entryPrintBool (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)) :=
+  ⟨rfl, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
 
 /-- All hypotheses of `correctness` hold together: the witness code at the three contract
 addresses, the ranges `wrt`, an admissible return address and a call state ready to print. -/
@@ -176,31 +177,31 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (r
     Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024 ∧
     Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024 ∧
     MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove") ∧
-    GoABI.RetAddr (P.link impl) ret ∧ GoABI.CallSetup ((P.link impl).withExit ret) PrintCode.entryPrintBool [BitVec.ofNat 64 true.toNat] s ∧
+    GoABI.RetAddr (P.link impl) ret ∧ GoABI.CallSetup0 PrintCode.entryPrintBool [BitVec.ofNat 64 true.toNat] s ∧
     (PrintReady ⟨PK, BI, BL, OW, DL⟩ rt 1088 16 256 s ∧ Amd64.Program.DataLoaded P s.mem ∧ DataOutside P rt) ∧
     (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.lock2") ∧ CallOK64 s_c 1024 1 ∧
       Amd64.Print.LockPre rt 0 s_c ∧ ¬ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
     (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.unlock2") ∧ CallOK64 s_c 1024 1 ∧
       Amd64.Print.LockPre rt 1 s_c ∧ lockHeld s_c.mem (s_c.regs 0).toNat) ∧
     (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (P.contractAddr "runtime.memmove") ∧ Amd64.Print.MemmovePre s_c) ∧
-    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn s s' ∧ ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.fmtBool true, [10#8]] es)
-      (fun _ _ => False) s k ∧
-    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn s s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.fmtBool true ++ [10#8]).length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.fmtBool true ++ [10#8])))
-      (fun _ _ => False) s k := by
+    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn (s.setRet ret) s' ∧ ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.fmtBool true, [10#8]] es)
+      (fun _ _ => False) (s.setRet ret) k ∧
+    Amd64.Kernel.ReturnsK ((P.link impl).withExit ret) E (fun s' k' => ABIReturn (s.setRet ret) s' ∧ ((k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.fmtBool true ++ [10#8]).length → k'.output 2 = k.output 2 ++ (Janus.Spec.Print.fmtBool true ++ [10#8])))
+      (fun _ _ => False) (s.setRet ret) k := by
   refine ⟨implAt, wrt, ret, wstate PrintCode.entryPrintBool (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0), ⟨[], 0⟩, {}, lock2_model wrt 1024, unlock2_model wrt 1024, memmove_model, hret, setup, ?pre,
     ⟨_, rfl, site_lock _⟩, ⟨_, rfl, site_unlock _⟩, ⟨_, rfl, site_memmove _⟩, ?run, ?run2⟩
   case pre => exact (⟨ready _ _ 16 (Or.inr (Or.inl rfl)), wmem_data, wrt_data⟩)
-  case run => exact correctness implAt wrt ⟨[], 0⟩ (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model true ret hret _ {} setup ((⟨ready _ _ 16 (Or.inr (Or.inl rfl)), wmem_data, wrt_data⟩))
-  case run2 => exact full_output implAt wrt ⟨[], 0⟩ (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model true ret hret _ {} setup ((⟨ready _ _ 16 (Or.inr (Or.inl rfl)), wmem_data, wrt_data⟩))
+  case run => exact (correctness implAt wrt ⟨[], 0⟩ (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model true) _ {} setup ((⟨ready _ _ 16 (Or.inr (Or.inl rfl)), wmem_data, wrt_data⟩)) ret hret
+  case run2 => exact (full_output implAt wrt ⟨[], 0⟩ (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model true) _ {} setup ((⟨ready _ _ 16 (Or.inr (Or.inl rfl)), wmem_data, wrt_data⟩)) ret hret
 
 /-- So the guarantee is reached: from the witness state, for every kernel, `println(true)` returns and the trace gains what the two writes may append. -/
 theorem returns (E : KEnv) (k : Kern) :
     Amd64.Kernel.ReturnsK ((P.link implAt).withExit ret) E
-      (fun s' k' => ABIReturn (wstate PrintCode.entryPrintBool (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)) s' ∧
+      (fun s' k' => ABIReturn ((wstate PrintCode.entryPrintBool (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)).setRet ret) s' ∧
         ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.fmtBool true, [10#8]] es)
-      (fun _ _ => False) (wstate PrintCode.entryPrintBool (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)) k :=
-  correctness implAt wrt E (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model true ret hret _ k setup
-    (⟨ready _ _ 16 (Or.inr (Or.inl rfl)), wmem_data, wrt_data⟩)
+      (fun _ _ => False) ((wstate PrintCode.entryPrintBool (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)).setRet ret) k :=
+  (correctness implAt wrt E (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model true) _ k setup
+    (⟨ready _ _ 16 (Or.inr (Or.inl rfl)), wmem_data, wrt_data⟩) ret hret
 
 end Witness
 
