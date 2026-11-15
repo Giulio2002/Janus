@@ -101,6 +101,7 @@ theorem correctness (ptr len cap : BitVec 64) :
         Janus.Spec.Disjoint ptr.toNat (8 * len.toNat) ((s.regs 4).toNat - 48) 64 ∧
         Janus.Spec.Disjoint (s.fsBase.toNat - 8) 8 ((s.regs 4).toNat - 48) 64)
       (fun s s' => results 1 s' = [xorWords s.mem ptr.toNat len.toNat]) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.StackWritable, Janus.Amd64.GoABI.Buffer, Janus.Amd64.GoABI.regSP]
   intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, htls, ⟨hp', hp⟩, hd, hdt⟩
   janus64_intro hs
   have htr := htls.readable
@@ -130,9 +131,9 @@ def s0 : Janus.Amd64.State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry
+theorem setup : CallSetup0 Extracted.entry
     [(0x500000 : BitVec 64), 2, 2] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+  ⟨rfl, rfl, by decide, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> first | rfl | decide, rfl⟩
@@ -142,20 +143,20 @@ theorem hpre : StackWritable s0 48 16 ∧ TlsG s0 ∧
     Janus.Spec.Disjoint (0x500000 : BitVec 64).toNat (8 * (2 : BitVec 64).toNat) ((s0.regs 4).toNat - 48) 64 ∧
     Janus.Spec.Disjoint (s0.fsBase.toNat - 8) 8 ((s0.regs 4).toNat - 48) 64 := by
   unfold Buffer Janus.Spec.Disjoint
-  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩,
+  refine ⟨(by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩), (by first | exact ⟨by decide, by decide, by decide, by decide⟩ | exact ⟨by decide, by decide, by decide⟩),
     ⟨by decide, by decide⟩, by decide, by decide⟩
 
 /-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Amd64.State) (ptr len cap : BitVec 64),
     RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap] s ∧
+    CallSetup0 Extracted.entry [ptr, len, cap] s ∧
     (StackWritable s 48 16 ∧ TlsG s ∧
       Buffer s ptr (8 * len.toNat) false ∧
       Janus.Spec.Disjoint ptr.toNat (8 * len.toNat) ((s.regs 4).toNat - 48) 64 ∧
       Janus.Spec.Disjoint (s.fsBase.toNat - 8) 8 ((s.regs 4).toNat - 48) 64) ∧
-    Returns (Extracted.program.withExit ret) s
-      (fun s' => ABIReturn s s' ∧ results 1 s' = [xorWords s.mem ptr.toNat len.toNat]) :=
-  ⟨ret, s0, 0x500000, 2, 2, hret, setup, hpre, correctness 0x500000 2 2 ret hret s0 setup hpre⟩
+    Returns (Extracted.program.withExit ret) (s.setRet ret)
+      (fun s' => ABIReturn (s.setRet ret) s' ∧ results 1 s' = [xorWords (s.setRet ret).mem ptr.toNat len.toNat]) :=
+  ⟨ret, s0, 0x500000, 2, 2, hret, setup, hpre, (correctness 0x500000 2 2) s0 setup hpre ret hret⟩
 
 end Witness
 

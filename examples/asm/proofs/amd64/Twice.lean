@@ -63,6 +63,7 @@ theorem correctness (x : BitVec 64) :
       (fun s s' => results0 s s' 1 1 = [2 * x + 1] ∧
         MemFrame (s.mem.writeLE ((s.regs 4).toNat + 16) 8 (2 * x + 1).toNat) s'.mem
           [((s.regs 4).toNat - 56, (s.regs 4).toNat)]) := by
+  janus64_ensures_old
   intro ret hret s hs ⟨hb, hst, hf1, hf2, hf3⟩
   janus64_intro0 hs
   janus64_run calls [double0_summary]
@@ -91,8 +92,8 @@ def s0 : Janus.Amd64.State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry [(3 : BitVec 64)] 1 s0 :=
-  ⟨rfl, by decide, by
+theorem setup : CallSetupF Extracted.entry [(3 : BitVec 64)] 1 s0 :=
+  ⟨rfl, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0) with rfl
@@ -105,24 +106,24 @@ theorem hpre : 56 ≤ (s0.regs 4).toNat ∧ s0.mem.accessible ((s0.regs 4).toNat
   ⟨by decide, by decide, by decide, by decide, by decide⟩
 
 /-- The theorem fires: `Twice(3)` returns `7`. -/
-theorem returns : Returns (Extracted.program.withExit ret) s0
-    (fun s' => ABIReturn0 s0 s' ∧
-      (results0 s0 s' 1 1 = [2 * (3 : BitVec 64) + 1] ∧
-        MemFrame (s0.mem.writeLE ((s0.regs 4).toNat + 16) 8 (2 * (3 : BitVec 64) + 1).toNat) s'.mem
-          [((s0.regs 4).toNat - 56, (s0.regs 4).toNat)])) :=
-  correctness 3 ret hret s0 setup hpre
+theorem returns : Returns (Extracted.program.withExit ret) (s0.setRet ret)
+    (fun s' => ABIReturn0 (s0.setRet ret) s' ∧
+      (results0 (s0.setRet ret) s' 1 1 = [2 * (3 : BitVec 64) + 1] ∧
+        MemFrame ((s0.setRet ret).mem.writeLE (((s0.setRet ret).regs 4).toNat + 16) 8 (2 * (3 : BitVec 64) + 1).toNat) s'.mem
+          [(((s0.setRet ret).regs 4).toNat - 56, ((s0.setRet ret).regs 4).toNat)])) :=
+  (correctness 3) s0 setup hpre ret hret
 
 /-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Amd64.State) (x : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup0 (Extracted.program.withExit ret) Extracted.entry [x] 1 s ∧
+    CallSetupF Extracted.entry [x] 1 s ∧
     (56 ≤ (s.regs 4).toNat ∧ s.mem.accessible ((s.regs 4).toNat - 56) 56 true = true ∧
       8 ≤ s.fsBase.toNat ∧ s.fsBase.toNat ≤ 2 ^ 48 ∧
       s.mem.accessible (s.fsBase.toNat - 8) 8 false = true) ∧
-    Returns (Extracted.program.withExit ret) s
-      (fun s' => ABIReturn0 s s' ∧
-        (results0 s s' 1 1 = [2 * x + 1] ∧
-          MemFrame (s.mem.writeLE ((s.regs 4).toNat + 16) 8 (2 * x + 1).toNat) s'.mem
-            [((s.regs 4).toNat - 56, (s.regs 4).toNat)])) :=
+    Returns (Extracted.program.withExit ret) (s.setRet ret)
+      (fun s' => ABIReturn0 (s.setRet ret) s' ∧
+        (results0 (s.setRet ret) s' 1 1 = [2 * x + 1] ∧
+          MemFrame ((s.setRet ret).mem.writeLE (((s.setRet ret).regs 4).toNat + 16) 8 (2 * x + 1).toNat) s'.mem
+            [(((s.setRet ret).regs 4).toNat - 56, ((s.setRet ret).regs 4).toNat)])) :=
   ⟨ret, s0, 3, hret, setup, hpre, returns⟩
 
 end Witness

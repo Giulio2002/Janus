@@ -77,6 +77,7 @@ theorem correctness (ptr len cap : BitVec 64) :
       (fun s => Buffer s ptr (8 * len.toNat) false)
       (fun s s' => results0 s s' 3 1 = [xorWords s.mem ptr.toNat len.toNat] ∧
         Janus.Spec.OnlyWrites s.mem s'.mem ((s.regs 4).toNat + 32) 8) := by
+  janus64_ensures_old [Janus.Amd64.GoABI.Buffer]
   intro ret hret s hs ⟨hp', hp⟩
   janus64_intro0 hs
   janus64_run until [head]
@@ -104,9 +105,9 @@ def s0 : Janus.Amd64.State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry
+theorem setup : CallSetupF Extracted.entry
     [(0x500000 : BitVec 64), 2, 2] 1 s0 :=
-  ⟨rfl, by decide, by
+  ⟨rfl, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl
@@ -119,21 +120,21 @@ theorem hpre : Buffer s0 (0x500000 : BitVec 64) (8 * (2 : BitVec 64).toNat) fals
   unfold Buffer; decide
 
 /-- The theorem fires: `XorSlice` of the two words `5, 6` at `dat`. -/
-theorem returns : Returns (Extracted.program.withExit ret) s0
-    (fun s' => ABIReturn0 s0 s' ∧
-      (results0 s0 s' 3 1 = [xorWords s0.mem (0x500000 : BitVec 64).toNat (2 : BitVec 64).toNat] ∧
-        Janus.Spec.OnlyWrites s0.mem s'.mem ((s0.regs 4).toNat + 32) 8)) :=
-  correctness 0x500000 2 2 ret hret s0 setup hpre
+theorem returns : Returns (Extracted.program.withExit ret) (s0.setRet ret)
+    (fun s' => ABIReturn0 (s0.setRet ret) s' ∧
+      (results0 (s0.setRet ret) s' 3 1 = [xorWords (s0.setRet ret).mem (0x500000 : BitVec 64).toNat (2 : BitVec 64).toNat] ∧
+        Janus.Spec.OnlyWrites (s0.setRet ret).mem s'.mem (((s0.setRet ret).regs 4).toNat + 32) 8)) :=
+  (correctness 0x500000 2 2) s0 setup hpre ret hret
 
 /-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : Janus.Amd64.State) (ptr len cap : BitVec 64),
     RetAddr Extracted.program ret ∧
-    CallSetup0 (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap] 1 s ∧
+    CallSetupF Extracted.entry [ptr, len, cap] 1 s ∧
     Buffer s ptr (8 * len.toNat) false ∧
-    Returns (Extracted.program.withExit ret) s
-      (fun s' => ABIReturn0 s s' ∧
-        (results0 s s' 3 1 = [xorWords s.mem ptr.toNat len.toNat] ∧
-          Janus.Spec.OnlyWrites s.mem s'.mem ((s.regs 4).toNat + 32) 8)) :=
+    Returns (Extracted.program.withExit ret) (s.setRet ret)
+      (fun s' => ABIReturn0 (s.setRet ret) s' ∧
+        (results0 (s.setRet ret) s' 3 1 = [xorWords (s.setRet ret).mem ptr.toNat len.toNat] ∧
+          Janus.Spec.OnlyWrites (s.setRet ret).mem s'.mem (((s.setRet ret).regs 4).toNat + 32) 8)) :=
   ⟨ret, s0, 0x500000, 2, 2, hret, setup, hpre, returns⟩
 
 end Witness

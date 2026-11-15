@@ -59,6 +59,7 @@ theorem correctness (x : BitVec 64) :
       (fun s s' => results0 s s' 1 1 = [2 * x + 1] ∧
         MemFrame (s.mem.writeLE (s.sp.toNat + 16) 8 (2 * x + 1).toNat) s'.mem
           [(s.sp.toNat - 72, s.sp.toNat - 8)]) := by
+  janus_ensures_old [Janus.Spec.StackOK]
   intro ret hret s hs ⟨hal, hb, ha, hst⟩
   janus_intro0 hs
   janus_run calls [double0_summary]
@@ -85,8 +86,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry [(3 : BitVec 64)] 1 s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetupF Extracted.entry [(3 : BitVec 64)] 1 s0 :=
+  ⟨rfl, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0) with rfl
@@ -97,21 +98,21 @@ theorem hpre : StackOK s0 72 24 := by
   unfold Janus.Spec.StackOK; refine ⟨by decide, by decide, by decide, by decide⟩
 
 /-- The theorem fires: `Twice(3)` returns `7`. -/
-theorem returns : Returns (Extracted.program.withExit ret) s0
-    (fun s' => ABIReturn0 s0 s' ∧
-      (results0 s0 s' 1 1 = [2 * (3 : BitVec 64) + 1] ∧
-        MemFrame (s0.mem.writeLE (s0.sp.toNat + 16) 8 (2 * (3 : BitVec 64) + 1).toNat) s'.mem
-          [(s0.sp.toNat - 72, s0.sp.toNat - 8)])) :=
-  correctness 3 ret hret s0 setup hpre
+theorem returns : Returns (Extracted.program.withExit ret) (s0.setRet ret)
+    (fun s' => ABIReturn0 (s0.setRet ret) s' ∧
+      (results0 (s0.setRet ret) s' 1 1 = [2 * (3 : BitVec 64) + 1] ∧
+        MemFrame ((s0.setRet ret).mem.writeLE ((s0.setRet ret).sp.toNat + 16) 8 (2 * (3 : BitVec 64) + 1).toNat) s'.mem
+          [((s0.setRet ret).sp.toNat - 72, (s0.setRet ret).sp.toNat - 8)])) :=
+  (correctness 3) s0 setup hpre ret hret
 
 /-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (x : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup0 (Extracted.program.withExit ret) Extracted.entry [x] 1 s ∧ StackOK s 72 24 ∧
-    Returns (Extracted.program.withExit ret) s
-      (fun s' => ABIReturn0 s s' ∧
-        (results0 s s' 1 1 = [2 * x + 1] ∧
-          MemFrame (s.mem.writeLE (s.sp.toNat + 16) 8 (2 * x + 1).toNat) s'.mem
-            [(s.sp.toNat - 72, s.sp.toNat - 8)])) :=
+    CallSetupF Extracted.entry [x] 1 s ∧ StackOK s 72 24 ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret)
+      (fun s' => ABIReturn0 (s.setRet ret) s' ∧
+        (results0 (s.setRet ret) s' 1 1 = [2 * x + 1] ∧
+          MemFrame ((s.setRet ret).mem.writeLE ((s.setRet ret).sp.toNat + 16) 8 (2 * x + 1).toNat) s'.mem
+            [((s.setRet ret).sp.toNat - 72, (s.setRet ret).sp.toNat - 8)])) :=
   ⟨ret, s0, 3, hret, setup, hpre, returns⟩
 
 end Witness

@@ -88,6 +88,7 @@ theorem correctness (ptr len cap : BitVec 64) :
       (fun s => Ptr s.mem ptr (8 * len.toNat) false)
       (fun s s' => results0 s s' 3 1 = [xorWords s.mem ptr.toNat len.toNat] ∧
         OnlyWrites s.mem s'.mem (s.sp.toNat + 32) 8) := by
+  janus_ensures_old [Janus.Spec.Ptr]
   intro ret hret s hs ⟨hp, hp'⟩
   janus_intro0 hs
   janus_run until [head]
@@ -113,9 +114,9 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup0 (Extracted.program.withExit ret) Extracted.entry
+theorem setup : CallSetupF Extracted.entry
     [(0x300000 : BitVec 64), 2, 2] 1 s0 :=
-  ⟨rfl, rfl, by
+  ⟨rfl, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl
@@ -128,20 +129,20 @@ theorem hpre : Ptr s0.mem (0x300000 : BitVec 64) (8 * (2 : BitVec 64).toNat) fal
   unfold Janus.Spec.Ptr; decide
 
 /-- The theorem fires: `XorSlice` of the two words `5, 6` at `dat`. -/
-theorem returns : Returns (Extracted.program.withExit ret) s0
-    (fun s' => ABIReturn0 s0 s' ∧
-      (results0 s0 s' 3 1 = [xorWords s0.mem (0x300000 : BitVec 64).toNat (2 : BitVec 64).toNat] ∧
-        OnlyWrites s0.mem s'.mem (s0.sp.toNat + 32) 8)) :=
-  correctness 0x300000 2 2 ret hret s0 setup hpre
+theorem returns : Returns (Extracted.program.withExit ret) (s0.setRet ret)
+    (fun s' => ABIReturn0 (s0.setRet ret) s' ∧
+      (results0 (s0.setRet ret) s' 3 1 = [xorWords (s0.setRet ret).mem (0x300000 : BitVec 64).toNat (2 : BitVec 64).toNat] ∧
+        OnlyWrites (s0.setRet ret).mem s'.mem ((s0.setRet ret).sp.toNat + 32) 8)) :=
+  (correctness 0x300000 2 2) s0 setup hpre ret hret
 
 /-- All the hypotheses of `correctness` hold together at a concrete call, and it returns. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State) (ptr len cap : BitVec 64), RetAddr Extracted.program ret ∧
-    CallSetup0 (Extracted.program.withExit ret) Extracted.entry [ptr, len, cap] 1 s ∧
+    CallSetupF Extracted.entry [ptr, len, cap] 1 s ∧
     Ptr s.mem ptr (8 * len.toNat) false ∧
-    Returns (Extracted.program.withExit ret) s
-      (fun s' => ABIReturn0 s s' ∧
-        (results0 s s' 3 1 = [xorWords s.mem ptr.toNat len.toNat] ∧
-          OnlyWrites s.mem s'.mem (s.sp.toNat + 32) 8)) :=
+    Returns (Extracted.program.withExit ret) (s.setRet ret)
+      (fun s' => ABIReturn0 (s.setRet ret) s' ∧
+        (results0 (s.setRet ret) s' 3 1 = [xorWords (s.setRet ret).mem ptr.toNat len.toNat] ∧
+          OnlyWrites (s.setRet ret).mem s'.mem ((s.setRet ret).sp.toNat + 32) 8)) :=
   ⟨ret, s0, 0x300000, 2, 2, hret, setup, hpre, returns⟩
 
 end Witness
