@@ -49,6 +49,7 @@ theorem correctness (impl : List Segment) (C : CheckptrModel) (hl : C.Laws)
       (fun s s' => (s'.regs 0).toNat = s.mem.readLE p.toNat 8 ∧
         MemFrame s.mem s'.mem (C.priv ++ [(s.sp.toNat - (C.depth + 48), s.sp.toNat + 16)]) ∧
         C.Env s'.mem (s.regs 28)) := by
+  janus_ensures_old [Janus.Contracts.Instrument.CallerOK, Janus.Program.DataLoaded, Janus.Spec.Ptr, Janus.Contracts.Instrument.NoStraddle]
   intro ret hret s hs ⟨hcal, hd, ⟨hp, hp'⟩, hp0, hns, hpo, hpd, hgd16⟩
   have hc' := hcal
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hdp, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -160,8 +161,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩, mem := mem2 }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [pv] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩
+theorem setup : CallSetup0 Extracted.entry [pv] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h; subst h; rfl⟩
 
 theorem pre : CallerOK C0.toRtEnv s0 48 16 ∧ Extracted.program.DataLoaded s0.mem ∧
     Ptr s0.mem pv 8 false ∧ pv.toNat ≠ 0 ∧ NoStraddle C0 s0.mem (s0.regs 28) pv.toNat 8 ∧
@@ -210,17 +211,17 @@ theorem wsCall_pre : RTPre C0.toRtEnv 3 wsCall ∧
   ⟨wsCall_rtpre, Or.inl rfl⟩
 
 /-- The returning run, exactly as `correctness` states it at the witness. -/
-theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = s0.mem.readLE pv.toNat 8 ∧
-      MemFrame s0.mem s'.mem (C0.priv ++ [(s0.sp.toNat - (C0.depth + 48), s0.sp.toNat + 16)]) ∧
-      C0.Env s'.mem (s0.regs 28) :=
-  correctness implAt C0 C0_laws model pv ret hret s0 setup pre
+theorem returnsF : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = (s0.setRet ret).mem.readLE pv.toNat 8 ∧
+      MemFrame (s0.setRet ret).mem s'.mem (C0.priv ++ [((s0.setRet ret).sp.toNat - (C0.depth + 48), (s0.setRet ret).sp.toNat + 16)]) ∧
+      C0.Env s'.mem ((s0.setRet ret).regs 28) :=
+  (correctness implAt C0 C0_laws model pv) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (C : CheckptrModel) (ret : Nat) (s : State), C.Laws ∧
     CheckptrAlignment (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.checkptrAlignment") C ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [pv] s ∧
+    CallSetup0 Extracted.entry [pv] s ∧
     (CallerOK C.toRtEnv s 48 16 ∧ Extracted.program.DataLoaded s.mem ∧
       Ptr s.mem pv 8 false ∧ pv.toNat ≠ 0 ∧ NoStraddle C s.mem (s.regs 28) pv.toNat 8 ∧
       Outside pv.toNat 8 C.priv ∧ Disjoint pv.toNat 8 (s.sp.toNat - (C.depth + 48)) (C.depth + 64) ∧
@@ -228,15 +229,15 @@ theorem nonvacuous : ∃ (impl : List Segment) (C : CheckptrModel) (ret : Nat) (
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.checkptrAlignment") ∧
       RTPre C.toRtEnv 3 s_c ∧
       AlignOK C s_c.mem (s_c.regs 28) (s_c.regs 0).toNat (s_c.regs 1).toNat (s_c.regs 2).toNat) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
-      ABIReturn s s' ∧ (s'.regs 0).toNat = s.mem.readLE pv.toNat 8 ∧
-        MemFrame s.mem s'.mem (C.priv ++ [(s.sp.toNat - (C.depth + 48), s.sp.toNat + 16)]) ∧
-        C.Env s'.mem (s.regs 28) :=
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ (s'.regs 0).toNat = (s.setRet ret).mem.readLE pv.toNat 8 ∧
+        MemFrame (s.setRet ret).mem s'.mem (C.priv ++ [((s.setRet ret).sp.toNat - (C.depth + 48), (s.setRet ret).sp.toNat + 16)]) ∧
+        C.Env s'.mem ((s.setRet ret).regs 28) :=
   ⟨implAt, C0, ret, s0, C0_laws, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returnsF⟩
 
 /-- So the guarantee is reached: `Word(&v)` returns `42`. -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ (s'.regs 0).toNat = 42 := by
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = 42 := by
   refine Returns.mono returnsF ?_
   intro s' ⟨habi, h0, _, _⟩
   refine ⟨habi, ?_⟩

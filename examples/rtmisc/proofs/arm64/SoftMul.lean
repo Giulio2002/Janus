@@ -35,6 +35,7 @@ theorem correctness (impl : List Segment)
       (fun s => CallerOK softEnv s 48 16 ∧ s.fpcr = 0 ∧ ¬ MulTiny a.toNat b.toNat)
       (fun s s' => ResultIs binary64 (mul binary64 .rne a.toNat b.toNat) (s'.regs 0).toNat ∧
         MemFrame s.mem s'.mem [(s.sp.toNat - (softDepth + 48), s.sp.toNat + 16)]) := by
+  janus_ensures_old [Janus.Contracts.Instrument.CallerOK]
   intro ret hret s hs ⟨hcal, hfp, hnt⟩
   have hc' := hcal
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hdp, hb, hst, hout, hgd, hgo⟩ := hc'
@@ -103,8 +104,8 @@ def s0 : State :=
     sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry, flags := ⟨false, false, false, false⟩,
     mem := ⟨fun _ => 0, [⟨wsp - 512, 0x300 + 0x100, true⟩, ⟨wg, 0x100, false⟩]⟩ }
 
-theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [a1, a1] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
+theorem setup : CallSetup0 Extracted.entry [a1, a1] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
 
 theorem pre : CallerOK softEnv s0 48 16 ∧ s0.fpcr = 0 ∧ ¬ MulTiny a1.toNat a1.toNat := by
   refine ⟨⟨trivial, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide,
@@ -140,22 +141,22 @@ theorem wsCall_pre : SoftPre wsCall ∧ ¬ MulTiny (wsCall.regs 0).toNat (wsCall
   · simp [softEnv]
 
 /-- So the guarantee is reached: `1.0 * 1.0` is the IEEE product (`1.0`). -/
-theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ ResultIs binary64 (mul binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat ∧
-      MemFrame s0.mem s'.mem [(s0.sp.toNat - (softDepth + 48), s0.sp.toNat + 16)] :=
-  correctness implAt model a1 a1 ret hret s0 setup pre
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) (s0.setRet ret) fun s' =>
+    ABIReturn (s0.setRet ret) s' ∧ ResultIs binary64 (mul binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat ∧
+      MemFrame (s0.setRet ret).mem s'.mem [((s0.setRet ret).sp.toNat - (softDepth + 48), (s0.setRet ret).sp.toNat + 16)] :=
+  (correctness implAt model a1 a1) s0 setup pre ret hret
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (ret : Nat) (s : State),
     SoftFmulContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.fmul64") ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [a1, a1] s ∧
+    CallSetup0 Extracted.entry [a1, a1] s ∧
     (CallerOK softEnv s 48 16 ∧ s.fpcr = 0 ∧ ¬ MulTiny a1.toNat a1.toNat) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.fmul64") ∧
       SoftPre s_c ∧ ¬ MulTiny (s_c.regs 0).toNat (s_c.regs 1).toNat) ∧
-    Returns ((Extracted.program.link impl).withExit ret) s fun s' =>
-      ABIReturn s s' ∧ ResultIs binary64 (mul binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat ∧
-        MemFrame s.mem s'.mem [(s.sp.toNat - (softDepth + 48), s.sp.toNat + 16)] :=
+    Returns ((Extracted.program.link impl).withExit ret) (s.setRet ret) fun s' =>
+      ABIReturn (s.setRet ret) s' ∧ ResultIs binary64 (mul binary64 .rne a1.toNat a1.toNat) (s'.regs 0).toNat ∧
+        MemFrame (s.setRet ret).mem s'.mem [((s.setRet ret).sp.toNat - (softDepth + 48), (s.setRet ret).sp.toNat + 16)] :=
   ⟨implAt, ret, s0, model, hret, setup, pre, ⟨wsCall, rfl, wsCall_pre⟩, returns⟩
 
 end Witness
