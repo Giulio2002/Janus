@@ -29,7 +29,9 @@ theorem wrong_argument_bytes (impl : List Segment) (fn stack : Nat) (rt : List (
         tab.toNat + 32 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 8 false = true ∧ s.mem.readLE (tab.toNat + 24) 8 = fn ∧
         Outside (s.sp.toNat - 56) 56 rt)
       (fun _ s' => ∃ n e1 e2, R w ptr len cap n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 1 = e1 ∧ s'.regs 2 = e2) := by
-  intro hc ret hret s hs ⟨h8, ⟨hfn4, hfn⟩, hd, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, htb, ht, hF, hrt⟩
+  intro hc
+  janus_ensures_old
+  intro ret hret s hs ⟨h8, ⟨hfn4, hfn⟩, hd, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, htb, ht, hF, hrt⟩
   janus_intro hs
   simp only [Disjoint] at hd
   have hrt' : Outside (s.sp.toNat - 48 - 8) (48 + 8) rt := hrt.of_sub (by omega) (by omega)
@@ -45,7 +47,9 @@ theorem forged_fn (impl : List Segment) (fn fn2 stack : Nat) (rt : List (Nat × 
         tab.toNat + 32 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 8 false = true ∧ s.mem.readLE (tab.toNat + 24) 8 = fn2 ∧
         Outside (s.sp.toNat - 56) 56 rt)
       (fun _ s' => ∃ n e1 e2, R w ptr len cap n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 1 = e1 ∧ s'.regs 2 = e2) := by
-  intro hc ret hret s hs ⟨h8, ⟨hfn4, hfn⟩, _, hd, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, htb, ht, hF, hrt⟩
+  intro hc
+  janus_ensures_old
+  intro ret hret s hs ⟨h8, ⟨hfn4, hfn⟩, _, hd, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, htb, ht, hF, hrt⟩
   janus_intro hs
   simp only [Disjoint] at hd
   have hrt' : Outside (s.sp.toNat - 48 - 8) (48 + 8) rt := hrt.of_sub (by omega) (by omega)

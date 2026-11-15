@@ -24,8 +24,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [p, n, cap, c] s0 :=
-  ⟨rfl, rfl, by intro i h; simp at h; rcases i with _|_|_|_|i <;> simp [s0] at h ⊢ <;> omega⟩
+theorem setup : CallSetup0 Extracted.entry [p, n, cap, c] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by intro i h; simp at h; rcases i with _|_|_|_|i <;> simp [s0] at h ⊢ <;> omega⟩
 
 theorem pre :
     GuardOK s0 0 ∧ StackOK s0 56 16 ∧ n.toNat = 64 ∧ p.toNat % 32 = 0 ∧
@@ -33,9 +33,9 @@ theorem pre :
   refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩ <;>
     simp only [GuardOK, StackOK, Ptr, Disjoint, s0, p, n] <;> decide
 
-theorem fires : Returns (Extracted.program.withExit ret) s0
-    (fun s' => ABIReturn s0 s' ∧
-      s'.regs 0 = BitVec.ofInt 64 (Proof.indexOf s0.mem p.toNat (c.toNat % 256) 64)) :=
-  Proof.correctness p n cap c ret hret s0 setup pre
+theorem fires : Returns (Extracted.program.withExit ret) (s0.setRet ret)
+    (fun s' => ABIReturn (s0.setRet ret) s' ∧
+      s'.regs 0 = BitVec.ofInt 64 (Proof.indexOf (s0.setRet ret).mem p.toNat (c.toNat % 256) 64)) :=
+  (Proof.correctness p n cap c) s0 setup pre ret hret
 
 end A64IndexByteWitness

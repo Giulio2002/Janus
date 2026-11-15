@@ -22,7 +22,9 @@ theorem wrong_argument_bytes (impl : List Janus.Amd64.Segment) (fn stack : Nat) 
         tab.toNat + 32 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 8 false = true ∧
         s.mem.readLE (tab.toNat + 24) 8 = fn ∧ Outside ((s.regs 4).toNat - 48) 56 rt)
       (fun _ s' => ∃ n e1 e2, R w ptr len cap n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 3 = e1 ∧ s'.regs 1 = e2) := by
-  intro hc ret hret s hs ⟨h8, hfn, hd, hg, ⟨hle, hnw, hacc⟩, hal, htb, ht, hF, hrt⟩
+  intro hc
+  janus64_ensures_old
+  intro ret hret s hs ⟨h8, hfn, hd, hg, ⟨hle, hnw, hacc⟩, hal, htb, ht, hF, hrt⟩
   janus64_intro hs
   have hgl := hg.load
   have hgb := hg.below
@@ -45,7 +47,9 @@ theorem forged_fn (impl : List Janus.Amd64.Segment) (fn fn2 stack : Nat) (rt : L
         tab.toNat + 32 ≤ 2 ^ 48 ∧ s.mem.accessible (tab.toNat + 24) 8 false = true ∧
         s.mem.readLE (tab.toNat + 24) 8 = fn2 ∧ Outside ((s.regs 4).toNat - 48) 56 rt)
       (fun _ s' => ∃ n e1 e2, R w ptr len cap n e1 e2 ∧ s'.regs 0 = n ∧ s'.regs 3 = e1 ∧ s'.regs 1 = e2) := by
-  intro hc ret hret s hs ⟨h8, hfn, _, hd, hg, ⟨hle, hnw, hacc⟩, hal, htb, ht, hF, hrt⟩
+  intro hc
+  janus64_ensures_old
+  intro ret hret s hs ⟨h8, hfn, _, hd, hg, ⟨hle, hnw, hacc⟩, hal, htb, ht, hF, hrt⟩
   janus64_intro hs
   have hgl := hg.load
   have hgb := hg.below

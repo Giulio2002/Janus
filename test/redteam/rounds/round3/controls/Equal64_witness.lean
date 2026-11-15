@@ -28,12 +28,10 @@ def s0 : State :=
 theorem hret : RetAddr Extracted.program ret := by
   refine ⟨?_, ?_, ?_⟩ <;> decide
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [a, b] s0 := by
-  refine ⟨rfl, ?_, rfl, by decide, ?_, rfl⟩
-  · show Janus.Arm64.Memory.readLE s0.mem _ 8 = _
-    rw [Janus.Amd64.Program.exitAddr_withExit]; decide
-  · intro i h; simp only [List.length_cons, List.length_nil] at h
-    rcases i with _ | _ | i <;> first | rfl | (simp only [Nat.succ_lt_succ_iff] at h; omega)
+theorem setup : CallSetup0 Extracted.entry [a, b] s0 := by
+  refine ⟨rfl, rfl, by decide, ?_, rfl⟩
+  intro i h; simp only [List.length_cons, List.length_nil] at h
+  rcases i with _ | _ | i <;> first | rfl | (simp only [Nat.succ_lt_succ_iff] at h; omega)
 
 set_option maxHeartbeats 2000000 in
 theorem pre :
@@ -46,12 +44,12 @@ theorem pre :
   have hav : Proof.hasAVX2 = 0x579264 := by
     simp only [Proof.hasAVX2, reduceSegAddr, reduceRipTarget]
   rw [hav]
-  refine ⟨⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;>
+  refine ⟨⟨by decide, by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;>
     simp only [StackWritable, Buffer, regSP, s0, a, b] <;> decide
 
-theorem fires : Returns (Extracted.program.withExit ret) s0
-    (fun s' => ABIReturn s0 s' ∧
-      (s'.regs 0).setWidth 8 = if valueAt s0 a 64 = valueAt s0 b 64 then 1 else 0) :=
-  Proof.correctness a b ret hret s0 setup pre
+theorem fires : Returns (Extracted.program.withExit ret) (s0.setRet ret)
+    (fun s' => ABIReturn (s0.setRet ret) s' ∧
+      (s'.regs 0).setWidth 8 = if valueAt (s0.setRet ret) a 64 = valueAt (s0.setRet ret) b 64 then 1 else 0) :=
+  (Proof.correctness a b) s0 setup pre ret hret
 
 end Equal64Witness

@@ -30,12 +30,10 @@ def s0 : State :=
 theorem hret : RetAddr Extracted.program ret := by
   refine ⟨by decide, ?_, ?_⟩ <;> decide
 
-theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [dst, src] s0 := by
-  refine ⟨rfl, ?_, rfl, by decide, ?_, rfl⟩
-  · show Janus.Arm64.Memory.readLE s0.mem _ 8 = _
-    rw [Janus.Amd64.Program.exitAddr_withExit]; decide
-  · intro i h; simp only [List.length_cons, List.length_nil] at h
-    rcases i with _ | _ | i <;> first | rfl | (simp only [Nat.succ_lt_succ_iff] at h; omega)
+theorem setup : CallSetup0 Extracted.entry [dst, src] s0 := by
+  refine ⟨rfl, rfl, by decide, ?_, rfl⟩
+  intro i h; simp only [List.length_cons, List.length_nil] at h
+  rcases i with _ | _ | i <;> first | rfl | (simp only [Nat.succ_lt_succ_iff] at h; omega)
 
 set_option maxHeartbeats 2000000 in
 theorem pre :
@@ -49,11 +47,11 @@ theorem pre :
   have hmb : Proof.memmoveBits = 0x578ab0 := by
     simp only [Proof.memmoveBits, reduceSegAddr, reduceRipTarget]
   rw [hmb]
-  refine ⟨⟨by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;>
+  refine ⟨⟨by decide, by decide, by decide, by decide⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;>
     simp only [StackWritable, Buffer, Disjoint, regSP, s0, dst, src] <;> decide
 
-theorem fires : Returns (Extracted.program.withExit ret) s0
-    (fun s' => ABIReturn s0 s' ∧ valueAt s' dst 512 = valueAt s0 src 512) :=
-  Proof.correctness dst src ret hret s0 setup pre
+theorem fires : Returns (Extracted.program.withExit ret) (s0.setRet ret)
+    (fun s' => ABIReturn (s0.setRet ret) s' ∧ valueAt s' dst 512 = valueAt (s0.setRet ret) src 512) :=
+  (Proof.correctness dst src) s0 setup pre ret hret
 
 end CopyBlock512Witness
