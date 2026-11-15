@@ -436,7 +436,11 @@ def tac_with_defs(tac, head, concl, reg, fname, sig=''):
     m = CONCL.match(concl)
     toks, _ = tokens(concl, m.end())
     if not toks: return tac
-    pre_text = concl[m.end():] if head == 'EnsuresK' else (toks[-2][0] if len(toks) >= 2 else concl)
+    PRE_IDX = {'Ensures': 3, 'EnsuresGo': 3, 'EnsuresGoX': 3, 'CEnsures': 3, 'EnsuresWithin': 4, 'Ensures0': 4, 'EnsuresResults': 4,
+               'EnsuresResults0': 4, 'CEnsuresResults': 4, 'CEnsuresA': 4, 'CEnsuresR': 4, 'EnsuresC': 4, 'CEnsuresC': 4}
+    if head == 'EnsuresK': pre_text = concl[m.end():]
+    elif head in PRE_IDX and len(toks) > PRE_IDX[head]: pre_text = toks[PRE_IDX[head]][0]
+    else: pre_text = toks[-2][0] if len(toks) >= 2 else concl
     bound = set(w for grp in re.findall(r"[({\[]\s*((?:[\w'.]+\s+)+?)[\w'.]*\s*:", sig) for w in grp.split())
     names = unfold_list(pre_text, reg, fname, bound)
     return tac + (' [' + ', '.join(names) + ']' if names else '')
