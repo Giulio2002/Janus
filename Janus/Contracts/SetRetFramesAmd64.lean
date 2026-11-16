@@ -75,4 +75,21 @@ theorem liveSep_outside {L win : List (Nat × Nat)} (h : Janus.Contracts.LiveSep
     (hm : (lo, hi) ∈ L) (h1 : lo ≤ a) (h2 : a + n ≤ hi) : Outside a n win :=
   Janus.Outside.of_sub (h _ hm) h1 (by omega)
 
+/-- Installing the return address does not change a `MemFrame` whose ranges include a window that covers `[RSP, RSP + 8)`
+(the callee's own stack window, the last range of the list): a reader of the frame sees the same memory outside the ranges. -/
+theorem memFrame_setRet_iff {s : State} {ret : Nat} {M : Janus.Arm64.Memory} {rs : List (Nat × Nat)} {lo hi : Nat}
+    (h1 : lo ≤ (s.regs 4).toNat) (h2 : (s.regs 4).toNat + 8 ≤ hi) :
+    Janus.MemFrame (s.setRet ret).mem M (rs ++ [(lo, hi)]) ↔ Janus.MemFrame s.mem M (rs ++ [(lo, hi)]) := by
+  have hd : ∀ a n, Janus.Outside a n (rs ++ [(lo, hi)]) → a + n ≤ (s.regs 4).toNat ∨ (s.regs 4).toNat + 8 ≤ a := by
+    intro a n ho
+    simp only [Janus.outside_append, Janus.outside_cons, Janus.outside_nil, and_true] at ho
+    omega
+  constructor
+  · intro h
+    exact ⟨fun a n ho => by rw [h.readLE a n ho]; exact readLE_setRet_of_disjoint (hd a n ho),
+      fun a n w => by rw [h.accessible a n w, setRet_accessible]⟩
+  · intro h
+    exact ⟨fun a n ho => by rw [h.readLE a n ho]; exact (readLE_setRet_of_disjoint (hd a n ho)).symm,
+      fun a n w => by rw [h.accessible a n w, setRet_accessible]⟩
+
 end Janus.Contracts.SetRetFramesAmd64

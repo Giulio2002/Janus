@@ -94,6 +94,7 @@ macro_rules (kind := janus64PreSetRetCore)
     let f8 := mkIdent `Janus.Contracts.SetRetFramesAmd64.panic_rp_setRet
     let f9 := mkIdent `Janus.Contracts.SetRetFramesAmd64.panic_room_setRet
     let f10 := mkIdent `Janus.Contracts.SetRetFramesAmd64.panic_calm_setRet
+    let mf := mkIdent `Janus.Contracts.SetRetFramesAmd64.memFrame_setRet_iff
     -- the definitions the user lists are unfolded one by one: an ambiguous or unknown name fails only its own `simp`
     -- all at once (definitions inside each other unfold to a fixpoint), then one by one twice (what is left when a name is ambiguous)
     let mut us ← `(tactic| try simp only [$ds,*] at $hp:ident ⊢)
@@ -131,6 +132,7 @@ macro_rules (kind := janus64PreSetRetCore)
          try simp (disch := first | assumption | janus_outside_slot) only [$v2:ident] at ⊢
          try simp (disch := first | assumption | janus_disj_omega | omega) only [$l1:ident, $l2:ident] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$m1:ident, $m2:ident, $m3:ident, $m4:ident] at ⊢
+         try simp (disch := omega) only [$mf:ident] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$f0:ident, $f1:ident, $f2:ident, $f3:ident, $f4:ident, $f5:ident, $f6:ident, $f7:ident, $f8:ident, $f9:ident, $f10:ident] at ⊢
          all_goals first
            | with_reducible exact Janus.Tactic.Hide.elim hp0
