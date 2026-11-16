@@ -1220,6 +1220,11 @@ def main(files):
             if n6:
                 warn.append('%d `refine ⟨?_, ?_, ?_⟩ <;> …` alternatives got a 4-hole twin (StackGuardOK 4th field)' % n6)
                 t2 = t6
+        if 'linked_eq' in t2:
+            # `by rw [linked_eq]; exact setup` transported the old `CallSetup (linked.withExit ret) …` to the program the lemma is about; the new
+            # `CallSetup0 entry args s` mentions no program: the setup lemma is the proof
+            t7, n7 = re.subn(r'by rw \[linked_eq\]; exact (setup\w*)', r'\1', t2)
+            if n7: warn.append('%d `by rw [linked_eq]; exact setup` witness fields are now the setup lemma itself (CallSetup0 mentions no program)' % n7); t2 = t7
         if '.mono' in t2 and 'pan_iff' in t2:
             t2, ngm = fix_go_mono(t2)
             if ngm: warn.append('%d EnsuresGo.mono hret/hpan lambdas now bind the return address (s r s\')' % ngm)
