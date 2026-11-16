@@ -680,6 +680,14 @@ def _migrate(t, amd0, reg, fname=''):
             if dl != ptac:
                 it = re.sub(r'(?<![\w.\'])((?:\w+\.)*Ensures0?\.mono)(?![\w\'_])(?!\s*\(hinv\s*:=)', lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[split_sig(it)[1] or 0:]) if False else \
                     it[:split_sig(it)[1]] + re.sub(r'(?<![\w.\'])((?:\w+\.)*Ensures0?\.mono)(?![\w\'_])(?!\s*\(hinv\s*:=)', lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[split_sig(it)[1]:])
+        if cc and isa[i] and cc[1] in ('Ensures', 'Ensures0') and not conclusion(it) is None:      # amd64 only: the arm64 default (no list) proves every claim of this tree
+            # the dot form `(thm args).mono hpre hpost` of a row: the same unfold list for its `hinv` (EnsuresGo.mono has none)
+            se2 = split_sig(it)[1]
+            if se2 is not None and re.search(r'\)\.mono(?![\w\'_])', it[se2:]):
+                ptac = 'janus64_pre_setRet' if isa[i] else 'janus_pre_setRet'
+                dl = tac_with_defs(ptac, cc[1], cc[2], reg, fname, cc[3])
+                if dl != ptac:
+                    it = it[:se2] + re.sub(r'(\)\.mono)(?=\s+\(fun\s)(?![^\n]*\(hinv\s*:=)', lambda mm: mm.group(1) + ' (hinv := by ' + dl + ')', it[se2:])
         it = add_hlen(it, isa[i], warn, m.group(1), reg)
         items[i] = it
     # ---- pass 2: old-shaped applications of Ensures-form theorems (and hypotheses) -> `(thm args).toOld ret hret …`
