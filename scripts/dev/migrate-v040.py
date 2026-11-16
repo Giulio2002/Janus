@@ -432,7 +432,7 @@ def collect(t, reg):
         if not m: continue
         sgs, _bss = split_sig(it)
         cis = top_colon(sgs) if sgs is not None else -1
-        if cis >= 0 and re.match(r'\s*CallSetup\s*\(', sgs[cis + 1:]) and '.withExit' in sgs[cis + 1:]: reg.setupnames.add(m.group(1).split('.')[-1])
+        if cis >= 0 and re.match(r'\s*(?:CallSetup|CCallA?)\s*\(', sgs[cis + 1:]) and '.withExit' in sgs[cis + 1:]: reg.setupnames.add(m.group(1).split('.')[-1])
         sg0, bs0 = split_sig(it)
         if sg0 is not None and re.search(r'\{args\s*:\s*List', sg0):
             reg.argthms.append((m.group(1).split('.')[-1], it[bs0:]))
@@ -959,7 +959,7 @@ def rewrite_witness(it, apps, amd, name, warn, plain, kern, extra=()):
         tail = it[m.end():end]
         tk0, _ = tokens(tail, 0)
         extra_st = []
-        if it[max(0, m.start() - 2):m.start()] == 'Go' and len(tk0) >= 2: tk0 = tk0[1:]      # `GoReturns P C S …`: the class comes first
+        if (it[max(0, m.start() - 2):m.start()] == 'Go' or m.group(1) == 'ReturnsC') and len(tk0) >= 2: tk0 = tk0[1:]      # `GoReturns P C S …` / `ReturnsC P C post S`: the class / contract comes first
         if tk0 and tk0[0][0].startswith('(') and '.setRet' not in tk0[0][0] and tk0[0][0] not in ('(fun', ) and not tk0[0][0].startswith('(fun'):
             extra_st = [tk0[0][0]]       # a state given by an expression (`(s0 mem0)`), not a variable
         for st in extra_st:
