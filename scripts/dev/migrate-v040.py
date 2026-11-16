@@ -917,10 +917,11 @@ def untoold(it, setups):
         toks, stop = tokens(it, m.end())
         si = 1
         sname = re.match(r'\(?([\w.\']+)', toks[1][0]) if len(toks) >= 2 else None
-        if (sname is None or sname.group(1).split('.')[-1] not in setups) and len(toks) >= 3:
+        issetup = lambda n: n in setups or re.fullmatch(r"h?setup\w*", n) is not None      # a setup lemma, or a local `hsetup` from an obtain
+        if (sname is None or not issetup(sname.group(1).split('.')[-1])) and len(toks) >= 3:
             si = 2          # EnsuresK: `S K SETUP PRE`
             sname = re.match(r'\(?([\w.\']+)', toks[2][0])
-        if sname is None or sname.group(1).split('.')[-1] not in setups:
+        if sname is None or not issetup(sname.group(1).split('.')[-1]):
             pos = m.end(); continue
         last = si + 2 if len(toks) >= si + 2 else si + 1
         states.add(toks[0][0]); states.add('__raw__')
