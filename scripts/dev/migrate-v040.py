@@ -255,7 +255,7 @@ def fix_mono(it, warn, ok_heads=None):
         if len(bt) < 3:
             out.append(it[pos:m.end()]); pos = m.end(); continue
         first = bt[0][0]
-        body = it[arrow + 2:tk[2]]
+        body = it[arrow + 2:tk[2]] if tk[0].startswith('(fun ') else it[arrow + 2:]      # an unparenthesised `fun` extends to the end of the term
         if first != '_' and re.search(r'(?<![\w.\'])' + re.escape(first) + r'(?![\w\'])', body):
             warn.append('Ensures.mono with a named state binder `%s` used in the postcondition proof: adjust by hand (mono_ret binds the state without the return address)' % first)
             out.append(it[pos:m.end()]); pos = m.end(); continue
