@@ -258,6 +258,31 @@ structure TLSBlock (t : TLSImage) (s : State) : Prop where
   selfAcc : s.mem.accessible s.fsBase.toNat 8 false = true
   self : s.mem.readLE s.fsBase.toNat 8 = s.fsBase.toNat
 
+/-- Installing the return address leaves `TLSBlock` unchanged when the thread control block word `[FS, FS + 8)` is apart
+from `[RSP, RSP + 8)` (a precondition conjunct). Used by `janus64_pre_setRet`. -/
+theorem tlsBlock_setRet_iff {t : TLSImage} {s : State} {ret : Nat}
+    (h : s.fsBase.toNat + 8 ≤ (s.regs 4).toNat ∨ (s.regs 4).toNat + 8 ≤ s.fsBase.toNat) :
+    TLSBlock t (s.setRet ret) ↔ TLSBlock t s := by
+  have e : (s.setRet ret).mem.readLE s.fsBase.toNat 8 = s.mem.readLE s.fsBase.toNat 8 :=
+    Janus.Amd64.GoABI.readLE_setRet_of_disjoint (by omega)
+  constructor
+  · rintro ⟨a, b, c, d⟩
+    exact ⟨by simpa using a, by simpa using b, by simpa using c, by simpa [e] using d⟩
+  · rintro ⟨a, b, c, d⟩
+    exact ⟨by simpa using a, by simpa using b, by simpa using c, by simpa [e] using d⟩
+
+/-- Installing the return address leaves a C string unchanged when its bytes `[p, p + n + 1)` are apart from
+`[RSP, RSP + 8)` (a precondition conjunct). Used by `janus64_pre_setRet`. -/
+theorem cstr_setRet_iff {s : State} {ret p n : Nat}
+    (h : p + n + 1 ≤ (s.regs 4).toNat ∨ (s.regs 4).toNat + 8 ≤ p) :
+    Janus.Contracts.Libc.CStr (s.setRet ret).mem p n ↔ Janus.Contracts.Libc.CStr s.mem p n := by
+  have e : ∀ i, i ≤ n → (s.setRet ret).mem.bytes (p + i) = s.mem.bytes (p + i) :=
+    fun i hi => Janus.Amd64.GoABI.bytes_setRet_of_outside (by omega)
+  unfold Janus.Contracts.Libc.CStr
+  simp only [Janus.Amd64.GoABI.setRet_accessible, e n (Nat.le_refl _)]
+  exact and_congr Iff.rfl (and_congr Iff.rfl (and_congr Iff.rfl
+    (forall_congr' fun i => forall_congr' fun hi => by rw [e i (by omega)])))
+
 /-- `__tls_get_addr(ti)` (traditional general dynamic, called through the PLT): `ti` points at a
 `tls_index` `{module, offset}`; the call returns the address of that offset in the thread's
 block of the module (`block m`, the address glibc's DTV gives; for the executable, module 1,

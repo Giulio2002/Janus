@@ -77,6 +77,8 @@ macro_rules (kind := janus64PreSetRetCore)
     let v1 := mkIdent `Janus.Contracts.view_setRet
     let v2 := mkIdent `Janus.Contracts.StackAmd64.rtView_setRet
     let c1 := mkIdent `Janus.Amd64.CABI.CStack
+    let l1 := mkIdent `Janus.Contracts.LibcAmd64.tlsBlock_setRet_iff
+    let l2 := mkIdent `Janus.Contracts.LibcAmd64.cstr_setRet_iff
     let m1 := mkIdent `Janus.Contracts.MapAmd64.laws_env_setRet
     let m2 := mkIdent `Janus.Contracts.MapAmd64.laws_rep_setRet
     let m3 := mkIdent `Janus.Contracts.MapAmd64.laws_isMap_setRet
@@ -127,6 +129,7 @@ macro_rules (kind := janus64PreSetRetCore)
          try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$v1:ident] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$v2:ident] at ⊢
+         try simp (disch := first | assumption | janus_disj_omega | omega) only [$l1:ident, $l2:ident] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$m1:ident, $m2:ident, $m3:ident, $m4:ident] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$f0:ident, $f1:ident, $f2:ident, $f3:ident, $f4:ident, $f5:ident, $f6:ident, $f7:ident, $f8:ident, $f9:ident, $f10:ident] at ⊢
          all_goals first
