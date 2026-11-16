@@ -177,14 +177,17 @@ macro_rules (kind := janus64EnsuresOld)
   | `(tactic| janus64_ensures_old) => `(tactic| janus64_ensures_old [])
   | `(tactic| janus64_ensures_old [$ds,*]) => do
     let mut acc ← `(Lean.Parser.Tactic.tacticSeq| fail "janus64_ensures_old: the goal is not a main-theorem form with an `of_old` bridge")
+    let mut heads : Array (Ident × TSyntax ``Lean.Parser.Tactic.tacticSeq) := #[]
     for (n, kind) in ensuresOldForms64.reverse do
       let alt ← if kind == 1 then
           `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus64_pre_setRet_k [$ds,*]) ?_)
         else if kind == 2 then
           `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus64_pre_setRet_c [$ds,*]) ?_)
         else `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus64_pre_setRet [$ds,*]) ?_)
+      heads := heads.push (mkIdent n.getPrefix, alt)
       acc ← `(Lean.Parser.Tactic.tacticSeq| first | $alt | $acc)
-    `(tactic| ($acc))
+    let (hn, ha) := (heads.map (·.1), heads.map (·.2))
+    `(tactic| janus_head_first $[$hn:ident => ($ha)]* otherwise ($acc))
 
 end Janus.Amd64.Tactic
 

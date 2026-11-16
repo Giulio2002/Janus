@@ -200,6 +200,24 @@ invariance of `pre` under `setRet` with `janus_pre_setRet [defs]`. The form's mo
 (the alternatives name each form's bridge). -/
 syntax "janus_ensures_old" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 
+/-- `janus_head_first N₁ => (tac₁) … otherwise (tac)`: run `tacᵢ` for the FIRST `Nᵢ` that is the head constant of the goal (as
+written: nothing is unfolded) and report its errors as they are; run `tac` when no head matches (a definition that unfolds to a
+main-theorem form, `EnsuresResults`, …). Choosing the bridge by the goal's head keeps `janus_ensures_old` from first trying
+the bridges of the other forms: each failed `refine` unifies the whole (large) precondition and cost minutes on a big goal
+(RangeDefer: 1442 s of 1530 s). -/
+syntax "janus_head_first " (ident " => " "(" tacticSeq ")")* " otherwise " "(" tacticSeq ")" : tactic
+
+elab_rules : tactic
+  | `(tactic| janus_head_first $[$ns:ident => ($alts)]* otherwise ($fb)) => do
+    let g ← getMainGoal
+    let ty ← instantiateMVars (← g.getType)
+    let head := ty.consumeMData.getAppFn.constName?
+    for n in ns, alt in alts do
+      if head == some n.getId then
+        evalTactic alt
+        return
+    evalTactic fb
+
 /-- The bridge of each main-theorem form (arm64) and the pre-setRet tactic that proves its `hinv`. The names
 are resolved where `janus_ensures_old` is used (the form's module need not be imported here). -/
 def ensuresOldForms : List (Name × Nat) :=
@@ -215,14 +233,17 @@ macro_rules
   | `(tactic| janus_ensures_old) => `(tactic| janus_ensures_old [])
   | `(tactic| janus_ensures_old [$ds,*]) => do
     let mut acc ← `(Lean.Parser.Tactic.tacticSeq| fail "janus_ensures_old: the goal is not a main-theorem form with an `of_old` bridge")
+    let mut heads : Array (Ident × TSyntax ``Lean.Parser.Tactic.tacticSeq) := #[]
     for (n, kind) in ensuresOldForms.reverse do
       let alt ← if kind == 1 then
           `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus_pre_setRet_k [$ds,*]) ?_)
         else if kind == 2 then
           `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus_pre_setRet_c [$ds,*]) ?_)
         else `(Lean.Parser.Tactic.tacticSeq| refine $(mkIdent n) (by janus_pre_setRet [$ds,*]) ?_)
+      heads := heads.push (mkIdent n.getPrefix, alt)
       acc ← `(Lean.Parser.Tactic.tacticSeq| first | $alt | $acc)
-    `(tactic| ($acc))
+    let (hn, ha) := (heads.map (·.1), heads.map (·.2))
+    `(tactic| janus_head_first $[$hn:ident => ($ha)]* otherwise ($acc))
 
 end Janus.Tactic
 
