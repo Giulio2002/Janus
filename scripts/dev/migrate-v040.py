@@ -533,8 +533,8 @@ def _migrate(t, amd0, reg, fname=''):
         isa.append(cur)
     inw, w = [], False
     for it in items:
-        if re.match(r'namespace (?:[\w.]+\.)?Witness\w*\b', it): w = True
-        if re.match(r'end (?:[\w.]+\.)?Witness\w*\b', it): w = False
+        if re.match(r'namespace (?:[\w.]+\.)?(?:Witness\w*|\w*Wit(?!h)\w*)\b', it): w = True
+        if re.match(r'end (?:[\w.]+\.)?(?:Witness\w*|\w*Wit(?!h)\w*)\b', it): w = False
         inw.append(w)
     ens = {}      # row theorem name -> is EnsuresK
     # ---- pass 1: row theorems and generic helpers
@@ -825,6 +825,9 @@ def _migrate(t, amd0, reg, fname=''):
         exw = '∃' in sig0 and SETUP_RE.search(it) is not None
         if exw and inw[i] and not apps and restated and any(re.search(r"(?<![\w.'])" + re.escape(r) + r"(?![\w'])", it[len(sig0):]) for r in restated): name_force = True
         else: name_force = False
+        if exw and inw[i] and not apps and not name_force and not re.search(r'\bReturns\w*\b|\bPanics\b', sig0) and any(
+                re.search(r"(?<![\w.'])" + re.escape(u.split('.')[-1]) + r"(?![\w'])", it[len(sig0):]) for u in used_setups):
+            name_force = True      # a pre-only witness (`∃ … CallSetup (P.withExit ret) … ∧ Pre …`) proved by a migrated setup lemma: its CallSetup becomes CallSetup0
         if (apps or extra.get(i) or (exw and inw[i] and (name in FORCE or name_force or (ens and not RAW)))) and (name not in ens or inw[i]) and not conclusion(it) is not None:
             it = rewrite_witness(it, apps, amd, name, warn, plain, kern, extra.get(i, ()))
             for bn in both_used:      # the rewritten witness applies the new-shaped twin of a setup lemma the raw theorems still apply
