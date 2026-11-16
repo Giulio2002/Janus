@@ -363,7 +363,7 @@ def import_closure(f, reg):
     return out
 
 # masked runtime views stay folded: `view_setRet` / `rtView_setRet` (amd64 janus64_pre_setRet) rewrite them as they are
-NO_UNFOLD = {'rtView', 'view'}
+NO_UNFOLD = {'rtView', 'view', 'DataLoaded'}      # DataLoaded: the framework's law dataLoaded_setRet_iff needs the folded predicate
 
 def unfold_list(pre_text, reg, f, bound=()):
     """The consumer's state-reading definitions reachable from `pre_text`, as fully qualified names (the definition visible
