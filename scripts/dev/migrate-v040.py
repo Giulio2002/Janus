@@ -762,7 +762,7 @@ def _migrate(t, amd0, reg, fname=''):
                 if re.match(r'\s*=>', it[m.end():]) or re.search(r'\|\s*$', it[max(0, m.start() - 12):m.start()]): continue      # a match arm sharing a theorem's name
                 toks, stop = tokens(it, m.end())
                 for k in range(len(toks) - 3):
-                    if re.fullmatch(r"hret[\w']*", toks[k + 1][0].split('.')[-1]) and re.fullmatch(r"[\w'.]+", toks[k][0]):
+                    if (re.fullmatch(r"hret[\w']*", toks[k + 1][0].split('.')[-1]) or (toks[k][0] == 'ret' and re.fullmatch(r"\?\w+", toks[k + 1][0]))) and re.fullmatch(r"[\w'.]+", toks[k][0]):
                         need = 5 if isk else 4          # ret hret s [k] setup  (+ pre follows)
                         if k + need <= len(toks):
                             out.append((m, toks, k, isk))
@@ -997,7 +997,7 @@ def rewrite_witness(it, apps, amd, name, warn, plain, kern, extra=()):
             toks, stop = tokens(it, m.end())
             kk = None
             for q in range(len(toks) - 1):
-                if re.fullmatch(r"hret[\w']*", toks[q + 1][0].split('.')[-1]) and re.fullmatch(r"[\w'.]+", toks[q][0]):
+                if (re.fullmatch(r"hret[\w']*", toks[q + 1][0].split('.')[-1]) or (toks[q][0] == 'ret' and re.fullmatch(r"\?\w+", toks[q + 1][0]))) and re.fullmatch(r"[\w'.]+", toks[q][0]):
                     kk = q; break
             need = 5 if isk else 4
             if kk is None or kk + need > len(toks):
