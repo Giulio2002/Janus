@@ -187,13 +187,14 @@ theorem correctness (p n : BitVec 64) :
       (fun s s' => (s'.regs 0).toNat = sum32 s.mem p.toNat n.toNat % 2 ^ 32 ∧ s'.mem = s.mem) :=
   CEnsures.of_summary (summary p n)
     (fun ret s hret hs ⟨⟨_, _, hnw, hst⟩, hb, hacc⟩ => by
-      have h0 : s.regs 7 = p := hs.reg (i := 0) (by simp)
-      have h1 : s.regs 6 = n := hs.reg (i := 1) (by simp)
-      have hr := hs.ret
+      have hs' := hs.setRet (p := Extracted.program) hret.lt64
+      have h0 : (s.setRet ret).regs 7 = p := hs'.reg (i := 0) (by simp)
+      have h1 : (s.setRet ret).regs 6 = n := hs'.reg (i := 1) (by simp)
+      have hr := hs'.ret
       simp only [CABI.regSP, Nat.sub_zero, Nat.zero_add, Program.withExit] at hst hnw hr
       exact ⟨h0, h1, hb, hacc, hnw, Janus.Arm64.Memory.accessible_weaken _ hst,
-        by rw [hr]; exact hret.user, hs.df⟩)
-    (fun s s' _ h => by
+        by rw [hr]; exact hret.user, hs'.df⟩)
+    (fun s ret s' _ h => by
       obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12⟩ := h
       exact ⟨⟨h1, h2, h3, h4, h5, h6, h7, h8, by rw [h9], h10⟩, h12, h11⟩)
 
@@ -217,8 +218,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [p0, n0] s0 :=
-  ⟨rfl, by decide, by decide, by intro i h; simp only [List.length_cons, List.length_nil] at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, by decide, rfl⟩
+theorem call : CCallF Extracted.entry [p0, n0] s0 :=
+  ⟨rfl, by decide, by intro i h; simp only [List.length_cons, List.length_nil] at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, by decide, rfl⟩
 
 theorem pre : CStack s0 0 8 ∧ p0.toNat + 4 * n0.toNat ≤ 2 ^ 48 ∧
     s0.mem.accessible p0.toNat (4 * n0.toNat) false = true := by
@@ -226,10 +227,10 @@ theorem pre : CStack s0 0 8 ∧ p0.toNat + 4 * n0.toNat ≤ 2 ^ 48 ∧
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (p : BitVec 64) (n : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [p, n] s ∧ (CStack s 0 8 ∧ p.toNat + 4 * n.toNat ≤ 2 ^ 48 ∧
+    CCallF Extracted.entry [p, n] s ∧ (CStack s 0 8 ∧ p.toNat + 4 * n.toNat ≤ 2 ^ 48 ∧
     s.mem.accessible p.toNat (4 * n.toNat) false = true) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧ ((s'.regs 0).toNat = sum32 s.mem p.toNat n.toNat % 2 ^ 32 ∧ s'.mem = s.mem)) :=
-  ⟨p0, n0, ret, s0, hret, call, pre, correctness p0 n0 ret hret s0 call pre⟩
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧ ((s'.regs 0).toNat = sum32 (s.setRet ret).mem p.toNat n.toNat % 2 ^ 32 ∧ s'.mem = (s.setRet ret).mem)) :=
+  ⟨p0, n0, ret, s0, hret, call, pre, (correctness p0 n0) s0 call pre ret hret⟩
 
 end Witness
 

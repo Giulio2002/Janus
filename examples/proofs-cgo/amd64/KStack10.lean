@@ -92,10 +92,11 @@ theorem correctness (a b c d e f g h : BitVec 64) (i : BitVec 32) (j : BitVec 64
     CEnsuresR Extracted.program Extracted.entry sig (vals a b c d e f g h i j) (fun s => CStack s 0 8)
       (fun _ _ v => v = (spec a b c d e f g h i j).toNat) :=
   CEnsuresA.of_summary (summary a b c d e f g h i j)
-    (fun _ s hret hs ⟨_, _, hnw, hst⟩ => by
+    (fun ret s hret hs ⟨_, _, hnw, hst⟩ => by
       simp only [CABI.regSP, Nat.sub_zero, Nat.zero_add] at hnw hst
-      exact ⟨hs.args, hnw, Janus.Arm64.Memory.accessible_weaken _ hst, hs.ret_lt hret, hs.df⟩)
-    (fun _ _ _ ⟨hsp, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, _, h0⟩ =>
+      have hs' := hs.setRet (p := Extracted.program) hret.lt64
+      exact ⟨hs'.args, hnw, Janus.Arm64.Memory.accessible_weaken _ hst, hs'.ret_lt hret, hs'.df⟩)
+    (fun _ _ _ _ ⟨hsp, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, _, h0⟩ =>
       ⟨CReturn.of_eqs hsp h3 h5 h12 h13 h14 h15 hdf hmx hfw, _,
         by simp only [Returned, sig, result, ResultAt, PiecesAt, and_true, pieceAt_gpr_word, h0], rfl⟩)
 
@@ -128,24 +129,24 @@ theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 theorem spre : SPre (vals 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0) s0 :=
   (spre_iff 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0 s0).2
     ⟨by decide, by decide, by decide, by decide, by decide, by decide,
-      ⟨by decide, by decide, by decide +kernel⟩, ⟨by decide, by decide, by decide +kernel⟩,
-      ⟨by decide, by decide, by decide +kernel⟩, ⟨by decide, by decide, by decide +kernel⟩,
+      (by first | exact ⟨by decide, by decide, by decide +kernel, by decide⟩ | exact ⟨by decide, by decide, by decide +kernel⟩), (by first | exact ⟨by decide, by decide, by decide +kernel, by decide⟩ | exact ⟨by decide, by decide, by decide +kernel⟩),
+      (by first | exact ⟨by decide, by decide, by decide +kernel, by decide⟩ | exact ⟨by decide, by decide, by decide +kernel⟩), (by first | exact ⟨by decide, by decide, by decide +kernel, by decide⟩ | exact ⟨by decide, by decide, by decide +kernel⟩),
       by decide, by decide, by decide +kernel, by decide⟩
 
-theorem call : CCallA (Extracted.program.withExit ret) Extracted.entry sig
+theorem call : CCallAF Extracted.entry sig
     (vals 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0) s0 :=
-  ⟨rfl, by decide +kernel, by decide, rfl, spre.1, (by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr), (by intro h; simp [sig] at h)⟩
+  ⟨rfl, by decide, rfl, spre.1, (by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr), (by intro h; simp [sig] at h)⟩
 
 theorem stack : CStack s0 0 8 := ⟨by decide, by decide, by decide, by decide⟩
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (a b c d e f g h : BitVec 64) (i : BitVec 32) (j : BitVec 64) (ret : Nat) (s : State),
     RetAddr Extracted.program ret ∧
-    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals a b c d e f g h i j) s ∧ (CStack s 0 8) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      (∃ v, Returned sig s s' v ∧ (v = (spec a b c d e f g h i j).toNat))) :=
+    CCallAF Extracted.entry sig (vals a b c d e f g h i j) s ∧ (CStack s 0 8) ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      (∃ v, Returned sig (s.setRet ret) s' v ∧ (v = (spec a b c d e f g h i j).toNat))) :=
   ⟨1#64, 2#64, 3#64, 4#64, 5#64, 6#64, 7#64, 8#64, i0, j0, ret, s0, hret, call, stack,
-    correctness 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0 ret hret s0 call stack⟩
+    (correctness 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0) s0 call stack ret hret⟩
 
 end Witness
 

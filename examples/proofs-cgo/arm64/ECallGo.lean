@@ -45,6 +45,7 @@ def GoPost (a : W64) (u u' : State) : Prop :=
   u'.mem = u.mem.writeLE (a.toNat + 8) 8 (2 * u.mem.readLE a.toNat 8)
 
 theorem go_spec (a : W64) : EnsuresC Extracted.program Contract.none goFn [a] (GoPre a) (GoPost a) := by
+  janus_ensures_old [Proof.GoPre]
   intro ret hret u hu ⟨hb, hacc⟩
   apply ReturnsC.of_reaches
   janus_intro hu
@@ -109,6 +110,7 @@ set_option maxHeartbeats 8000000 in
 theorem c_spec (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (x : W64) :
     CEnsuresC Extracted.program (CallbackSpec Extracted.tls goFn (G (cbk rt H)) E) Extracted.entry [x]
       (CPre rt H) (fun _ s' => s'.regs 0 = 2 * x + 1) := by
+  janus_ensures_old [Proof.CPre, Janus.CABI.CStack, Proof.win, Proof.rid, Proof.ctxf, Proof.iscgo, Proof.slot, Proof.gslot, Proof.goFn, Janus.FFI.cbGoStack, Proof.slotOf, Proof.baseOf, Proof.eszOf, Proof.resOf, Proof.spanOf, Proof.cacheOf, Proof.fidxOf, Proof.cOf, Proof.scOf, Proof.sizeToClass8, Proof.nBase]
   intro ret hret s hs hpre
   obtain ⟨hd, ⟨hal, hb, ha, hw⟩, hra, hrv, hca, hcv, hia, hio, htb, hta, hga, hgpa, hro, hco, hgo, hgpo, hto, hgt,
     hgpt, hct, hrt, hH⟩ := hpre
@@ -240,8 +242,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
 
-theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [7#64] s0 :=
-  ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
+theorem call : CCallF Extracted.entry [7#64] s0 :=
+  ⟨⟨rfl, by decide, by intro i h; simp at h; subst h; rfl⟩, by first | decide | simp | omega, by decide⟩
 
 theorem data : Extracted.program.DataLoaded mem0 :=
   -- not `decide +kernel` over every byte (114 s: each byte scans the object list): the objects are disjoint and every
@@ -264,13 +266,13 @@ theorem pre : CPre [] (fun _ _ _ _ => True) s0 := by
 /-- All hypotheses of `correctness` hold together (for the readiness that always holds and no
 runtime-owned memory). -/
 theorem nonvacuous : ∃ (rtc : List (Nat × Nat)) (Hc : RtReady) (x : W64) (ret : Nat) (s : State),
-    RetAddr Extracted.program ret ∧ CCall (Extracted.program.withExit ret) Extracted.entry [x] s ∧
+    RetAddr Extracted.program ret ∧ CCallF Extracted.entry [x] s ∧
       CPre rtc Hc s ∧
       ReturnsC (Extracted.program.withExit ret)
         (CgoCallback Extracted.tls Extracted.program Contract.none (fun _ => True) (cbk rtc Hc))
-        (fun s' => CReturn s s' ∧ (s'.regs 0 = 2 * x + 1)) s :=
+        (fun s' => CReturn (s.setRet ret) s' ∧ (s'.regs 0 = 2 * x + 1)) (s.setRet ret) :=
   ⟨[], fun _ _ _ _ => True, 7#64, RET, s0, hret, call, pre,
-    correctness [] (fun _ _ _ _ => True) 7#64 RET hret s0 call pre⟩
+    correctness [] (fun _ _ _ _ => True) 7#64 s0 call pre RET hret⟩
 
 end Witness
 

@@ -28,6 +28,7 @@ namespace Proof
 theorem correctness (a b : BitVec 64) :
     CEnsures Extracted.program Extracted.entry [a, b] (fun s => CStack s 0 8)
       (fun _ s' => (s'.regs 0).toNat = max a.toNat b.toNat) := by
+  janus64_ensures_old [Janus.Amd64.CABI.CStack]
   intro ret hret s hs ⟨_, _, hnw, hacc⟩
   have h_rip := hs.rip
   have h_ret := hs.ret
@@ -61,8 +62,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [3#64, 5#64] s0 :=
-  ⟨rfl, by decide, by decide, by
+theorem call : CCallF Extracted.entry [3#64, 5#64] s0 :=
+  ⟨rfl, by decide, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, by decide, rfl⟩
@@ -73,15 +74,15 @@ theorem stack : CStack s0 0 8 := by
 
 /-- All hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (a b : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [a, b] s ∧ (CStack s 0 8) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+    CCallF Extracted.entry [a, b] s ∧ (CStack s 0 8) ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
       ((s'.regs 0).toNat = max a.toNat b.toNat)) :=
-  ⟨3#64, 5#64, ret, s0, hret, call, stack, correctness 3#64 5#64 ret hret s0 call stack⟩
+  ⟨3#64, 5#64, ret, s0, hret, call, stack, (correctness 3#64 5#64) s0 call stack ret hret⟩
 
 /-- So the guarantee is reached: the call returns with `max 3 5 = 5` in `RAX`. -/
-theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
-    CReturn s0 s' ∧ (s'.regs 0).toNat = 5 :=
-  (correctness 3#64 5#64 ret hret s0 call stack).mono fun _ h => ⟨h.1, by simpa using h.2⟩
+theorem returns : Returns (Extracted.program.withExit ret) (s0.setRet ret) fun s' =>
+    CReturn (s0.setRet ret) s' ∧ (s'.regs 0).toNat = 5 :=
+  ((correctness 3#64 5#64) s0 call stack ret hret).mono fun _ h => ⟨h.1, by simpa using h.2⟩
 
 end Witness
 

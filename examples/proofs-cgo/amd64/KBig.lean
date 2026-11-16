@@ -90,11 +90,12 @@ theorem correctness (x y : BitVec 64) :
       (fun s s' v => v = quad (x + y) (x - y) (x * y) (x ^^^ y) ∧
         MemFrame s.mem s'.mem [((s.regs 7).toNat, (s.regs 7).toNat + 32)]) :=
   CEnsuresA.of_summary (summary x y)
-    (fun _ s hret hs ⟨_, _, hnw, hst⟩ => by
+    (fun ret s hret hs ⟨_, _, hnw, hst⟩ => by
       simp only [CABI.regSP, Nat.sub_zero, Nat.zero_add] at hnw hst
-      exact ⟨hs.args, hs.retBuf, hnw, Janus.Arm64.Memory.accessible_weaken _ hst, hs.ret_lt hret,
-        hs.df⟩)
-    (fun s _ _ ⟨hsp, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hm, h0⟩ =>
+      have hs' := hs.setRet (p := Extracted.program) hret.lt64
+      exact ⟨hs'.args, hs'.retBuf, hnw, Janus.Arm64.Memory.accessible_weaken _ hst, hs'.ret_lt hret,
+        hs'.df⟩)
+    (fun s _ _ _ ⟨hsp, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hm, h0⟩ =>
       ⟨CReturn.of_eqs hsp h3 h5 h12 h13 h14 h15 hdf hmx hfw, _,
         by simp only [Returned, sig, result, ResultAt, size_big, hm, bigMem_read, h0, and_true], rfl,
         by rw [hm]; unfold bigMem; janus_frame⟩)
@@ -123,18 +124,18 @@ theorem spre : SPre (vals x0 y0) s0 :=
   (spre_iff x0 y0 s0).2 ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide,
     by decide, by decide⟩
 
-theorem call : CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals x0 y0) s0 :=
-  ⟨rfl, by decide, by decide, rfl, spre.1, spre.2.1, by intro h; simp [sig] at h⟩
+theorem call : CCallAF Extracted.entry sig (vals x0 y0) s0 :=
+  ⟨rfl, by decide, rfl, spre.1, spre.2.1, by intro h; simp [sig] at h⟩
 
 theorem stack : CStack s0 0 8 := ⟨by decide, by decide, by decide, by decide⟩
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (x y : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals x y) s ∧ (CStack s 0 8) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      (∃ v, Returned sig s s' v ∧ (v = quad (x + y) (x - y) (x * y) (x ^^^ y) ∧
-        MemFrame s.mem s'.mem [((s.regs 7).toNat, (s.regs 7).toNat + 32)]))) :=
-  ⟨x0, y0, ret, s0, hret, call, stack, correctness x0 y0 ret hret s0 call stack⟩
+    CCallAF Extracted.entry sig (vals x y) s ∧ (CStack s 0 8) ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      (∃ v, Returned sig (s.setRet ret) s' v ∧ (v = quad (x + y) (x - y) (x * y) (x ^^^ y) ∧
+        MemFrame (s.setRet ret).mem s'.mem [(((s.setRet ret).regs 7).toNat, ((s.setRet ret).regs 7).toNat + 32)]))) :=
+  ⟨x0, y0, ret, s0, hret, call, stack, (correctness x0 y0) s0 call stack ret hret⟩
 
 end Witness
 

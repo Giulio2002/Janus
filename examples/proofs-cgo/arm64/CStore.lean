@@ -16,6 +16,7 @@ theorem correctness (p v : BitVec 64) :
     CEnsures Extracted.program Extracted.entry [p, v]
       (fun s => p.toNat + 8 ≤ 2 ^ 48 ∧ s.mem.accessible p.toNat 8 true = true)
       (fun s s' => s'.mem = s.mem.writeLE p.toNat 8 v.toNat) := by
+  janus_ensures_old
   intro ret hret s hs ⟨hb, hacc⟩
   janus_intro hs.call
   janus_run
@@ -33,19 +34,19 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
 
-theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [BitVec.ofNat 64 P, v0] s0 :=
-  ⟨⟨rfl, rfl, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩, by decide, by decide⟩
+theorem call : CCallF Extracted.entry [BitVec.ofNat 64 P, v0] s0 :=
+  ⟨⟨rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩, by first | decide | simp | omega, by decide⟩
 
 theorem pre : (BitVec.ofNat 64 P).toNat + 8 ≤ 2 ^ 48 ∧ s0.mem.accessible (BitVec.ofNat 64 P).toNat 8 true = true :=
   ⟨by decide, by decide⟩
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (p v : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [p, v] s ∧
+    CCallF Extracted.entry [p, v] s ∧
     (p.toNat + 8 ≤ 2 ^ 48 ∧ s.mem.accessible p.toNat 8 true = true) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      s'.mem = s.mem.writeLE p.toNat 8 v.toNat) :=
-  ⟨_, v0, RET, s0, hret, call, pre, correctness _ v0 RET hret s0 call pre⟩
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      s'.mem = (s.setRet ret).mem.writeLE p.toNat 8 v.toNat) :=
+  ⟨_, v0, RET, s0, hret, call, pre, correctness _ v0 s0 call pre RET hret⟩
 
 end Witness
 

@@ -384,18 +384,19 @@ theorem correctness (xs : List (BitVec 64)) (hk : xs.length < 2 ^ 31) :
   refine CEnsuresA.of_summary (summary xs) ?_ ?_
   · rintro ret s hret hs ⟨hb, htop, hacc, hca, hcb, hco⟩
     simp only [outside_cons, outside_nil, and_true] at hco
-    have ha := hs.args
+    have hs' := hs.setRet (p := Extracted.program) hret.lt64
+    have ha := hs'.args
     have hst : (sig xs).start = {} := rfl
     simp only [SysV.Sig.passing, hst] at ha
     simp only [sig, SysV.assignAll, assign_n] at ha
-    rw [argsAt_cons, argsAt_ints_gen s _ xs (by decide) (by decide) (by decide)] at ha
+    rw [argsAt_cons, argsAt_ints_gen (s.setRet ret) _ xs (by decide) (by decide) (by decide)] at ha
     obtain ⟨hn, hargs⟩ := ha
     simp only [ArgAt, PiecesAt, PieceAt, bytesOf, Nat.pow_zero, Nat.div_one, and_true,
       Nat.reducePow] at hn
     exact { n := by rw [Nat.mod_eq_of_lt (by omega : xs.length < 4294967296)] at hn; simpa using hn
             len := hk, args := hargs, b := hb, top := htop, acc := hacc, ca := hca, cb := hcb,
-            co := by omega, ra := hs.ret_lt hret, df := hs.df, al := hs.al }
-  · rintro s s' - ⟨hsp, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hx, hmf, h0⟩
+            co := by simp only [GoABI.setRet_regs, GoABI.setRet_fsBase]; omega, ra := hs'.ret_lt hret, df := hs'.df, al := hs'.al }
+  · rintro s ret s' - ⟨hsp, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hx, hmf, h0⟩
     refine ⟨CReturn.of_eqs hsp h3 h5 h12 h13 h14 h15 hdf hmx hfw, _, ?_, rfl, hmf⟩
     have : SysV.result (.int 8 true) = .direct [⟨0, 8, .gpr 0⟩] := by decide
     simp only [Returned, sig, this, ResultAt, PiecesAt, and_true, pieceAt_gpr_word, h0]
@@ -422,14 +423,13 @@ theorem frame : Frame s0 := by
   refine ⟨by decide, by decide, by decide, by decide, by decide, ?_⟩
   simp only [outside_cons, outside_nil, and_true]; decide
 
-theorem call : CCallA (Extracted.program.withExit ret) Extracted.entry (sig [])
+theorem call : CCallAF Extracted.entry (sig [])
     ((([] : List (BitVec 64)).length) :: ([] : List (BitVec 64)).map BitVec.toNat) s0 := by
-  refine ⟨rfl, by decide, by decide, rfl, ?_, ?_, ?_⟩
+  refine ⟨rfl, by decide, rfl, ?_, ?_, ?_⟩
   · have hst : (sig ([] : List (BitVec 64))).start = {} := rfl
     simp only [SysV.Sig.passing, hst]
     simp only [sig, SysV.assignAll, assign_n]
-    simp [argsAt_cons, ArgsAt, ArgAt, PiecesAt, PieceAt, bytesOf, s0]
-    simp [SysV.assignAll, ArgsAt]
+    simp [ArgsAtF, ArgAtF, PiecesAt, PieceAt, bytesOf, s0, SysV.assignAll]
   · intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht
     have : SysV.result (.int 8 true) = .direct [⟨0, 8, .gpr 0⟩] := by decide
     rw [this] at hr; cases hr
@@ -438,12 +438,12 @@ theorem call : CCallA (Extracted.program.withExit ret) Extracted.entry (sig [])
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (xs : List (BitVec 64)) (ret : Nat) (s : State), xs.length < 2 ^ 31 ∧
     RetAddr Extracted.program ret ∧
-    CCallA (Extracted.program.withExit ret) Extracted.entry (sig xs) (xs.length :: xs.map BitVec.toNat) s ∧
+    CCallAF Extracted.entry (sig xs) (xs.length :: xs.map BitVec.toNat) s ∧
     Frame s ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      (∃ v, Returned (sig xs) s s' v ∧ (v = (psum xs xs.length).toNat ∧
-        MemFrame s.mem s'.mem [((s.regs 4).toNat - 88, (s.regs 4).toNat)]))) :=
-  ⟨[], ret, s0, by decide, hret, call, frame, correctness [] (by decide) ret hret s0 call frame⟩
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      (∃ v, Returned (sig xs) (s.setRet ret) s' v ∧ (v = (psum xs xs.length).toNat ∧
+        MemFrame (s.setRet ret).mem s'.mem [(((s.setRet ret).regs 4).toNat - 88, ((s.setRet ret).regs 4).toNat)]))) :=
+  ⟨[], ret, s0, by decide, hret, call, frame, (correctness [] (by decide)) s0 call frame ret hret⟩
 
 end Witness
 

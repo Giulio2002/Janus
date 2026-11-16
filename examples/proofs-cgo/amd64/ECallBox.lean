@@ -87,7 +87,8 @@ theorem go_spec (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (Ha : RtRea
     (hnew : NewobjectContract64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 Ha) (a : W64) :
     EnsuresC (Extracted.program.link impl) Contract.none goFn [a] (GoPre rt Ha a) (GoPost rt a) := by
-  intro ret hret u hu ⟨⟨hg1, hg2, hg3⟩, hb, ha, hw, hgo, hab, haw, hao, hart, hal, ⟨ht1, ht2⟩, hts, hpb,
+  janus64_ensures_old [Proof.GoPre, Proof.gsBox, Proof.ROK, Janus.Contracts.TypeOK, Proof.boxType, Janus.Contracts.typSize, Janus.Contracts.typPtrBytes]
+  intro ret hret u hu ⟨⟨hg1, hg2, hg3, hg4⟩, hb, ha, hw, hgo, hab, haw, hao, hart, hal, ⟨ht1, ht2⟩, hts, hpb,
     hto, hrto, hH⟩
   simp only [outside_cons, outside_nil, and_true, gsBox] at hgo hao hto hrto hb hw
   simp only [stackguard0, regG, stackguard0Offset, GoABI.regSP] at hg1 hg2 hg3
@@ -153,15 +154,18 @@ def CPre (rt rtc : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (s : State) 
   (∀ a n w, s.mem.accessible a n w = true → Outside a n rt) ∧
   Outside ((s.regs 4).toNat - win) win rtc ∧
   H [goFn, gsBox] (s.mem.readLE (tlsGSlot Extracted.tls s.fsBase) 8) ((s.regs 4).toNat - 152)
-    (Janus.Contracts.rtView rtc s.mem)
+    (Janus.Contracts.rtView rtc s.mem) ∧
+  Outside (s.regs 4).toNat 8 rtc ∧
+  Outside (tlsGSlot Extracted.tls s.fsBase) 8 [((s.regs 4).toNat, (s.regs 4).toNat + 8)]
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 8000000 in
 theorem c_spec (impl : List Amd64.Segment) (rt rtc : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (x : W64) :
     CEnsuresC (Extracted.program.link impl) (CallbackSpec Extracted.tls goFn (G rt (cbk rtc H)) E) Extracted.entry [x]
       (CPre rt rtc H) (fun _ s' => s'.regs 0 = x + 1) := by
+  janus64_ensures_old [Janus.Amd64.CABI.regSP, Proof.CPre, Janus.Amd64.CABI.CStack, Proof.win, Proof.rid, Proof.ctxf, Proof.goFn, Proof.gsBox, Janus.Amd64.FFI.cbStackScratch]
   intro ret hret s hs hpre
-  obtain ⟨hd, ⟨hal, hb, ha, hw⟩, hra, hrv, hca, hcv, hfb, hfl, hga, hro, hco, hgo, hto, hct, hrt, hcrt, hrtw, hH⟩ := hpre
+  obtain ⟨hd, ⟨hal, hb, ha, hw⟩, hra, hrv, hca, hcv, hfb, hfl, hga, hro, hco, hgo, hto, hct, hrt, hcrt, hrtw, hH, hrts, hgsl⟩ := hpre
   have et1 : Extracted.tls.x64Off = janus_eval% Extracted.tls.x64Off := rfl
   have et2 : Extracted.tls.varOff "runtime.tlsg" = janus_eval% (Extracted.tls.varOff "runtime.tlsg") := rfl
   simp only [tlsGSlot, TLSImage.x64Addr, et1, et2] at hH
@@ -368,6 +372,10 @@ theorem hret : RetAddr (Extracted.program.link implAt) RET := RetAddr.of_check (
 theorem call : CCall ((Extracted.program.link implAt).withExit RET) Extracted.entry [7#64] s0 :=
   ⟨rfl, by decide +kernel, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
 
+
+theorem call_at0 : CCallF Extracted.entry [7#64] s0 :=
+  ⟨rfl, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
+
 theorem data : CProg.DataLoaded mem0 := by
   unfold Amd64.Program.DataLoaded; decide +kernel
 
@@ -453,16 +461,16 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H
     (rtc : List (Nat × Nat)) (Hc : RtReady) (x : W64) (ret : Nat) (s : State),
     NewobjectContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.newobject") rt 4096 Ha ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CCall ((Extracted.program.link impl).withExit ret) Extracted.entry [x] s ∧ CPre rt rtc Hc s ∧
+    CCallF Extracted.entry [x] s ∧ CPre rt rtc Hc s ∧
     (∃ u, ROK rt Ha u) ∧
     (∃ s_c : State, s_c.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
       NewobjectPre64 4096 s_c ∧ Ready64 Ha rt [(s_c.regs 0).toNat] s_c) ∧
     ReturnsC ((Extracted.program.link impl).withExit ret)
       (CgoCallback Extracted.tls (Extracted.program.link impl) Contract.none (ROK rt Ha) (cbk rtc Hc))
-      (fun s' => CReturn s s' ∧ (s'.regs 0 = x + 1)) s :=
-  ⟨implAt, rtW, HaW, [], fun _ _ _ _ => True, 7#64, RET, s0, newobject_impl, hret, call, pre, ⟨u0, rok⟩,
+      (fun s' => CReturn (s.setRet ret) s' ∧ (s'.regs 0 = x + 1)) (s.setRet ret) :=
+  ⟨implAt, rtW, HaW, [], fun _ _ _ _ => True, 7#64, RET, s0, newobject_impl, hret, call_at0, pre, ⟨u0, rok⟩,
     ⟨c0, rfl, c0_pre⟩,
-    correctness implAt rtW HaW newobject_impl [] (fun _ _ _ _ => True) 7#64 RET hret s0 call pre⟩
+    correctness implAt rtW HaW newobject_impl [] (fun _ _ _ _ => True) 7#64 s0 call_at0 pre RET hret⟩
 
 end Witness
 

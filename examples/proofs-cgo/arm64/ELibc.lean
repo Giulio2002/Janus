@@ -51,6 +51,7 @@ def Post (src d : BitVec 64) (n : Nat) (s s' : State) : Prop :=
 set_option maxHeartbeats 8000000 in
 theorem correctness (src d : BitVec 64) (n : Nat) :
     CEnsuresC Extracted.program Libc Extracted.entry [src, d] (Pre src d n) (Post src d n) := by
+  janus_ensures_old [Proof.Pre, Janus.Contracts.Libc.CStr, Janus.CABI.CStack, Janus.Contracts.Libc.libcStack]
   intro ret hret s hs ⟨hstr, hdb, hda, hdisj, ⟨hal, hb, ha, hw⟩, hos, hod, hne⟩
   apply ReturnsC.of_reaches
   janus_intro hs.call
@@ -244,9 +245,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
 
-theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [BitVec.ofNat 64 S, BitVec.ofNat 64 D] s0 :=
-  ⟨⟨rfl, rfl, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩,
-    by decide, by decide⟩
+theorem call : CCallF Extracted.entry [BitVec.ofNat 64 S, BitVec.ofNat 64 D] s0 :=
+  ⟨⟨rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩, by first | decide | simp | omega, by decide⟩
 
 set_option maxRecDepth 100000 in
 theorem pre : Pre (BitVec.ofNat 64 S) (BitVec.ofNat 64 D) 0 s0 := by
@@ -257,9 +257,9 @@ theorem pre : Pre (BitVec.ofNat 64 S) (BitVec.ofNat 64 D) 0 s0 := by
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (src d : BitVec 64) (n : Nat) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [src, d] s ∧ Pre src d n s ∧
-    ReturnsC (Extracted.program.withExit ret) Libc (fun s' => CReturn s s' ∧ (Post src d n s s')) s :=
-  ⟨_, _, 0, RET, s0, hret, call, pre, correctness _ _ 0 RET hret s0 call pre⟩
+    CCallF Extracted.entry [src, d] s ∧ Pre src d n s ∧
+    ReturnsC (Extracted.program.withExit ret) Libc (fun s' => CReturn (s.setRet ret) s' ∧ (Post src d n (s.setRet ret) s')) (s.setRet ret) :=
+  ⟨_, _, 0, RET, s0, hret, call, pre, correctness _ _ 0 s0 call pre RET hret⟩
 
 end Witness
 

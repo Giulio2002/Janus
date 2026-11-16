@@ -42,6 +42,7 @@ set_option maxRecDepth 100000 in
 set_option maxHeartbeats 8000000 in
 theorem correctness (J : JmpModel64) (v : BitVec 64) :
     CEnsuresC Extracted.program (SetJmp J) Extracted.entry [v] Pre (Post v) := by
+  janus64_ensures_old [Proof.Pre, Janus.Amd64.CABI.CStack, Janus.Contracts.Libc.libcStack, Proof.env, Janus.Contracts.LibcAmd64.jmpBufSize64, Proof.sp]
   intro ret hret s hs hpre
   obtain ⟨⟨hal, hb, ha, hw⟩, heb, hea, heo⟩ := hpre
   have he : env = janus_eval% env := rfl
@@ -199,8 +200,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [v0] s0 :=
-  ⟨rfl, by decide +kernel, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
+theorem call : CCallF Extracted.entry [v0] s0 :=
+  ⟨rfl, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
 
 set_option maxRecDepth 100000 in
 theorem pre : Pre s0 := by
@@ -209,9 +210,9 @@ theorem pre : Pre s0 := by
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (J : JmpModel64) (v : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [v] s ∧ Pre s ∧
-    ReturnsC (Extracted.program.withExit ret) (SetJmp J) (fun s' => CReturn s s' ∧ (Post v s s')) s :=
-  ⟨wordModel, v0, ret, s0, hret, call, pre, correctness wordModel v0 ret hret s0 call pre⟩
+    CCallF Extracted.entry [v] s ∧ Pre s ∧
+    ReturnsC (Extracted.program.withExit ret) (SetJmp J) (fun s' => CReturn (s.setRet ret) s' ∧ (Post v (s.setRet ret) s')) (s.setRet ret) :=
+  ⟨wordModel, v0, ret, s0, hret, call, pre, (correctness wordModel v0) s0 call pre ret hret⟩
 
 end Witness
 

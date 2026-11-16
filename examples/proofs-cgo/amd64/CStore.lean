@@ -19,6 +19,7 @@ theorem correctness (p v : BitVec 64) :
       (fun s => CStack s 0 8 ∧ p.toNat + 8 ≤ 2 ^ 48 ∧ s.mem.accessible p.toNat 8 true = true ∧
         Disjoint p 8 (s.regs 4) 8)
       (fun s s' => s'.mem = s.mem.writeLE p.toNat 8 v.toNat) := by
+  janus64_ensures_old [Janus.Amd64.CABI.CStack]
   intro ret hret s hs ⟨⟨_, _, hnw, hacc⟩, hb, hp, hd⟩
   have h_rip := hs.rip
   have h_ret := hs.ret
@@ -49,8 +50,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [p0, v0] s0 :=
-  ⟨rfl, by decide, by decide, by intro i h; simp only [List.length_cons, List.length_nil] at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, by decide, rfl⟩
+theorem call : CCallF Extracted.entry [p0, v0] s0 :=
+  ⟨rfl, by decide, by intro i h; simp only [List.length_cons, List.length_nil] at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, by decide, rfl⟩
 
 theorem pre : CStack s0 0 8 ∧ p0.toNat + 8 ≤ 2 ^ 48 ∧ s0.mem.accessible p0.toNat 8 true = true ∧ Disjoint p0 8 (s0.regs 4) 8 := by
   refine ⟨⟨by decide, by decide, by decide, by decide⟩, by decide, by decide, ?_⟩
@@ -58,9 +59,9 @@ theorem pre : CStack s0 0 8 ∧ p0.toNat + 8 ≤ 2 ^ 48 ∧ s0.mem.accessible p0
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (p : BitVec 64) (v : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [p, v] s ∧ (CStack s 0 8 ∧ p.toNat + 8 ≤ 2 ^ 48 ∧ s.mem.accessible p.toNat 8 true = true ∧ Disjoint p 8 (s.regs 4) 8) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧ (s'.mem = s.mem.writeLE p.toNat 8 v.toNat)) :=
-  ⟨p0, v0, ret, s0, hret, call, pre, correctness p0 v0 ret hret s0 call pre⟩
+    CCallF Extracted.entry [p, v] s ∧ (CStack s 0 8 ∧ p.toNat + 8 ≤ 2 ^ 48 ∧ s.mem.accessible p.toNat 8 true = true ∧ Disjoint p 8 (s.regs 4) 8) ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧ (s'.mem = (s.setRet ret).mem.writeLE p.toNat 8 v.toNat)) :=
+  ⟨p0, v0, ret, s0, hret, call, pre, (correctness p0 v0) s0 call pre ret hret⟩
 
 end Witness
 

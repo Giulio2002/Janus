@@ -374,6 +374,7 @@ theorem correctness (n : BitVec 64) :
     CEnsures Extracted.program Extracted.entry [n] (Pre n)
       (fun s s' => (s'.regs 0).toNat = n.toNat * (n.toNat - 1) / 2 % 2 ^ 64 ∧
         MemFrame s.mem s'.mem [(s.sp.toNat - (48 + T n.toNat), s.sp.toNat)]) := by
+  janus_ensures_old [Proof.Pre, Janus.CABI.CStack, Proof.gslot, Proof.slotOf, Proof.baseOf, Proof.eszOf, Proof.resOf, Proof.spanOf, Proof.cacheOf, Proof.fidxOf, Proof.cOf, Proof.scOf, Proof.sizeToClass8, Proof.nBase]
   intro ret hret s hs ⟨hn, ⟨hal, hb, ha, hw⟩, hga, hgpa, hgo, hgpo⟩
   have e4 : gslot = janus_eval% gslot := rfl
   rw [e4] at hga hgpa hgo hgpo
@@ -444,8 +445,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
 
-theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [n0] s0 :=
-  ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
+theorem call : CCallF Extracted.entry [n0] s0 :=
+  ⟨⟨rfl, by decide, by intro i h; simp at h; subst h; rfl⟩, by first | decide | simp | omega, by decide⟩
 
 set_option maxRecDepth 100000 in
 theorem pre : Pre n0 s0 := by
@@ -455,11 +456,11 @@ theorem pre : Pre n0 s0 := by
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (n : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [n] s ∧ Pre n s ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+    CCallF Extracted.entry [n] s ∧ Pre n s ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
       ((s'.regs 0).toNat = n.toNat * (n.toNat - 1) / 2 % 2 ^ 64 ∧
-        MemFrame s.mem s'.mem [(s.sp.toNat - (48 + T n.toNat), s.sp.toNat)])) :=
-  ⟨n0, RET, s0, hret, call, pre, correctness n0 RET hret s0 call pre⟩
+        MemFrame (s.setRet ret).mem s'.mem [((s.setRet ret).sp.toNat - (48 + T n.toNat), (s.setRet ret).sp.toNat)])) :=
+  ⟨n0, RET, s0, hret, call, pre, correctness n0 s0 call pre RET hret⟩
 
 end Witness
 

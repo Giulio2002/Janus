@@ -460,6 +460,7 @@ def WPost (a : BitVec 64) (t t' : State) : Prop :=
 set_option maxHeartbeats 4000000 in
 theorem wrapper_spec (T a : BitVec 64) :
     CEnsuresC Extracted.program (TopOfStack T) wrapper [a] (WPre a) (WPost a) := by
+  janus_ensures_old [Proof.WPre, Janus.CABI.CStack, Proof.got, Proof.entry]
   intro ret hret t hs ⟨⟨hal, hb, htop, hacc⟩, ha, hfa, hd, hgb, hga, hgo, hGb, hGa, hGo⟩
   apply ReturnsC.of_reaches
   janus_intro hs.call
@@ -560,6 +561,7 @@ set_option maxHeartbeats 4000000 in
 theorem go_spec (a b c d e f g h : BitVec 64) :
     EnsuresC Extracted.program (CgoSpec wrapper G E) Extracted.entry [a, b, c, d, e, f, g, h] GoPre
       (fun _ s' => s'.regs 0 = psum [a, b, c, d, e, f, g, h] 8) := by
+  janus_ensures_old [Proof.GoPre, Janus.Spec.GuardOK, Janus.Spec.StackOK, Proof.fnVar, Proof.wrapper, Proof.alwaysFalse, Proof.got, Proof.entry]
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, htop, hst⟩, hfa, hfv, haa, hav, hgb, hga, hGb, hGa,
     hdg, hdt, hdf, hda, hdgot, hdG⟩
   apply ReturnsC.of_reaches
@@ -658,8 +660,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
 
-theorem setup : CallSetup (Extracted.program.withExit RET) Extracted.entry [(1#64), (2#64), (3#64), (4#64), (5#64), (6#64), (7#64), (8#64)] s0 :=
-  ⟨rfl, rfl, by
+theorem setup : CallSetup0 Extracted.entry [(1#64), (2#64), (3#64), (4#64), (5#64), (6#64), (7#64), (8#64)] s0 :=
+  ⟨rfl, by first | decide | simp | omega, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3 ∨ i = 4 ∨ i = 5 ∨ i = 6 ∨ i = 7) with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> rfl⟩
@@ -676,10 +678,10 @@ theorem pre : GoPre s0 := by
 
 /-- All hypotheses of `correctness` hold together at a concrete call, and the call returns. -/
 theorem nonvacuous : ∃ (a b c d e f g h : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [a, b, c, d, e, f, g, h] s ∧ (GoPre s) ∧
+    CallSetup0 Extracted.entry [a, b, c, d, e, f, g, h] s ∧ (GoPre s) ∧
     ReturnsC (Extracted.program.withExit ret) (CgoCall Extracted.program) (fun s' =>
-      ABIReturnC s s' ∧ ((fun _ s' => s'.regs 0 = psum [a, b, c, d, e, f, g, h] 8) s s')) s :=
-  ⟨1#64, 2#64, 3#64, 4#64, 5#64, 6#64, 7#64, 8#64, RET, s0, hret, setup, pre, correctness (1#64) (2#64) (3#64) (4#64) (5#64) (6#64) (7#64) (8#64) RET hret s0 setup pre⟩
+      ABIReturnC (s.setRet ret) s' ∧ ((fun _ s' => s'.regs 0 = psum [a, b, c, d, e, f, g, h] 8) (s.setRet ret) s')) (s.setRet ret) :=
+  ⟨1#64, 2#64, 3#64, 4#64, 5#64, 6#64, 7#64, 8#64, RET, s0, hret, setup, pre, correctness (1#64) (2#64) (3#64) (4#64) (5#64) (6#64) (7#64) (8#64) s0 setup pre RET hret⟩
 
 end Witness
 

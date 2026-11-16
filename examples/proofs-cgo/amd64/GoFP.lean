@@ -99,6 +99,7 @@ def WPost (a : BitVec 64) (t t' : State) : Prop :=
 set_option maxHeartbeats 4000000 in
 theorem wrapper_spec (T a : BitVec 64) :
     CEnsuresC Extracted.program (TopOfStack T) wrapper [a] (WPre a) (WPost a) := by
+  janus64_ensures_old [Proof.WPre, Janus.Amd64.CABI.CStack, Janus.Amd64.GoABI.GoMXCSR]
   intro ret hret t hs ⟨⟨hal, hb, htop, hacc⟩, ha, hfa, hd, hm⟩
   apply ReturnsC.of_reaches
   have h_rip := hs.rip
@@ -169,7 +170,8 @@ set_option maxHeartbeats 4000000 in
 theorem go_spec (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) :
     EnsuresC Extracted.program (CgoSpec wrapper G E) Extracted.entry [] (GoPre a b c)
       (fun _ s' => (s'.xmm 0).toNat % 2 ^ 64 = mul a b c) := by
-  intro ret hret s hs ⟨ha, hbv, hc, hm, ⟨hg1, hg2, hg3⟩, ⟨hb, htop, hst⟩, ⟨hfs, hfsr, hfsg⟩, hfa, hfv,
+  janus64_ensures_old [Proof.GoPre, Janus.Amd64.GoABI.GoMXCSR, Janus.Amd64.GoABI.StackWritable, Proof.fnVar, Proof.wrapper, Proof.alwaysFalse]
+  intro ret hret s hs ⟨ha, hbv, hc, hm, ⟨hg1, hg2, hg3, hg4⟩, ⟨hb, htop, hst⟩, ⟨hfs, hfsr, hfsg⟩, hfa, hfv,
     haa, hav, hdg, hdt, hdf, hda⟩
   apply ReturnsC.of_reaches
   janus64_intro hs
@@ -273,8 +275,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit RET) Extracted.entry [] s0 :=
-  ⟨rfl, by decide +kernel, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     exact absurd h (by simp), rfl⟩
@@ -292,10 +294,10 @@ theorem pre : GoPre (0x4008000000000000#64) (0x40000000#32) (0x3FF0000000000000#
 
 /-- All hypotheses of `correctness` hold together at a concrete call, and the call returns. -/
 theorem nonvacuous : ∃ (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧ (GoPre a b c s) ∧
+    CallSetup0 Extracted.entry [] s ∧ (GoPre a b c s) ∧
     ReturnsC (Extracted.program.withExit ret) (CgoCall Extracted.program) (fun s' =>
-      ABIReturn s s' ∧ ((fun _ s' => (s'.xmm 0).toNat % 2 ^ 64 = mul a b c) s s')) s :=
-  ⟨0x4008000000000000#64, 0x40000000#32, 0x3FF0000000000000#64, RET, s0, hret, setup, pre, correctness (0x4008000000000000#64) (0x40000000#32) (0x3FF0000000000000#64) RET hret s0 setup pre⟩
+      ABIReturn (s.setRet ret) s' ∧ ((fun _ s' => (s'.xmm 0).toNat % 2 ^ 64 = mul a b c) (s.setRet ret) s')) (s.setRet ret) :=
+  ⟨0x4008000000000000#64, 0x40000000#32, 0x3FF0000000000000#64, RET, s0, hret, setup, pre, correctness (0x4008000000000000#64) (0x40000000#32) (0x3FF0000000000000#64) s0 setup pre RET hret⟩
 
 end Witness
 

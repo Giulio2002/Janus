@@ -98,8 +98,10 @@ theorem correctness (ax ay bx by_ n : BitVec 64) :
     CEnsuresR Extracted.program Extracted.entry sig (vals ax ay bx by_ n) (fun s => s.fpcr = 0)
       (fun _ _ v => v = pair (BitVec.ofNat 64 (prod ax ay bx by_)) (n + 1)) :=
   CEnsuresA.of_summary (summary ax ay bx by_ n)
-    (fun _ _ hret hs hf => ⟨hs.args, hf, hs.lr_ok hret⟩)
-    (fun _ _ _ ⟨hsp, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, hfc, v8, v9, v10, v11, v12,
+    (fun ret _ hret hs hf => by
+      have hs' := hs.setRet (p := Extracted.program) ret
+      exact ⟨hs'.args, hf, hs'.lr_ok hret⟩)
+    (fun _ _ _ _ ⟨hsp, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, hfc, v8, v9, v10, v11, v12,
         v13, v14, v15, _, h0, h1⟩ =>
       ⟨⟨hsp, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, hfc, v8, v9, v10, v11, v12, v13,
         v14, v15⟩, _, by
@@ -129,16 +131,16 @@ theorem spre : SPre (vals ax0 ay0 bx0 by0 n0) s0 :=
   (spre_iff ax0 ay0 bx0 by0 n0 s0).2 ⟨by decide, by decide, by decide, by decide, by decide, by decide,
     by decide, by decide⟩
 
-theorem call : CCallA (Extracted.program.withExit RET) Extracted.entry sig (vals ax0 ay0 bx0 by0 n0) s0 :=
-  ⟨rfl, rfl, by decide, spre.1, by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr⟩
+theorem call : CCallAF Extracted.entry sig (vals ax0 ay0 bx0 by0 n0) s0 :=
+  ⟨rfl, by decide, spre.1, by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr⟩
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (ax ay bx by_ n : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals ax ay bx by_ n) s ∧ (s.fpcr = 0) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      (∃ v, Returned sig s s' v ∧ (v = pair (BitVec.ofNat 64 (prod ax ay bx by_)) (n + 1)))) :=
+    CCallAF Extracted.entry sig (vals ax ay bx by_ n) s ∧ (s.fpcr = 0) ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      (∃ v, Returned sig (s.setRet ret) s' v ∧ (v = pair (BitVec.ofNat 64 (prod ax ay bx by_)) (n + 1)))) :=
   ⟨ax0, ay0, bx0, by0, n0, RET, s0, hret, call, rfl,
-    correctness ax0 ay0 bx0 by0 n0 RET hret s0 call rfl⟩
+    correctness ax0 ay0 bx0 by0 n0 s0 call rfl RET hret⟩
 
 end Witness
 

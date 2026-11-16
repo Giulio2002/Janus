@@ -54,6 +54,7 @@ set_option maxHeartbeats 8000000 in
 set_option maxRecDepth 100000 in
 theorem correctness (src d : BitVec 64) (n : Nat) :
     CEnsuresC Extracted.program Libc Extracted.entry [src, d] (Pre src d n) (Post src d n) := by
+  janus64_ensures_old [Proof.Pre, Janus.Amd64.CABI.CStack, Janus.Contracts.Libc.libcStack, Proof.sp]
   intro ret hret s hs ⟨hstr, hdb, hda, hdisj, ⟨hal, hb, ha, hw⟩, hos, hod, hne⟩
   apply ReturnsC.of_reaches
   have h_rip := hs.rip
@@ -313,8 +314,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [BitVec.ofNat 64 S, BitVec.ofNat 64 D] s0 :=
-  ⟨rfl, by decide +kernel, by decide, by
+theorem call : CCallF Extracted.entry [BitVec.ofNat 64 S, BitVec.ofNat 64 D] s0 :=
+  ⟨rfl, by decide, by
     intro i h; simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, by decide, rfl⟩
 
@@ -327,9 +328,9 @@ theorem pre : Pre (BitVec.ofNat 64 S) (BitVec.ofNat 64 D) 0 s0 := by
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (src d : BitVec 64) (n : Nat) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [src, d] s ∧ Pre src d n s ∧
-    ReturnsC (Extracted.program.withExit ret) Libc (fun s' => CReturn s s' ∧ (Post src d n s s')) s :=
-  ⟨_, _, 0, ret, s0, hret, call, pre, correctness _ _ 0 ret hret s0 call pre⟩
+    CCallF Extracted.entry [src, d] s ∧ Pre src d n s ∧
+    ReturnsC (Extracted.program.withExit ret) Libc (fun s' => CReturn (s.setRet ret) s' ∧ (Post src d n (s.setRet ret) s')) (s.setRet ret) :=
+  ⟨_, _, 0, ret, s0, hret, call, pre, (correctness _ _ 0) s0 call pre ret hret⟩
 
 end Witness
 

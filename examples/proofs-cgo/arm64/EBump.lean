@@ -45,6 +45,7 @@ theorem correctness (x : BitVec 64) :
         s.mem.accessible counter 8 true = true)
       (fun s s' => (s'.regs 0).toNat = bumped s.mem x ∧
         s'.mem = s.mem.writeLE counter 8 (bumped s.mem x)) := by
+  janus_ensures_old [Proof.scale, Proof.counter]
   intro ret hret s hs ⟨hd, hsc, hco⟩
   janus_intro hs.call
   janus_data hd []
@@ -76,8 +77,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
 
-theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [x0] s0 :=
-  ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
+theorem call : CCallF Extracted.entry [x0] s0 :=
+  ⟨⟨rfl, by decide, by intro i h; simp at h; subst h; rfl⟩, by first | decide | simp | omega, by decide⟩
 
 theorem dataLoaded : Extracted.program.DataLoaded wm := by
   unfold Janus.Program.DataLoaded
@@ -89,13 +90,13 @@ theorem pre : Extracted.program.DataLoaded s0.mem ∧ s0.mem.accessible scale 8 
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (x : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [x] s ∧
+    CCallF Extracted.entry [x] s ∧
     (Extracted.program.DataLoaded s.mem ∧ s.mem.accessible scale 8 false = true ∧
       s.mem.accessible counter 8 true = true) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      ((s'.regs 0).toNat = bumped s.mem x ∧
-        s'.mem = s.mem.writeLE counter 8 (bumped s.mem x))) :=
-  ⟨x0, RET, s0, hret, call, pre, correctness x0 RET hret s0 call pre⟩
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      ((s'.regs 0).toNat = bumped (s.setRet ret).mem x ∧
+        s'.mem = (s.setRet ret).mem.writeLE counter 8 (bumped (s.setRet ret).mem x))) :=
+  ⟨x0, RET, s0, hret, call, pre, correctness x0 s0 call pre RET hret⟩
 
 end Witness
 

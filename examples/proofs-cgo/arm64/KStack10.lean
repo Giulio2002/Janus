@@ -94,8 +94,10 @@ theorem correctness (a b c d e f g h : BitVec 64) (i : BitVec 32) (j : BitVec 64
     CEnsuresR Extracted.program Extracted.entry sig (vals a b c d e f g h i j) (fun _ => True)
       (fun _ _ v => v = (spec a b c d e f g h i j).toNat) :=
   CEnsuresA.of_summary (summary a b c d e f g h i j)
-    (fun _ _ hret hs _ => ⟨hs.args, hs.spAligned, hs.lr_ok hret⟩)
-    (fun _ _ _ ⟨hsp, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, hfc, hv, _, h0⟩ =>
+    (fun ret _ hret hs _ => by
+      have hs' := hs.setRet (p := Extracted.program) ret
+      exact ⟨hs'.args, hs'.spAligned, hs'.lr_ok hret⟩)
+    (fun _ _ _ _ ⟨hsp, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, hfc, hv, _, h0⟩ =>
       ⟨CReturn.of_eqs hsp h19 h20 h21 h22 h23 h24 h25 h26 h27 h28 h29 hfc hv, _,
         by simp only [Returned, sig, result, ResultAt, PiecesAt, and_true, pieceAt_gpr_word, h0], rfl⟩)
 
@@ -123,18 +125,18 @@ theorem spre : SPre (vals 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0) s0 :=
       ⟨by decide, by decide, by decide +kernel⟩, ⟨by decide, by decide, by decide +kernel⟩,
       by decide, by decide, by decide⟩
 
-theorem call : CCallA (Extracted.program.withExit RET) Extracted.entry sig
+theorem call : CCallAF Extracted.entry sig
     (vals 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0) s0 :=
-  ⟨rfl, rfl, by decide, spre.1, by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr⟩
+  ⟨rfl, by decide, spre.1, by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr⟩
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (a b c d e f g h : BitVec 64) (i : BitVec 32) (j : BitVec 64) (ret : Nat) (s : State),
     RetAddr Extracted.program ret ∧
-    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals a b c d e f g h i j) s ∧ True ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      (∃ v, Returned sig s s' v ∧ (v = (spec a b c d e f g h i j).toNat))) :=
+    CCallAF Extracted.entry sig (vals a b c d e f g h i j) s ∧ True ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      (∃ v, Returned sig (s.setRet ret) s' v ∧ (v = (spec a b c d e f g h i j).toNat))) :=
   ⟨1#64, 2#64, 3#64, 4#64, 5#64, 6#64, 7#64, 8#64, i0, j0, RET, s0, hret, call, trivial,
-    correctness 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0 RET hret s0 call trivial⟩
+    correctness 1#64 2#64 3#64 4#64 5#64 6#64 7#64 8#64 i0 j0 s0 call trivial RET hret⟩
 
 end Witness
 

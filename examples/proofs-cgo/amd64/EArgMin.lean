@@ -299,6 +299,7 @@ theorem correctness (a n : BitVec 64) :
         Outside a.toNat (8 * n.toNat) [((s.regs 4).toNat - 48, (s.regs 4).toNat + 8)])
       (fun s s' => (s'.regs 0).toNat = best BitVec.slt (word s.mem a.toNat) (n.toNat - 1) ∧
         MemFrame s.mem s'.mem [((s.regs 4).toNat - 48, (s.regs 4).toNat)]) := by
+  janus64_ensures_old [Janus.Amd64.CABI.CStack]
   intro ret hret s hs ⟨hab, hac, ⟨hsa, hsb, hsc, hsw⟩, hout⟩
   have h_rip := hs.rip
   have h_ret := hs.ret
@@ -336,8 +337,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [a0, n0] s0 :=
-  ⟨rfl, by decide +kernel, by decide, by
+theorem call : CCallF Extracted.entry [a0, n0] s0 :=
+  ⟨rfl, by decide, by
     intro i h; simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, by decide, rfl⟩
 
@@ -349,14 +350,14 @@ theorem pre : a0.toNat + 8 * n0.toNat ≤ 2 ^ 48 ∧
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (a n : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [a, n] s ∧
+    CCallF Extracted.entry [a, n] s ∧
     (a.toNat + 8 * n.toNat ≤ 2 ^ 48 ∧
       s.mem.accessible a.toNat (8 * n.toNat) false = true ∧ CStack s 48 8 ∧
       Outside a.toNat (8 * n.toNat) [((s.regs 4).toNat - 48, (s.regs 4).toNat + 8)]) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      ((s'.regs 0).toNat = best BitVec.slt (word s.mem a.toNat) (n.toNat - 1) ∧
-        MemFrame s.mem s'.mem [((s.regs 4).toNat - 48, (s.regs 4).toNat)])) :=
-  ⟨a0, n0, ret, s0, hret, call, pre, correctness a0 n0 ret hret s0 call pre⟩
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      ((s'.regs 0).toNat = best BitVec.slt (word (s.setRet ret).mem a.toNat) (n.toNat - 1) ∧
+        MemFrame (s.setRet ret).mem s'.mem [(((s.setRet ret).regs 4).toNat - 48, ((s.setRet ret).regs 4).toNat)])) :=
+  ⟨a0, n0, ret, s0, hret, call, pre, (correctness a0 n0) s0 call pre ret hret⟩
 
 end Witness
 

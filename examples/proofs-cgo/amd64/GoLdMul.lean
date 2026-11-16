@@ -83,6 +83,7 @@ theorem frame_store10 {m m' : Memory} {rs : List (Nat × Nat)} {a v v' : Nat} (h
 set_option maxHeartbeats 4000000 in
 theorem wrapper_spec (T a : BitVec 64) :
     CEnsuresC Extracted.program (TopOfStack T) wrapper [a] (WPre a) (WPost a) := by
+  janus64_ensures_old [Proof.WPre, Janus.Amd64.CABI.CStack, Proof.Away, Proof.frameA, Proof.frameB, Proof.frameR]
   intro ret hret t hs ⟨⟨hal, hb, htop, hacc⟩, ha, hfa, hd, hab, haa, had, hbb, hba, hbd, hrb, hra, hrd,
     ⟨htags, hes, htp⟩, hcw⟩
   apply ReturnsC.of_reaches
@@ -158,7 +159,8 @@ set_option maxHeartbeats 20000000 in
 theorem go_spec (a b r : BitVec 64) :
     EnsuresC Extracted.program (CgoSpec wrapper G E) Extracted.entry [a, b, r] (GoPre a b r)
       (fun s s' => s'.mem.readLE r.toNat 10 = prod s.mem a.toNat b.toNat) := by
-  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hb, htop, hst⟩, ⟨hfs, hfsr, hfsg⟩, hx87, hfcw, hab, haa, hbb, hba,
+  janus64_ensures_old [Proof.GoPre, Janus.Amd64.GoABI.StackWritable, Proof.fnVar, Proof.wrapper, Proof.alwaysFalse, Proof.Shared]
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3, hg4⟩, ⟨hb, htop, hst⟩, ⟨hfs, hfsr, hfsg⟩, hx87, hfcw, hab, haa, hbb, hba,
     hrb, hra, hfa, hfv, haf, hav, hdg, hdt, hdf, hda, hdA, hdB, hdR, hdRA⟩
   apply ReturnsC.of_reaches
   janus64_intro hs
@@ -351,8 +353,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide)
 
-theorem setup : CallSetup (Extracted.program.withExit RET) Extracted.entry [(BitVec.ofNat 64 P), (BitVec.ofNat 64 (P + 0x1000)), (BitVec.ofNat 64 (P + 0x2000))] s0 :=
-  ⟨rfl, by decide +kernel, rfl, by decide, by
+theorem setup : CallSetup0 Extracted.entry [(BitVec.ofNat 64 P), (BitVec.ofNat 64 (P + 0x1000)), (BitVec.ofNat 64 (P + 0x2000))] s0 :=
+  ⟨rfl, rfl, by decide, by
     intro i h
     simp only [List.length_cons, List.length_nil] at h
     rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl, rfl⟩
@@ -371,10 +373,10 @@ theorem pre : GoPre (BitVec.ofNat 64 P) (BitVec.ofNat 64 (P + 0x1000)) (BitVec.o
 
 /-- All hypotheses of `correctness` hold together at a concrete call, and the call returns. -/
 theorem nonvacuous : ∃ (a b r : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CallSetup (Extracted.program.withExit ret) Extracted.entry [a, b, r] s ∧ (GoPre a b r s) ∧
+    CallSetup0 Extracted.entry [a, b, r] s ∧ (GoPre a b r s) ∧
     ReturnsC (Extracted.program.withExit ret) (CgoCall Extracted.program) (fun s' =>
-      ABIReturn s s' ∧ ((fun s s' => s'.mem.readLE r.toNat 10 = prod s.mem a.toNat b.toNat) s s')) s :=
-  ⟨BitVec.ofNat 64 P, BitVec.ofNat 64 (P + 0x1000), BitVec.ofNat 64 (P + 0x2000), RET, s0, hret, setup, pre, correctness (BitVec.ofNat 64 P) (BitVec.ofNat 64 (P + 0x1000)) (BitVec.ofNat 64 (P + 0x2000)) RET hret s0 setup pre⟩
+      ABIReturn (s.setRet ret) s' ∧ ((fun s s' => s'.mem.readLE r.toNat 10 = prod s.mem a.toNat b.toNat) (s.setRet ret) s')) (s.setRet ret) :=
+  ⟨BitVec.ofNat 64 P, BitVec.ofNat 64 (P + 0x1000), BitVec.ofNat 64 (P + 0x2000), RET, s0, hret, setup, pre, correctness (BitVec.ofNat 64 P) (BitVec.ofNat 64 (P + 0x1000)) (BitVec.ofNat 64 (P + 0x2000)) s0 setup pre RET hret⟩
 
 end Witness
 

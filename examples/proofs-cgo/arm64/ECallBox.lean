@@ -90,6 +90,7 @@ theorem go_spec (impl : List Segment) (rt : List (Nat × Nat)) (Ha : RtReady)
     (hnew : NewobjectContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 Ha) (a : W64) :
     EnsuresC (Extracted.program.link impl) Contract.none goFn [a] (GoPre rt Ha a) (GoPost rt a) := by
+  janus_ensures_old [Proof.GoPre, Janus.Spec.GuardOK, Janus.Spec.StackOK, Proof.gsBox, Proof.ROK, Janus.Contracts.TypeOK, Proof.boxType, Janus.Contracts.typSize, Janus.Contracts.typPtrBytes]
   intro ret hret u hu ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hgo, hab, haw, hao, hart, ⟨ht1, ht2⟩, hts, hpb,
     hto, hrto, hH⟩
   simp only [outside_cons, outside_nil, and_true, gsBox] at hgo hao hto hrto hb hw
@@ -181,6 +182,7 @@ set_option maxHeartbeats 8000000 in
 theorem c_spec (impl : List Segment) (rt rtc : List (Nat × Nat)) (Hc : RtReady) (x : W64) :
     CEnsuresC (Extracted.program.link impl) (CallbackSpec Extracted.tls goFn (G rt (cbk rtc Hc)) E) Extracted.entry [x]
       (CPre rt rtc Hc) (fun _ s' => s'.regs 0 = x + 1) := by
+  janus_ensures_old [Proof.CPre, Janus.CABI.CStack, Proof.win, Proof.rid, Proof.ctxf, Proof.iscgo, Proof.slot, Proof.gslot, Proof.goFn, Proof.gsBox, Janus.FFI.cbStackScratch, Proof.slotOf, Proof.baseOf, Proof.eszOf, Proof.resOf, Proof.spanOf, Proof.cacheOf, Proof.fidxOf, Proof.cOf, Proof.scOf, Proof.sizeToClass8, Proof.nBase]
   intro ret hret s hs hpre
   obtain ⟨hd, ⟨hal, hb, ha, hw⟩, hra, hrv, hca, hcv, hia, hio, htb, hta, hga, hgpa, hro, hco, hgo, hgpo, hto, hgt,
     hgpt, hct, hcrt, hrt, hH⟩ := hpre
@@ -376,6 +378,10 @@ theorem hret : RetAddr (Extracted.program.link implAt) RET := RetAddr.of_check (
 theorem call : CCall ((Extracted.program.link implAt).withExit RET) Extracted.entry [7#64] s0 :=
   ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
 
+
+theorem call_at0 : CCallF Extracted.entry [7#64] s0 :=
+  ⟨⟨rfl, by decide, by intro i h; simp at h; subst h; rfl⟩, by first | decide | simp | omega, by decide⟩
+
 theorem data : CProg.DataLoaded mem0 := by
   unfold Program.DataLoaded; decide +kernel
 
@@ -461,16 +467,16 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (Ha : Rt
     (rtc : List (Nat × Nat)) (Hc : RtReady) (x : W64) (ret : Nat) (s : State),
     NewobjectContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.newobject") rt 4096 Ha ∧
     RetAddr (Extracted.program.link impl) ret ∧
-    CCall ((Extracted.program.link impl).withExit ret) Extracted.entry [x] s ∧ CPre rt rtc Hc s ∧
+    CCallF Extracted.entry [x] s ∧ CPre rt rtc Hc s ∧
     (∃ u, ROK rt Ha u) ∧
     (∃ s_c : State, s_c.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.newobject") ∧
       NewobjectPre 4096 s_c ∧ Ready Ha rt [(s_c.regs 0).toNat] s_c) ∧
     ReturnsC ((Extracted.program.link impl).withExit ret)
       (CgoCallback Extracted.tls (Extracted.program.link impl) Contract.none (ROK rt Ha) (cbk rtc Hc))
-      (fun s' => CReturn s s' ∧ (s'.regs 0 = x + 1)) s :=
-  ⟨implAt, rtW, HaW, [], fun _ _ _ _ => True, 7#64, RET, s0, newobject_impl, hret, call, pre, ⟨u0, rok⟩,
+      (fun s' => CReturn (s.setRet ret) s' ∧ (s'.regs 0 = x + 1)) (s.setRet ret) :=
+  ⟨implAt, rtW, HaW, [], fun _ _ _ _ => True, 7#64, RET, s0, newobject_impl, hret, call_at0, pre, ⟨u0, rok⟩,
     ⟨c0, rfl, c0_pre⟩,
-    correctness implAt rtW HaW newobject_impl [] (fun _ _ _ _ => True) 7#64 RET hret s0 call pre⟩
+    correctness implAt rtW HaW newobject_impl [] (fun _ _ _ _ => True) 7#64 s0 call_at0 pre RET hret⟩
 
 end Witness
 

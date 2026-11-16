@@ -47,6 +47,7 @@ theorem correctness (p : BitVec 64) :
       (fun s s' => (s'.regs 0).toNat % 2 ^ 32 = (s.mem.readLE p.toNat 4 + 1) % 2 ^ 32 ∧
         s'.mem.readLE p.toNat 4 = (s.mem.readLE p.toNat 4 + 1) % 2 ^ 32 ∧
         MemFrame s.mem s'.mem [(p.toNat, p.toNat + 4), (s.sp.toNat - 16, s.sp.toNat)]) := by
+  janus_ensures_old [Proof.lse, Proof.Witness.k, Janus.CABI.CStack]
   intro ret hret s hs ⟨hal4, hpb, hpw, hla, hlv, ⟨hal, hb, ha, hw⟩, hout, hlo⟩
   janus_intro hs.call
   have hl : lse = janus_eval% lse := rfl
@@ -135,8 +136,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
 
-theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [BitVec.ofNat 64 P] s0 :=
-  ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
+theorem call : CCallF Extracted.entry [BitVec.ofNat 64 P] s0 :=
+  ⟨⟨rfl, by decide, by intro i h; simp at h; subst h; rfl⟩, by first | decide | simp | omega, by decide⟩
 
 theorem pre : (BitVec.ofNat 64 P).toNat % 4 = 0 ∧ (BitVec.ofNat 64 P).toNat + 4 ≤ 2 ^ 48 ∧
     s0.mem.accessible (BitVec.ofNat 64 P).toNat 4 true = true ∧
@@ -151,16 +152,16 @@ theorem pre : (BitVec.ofNat 64 P).toNat % 4 = 0 ∧ (BitVec.ofNat 64 P).toNat + 
 /-- All hypotheses of `correctness` hold together, on the LL/SC path (flag clear, progress
 hypothesis met), and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (p : W64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [p] s ∧
+    CCallF Extracted.entry [p] s ∧
     (p.toNat % 4 = 0 ∧ p.toNat + 4 ≤ 2 ^ 48 ∧ s.mem.accessible p.toNat 4 true = true ∧
       s.mem.accessible lse 1 false = true ∧ (s.mem.readLE lse 1 ≠ 0 ∨ ∃ k, s.exclPass k = true) ∧
       CStack s 16 0 ∧ Outside p.toNat 4 [(s.sp.toNat - 16, s.sp.toNat)] ∧
       Outside lse 1 [(s.sp.toNat - 16, s.sp.toNat)]) ∧ s.mem.readLE lse 1 = 0 ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      ((s'.regs 0).toNat % 2 ^ 32 = (s.mem.readLE p.toNat 4 + 1) % 2 ^ 32 ∧
-        s'.mem.readLE p.toNat 4 = (s.mem.readLE p.toNat 4 + 1) % 2 ^ 32 ∧
-        MemFrame s.mem s'.mem [(p.toNat, p.toNat + 4), (s.sp.toNat - 16, s.sp.toNat)])) :=
-  ⟨_, RET, s0, hret, call, pre, by decide +kernel, correctness _ RET hret s0 call pre⟩
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      ((s'.regs 0).toNat % 2 ^ 32 = ((s.setRet ret).mem.readLE p.toNat 4 + 1) % 2 ^ 32 ∧
+        s'.mem.readLE p.toNat 4 = ((s.setRet ret).mem.readLE p.toNat 4 + 1) % 2 ^ 32 ∧
+        MemFrame (s.setRet ret).mem s'.mem [(p.toNat, p.toNat + 4), ((s.setRet ret).sp.toNat - 16, (s.setRet ret).sp.toNat)])) :=
+  ⟨_, RET, s0, hret, call, pre, by decide +kernel, correctness _ s0 call pre RET hret⟩
 
 end Witness
 

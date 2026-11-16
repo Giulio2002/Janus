@@ -426,6 +426,7 @@ theorem correctness (n : BitVec 64) :
     CEnsures Extracted.program Extracted.entry [n] (Pre n)
       (fun s s' => (s'.regs 0).toNat = n.toNat * (n.toNat - 1) / 2 % 2 ^ 64 ∧
         MemFrame s.mem s'.mem [((s.regs 4).toNat - (24 + T n.toNat), (s.regs 4).toNat)]) := by
+  janus64_ensures_old [Proof.Pre, Janus.Amd64.CABI.CStack, Proof.guard]
   intro ret hret s hs ⟨hn, ⟨hal, hb, ha, hw⟩, hgb, hga, hgo⟩
   have h_rip := hs.rip
   have h_ret := hs.ret
@@ -490,8 +491,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [n0] s0 :=
-  ⟨rfl, by decide +kernel, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
+theorem call : CCallF Extracted.entry [n0] s0 :=
+  ⟨rfl, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
 
 set_option maxRecDepth 100000 in
 theorem pre : Pre n0 s0 := by
@@ -501,11 +502,11 @@ theorem pre : Pre n0 s0 := by
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (n : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [n] s ∧ Pre n s ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+    CCallF Extracted.entry [n] s ∧ Pre n s ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
       ((s'.regs 0).toNat = n.toNat * (n.toNat - 1) / 2 % 2 ^ 64 ∧
-        MemFrame s.mem s'.mem [((s.regs 4).toNat - (24 + T n.toNat), (s.regs 4).toNat)])) :=
-  ⟨n0, ret, s0, hret, call, pre, correctness n0 ret hret s0 call pre⟩
+        MemFrame (s.setRet ret).mem s'.mem [(((s.setRet ret).regs 4).toNat - (24 + T n.toNat), ((s.setRet ret).regs 4).toNat)])) :=
+  ⟨n0, ret, s0, hret, call, pre, (correctness n0) s0 call pre ret hret⟩
 
 end Witness
 

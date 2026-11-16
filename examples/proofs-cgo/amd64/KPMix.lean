@@ -87,10 +87,11 @@ theorem correctness (ax ay bx by_ n : BitVec 64) :
       (fun s => CStack s 0 8 ∧ GoMXCSR s)
       (fun _ _ v => v = pair (BitVec.ofNat 64 (prod ax ay bx by_)) (n + 1)) :=
   CEnsuresA.of_summary (summary ax ay bx by_ n)
-    (fun _ s hret hs ⟨⟨_, _, hnw, hst⟩, hm⟩ => by
+    (fun ret s hret hs ⟨⟨_, _, hnw, hst⟩, hm⟩ => by
       simp only [CABI.regSP, Nat.sub_zero, Nat.zero_add] at hnw hst
-      exact ⟨hs.args, hm, hnw, Janus.Arm64.Memory.accessible_weaken _ hst, hs.ret_lt hret, hs.df⟩)
-    (fun _ _ _ ⟨hsp, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, _, h0, h1⟩ =>
+      have hs' := hs.setRet (p := Extracted.program) hret.lt64
+      exact ⟨hs'.args, hm, hnw, Janus.Arm64.Memory.accessible_weaken _ hst, hs'.ret_lt hret, hs'.df⟩)
+    (fun _ _ _ _ ⟨hsp, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, _, h0, h1⟩ =>
       ⟨⟨hsp, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw⟩, _, by
         simp only [Returned, sig, result, ResultAt, PiecesAt, and_true, PieceAt, bytesOf_pair_lo,
           bytesOf_pair_hi, h1, BitVec.toNat_ofNat, Nat.pow_zero, Nat.div_one, Nat.reducePow] at h0 ⊢
@@ -125,19 +126,19 @@ theorem spre : SPre (vals ax0 ay0 bx0 by0 n0) s0 :=
   (spre_iff ax0 ay0 bx0 by0 n0 s0).2 ⟨by decide, by decide, by decide, by decide, by decide, mx,
     by decide, by decide, by decide, by decide⟩
 
-theorem call : CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals ax0 ay0 bx0 by0 n0) s0 :=
-  ⟨rfl, by decide, by decide, rfl, spre.1, (by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr), (by intro h; simp [sig] at h)⟩
+theorem call : CCallAF Extracted.entry sig (vals ax0 ay0 bx0 by0 n0) s0 :=
+  ⟨rfl, by decide, rfl, spre.1, (by intro t ht hr; simp only [sig, Option.some.injEq] at ht; subst ht; rw [result] at hr; cases hr), (by intro h; simp [sig] at h)⟩
 
 theorem pre : CStack s0 0 8 ∧ GoMXCSR s0 := ⟨⟨by decide, by decide, by decide, by decide⟩, mx⟩
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (ax ay bx by_ n : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals ax ay bx by_ n) s ∧
+    CCallAF Extracted.entry sig (vals ax ay bx by_ n) s ∧
     (CStack s 0 8 ∧ GoMXCSR s) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      (∃ v, Returned sig s s' v ∧ (v = pair (BitVec.ofNat 64 (prod ax ay bx by_)) (n + 1)))) :=
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      (∃ v, Returned sig (s.setRet ret) s' v ∧ (v = pair (BitVec.ofNat 64 (prod ax ay bx by_)) (n + 1)))) :=
   ⟨ax0, ay0, bx0, by0, n0, ret, s0, hret, call, pre,
-    correctness ax0 ay0 bx0 by0 n0 ret hret s0 call pre⟩
+    (correctness ax0 ay0 bx0 by0 n0) s0 call pre ret hret⟩
 
 end Witness
 

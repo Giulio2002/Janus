@@ -34,6 +34,7 @@ theorem correctness (x : BitVec 64) :
       (fun s s' => (s'.regs 0).toNat = (s.mem.readLE (var s) 8 + x.toNat) % 2 ^ 64 ∧
         s'.mem.readLE (var s) 8 = (s.mem.readLE (var s) 8 + x.toNat) % 2 ^ 64 ∧
         MemFrame s.mem s'.mem [(var s, var s + 8), (s.sp.toNat - 16, s.sp.toNat)]) := by
+  janus_ensures_old [Janus.Contracts.Libc.TLSBlock, Janus.CABI.CStack, Proof.var]
   intro ret hret s hs ⟨⟨htb, hta⟩, ⟨hal, hb, ha, hw⟩, hout⟩
   janus_intro hs.call
   have e1 : Extracted.tls.a64Off = janus_eval% Extracted.tls.a64Off := rfl
@@ -64,8 +65,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
 
-theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [x0] s0 :=
-  ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
+theorem call : CCallF Extracted.entry [x0] s0 :=
+  ⟨⟨rfl, by decide, by intro i h; simp at h; subst h; rfl⟩, by first | decide | simp | omega, by decide⟩
 
 theorem pre : TLSBlock Extracted.tls s0 ∧ CStack s0 16 0 ∧ Outside (var s0) 8 [(s0.sp.toNat - 16, s0.sp.toNat)] := by
   refine ⟨⟨by decide +kernel, by decide +kernel⟩, ⟨by decide, by decide, by decide, by decide⟩, ?_⟩
@@ -73,13 +74,13 @@ theorem pre : TLSBlock Extracted.tls s0 ∧ CStack s0 16 0 ∧ Outside (var s0) 
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (x : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [x] s ∧
+    CCallF Extracted.entry [x] s ∧
     (TLSBlock Extracted.tls s ∧ CStack s 16 0 ∧ Outside (var s) 8 [(s.sp.toNat - 16, s.sp.toNat)]) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      ((s'.regs 0).toNat = (s.mem.readLE (var s) 8 + x.toNat) % 2 ^ 64 ∧
-        s'.mem.readLE (var s) 8 = (s.mem.readLE (var s) 8 + x.toNat) % 2 ^ 64 ∧
-        MemFrame s.mem s'.mem [(var s, var s + 8), (s.sp.toNat - 16, s.sp.toNat)])) :=
-  ⟨x0, RET, s0, hret, call, pre, correctness x0 RET hret s0 call pre⟩
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      ((s'.regs 0).toNat = ((s.setRet ret).mem.readLE (var (s.setRet ret)) 8 + x.toNat) % 2 ^ 64 ∧
+        s'.mem.readLE (var (s.setRet ret)) 8 = ((s.setRet ret).mem.readLE (var (s.setRet ret)) 8 + x.toNat) % 2 ^ 64 ∧
+        MemFrame (s.setRet ret).mem s'.mem [(var (s.setRet ret), var (s.setRet ret) + 8), ((s.setRet ret).sp.toNat - 16, (s.setRet ret).sp.toNat)])) :=
+  ⟨x0, RET, s0, hret, call, pre, correctness x0 s0 call pre RET hret⟩
 
 end Witness
 

@@ -91,8 +91,10 @@ theorem correctness (x y : BitVec 64) :
       (fun s s' v => v = quad (x + y) (x - y) (x * y) (x ^^^ y) ∧
         MemFrame s.mem s'.mem [((s.regs 8).toNat, (s.regs 8).toNat + 32)]) :=
   CEnsuresA.of_summary (summary x y)
-    (fun _ _ hret hs _ => ⟨hs.args, hs.retBuf, hs.lr_ok hret⟩)
-    (fun s _ _ ⟨hsp, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, hfc, hv, hm⟩ =>
+    (fun ret _ hret hs _ => by
+      have hs' := hs.setRet (p := Extracted.program) ret
+      exact ⟨hs'.args, hs'.retBuf, hs'.lr_ok hret⟩)
+    (fun s _ _ _ ⟨hsp, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, hfc, hv, hm⟩ =>
       ⟨CReturn.of_eqs hsp h19 h20 h21 h22 h23 h24 h25 h26 h27 h28 h29 hfc hv, _,
         by simp only [Returned, sig, result, ResultAt, size_big, hm, bigMem_read], rfl,
         by rw [hm]; unfold bigMem; janus_frame⟩)
@@ -115,16 +117,16 @@ theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +ker
 theorem spre : SPre (vals x0 y0) s0 :=
   (spre_iff x0 y0 s0).2 ⟨by decide, by decide, by decide, by decide, by decide, by decide⟩
 
-theorem call : CCallA (Extracted.program.withExit RET) Extracted.entry sig (vals x0 y0) s0 :=
-  ⟨rfl, rfl, by decide, spre.1, spre.2.1⟩
+theorem call : CCallAF Extracted.entry sig (vals x0 y0) s0 :=
+  ⟨rfl, by decide, spre.1, spre.2.1⟩
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (x y : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCallA (Extracted.program.withExit ret) Extracted.entry sig (vals x y) s ∧ True ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      (∃ v, Returned sig s s' v ∧ (v = quad (x + y) (x - y) (x * y) (x ^^^ y) ∧
-        MemFrame s.mem s'.mem [((s.regs 8).toNat, (s.regs 8).toNat + 32)]))) :=
-  ⟨x0, y0, RET, s0, hret, call, trivial, correctness x0 y0 RET hret s0 call trivial⟩
+    CCallAF Extracted.entry sig (vals x y) s ∧ True ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      (∃ v, Returned sig (s.setRet ret) s' v ∧ (v = quad (x + y) (x - y) (x * y) (x ^^^ y) ∧
+        MemFrame (s.setRet ret).mem s'.mem [(((s.setRet ret).regs 8).toNat, ((s.setRet ret).regs 8).toNat + 32)]))) :=
+  ⟨x0, y0, RET, s0, hret, call, trivial, correctness x0 y0 s0 call trivial RET hret⟩
 
 end Witness
 

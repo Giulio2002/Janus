@@ -217,15 +217,17 @@ theorem correctness (p n c : BitVec 64) :
       (fun s s' => (s'.regs 0).toNat = countOf s.mem p.toNat (c.toNat % 256) n.toNat ∧ s'.mem = s.mem) :=
   CEnsures.of_summary (summary p n c)
     (fun ret s hret hs ⟨hb, hacc⟩ => by
-      have h0 := hs.call.reg (i := 0) (by simp)
-      have h1 := hs.call.reg (i := 1) (by simp)
-      have h2 := hs.call.reg (i := 2) (by simp)
-      have hlr := hs.call.lr
-      simp only [List.getElem_cons_zero, List.getElem_cons_succ, Program.withExit] at h0 h1 h2 hlr
-      refine ⟨h0, h1, h2, hb, hacc, ?_, ?_⟩ <;> rw [hlr, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hret.lt64]
+      have h0 : s.regs 0 = p := hs.call.args 0 (by simp)
+      have h1 : s.regs 1 = n := hs.call.args 1 (by simp)
+      have h2 : s.regs 2 = c := hs.call.args 2 (by simp)
+      have h0' : (s.setRet ret).regs 0 = p := by rw [setRet_regs_of_ne (by decide)]; exact h0
+      have h1' : (s.setRet ret).regs 1 = n := by rw [setRet_regs_of_ne (by decide)]; exact h1
+      have h2' : (s.setRet ret).regs 2 = c := by rw [setRet_regs_of_ne (by decide)]; exact h2
+      have hlr : (s.setRet ret).regs 30 = BitVec.ofNat 64 ret := setRet_regs_lr
+      refine ⟨h0', h1', h2', hb, hacc, ?_, ?_⟩ <;> rw [hlr, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hret.lt64]
       · exact hret.aligned
       · have := hret.user; omega)
-    (fun s s' _ h => by
+    (fun s ret s' _ h => by
       obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, v8, v9, v10, v11, v12, v13,
         v14, v15, h14, h15⟩ := h
       exact ⟨⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, v8, v9, v10, v11, v12, v13,
@@ -246,9 +248,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
 
-theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [BitVec.ofNat 64 P, n0, c0] s0 :=
-  ⟨⟨rfl, rfl, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩,
-    by decide, by decide⟩
+theorem call : CCallF Extracted.entry [BitVec.ofNat 64 P, n0, c0] s0 :=
+  ⟨⟨rfl, by decide, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl⟩, by first | decide | simp | omega, by decide⟩
 
 theorem pre : (BitVec.ofNat 64 P).toNat + n0.toNat ≤ 2 ^ 48 ∧
     s0.mem.accessible (BitVec.ofNat 64 P).toNat n0.toNat false = true :=
@@ -256,11 +257,11 @@ theorem pre : (BitVec.ofNat 64 P).toNat + n0.toNat ≤ 2 ^ 48 ∧
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (p n c : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [p, n, c] s ∧
+    CCallF Extracted.entry [p, n, c] s ∧
     (p.toNat + n.toNat ≤ 2 ^ 48 ∧ s.mem.accessible p.toNat n.toNat false = true) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      ((s'.regs 0).toNat = countOf s.mem p.toNat (c.toNat % 256) n.toNat ∧ s'.mem = s.mem)) :=
-  ⟨_, n0, c0, RET, s0, hret, call, pre, correctness _ n0 c0 RET hret s0 call pre⟩
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      ((s'.regs 0).toNat = countOf (s.setRet ret).mem p.toNat (c.toNat % 256) n.toNat ∧ s'.mem = (s.setRet ret).mem)) :=
+  ⟨_, n0, c0, RET, s0, hret, call, pre, correctness _ n0 c0 s0 call pre RET hret⟩
 
 end Witness
 

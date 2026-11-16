@@ -33,12 +33,15 @@ def envp (m : Janus.Arm64.Memory) (v : Nat) : Nat := m.readLE v 8
 
 def Pre (i : W64) (v : Nat) (s : State) : Prop :=
   CStack s 0 8 ∧ GotBound Extracted.dyngot "environ" v s.mem ∧ v + 8 ≤ 2 ^ 48 ∧ s.mem.accessible v 8 false = true ∧
-    envp s.mem v + 8 * i.toNat + 8 ≤ 2 ^ 48 ∧ s.mem.accessible (envp s.mem v + 8 * i.toNat) 8 false = true
+    envp s.mem v + 8 * i.toNat + 8 ≤ 2 ^ 48 ∧ s.mem.accessible (envp s.mem v + 8 * i.toNat) 8 false = true ∧
+    Outside (DynGOT.slotOf Extracted.dyngot "environ") 8 [((s.regs 4).toNat, (s.regs 4).toNat + 8)] ∧
+    Outside v 8 [((s.regs 4).toNat, (s.regs 4).toNat + 8)]
 
 theorem correctness (i : W64) (v : Nat) :
     CEnsures Extracted.program Extracted.entry [i] (Pre i v)
       (fun s s' => (s'.regs 0).toNat = s.mem.readLE (envp s.mem v + 8 * i.toNat) 8 ∧ s'.mem = s.mem) := by
-  intro ret hret s hs ⟨⟨_, _, hnw, hacc⟩, ⟨hsb, hsa, hsv⟩, hvb, hva, heb, hea⟩
+  janus64_ensures_old [Proof.Pre, Janus.Amd64.CABI.CStack, Janus.GotBound, Proof.envp, Proof.slotOf, Proof.baseOf, Proof.eszOf, Proof.resOf, Proof.spanOf, Proof.cacheOf, Proof.fidxOf, Proof.cOf, Proof.scOf, Proof.sizeToClass8, Proof.nBase]
+  intro ret hret s hs ⟨⟨_, _, hnw, hacc⟩, ⟨hsb, hsa, hsv⟩, hvb, hva, heb, hea, hos, hov⟩
   have h_rip := hs.rip
   have h_ret := hs.ret
   have h_df := hs.df
@@ -79,19 +82,21 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
 
-theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [0#64] s0 :=
-  ⟨rfl, by decide +kernel, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
+theorem call : CCallF Extracted.entry [0#64] s0 :=
+  ⟨rfl, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
 
 theorem pre : Pre 0#64 VAR s0 := by
   refine ⟨⟨by decide, by decide, by decide, by decide +kernel⟩, ⟨by decide +kernel, by decide +kernel,
-    by decide +kernel⟩, by decide, by decide +kernel, by decide +kernel, by decide +kernel⟩
+    by decide +kernel⟩, by decide, by decide +kernel, by decide +kernel, by decide +kernel,
+  by simp only [outside_cons, outside_nil, and_true]; decide +kernel,
+  by simp only [outside_cons, outside_nil, and_true]; decide +kernel⟩
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (i : W64) (v ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [i] s ∧ Pre i v s ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      ((s'.regs 0).toNat = s.mem.readLE (envp s.mem v + 8 * i.toNat) 8 ∧ s'.mem = s.mem)) :=
-  ⟨0#64, VAR, RET, s0, hret, call, pre, correctness 0#64 VAR RET hret s0 call pre⟩
+    CCallF Extracted.entry [i] s ∧ Pre i v s ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      ((s'.regs 0).toNat = (s.setRet ret).mem.readLE (envp (s.setRet ret).mem v + 8 * i.toNat) 8 ∧ s'.mem = (s.setRet ret).mem)) :=
+  ⟨0#64, VAR, RET, s0, hret, call, pre, correctness 0#64 VAR s0 call pre RET hret⟩
 
 end Witness
 

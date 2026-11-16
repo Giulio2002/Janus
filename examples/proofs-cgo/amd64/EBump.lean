@@ -41,6 +41,7 @@ theorem correctness (x : BitVec 64) :
         s.mem.accessible counter 8 true = true ∧ Disjoint (BitVec.ofNat 64 counter) 8 (s.regs 4) 8)
       (fun s s' => (s'.regs 0).toNat = bumped s.mem x ∧
         s'.mem = s.mem.writeLE counter 8 (bumped s.mem x)) := by
+  janus64_ensures_old [Janus.Amd64.CABI.CStack, Proof.scale, Proof.counter]
   intro ret hret s hs ⟨⟨_, _, hnw, hacc⟩, hd, hsc, hco, hdj⟩
   have h_rip := hs.rip
   have h_ret := hs.ret
@@ -85,8 +86,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [x0] s0 :=
-  ⟨rfl, by decide, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
+theorem call : CCallF Extracted.entry [x0] s0 :=
+  ⟨rfl, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
 
 theorem dataLoaded : Extracted.program.DataLoaded wm := by
   unfold Janus.Amd64.Program.DataLoaded
@@ -99,13 +100,13 @@ theorem pre : CStack s0 0 8 ∧ Extracted.program.DataLoaded s0.mem ∧ s0.mem.a
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (x : BitVec 64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [x] s ∧
+    CCallF Extracted.entry [x] s ∧
     (CStack s 0 8 ∧ Extracted.program.DataLoaded s.mem ∧ s.mem.accessible scale 8 false = true ∧
       s.mem.accessible counter 8 true = true ∧ Disjoint (BitVec.ofNat 64 counter) 8 (s.regs 4) 8) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
-      ((s'.regs 0).toNat = bumped s.mem x ∧
-        s'.mem = s.mem.writeLE counter 8 (bumped s.mem x))) :=
-  ⟨x0, ret, s0, hret, call, pre, correctness x0 ret hret s0 call pre⟩
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
+      ((s'.regs 0).toNat = bumped (s.setRet ret).mem x ∧
+        s'.mem = (s.setRet ret).mem.writeLE counter 8 (bumped (s.setRet ret).mem x))) :=
+  ⟨x0, ret, s0, hret, call, pre, (correctness x0) s0 call pre ret hret⟩
 
 end Witness
 

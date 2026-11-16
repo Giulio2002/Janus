@@ -32,6 +32,7 @@ theorem correctness (a b : Nat) :
       (fun s => CStack s 0 40 ∧ X87.Idle s.x87 ∧ s.fpucw = 0x37F ∧
         s.mem.readLE ((s.regs 4).toNat + 8) 10 = a ∧ s.mem.readLE ((s.regs 4).toNat + 24) 10 = b)
       (fun _ s' => LdResult (X87.binop .mul 64 .rne a b).res s'.x87) := by
+  janus64_ensures_old [Janus.Amd64.CABI.CStack]
   simp only [LdResult]
   intro ret hret s hs ⟨⟨_, _, hnw, hacc⟩, ⟨htags, hes, htop⟩, hcw, ha, hb⟩
   have h_rip := hs.rip
@@ -74,8 +75,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-theorem call : CCall (Extracted.program.withExit ret) Extracted.entry [] s0 :=
-  ⟨rfl, by decide, by decide, by intro i h; simp at h, by decide, rfl⟩
+theorem call : CCallF Extracted.entry [] s0 :=
+  ⟨rfl, by decide, by intro i h; simp at h, by decide, rfl⟩
 
 theorem pre : CStack s0 0 40 ∧ X87.Idle s0.x87 ∧ s0.fpucw = 0x37F ∧
     s0.mem.readLE ((s0.regs 4).toNat + 8) 10 = a0 ∧ s0.mem.readLE ((s0.regs 4).toNat + 24) 10 = b0 := by
@@ -83,12 +84,12 @@ theorem pre : CStack s0 0 40 ∧ X87.Idle s0.x87 ∧ s0.fpucw = 0x37F ∧
 
 /-- The hypotheses of `correctness` hold together and the call returns with its guarantee. -/
 theorem nonvacuous : ∃ (a b : Nat) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
-    CCall (Extracted.program.withExit ret) Extracted.entry [] s ∧
+    CCallF Extracted.entry [] s ∧
     (CStack s 0 40 ∧ X87.Idle s.x87 ∧ s.fpucw = 0x37F ∧
       s.mem.readLE ((s.regs 4).toNat + 8) 10 = a ∧ s.mem.readLE ((s.regs 4).toNat + 24) 10 = b) ∧
-    Returns (Extracted.program.withExit ret) s (fun s' => CReturn s s' ∧
+    Returns (Extracted.program.withExit ret) (s.setRet ret) (fun s' => CReturn (s.setRet ret) s' ∧
       (LdResult (X87.binop .mul 64 .rne a b).res s'.x87)) :=
-  ⟨a0, b0, ret, s0, hret, call, pre, correctness a0 b0 ret hret s0 call pre⟩
+  ⟨a0, b0, ret, s0, hret, call, pre, (correctness a0 b0) s0 call pre ret hret⟩
 
 end Witness
 

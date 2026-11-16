@@ -23,7 +23,8 @@ def GoPost (a : W64) (u u' : State) : Prop :=
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 8000000 in
 theorem go_spec (a : W64) : EnsuresC Extracted.program Contract.none goFn [a] (GoPre a) (GoPost a) := by
-  intro ret hret u hu ⟨⟨hg1, hg2, hg3⟩, hb, ha, hw, hgo, hab, haw, hao⟩
+  janus64_ensures_old [Proof.GoPre, Proof.gsL]
+  intro ret hret u hu ⟨⟨hg1, hg2, hg3, hg4⟩, hb, ha, hw, hgo, hab, haw, hao⟩
   simp only [outside_cons, outside_nil, and_true, gsL] at hgo hao hb hw
   simp only [stackguard0, regG, stackguard0Offset, GoABI.regSP] at hg1 hg2 hg3
   apply ReturnsC.of_reaches
@@ -104,15 +105,18 @@ def CPre (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (s : State) : Pr
   Outside rid 4 [(s.fsBase.toNat - 24, s.fsBase.toNat - 16)] ∧
   Outside ((s.regs 4).toNat - win) win rt ∧
   H [goFn, gsL] (s.mem.readLE (tlsGSlot Extracted.tls s.fsBase) 8) ((s.regs 4).toNat - 152)
-    (Janus.Contracts.rtView rt s.mem)
+    (Janus.Contracts.rtView rt s.mem) ∧
+  Outside (s.regs 4).toNat 8 rt ∧
+  Outside (tlsGSlot Extracted.tls s.fsBase) 8 [((s.regs 4).toNat, (s.regs 4).toNat + 8)]
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 8000000 in
 theorem c_spec (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (x : W64) :
     CEnsuresC Extracted.program (CallbackSpec Extracted.tls goFn (G (cbk rt H)) E) Extracted.entry [x]
       (CPre rt H) (fun _ s' => s'.regs 0 = 3 * x) := by
+  janus64_ensures_old [Janus.Amd64.CABI.regSP, Proof.CPre, Janus.Amd64.CABI.CStack, Proof.win, Proof.rid, Proof.ctxf, Proof.goFn, Proof.gsL, Janus.Amd64.FFI.cbStackScratch]
   intro ret hret s hs hpre
-  obtain ⟨hd, ⟨hal, hb, ha, hw⟩, hra, hrv, hca, hcv, hfb, hfl, hga, hro, hco, hgo, hto, hct, hrt, hrtw, hH⟩ := hpre
+  obtain ⟨hd, ⟨hal, hb, ha, hw⟩, hra, hrv, hca, hcv, hfb, hfl, hga, hro, hco, hgo, hto, hct, hrt, hrtw, hH, hrts, hgsl⟩ := hpre
   have et1 : Extracted.tls.x64Off = janus_eval% Extracted.tls.x64Off := rfl
   have et2 : Extracted.tls.varOff "runtime.tlsg" = janus_eval% (Extracted.tls.varOff "runtime.tlsg") := rfl
   simp only [tlsGSlot, TLSImage.x64Addr, et1, et2] at hH
@@ -255,8 +259,8 @@ def s0 : State :=
 
 theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
 
-theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [7#64] s0 :=
-  ⟨rfl, by decide +kernel, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
+theorem call : CCallF Extracted.entry [7#64] s0 :=
+  ⟨rfl, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
 
 theorem data : Extracted.program.DataLoaded mem0 := by
   unfold Amd64.Program.DataLoaded; decide +kernel
@@ -272,13 +276,13 @@ theorem pre : CPre [] (fun _ _ _ _ => True) s0 := by
 
 /-- All hypotheses of `correctness` hold together. -/
 theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (x : W64) (ret : Nat) (s : State),
-    RetAddr Extracted.program ret ∧ CCall (Extracted.program.withExit ret) Extracted.entry [x] s ∧
+    RetAddr Extracted.program ret ∧ CCallF Extracted.entry [x] s ∧
       CPre rt H s ∧
       ReturnsC (Extracted.program.withExit ret)
         (CgoCallback Extracted.tls Extracted.program Contract.none (fun _ => True) (cbk rt H))
-        (fun s' => CReturn s s' ∧ (s'.regs 0 = 3 * x)) s :=
+        (fun s' => CReturn (s.setRet ret) s' ∧ (s'.regs 0 = 3 * x)) (s.setRet ret) :=
   ⟨[], fun _ _ _ _ => True, 7#64, RET, s0, hret, call, pre,
-    correctness [] (fun _ _ _ _ => True) 7#64 RET hret s0 call pre⟩
+    correctness [] (fun _ _ _ _ => True) 7#64 s0 call pre RET hret⟩
 
 end Witness
 
