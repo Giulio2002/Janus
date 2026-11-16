@@ -101,6 +101,23 @@ macro_rules (kind := janus64PreSetRetCore)
     for _ in [0:2] do
       for d in ds.getElems do
         us ← `(tactic| ($us; try simp only [$d] at $hp:ident ⊢))
+    -- after the split the conditional setRet laws are tried WITHOUT the user's definitions first (what every framework example
+    -- needs: unfolding a user definition here can leave a conjunct in a shape `hp0` no longer closes) and, only if that does
+    -- not close the goal, again WITH them (a consumer's conditional setRet law given in the list, e.g. one with an Apart side
+    -- condition, fires only after the hypotheses are split)
+    let rest ← `(tactic|
+       (try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
+        try simp (disch := first | assumption | janus_outside_slot) only [$v1:ident] at ⊢
+        try simp (disch := first | assumption | janus_outside_slot) only [$v2:ident] at ⊢
+        try simp (disch := first | assumption | janus_disj_omega | omega) only [$l1:ident, $l2:ident] at ⊢
+        try simp (disch := first | assumption | janus_outside_slot) only [$m1:ident, $m2:ident, $m3:ident, $m4:ident] at ⊢
+        try simp (disch := omega) only [$mf:ident] at ⊢
+        try simp (disch := first | assumption | janus_outside_slot) only [$f0:ident, $f1:ident, $f2:ident, $f3:ident, $f4:ident, $f5:ident, $f6:ident, $f7:ident, $f8:ident, $f9:ident, $f10:ident] at ⊢))
+    let closeQuiet ← `(tactic|
+       (all_goals first
+         | with_reducible exact Janus.Tactic.Hide.elim hp0
+         | (repeat' (first | with_reducible assumption | with_reducible refine And.intro ?_ ?_)
+            all_goals omega)))
     `(tactic|
       (have hu := ($hret).user
        $us
@@ -115,29 +132,38 @@ macro_rules (kind := janus64PreSetRetCore)
         (have hp0 : Janus.Tactic.Hide _ := $hp
          janus_split_hyps keep hp0
          janus_have_rsp8 hacc8 : ($s).mem.accessible (($s).regs 4).toNat 8 true = true
-         try simp (disch := first | assumption | janus_disj_omega | omega)
-           only [Janus.Amd64.GoABI.setRet_regs,
-           Janus.Amd64.GoABI.setRet_rip, Janus.Amd64.GoABI.setRet_flags,
-           Janus.Amd64.GoABI.setRet_xmm, Janus.Amd64.GoABI.setRet_ymmHi,
-           Janus.Amd64.GoABI.setRet_zmmHi, Janus.Amd64.GoABI.setRet_kreg,
-           Janus.Amd64.GoABI.setRet_fsBase, Janus.Amd64.GoABI.setRet_df,
-           Janus.Amd64.GoABI.setRet_mxcsr, Janus.Amd64.GoABI.setRet_x87,
-           Janus.Amd64.GoABI.setRet_fpucw, Janus.Amd64.GoABI.setRet_mem_regions,
-           Janus.Amd64.GoABI.setRet_accessible, Janus.Amd64.GoABI.readLE_setRet_of_disjoint,
-           Janus.Amd64.GoABI.bytes_setRet_of_outside, Janus.Amd64.GoABI.dataLoaded_setRet_iff,
-           Janus.Amd64.GoABI.stackGuardOK_setRet, Janus.Amd64.GoABI.tlsG_setRet_iff,
-           Janus.Amd64.GoABI.buffer_setRet, Janus.Amd64.GoABI.ptr_setRet, $ds,*] at ⊢
-         try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
-         try simp (disch := first | assumption | janus_outside_slot) only [$v1:ident] at ⊢
-         try simp (disch := first | assumption | janus_outside_slot) only [$v2:ident] at ⊢
-         try simp (disch := first | assumption | janus_disj_omega | omega) only [$l1:ident, $l2:ident] at ⊢
-         try simp (disch := first | assumption | janus_outside_slot) only [$m1:ident, $m2:ident, $m3:ident, $m4:ident] at ⊢
-         try simp (disch := omega) only [$mf:ident] at ⊢
-         try simp (disch := first | assumption | janus_outside_slot) only [$f0:ident, $f1:ident, $f2:ident, $f3:ident, $f4:ident, $f5:ident, $f6:ident, $f7:ident, $f8:ident, $f9:ident, $f10:ident] at ⊢
-         all_goals first
-           | with_reducible exact Janus.Tactic.Hide.elim hp0
-           | (repeat' (first | with_reducible assumption | with_reducible refine And.intro ?_ ?_)
-              all_goals first | omega | (trace_state; fail "janus_pre_setRet: this conjunct of the precondition is not invariant under setRet (see the goal above; pass the predicate definitions to the tactic, e.g. `janus64_ensures_old [Pre, CallEnv]`, and make a pointer read apart from the return slot)")))))
+         first
+          | (try simp (disch := first | assumption | janus_disj_omega | omega)
+               only [Janus.Amd64.GoABI.setRet_regs,
+                 Janus.Amd64.GoABI.setRet_rip, Janus.Amd64.GoABI.setRet_flags,
+                 Janus.Amd64.GoABI.setRet_xmm, Janus.Amd64.GoABI.setRet_ymmHi,
+                 Janus.Amd64.GoABI.setRet_zmmHi, Janus.Amd64.GoABI.setRet_kreg,
+                 Janus.Amd64.GoABI.setRet_fsBase, Janus.Amd64.GoABI.setRet_df,
+                 Janus.Amd64.GoABI.setRet_mxcsr, Janus.Amd64.GoABI.setRet_x87,
+                 Janus.Amd64.GoABI.setRet_fpucw, Janus.Amd64.GoABI.setRet_mem_regions,
+                 Janus.Amd64.GoABI.setRet_accessible, Janus.Amd64.GoABI.readLE_setRet_of_disjoint,
+                 Janus.Amd64.GoABI.bytes_setRet_of_outside, Janus.Amd64.GoABI.dataLoaded_setRet_iff,
+                 Janus.Amd64.GoABI.stackGuardOK_setRet, Janus.Amd64.GoABI.tlsG_setRet_iff,
+                 Janus.Amd64.GoABI.buffer_setRet, Janus.Amd64.GoABI.ptr_setRet] at ⊢
+             $rest
+             $closeQuiet)
+          | (try simp (disch := first | assumption | janus_disj_omega | omega)
+               only [Janus.Amd64.GoABI.setRet_regs,
+                 Janus.Amd64.GoABI.setRet_rip, Janus.Amd64.GoABI.setRet_flags,
+                 Janus.Amd64.GoABI.setRet_xmm, Janus.Amd64.GoABI.setRet_ymmHi,
+                 Janus.Amd64.GoABI.setRet_zmmHi, Janus.Amd64.GoABI.setRet_kreg,
+                 Janus.Amd64.GoABI.setRet_fsBase, Janus.Amd64.GoABI.setRet_df,
+                 Janus.Amd64.GoABI.setRet_mxcsr, Janus.Amd64.GoABI.setRet_x87,
+                 Janus.Amd64.GoABI.setRet_fpucw, Janus.Amd64.GoABI.setRet_mem_regions,
+                 Janus.Amd64.GoABI.setRet_accessible, Janus.Amd64.GoABI.readLE_setRet_of_disjoint,
+                 Janus.Amd64.GoABI.bytes_setRet_of_outside, Janus.Amd64.GoABI.dataLoaded_setRet_iff,
+                 Janus.Amd64.GoABI.stackGuardOK_setRet, Janus.Amd64.GoABI.tlsG_setRet_iff,
+                 Janus.Amd64.GoABI.buffer_setRet, Janus.Amd64.GoABI.ptr_setRet, $ds,*] at ⊢
+             $rest
+             all_goals first
+               | with_reducible exact Janus.Tactic.Hide.elim hp0
+               | (repeat' (first | with_reducible assumption | with_reducible refine And.intro ?_ ?_)
+                  all_goals first | omega | (trace_state; fail "janus_pre_setRet: this conjunct of the precondition is not invariant under setRet (see the goal above; pass the predicate definitions to the tactic, e.g. `janus64_ensures_old [Pre, CallEnv]`, and make a pointer read apart from the return slot)"))))))
 
 syntax (name := janus64PreSetRet) "janus64_pre_setRet" (" [" Lean.Parser.Tactic.simpLemma,* "]")? : tactic
 
