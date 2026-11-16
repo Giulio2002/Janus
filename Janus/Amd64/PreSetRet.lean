@@ -126,7 +126,7 @@ macro_rules (kind := janus64PreSetRetCore)
            Janus.Amd64.GoABI.setRet_accessible, Janus.Amd64.GoABI.readLE_setRet_of_disjoint,
            Janus.Amd64.GoABI.bytes_setRet_of_outside, Janus.Amd64.GoABI.dataLoaded_setRet_iff,
            Janus.Amd64.GoABI.stackGuardOK_setRet, Janus.Amd64.GoABI.tlsG_setRet_iff,
-           Janus.Amd64.GoABI.buffer_setRet, Janus.Amd64.GoABI.ptr_setRet] at ⊢
+           Janus.Amd64.GoABI.buffer_setRet, Janus.Amd64.GoABI.ptr_setRet, $ds,*] at ⊢
          try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$v1:ident] at ⊢
          try simp (disch := first | assumption | janus_outside_slot) only [$v2:ident] at ⊢
