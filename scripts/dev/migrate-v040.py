@@ -838,6 +838,18 @@ def _migrate(t, amd0, reg, fname=''):
             if '.setRet' in it.split(':=', 1)[0]: restated.add(name.split('.')[-1])
     return ''.join(items), warn
 
+GOMONO = re.compile(r"\(fun (\w+) (\w+'?) _ (\w+) => \(((?:[\w.]*)post_iff[^()\n]*?) \1 \2\)\.1 \3\)(\s*)\(fun \1 (\w+) (\w+'?) _ (\w+) => \(((?:[\w.]*)pan_iff[^()\n]*?) \1 \6( \7)?\)\.1 \8\)")
+
+def fix_go_mono(t):
+    """`EnsuresGo.mono h hpre (fun s s' _ q => (post_iff A s s').1 q) (fun s v s2 _ q => (pan_iff A s v s2).1 q)`: the v0.4 hret/hpan bind
+    `s r s'` / `s r v s'` and speak about `s.setRet r`."""
+    def rep(m):
+        s, s1, f1, ws, v, s2, f2 = m.group(1), m.group(2), m.group(4), m.group(5), m.group(6), m.group(7), m.group(9)
+        tail = ' ' + s2 if m.group(10) else ''
+        return ("(fun %s r %s _ hq => (%s (%s.setRet r) %s).1 hq)%s(fun %s r %s %s _ hq => (%s (%s.setRet r) %s%s).1 hq)"
+                % (s, s1, f1, s, s1, ws, s, v, s2, f2, s, v, tail))
+    return GOMONO.subn(rep, t)
+
 def fix_reexported_run(it, restated=()):
     """A claim file restates a witness run in its `Witness` namespace and proves it by the proof module's theorem of the same name:
     `theorem returns : Returns (P.withExit Wit.ret) Wit.s0 fun s' => ABIReturn Wit.s0 s' ∧ … := Wit.returns`. The proof module's
@@ -1208,6 +1220,9 @@ def main(files):
             if n6:
                 warn.append('%d `refine ⟨?_, ?_, ?_⟩ <;> …` alternatives got a 4-hole twin (StackGuardOK 4th field)' % n6)
                 t2 = t6
+        if '.mono' in t2 and 'pan_iff' in t2:
+            t2, ngm = fix_go_mono(t2)
+            if ngm: warn.append('%d EnsuresGo.mono hret/hpan lambdas now bind the return address (s r s\')' % ngm)
         if t2 != t: open(f, 'w').write(t2)
         print(f, ('WARN: ' + '; '.join(warn)) if warn else 'ok')
 
