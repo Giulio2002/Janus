@@ -295,7 +295,8 @@ func TestASLExamples(t *testing.T) {
 		"Add128": "% 2 ^ 128",
 	} {
 		t.Run(name, func(t *testing.T) {
-			code, stdout, stderr, r, dir := aslVerify(t, "example.com/basic."+name, filepath.Join(repoRoot, "examples", "proofs", name+".lean"))
+			code, stdout, stderr, r, dir := aslVerify(t, "example.com/basic."+name, filepath.Join(repoRoot, "examples", "proofs", name+".lean"),
+				"--theorem", "Proof.correctness", "--theorem", "Proof.Witness.nonvacuous")
 			if code != 0 || r == nil || r.ASL == nil || r.ASL.Status != "verified" {
 				t.Fatalf("verify --asl %s: %d\n%s\n%s", name, code, stdout, stderr)
 			}
@@ -337,7 +338,8 @@ func TestASLExamples(t *testing.T) {
 // verification and fails the ASL stage with the list of words.
 func TestASLUncovered(t *testing.T) {
 	needASL(t)
-	code, stdout, stderr, r, _ := aslVerify(t, "example.com/basic.Get", filepath.Join(repoRoot, "examples", "proofs", "Get.lean"))
+	code, stdout, stderr, r, _ := aslVerify(t, "example.com/basic.Get", filepath.Join(repoRoot, "examples", "proofs", "Get.lean"),
+		"--theorem", "Proof.correctness", "--theorem", "Proof.Witness.nonvacuous")
 	if code != 1 || r == nil || r.Theorem != "Proof.correctness" || r.ASL == nil || r.ASL.Status != "invalid" {
 		t.Fatalf("Get --asl: %d %v\n%s\n%s", code, r, stdout, stderr)
 	}
@@ -352,11 +354,16 @@ func TestASLUncovered(t *testing.T) {
 
 // TestASLForgeryRejected (test/redteam/asl): proofs that try to forge the ASL corollary. Each main
 // theorem verifies; the ASL stage must reject the forgery.
+const factOnlyRejection = "facts only"
+
 func TestASLForgeryRejected(t *testing.T) {
 	needASL(t)
 	for _, c := range []struct{ file, theorem, want string }{
 		{"X1_shadow_toASL", "", "Stage: ASL corollary"},
-		{"X2_own_toASL", "Proof.correctness_asl", "is not `Janus.GoABI.Ensures"},
+		// X2: since v0.3 the forged correctness_asl (a fact about proof-local definitions) has a fact-only conclusion: no non-vacuity
+		// witness can exist for it, so it is rejected at the non-vacuity stage, never reaching the ASL stage. The ASL-stage check
+		// ("is not `Janus.GoABI.Ensures`") is covered by test/lean/JanusTests/AslCorollaryReject.lean; see the X2 fixture.
+		{"X2_own_toASL", "Proof.correctness_asl", factOnlyRejection},
 		{"X3_plant_words", "", "Stage: ASL corollary"},
 		{"X4_plant_corollary", "", "Stage: ASL corollary"},
 		{"X5_elab_override", "", "ASL corollary"},
@@ -364,13 +371,29 @@ func TestASLForgeryRejected(t *testing.T) {
 		{"X7_reserved_name", "", "reserved for JanusASL"},
 	} {
 		t.Run(c.file, func(t *testing.T) {
-			extra := []string{}
+			// Every main theorem is verified only with its Witness.nonvacuous (the attack files carry Add's), so the forgery gets
+			// past the non-vacuity stage and must be rejected for the reason it targets.
+			extra := []string{"--theorem", "Proof.correctness", "--theorem", "Proof.Witness.nonvacuous"}
 			if c.theorem != "" {
 				extra = append(extra, "--theorem", c.theorem)
+			}
+			if c.want == factOnlyRejection {
+				extra = append(extra, "--theorem", "Proof.Witness.correctness_asl")
+				code, stdout, stderr, _, _ := aslVerify(t, "example.com/basic.Add", filepath.Join(repoRoot, "test", "redteam", "asl", "attacks", c.file+".lean"), extra...)
+				// The honest main theorem and its witness verify (and carry their corollary); the forged one is refused for its
+				// fact-only conclusion, at the witness audit, with the non-vacuity stage for the main theorem.
+				if code != 1 || !strings.Contains(stdout, "=== Proof.correctness: verified ===") || !strings.Contains(stderr+stdout, "=== Proof.correctness_asl: FAILED ===") ||
+					!strings.Contains(stderr+stdout, c.want) || !strings.Contains(stderr+stdout, "Stage: non-vacuity") || strings.Contains(stdout, "Verified: Proof.correctness_asl") {
+					t.Fatalf("%s: expected a fact-only non-vacuity rejection of Proof.correctness_asl: %d\n%s\n%s", c.file, code, stdout, stderr)
+				}
+				return
 			}
 			code, stdout, stderr, r, _ := aslVerify(t, "example.com/basic.Add", filepath.Join(repoRoot, "test", "redteam", "asl", "attacks", c.file+".lean"), extra...)
 			if code != 1 || r == nil || r.ASL == nil || r.ASL.Status != "invalid" || strings.Contains(stdout, "ASL corollary: Verified") {
 				t.Fatalf("%s not rejected: %d\n%s\n%s", c.file, code, stdout, stderr)
+			}
+			if strings.Contains(stderr, "Stage: non-vacuity") {
+				t.Errorf("%s: rejected at the non-vacuity stage, not for its targeted reason:\n%s", c.file, stderr)
 			}
 			if !strings.Contains(stderr, c.want) {
 				t.Errorf("%s: expected %q in\n%s", c.file, c.want, stderr)
@@ -386,7 +409,7 @@ func TestASLConsumer(t *testing.T) {
 	pkg := consumerCopy(t, "toml")
 	dir := mustExtract(t, "example.com/basic.Add")
 	code, stdout, stderr := runJanus(t, "verify", dir, "--proof", filepath.Join(pkg, "ConsumerExample", "Add.lean"),
-		"--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness", "--asl")
+		"--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness", "--theorem", "ConsumerExample.Add.Witness.nonvacuous", "--asl")
 	if code != 0 || !strings.Contains(stdout, "ASL corollary: Verified") {
 		t.Fatalf("consumer --asl: %d\n%s\n%s", code, stdout, stderr)
 	}
@@ -394,16 +417,24 @@ func TestASLConsumer(t *testing.T) {
 	maxDir := mustExtract(t, "example.com/basic.Max")
 	man := filepath.Join(t.TempDir(), "requests.json")
 	b, _ := json.Marshal(map[string]any{"schema": 1, "requests": []map[string]any{
-		{"outdir": dir, "proof": filepath.Join(pkg, "ConsumerExample", "Add.lean"), "theorem": "ConsumerExample.Add.correctness", "proofRoot": pkg},
-		{"outdir": maxDir, "proof": filepath.Join(repoRoot, "examples", "proofs", "Max.lean")},
+		{"outdir": dir, "proof": filepath.Join(pkg, "ConsumerExample", "Add.lean"), "theorem": "ConsumerExample.Add.correctness", "proofRoot": pkg,
+			"witnesses": []string{"ConsumerExample.Add.Witness.nonvacuous"}},
+		{"outdir": maxDir, "proof": filepath.Join(pkg, "ConsumerExample", "Max.lean"), "theorem": "ConsumerExample.Max.correctness", "proofRoot": pkg,
+			"witnesses": []string{"ConsumerExample.Max.Witness.nonvacuous"}},
 	}})
 	writeFile(t, man, string(b))
 	code, stdout, stderr = runJanus(t, "verify-batch", man, "--asl", "--json")
 	var res batchResults
-	if err := json.Unmarshal([]byte(stdout), &res); err != nil || code != 0 || res.Passed != 2 || res.ASLFailed != 0 {
+	if err := json.Unmarshal([]byte(stdout), &res); err != nil || code != 0 || res.Passed != 4 || len(res.Results) != 4 || res.ASLFailed != 0 {
 		t.Fatalf("verify-batch --asl: %d %v\n%s\n%s", code, err, stdout, stderr)
 	}
 	for _, r := range res.Results {
+		if r.Companion { // a witness carries no ASL corollary; its main theorem's is the one derived
+			if r.ASL != "" {
+				t.Errorf("batch witness %d: asl %q", r.Index, r.ASL)
+			}
+			continue
+		}
 		if r.ASL != "verified" {
 			t.Errorf("batch result %d: asl %q", r.Index, r.ASL)
 		}
@@ -417,7 +448,7 @@ func TestASLConsumer(t *testing.T) {
 	writeFile(t, filepath.Join(pkg, "lakefile.toml"), string(lf)+"\n[[lean_lib]]\nname = \"JanusASL\"\nglobs = [\"JanusASL.*\"]\n")
 	writeFile(t, filepath.Join(pkg, "ConsumerExample", "Add.lean"), "import JanusASL.Fake\n"+mustRead(t, filepath.Join(pkg, "ConsumerExample", "Add.lean")))
 	code, stdout, stderr = runJanus(t, "verify", dir, "--proof", filepath.Join(pkg, "ConsumerExample", "Add.lean"),
-		"--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness", "--asl")
+		"--proof-root", pkg, "--theorem", "ConsumerExample.Add.correctness", "--theorem", "ConsumerExample.Add.Witness.nonvacuous", "--asl")
 	if code != 1 || !strings.Contains(stderr, "Stage: ASL module identity") {
 		t.Fatalf("consumer JanusASL module not refused: %d\n%s\n%s", code, stdout, stderr)
 	}

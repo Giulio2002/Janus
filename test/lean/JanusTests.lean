@@ -29,6 +29,7 @@ import JanusTests.Diagnostics
 import JanusTests.Carry
 import JanusTests.CongrCost
 import JanusTests.Audit
+import JanusTests.AslCorollaryReject
 import JanusTests.BitVecLit
 import JanusTests.Errorf
 import JanusTests.Grab
