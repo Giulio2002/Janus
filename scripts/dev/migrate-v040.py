@@ -1229,6 +1229,10 @@ def main(files):
             if n6:
                 warn.append('%d `refine ⟨?_, ?_, ?_⟩ <;> …` alternatives got a 4-hole twin (StackGuardOK 4th field)' % n6)
                 t2 = t6
+        if 'hret.mono fun o ho => by' in t2 and '.setRet ret) s\')' in t2:
+            # the GoOutcome witness: the panic branch speaks about the run that starts at `s.setRet ret` like the returned branch
+            t9, n9 = re.subn(r"(\| panicked v s' => exact \((?:[\w.]*)pan_iff[^\n]*?) s v((?: s')?\)\.1 ho)", r"\1 (s.setRet ret) v\2", t2)
+            if n9: warn.append('%d GoOutcome witness panic branch(es) read at s.setRet ret' % n9); t2 = t9
         if 'linked_eq' in t2:
             # `by rw [linked_eq]; exact setup` transported the old `CallSetup (linked.withExit ret) …` to the program the lemma is about; the new
             # `CallSetup0 entry args s` mentions no program: the setup lemma is the proof
