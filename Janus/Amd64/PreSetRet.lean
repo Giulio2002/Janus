@@ -101,10 +101,10 @@ macro_rules (kind := janus64PreSetRetCore)
     for _ in [0:2] do
       for d in ds.getElems do
         us ← `(tactic| ($us; try simp only [$d] at $hp:ident ⊢))
-    -- after the split the conditional setRet laws are tried WITHOUT the user's definitions first (what every framework example
-    -- needs: unfolding a user definition here can leave a conjunct in a shape `hp0` no longer closes) and, only if that does
-    -- not close the goal, again WITH them (a consumer's conditional setRet law given in the list, e.g. one with an Apart side
-    -- condition, fires only after the hypotheses are split)
+    -- after the split the conditional setRet laws are tried WITH the user's list first (a consumer's conditional setRet law
+    -- given in the list, e.g. one with an Apart side condition, fires only after the hypotheses are split) and, only if that
+    -- does not close the goal, again WITHOUT it (unfolding a user definition there can leave a conjunct in a shape `hp0` no
+    -- longer closes: 9 framework examples). Trying the list first keeps the cost of every goal it closes unchanged
     let rest ← `(tactic|
        (try simp (disch := omega) only [Janus.Amd64.GoABI.readLE_setRet_sp] at ⊢
         try simp (disch := first | assumption | janus_outside_slot) only [$v1:ident] at ⊢
@@ -144,7 +144,7 @@ macro_rules (kind := janus64PreSetRetCore)
                  Janus.Amd64.GoABI.setRet_accessible, Janus.Amd64.GoABI.readLE_setRet_of_disjoint,
                  Janus.Amd64.GoABI.bytes_setRet_of_outside, Janus.Amd64.GoABI.dataLoaded_setRet_iff,
                  Janus.Amd64.GoABI.stackGuardOK_setRet, Janus.Amd64.GoABI.tlsG_setRet_iff,
-                 Janus.Amd64.GoABI.buffer_setRet, Janus.Amd64.GoABI.ptr_setRet] at ⊢
+                 Janus.Amd64.GoABI.buffer_setRet, Janus.Amd64.GoABI.ptr_setRet, $ds,*] at ⊢
              $rest
              $closeQuiet)
           | (try simp (disch := first | assumption | janus_disj_omega | omega)
@@ -158,7 +158,7 @@ macro_rules (kind := janus64PreSetRetCore)
                  Janus.Amd64.GoABI.setRet_accessible, Janus.Amd64.GoABI.readLE_setRet_of_disjoint,
                  Janus.Amd64.GoABI.bytes_setRet_of_outside, Janus.Amd64.GoABI.dataLoaded_setRet_iff,
                  Janus.Amd64.GoABI.stackGuardOK_setRet, Janus.Amd64.GoABI.tlsG_setRet_iff,
-                 Janus.Amd64.GoABI.buffer_setRet, Janus.Amd64.GoABI.ptr_setRet, $ds,*] at ⊢
+                 Janus.Amd64.GoABI.buffer_setRet, Janus.Amd64.GoABI.ptr_setRet] at ⊢
              $rest
              all_goals first
                | with_reducible exact Janus.Tactic.Hide.elim hp0
